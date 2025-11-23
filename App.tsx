@@ -83,7 +83,7 @@ export default function App() {
   const activeMedia = media.find(m => m.id === activeMediaId);
   const webgpuSupported = typeof navigator !== 'undefined' && 'gpu' in navigator;
   const [patternMode, setPatternMode] = useState<'html' | 'webgpu'>(webgpuSupported ? 'webgpu' : 'html');
-  const [shaderVersion, setShaderVersion] = useState<string>('patternv0.16.wgsl');
+  const [shaderVersion, setShaderVersion] = useState<string>('patternv0.17.wgsl');
   const effectivePatternMode = webgpuSupported ? patternMode : 'html';
 
   return (
