@@ -15,6 +15,8 @@ const shaderModules = import.meta.glob('./shaders/*.wgsl', { as: 'url' });
 const availableShaders = Object.keys(shaderModules).map(path => path.replace('./shaders/', ''));
 
 export default function App() {
+  const [volume, setVolume] = useState(1.0);
+
   const {
     status,
     isReady,
@@ -43,7 +45,7 @@ export default function App() {
   const [media, setMedia] = useState<MediaItem[]>([]);
   const [activeMediaId, setActiveMediaId] = useState<string | undefined>(undefined);
   const [overlayVisible, setOverlayVisible] = useState<boolean>(false);
-  const [volume, setVolume] = useState(1.0);
+
   const addMediaFile = useCallback((file: File) => {
     const url = URL.createObjectURL(file);
     const kind: MediaItem['kind'] = file.type === 'video/mp4' || file.type.startsWith('video/') ? 'video' : (file.type === 'image/gif' ? 'gif' : 'image');
@@ -81,7 +83,7 @@ export default function App() {
   const activeMedia = media.find(m => m.id === activeMediaId);
   const webgpuSupported = typeof navigator !== 'undefined' && 'gpu' in navigator;
   const [patternMode, setPatternMode] = useState<'html' | 'webgpu'>(webgpuSupported ? 'webgpu' : 'html');
-  const [shaderVersion, setShaderVersion] = useState<string>('patternv0.12.wgsl');
+  const [shaderVersion, setShaderVersion] = useState<string>('patternv0.14.wgsl');
   const effectivePatternMode = webgpuSupported ? patternMode : 'html';
 
   return (
@@ -99,9 +101,11 @@ export default function App() {
           onMediaAdd={addMediaFile}
           isLooping={isLooping}
           onLoopToggle={() => setIsLooping(!isLooping)}
-        />
           volume={volume}
           setVolume={setVolume}
+        />
+
+        {isModuleLoaded || effectivePatternMode === 'webgpu' ? (
           <>
             <InfoDisplay moduleInfo={moduleInfo} />
 
@@ -156,6 +160,7 @@ export default function App() {
                   grooveAmount={grooveAmount}
                   kickTrigger={kickTrigger}
                   activeChannels={activeChannels}
+                  isModuleLoaded={isModuleLoaded}
                 />
               ) : (
                 <PatternSequencer
@@ -175,9 +180,7 @@ export default function App() {
 
             <MediaOverlay item={activeMedia} visible={overlayVisible} onClose={() => setOverlayVisible(false)} onUpdate={(partial) => { if (!activeMedia) return; setMedia(prev => prev.map(m => m.id === activeMedia.id ? { ...m, ...partial } : m)); }} />
           </>
-        )}
-
-        {!isModuleLoaded && (
+        ) : (
            <div className="mt-6 bg-gray-800 p-6 rounded-lg shadow-lg text-center text-gray-400">
              <h2 className="text-xl font-semibold text-white mb-2">Welcome!</h2>
              <p>Load a tracker module file (e.g., .mod, .it, .s3m, .xm) to begin.</p>

@@ -8,12 +8,13 @@ interface ControlsProps {
   onFileSelected: (file: File) => void;
   onPlay: () => void;
   onStop: () => void;
-  // new prop: media add callback
   onMediaAdd?: (file: File) => void;
   isLooping: boolean;
   onLoopToggle: () => void;
   volume?: number;
   setVolume?: (v: number) => void;
+}
+
 export const Controls: React.FC<ControlsProps> = ({
   isReady,
   isPlaying,
@@ -24,10 +25,12 @@ export const Controls: React.FC<ControlsProps> = ({
   onMediaAdd,
   isLooping,
   onLoopToggle,
-}) => {
-  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
   volume,
   setVolume,
+}) => {
+  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) {
       onFileSelected(file);
     }
   };
@@ -98,13 +101,9 @@ export const Controls: React.FC<ControlsProps> = ({
           Loop
         </button>
       </div>
-    </section>
-  );
-};
 
-
-      <div className="flex items-center gap-4">
-        <label className="flex items-center gap-2">
+      <div className="flex items-center gap-4 text-gray-300">
+        <label className="flex items-center gap-2 text-sm">
           Volume
           <input
             type="range"
@@ -113,7 +112,10 @@ export const Controls: React.FC<ControlsProps> = ({
             step={0.01}
             value={volume ?? 1}
             onChange={e => setVolume && setVolume(Number(e.target.value))}
-            style={{ width: 100 }}
+            className="w-24 h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer"
           />
         </label>
       </div>
+    </section>
+  );
+};

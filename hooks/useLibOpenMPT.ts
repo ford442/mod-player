@@ -87,6 +87,7 @@ export function useLibOpenMPT(volume: number = 1.0) {
   const isPlayingRef = useRef(isPlaying);
   const isLoopingRef = useRef(isLooping);
   const gainNodeRef = useRef<GainNode | null>(null);
+
   useEffect(() => {
     moduleInfoRef.current = moduleInfo;
   }, [moduleInfo]);
@@ -99,6 +100,13 @@ export function useLibOpenMPT(volume: number = 1.0) {
     isLoopingRef.current = isLooping;
   }, [isLooping]);
 
+  // Update volume when volume prop changes
+  useEffect(() => {
+    if (gainNodeRef.current) {
+      gainNodeRef.current.gain.value = volume;
+    }
+  }, [volume]);
+
   const stopMusic = useCallback((ended = false) => {
     if (!scriptNodeRef.current) return;
 
@@ -108,6 +116,8 @@ export function useLibOpenMPT(volume: number = 1.0) {
       stereoPannerRef.current.disconnect();
       stereoPannerRef.current = null;
     }
+    // Disconnect gain node if needed, but it's usually fine to leave it connected to destination
+
     setIsPlaying(false);
     cancelAnimationFrame(animationFrameHandle.current);
 
@@ -118,7 +128,7 @@ export function useLibOpenMPT(volume: number = 1.0) {
         console.error("Error resetting module position:", e);
       }
     }
-    
+
     setPatternData(ended ? '... Song Ended ...' : '... Stopped ...');
     if (ended) {
         setStatus(`Finished playing "${moduleInfoRef.current.title}".`);
@@ -206,7 +216,7 @@ export function useLibOpenMPT(volume: number = 1.0) {
 
   const processModuleData = useCallback(async (fileData: Uint8Array, fileName: string) => {
     if (!libopenmptRef.current) return;
-    
+
     if (isPlayingRef.current) {
       stopMusic(false);
     }
@@ -220,10 +230,10 @@ export function useLibOpenMPT(volume: number = 1.0) {
     setIsModuleLoaded(false);
 
     setStatus(`Loading "${fileName}"...`);
-    
+
     try {
         const lib = libopenmptRef.current;
-        
+
         const bufferPtr = lib._malloc(fileData.length);
         lib.HEAPU8.set(fileData, bufferPtr);
 
@@ -347,7 +357,7 @@ export function useLibOpenMPT(volume: number = 1.0) {
         const AudioContext = window.AudioContext || window.webkitAudioContext;
         audioContextRef.current = new AudioContext({ sampleRate: SAMPLE_RATE });
       }
-      
+
       if (!gainNodeRef.current) {
         gainNodeRef.current = audioContextRef.current.createGain();
         gainNodeRef.current.connect(audioContextRef.current.destination);
@@ -397,18 +407,20 @@ export function useLibOpenMPT(volume: number = 1.0) {
       stereoPannerRef.current = audioContextRef.current.createStereoPanner();
       stereoPannerRef.current.pan.value = panValue;
 
-      // Connect: ScriptProcessor -> StereoPanner -> Destination
+      // Connect: ScriptProcessor -> StereoPanner -> GainNode -> Destination
       scriptNodeRef.current.connect(stereoPannerRef.current);
-      stereoPannerRef.current.connect(audioContextRef.current.destination);
+      stereoPannerRef.current.connect(gainNodeRef.current);
+      gainNodeRef.current.connect(audioContextRef.current.destination);
+
       setIsPlaying(true);
       setStatus(`Playing "${moduleInfoRef.current.title}"...`);
       animationFrameHandle.current = requestAnimationFrame(updateUI);
 
-      scriptNodeRef.current.connect(gainNodeRef.current);
+    } catch (e) {
       console.error("Failed to start music:", e);
       setStatus("Error: Failed to start playback. See console.");
     }
-  }, [isPlaying, stopMusic, updateUI, panValue]);
+  }, [isPlaying, stopMusic, updateUI, panValue, volume]);
 
   useEffect(() => {
     const init = async () => {
@@ -419,7 +431,7 @@ export function useLibOpenMPT(volume: number = 1.0) {
       }
       try {
         const lib = await window.libopenmptReady as LibOpenMPT;
-        
+
         if (!lib.UTF8ToString) {
           console.warn('Polyfilling libopenmpt.UTF8ToString...');
           lib.UTF8ToString = (ptr) => {
