@@ -10,7 +10,7 @@ const DEFAULT_CHANNELS = 8;
 const alignTo = (value: number, alignment: number) => Math.ceil(value / alignment) * alignment;
 const getLayoutType = (shaderFile: string): LayoutType => {
   if (shaderFile === 'patternShaderv0.12.wgsl') return 'texture';
-  if (shaderFile === 'patternv0.13.wgsl' || shaderFile === 'patternv0.14.wgsl' || shaderFile === 'patternv0.16.wgsl') return 'extended';
+  if (shaderFile === 'patternv0.13.wgsl' || shaderFile === 'patternv0.14.wgsl' || shaderFile === 'patternv0.16.wgsl' || shaderFile === 'patternv0.17.wgsl') return 'extended';
   return 'simple';
 };
 
@@ -267,8 +267,8 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   const [gpuReady, setGpuReady] = useState(false);
   const [localTime, setLocalTime] = useState(0);
 
-  const isHorizontal = shaderFile.includes('v0.12') || shaderFile.includes('v0.13') || shaderFile.includes('v0.14') || shaderFile.includes('v0.16');
-  const padTopChannel = shaderFile.includes('v0.16');
+  const isHorizontal = shaderFile.includes('v0.12') || shaderFile.includes('v0.13') || shaderFile.includes('v0.14') || shaderFile.includes('v0.16') || shaderFile.includes('v0.17');
+  const padTopChannel = shaderFile.includes('v0.16') || shaderFile.includes('v0.17');
 
   const canvasMetrics = useMemo(() => {
     const rawChannels = Math.max(1, matrix?.numChannels ?? DEFAULT_CHANNELS);
