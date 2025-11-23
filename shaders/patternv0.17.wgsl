@@ -224,7 +224,7 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   var inButton = 0.0;
 
   if (btnUV.x > 0.0 && btnUV.x < 1.0 && btnUV.y > 0.0 && btnUV.y < 1.0) {
-      btnColor = textureSample(buttonsTexture, buttonsSampler, btnUV).rgb;
+      btnColor = textureSampleLevel(buttonsTexture, buttonsSampler, btnUV, 0.0).rgb;
       inButton = 1.0;
   }
 
