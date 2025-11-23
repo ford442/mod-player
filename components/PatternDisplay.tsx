@@ -272,7 +272,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
 
   const canvasMetrics = useMemo(() => {
     if (shaderFile.includes('v0.18')) {
-      return { width: 600, height: 600 };
+      return { width: 1280, height: 1280 };
     }
     const rawChannels = Math.max(1, matrix?.numChannels ?? DEFAULT_CHANNELS);
     const displayChannels = padTopChannel ? rawChannels + 1 : rawChannels;
