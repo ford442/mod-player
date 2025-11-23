@@ -361,10 +361,26 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
 
   const ensureButtonTexture = async (device: GPUDevice) => {
     if (textureResourcesRef.current) return;
-    const img = new Image();
-    img.src = '/unlit-button.png';
-    await img.decode();
-    const bitmap = await createImageBitmap(img);
+
+    let bitmap: ImageBitmap;
+    try {
+      const img = new Image();
+      img.src = 'unlit-button.png';
+      await img.decode();
+      bitmap = await createImageBitmap(img);
+    } catch (e) {
+      console.warn('Failed to load button texture, using fallback.', e);
+      const canvas = document.createElement('canvas');
+      canvas.width = 1;
+      canvas.height = 1;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.fillStyle = '#222';
+        ctx.fillRect(0, 0, 1, 1);
+      }
+      bitmap = await createImageBitmap(canvas);
+    }
+
     const texture = device.createTexture({
       size: [bitmap.width, bitmap.height, 1],
       format: 'rgba8unorm',
