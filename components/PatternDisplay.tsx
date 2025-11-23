@@ -1,21 +1,13 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { ChannelShadowState, PatternMatrix } from '../types';
 
+const SHADER_FILE = 'patternv0.14.wgsl';
 const EMPTY_CHANNEL: ChannelShadowState = { volume: 0, pan: 0, freq: 0, trigger: 0, noteAge: 0, activeEffect: 0, effectValue: 0, isMuted: 0 };
-type LayoutType = 'simple' | 'texture' | 'extended';
-
 const DEFAULT_ROWS = 64;
 const DEFAULT_CHANNELS = 8;
-
-const alignTo = (value: number, alignment: number) => Math.ceil(value / alignment) * alignment;
-const getLayoutType = (shaderFile: string): LayoutType => {
-  if (shaderFile === 'patternShaderv0.12.wgsl') return 'texture';
-  if (shaderFile === 'patternv0.13.wgsl' || shaderFile === 'patternv0.14.wgsl') return 'extended';
-  return 'simple';
-};
+const UNIFORM_SIZE_BYTES = 64;
 
 const createUniformPayload = (
-  layoutType: LayoutType,
   params: {
     numRows: number;
     numChannels: number;
@@ -35,48 +27,25 @@ const createUniformPayload = (
     isModuleLoaded: boolean;
   }
 ): ArrayBuffer => {
-  if (layoutType === 'extended') {
-    const buffer = new ArrayBuffer(64);
-    const uint = new Uint32Array(buffer);
-    const float = new Float32Array(buffer);
-    uint[0] = Math.max(0, params.numRows) >>> 0;
-    uint[1] = Math.max(0, params.numChannels) >>> 0;
-    uint[2] = Math.max(0, params.playheadRow) >>> 0;
-    uint[3] = params.isPlaying ? 1 : 0;
-    float[4] = params.cellW;
-    float[5] = params.cellH;
-    float[6] = params.canvasW;
-    float[7] = params.canvasH;
-    float[8] = params.tickOffset;
-    float[9] = params.bpm;
-    float[10] = params.timeSec;
-    float[11] = params.beatPhase;
-    float[12] = params.groove;
-    float[13] = params.kickTrigger;
-    uint[14] = Math.max(0, params.activeChannels) >>> 0;
-    uint[15] = params.isModuleLoaded ? 1 : 0;
-    return buffer;
-  }
-
-  const buffer = new ArrayBuffer(layoutType === 'texture' ? 64 : 32);
+  const buffer = new ArrayBuffer(UNIFORM_SIZE_BYTES);
   const uint = new Uint32Array(buffer);
   const float = new Float32Array(buffer);
   uint[0] = Math.max(0, params.numRows) >>> 0;
   uint[1] = Math.max(0, params.numChannels) >>> 0;
   uint[2] = Math.max(0, params.playheadRow) >>> 0;
-  uint[3] = 0;
+  uint[3] = params.isPlaying ? 1 : 0;
   float[4] = params.cellW;
   float[5] = params.cellH;
   float[6] = params.canvasW;
   float[7] = params.canvasH;
-  if (layoutType === 'texture') {
-    float[8] = 1;
-    float[9] = 1;
-    float[10] = 0;
-    float[11] = 0;
-    float[12] = 1;
-    float[13] = 1;
-  }
+  float[8] = params.tickOffset;
+  float[9] = params.bpm;
+  float[10] = params.timeSec;
+  float[11] = params.beatPhase;
+  float[12] = params.groove;
+  float[13] = params.kickTrigger;
+  uint[14] = Math.max(0, params.activeChannels) >>> 0;
+  uint[15] = params.isModuleLoaded ? 1 : 0;
   return buffer;
 };
 
@@ -103,7 +72,6 @@ interface PatternDisplayProps {
   playheadRow: number;
   cellWidth?: number;
   cellHeight?: number;
-  shaderFile?: string;
   // Live playback uniforms
   isPlaying?: boolean;
   bpm?: number;
@@ -226,12 +194,13 @@ const buildRowFlags = (numRows: number): Uint32Array => {
   return flags;
 };
 
+const alignTo = (value: number, alignment: number) => Math.ceil(value / alignment) * alignment;
+
 export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     matrix,
     playheadRow,
     cellWidth = 18,
     cellHeight = 14,
-    shaderFile = 'patternv0.12.wgsl',
     bpm = 120,
     timeSec = 0,
     tickOffset = 0,
@@ -252,7 +221,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   const rowFlagsBufferRef = useRef<GPUBuffer | null>(null);
   const channelsBufferRef = useRef<GPUBuffer | null>(null);
   const bindGroupRef = useRef<GPUBindGroup | null>(null);
-  const layoutTypeRef = useRef<LayoutType>('simple');
+  const layoutTypeRef = useRef<'extended'>('extended');
   const textureResourcesRef = useRef<{ sampler: GPUSampler; view: GPUTextureView } | null>(null);
   const useExtendedRef = useRef<boolean>(false);
   const animationFrameRef = useRef<number>(0);
@@ -261,7 +230,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   const [gpuReady, setGpuReady] = useState(false);
   const [localTime, setLocalTime] = useState(0);
 
-  const isHorizontal = shaderFile.includes('v0.12') || shaderFile.includes('v0.13') || shaderFile.includes('v0.14');
+  const isHorizontal = true;
 
   const canvasMetrics = useMemo(() => {
     const channelsCount = Math.max(1, matrix?.numChannels ?? DEFAULT_CHANNELS);
@@ -386,21 +355,21 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
         const format = navigator.gpu.getPreferredCanvasFormat();
         context.configure({ device, format });
 
-        const shaderSource = await fetch(`./shaders/${shaderFile}`).then(res => res.text());
+        const shaderSource = await fetch(`./shaders/${SHADER_FILE}`).then(res => res.text());
         if (cancelled) return;
         const module = device.createShaderModule({ code: shaderSource });
         if ('getCompilationInfo' in module) {
           module.getCompilationInfo().then(info => {
             info.messages.forEach(msg => {
               const log = msg.type === 'error' ? console.error : console.warn;
-              log(`[WGSL ${msg.type}] ${shaderFile}:${msg.lineNum}:${msg.linePos} ${msg.message}`);
+              log(`[WGSL ${msg.type}] ${SHADER_FILE}:${msg.lineNum}:${msg.linePos} ${msg.message}`);
             });
           }).catch(() => {});
         }
 
-        const layoutType = getLayoutType(shaderFile);
+        const layoutType = 'extended';
         layoutTypeRef.current = layoutType;
-        useExtendedRef.current = layoutType === 'extended';
+        useExtendedRef.current = true;
         if (layoutType !== 'extended') {
           rowFlagsBufferRef.current?.destroy();
           rowFlagsBufferRef.current = null;
@@ -409,35 +378,16 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
         }
         textureResourcesRef.current = null;
 
-        let bindGroupLayout: GPUBindGroupLayout;
-        if (layoutType === 'texture') {
-          bindGroupLayout = device.createBindGroupLayout({
-            entries: [
-              { binding: 0, visibility: GPUShaderStage.FRAGMENT | GPUShaderStage.VERTEX, buffer: { type: 'read-only-storage' } },
-              { binding: 1, visibility: GPUShaderStage.FRAGMENT | GPUShaderStage.VERTEX, buffer: { type: 'uniform' } },
-              { binding: 2, visibility: GPUShaderStage.FRAGMENT, sampler: { type: 'filtering' } },
-              { binding: 3, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float' } },
-            ],
-          });
-        } else if (layoutType === 'extended') {
-          bindGroupLayout = device.createBindGroupLayout({
-            entries: [
-              { binding: 0, visibility: GPUShaderStage.FRAGMENT | GPUShaderStage.VERTEX, buffer: { type: 'read-only-storage' } },
-              { binding: 1, visibility: GPUShaderStage.FRAGMENT | GPUShaderStage.VERTEX, buffer: { type: 'uniform' } },
-              { binding: 2, visibility: GPUShaderStage.FRAGMENT, buffer: { type: 'read-only-storage' } },
-              { binding: 3, visibility: GPUShaderStage.FRAGMENT, buffer: { type: 'read-only-storage' } },
-              { binding: 4, visibility: GPUShaderStage.FRAGMENT, sampler: { type: 'filtering' } },
-              { binding: 5, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float' } },
-            ],
-          });
-        } else {
-          bindGroupLayout = device.createBindGroupLayout({
-            entries: [
-              { binding: 0, visibility: GPUShaderStage.FRAGMENT | GPUShaderStage.VERTEX, buffer: { type: 'read-only-storage' } },
-              { binding: 1, visibility: GPUShaderStage.FRAGMENT | GPUShaderStage.VERTEX, buffer: { type: 'uniform' } },
-            ],
-          });
-        }
+        const bindGroupLayout = device.createBindGroupLayout({
+          entries: [
+            { binding: 0, visibility: GPUShaderStage.FRAGMENT | GPUShaderStage.VERTEX, buffer: { type: 'read-only-storage' } },
+            { binding: 1, visibility: GPUShaderStage.FRAGMENT | GPUShaderStage.VERTEX, buffer: { type: 'uniform' } },
+            { binding: 2, visibility: GPUShaderStage.FRAGMENT, buffer: { type: 'read-only-storage' } },
+            { binding: 3, visibility: GPUShaderStage.FRAGMENT, buffer: { type: 'read-only-storage' } },
+            { binding: 4, visibility: GPUShaderStage.FRAGMENT, sampler: { type: 'filtering' } },
+            { binding: 5, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float' } },
+          ],
+        });
 
         let entryVert = 'vs';
         let entryFrag = 'fs';
@@ -457,8 +407,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
           });
         }
 
-        const uniformSize = layoutType === 'simple' ? 32 : 64;
-        const uniformBuffer = device.createBuffer({ size: alignTo(uniformSize, 256), usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+        const uniformBuffer = device.createBuffer({ size: alignTo(UNIFORM_SIZE_BYTES, 256), usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
 
         deviceRef.current = device;
         contextRef.current = context;
@@ -475,7 +424,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
           channelsBufferRef.current = createBufferWithData(device, emptyChannels, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
         }
 
-        const needsTexture = layoutType === 'texture' || layoutType === 'extended';
+        const needsTexture = true;
         if (needsTexture) {
           await ensureButtonTexture(device);
         }
@@ -496,7 +445,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
       setWebgpuAvailable(true);
       setGpuReady(false);
     };
-  }, [matrix, shaderFile]);
+  }, [matrix]);
 
   // Update buffers and re-render
   useEffect(() => {
@@ -523,7 +472,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
       // Use localTime if not loaded, otherwise timeSec
       const effectiveTime = isModuleLoaded ? timeSec : localTime;
 
-      const uniformPayload = createUniformPayload(layoutTypeRef.current, {
+      const uniformPayload = createUniformPayload({
         numRows,
         numChannels,
         playheadRow: tickRow,

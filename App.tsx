@@ -10,9 +10,7 @@ import { MediaOverlay } from './components/MediaOverlay';
 import { PatternDisplay } from './components/PatternDisplay';
 import type { MediaItem } from './types';
 
-// Dynamically load all WGSL shader files
-const shaderModules = import.meta.glob('./shaders/*.wgsl', { as: 'url' });
-const availableShaders = Object.keys(shaderModules).map(path => path.replace('./shaders/', ''));
+const SHADER_FILE = 'patternv0.14.wgsl';
 
 export default function App() {
   const [volume, setVolume] = useState(1.0);
@@ -83,7 +81,6 @@ export default function App() {
   const activeMedia = media.find(m => m.id === activeMediaId);
   const webgpuSupported = typeof navigator !== 'undefined' && 'gpu' in navigator;
   const [patternMode, setPatternMode] = useState<'html' | 'webgpu'>(webgpuSupported ? 'webgpu' : 'html');
-  const [shaderVersion, setShaderVersion] = useState<string>('patternv0.14.wgsl');
   const effectivePatternMode = webgpuSupported ? patternMode : 'html';
 
   return (
@@ -131,15 +128,7 @@ export default function App() {
                     </button>
                   </div>
                   {effectivePatternMode === 'webgpu' && (
-                    <select
-                      value={shaderVersion}
-                      onChange={(e) => setShaderVersion(e.target.value)}
-                      className="bg-gray-800 text-white text-sm px-3 py-2 rounded border border-white/10"
-                    >
-                      {availableShaders.map(shader => (
-                        <option key={shader} value={shader}>{shader.replace('.wgsl', '')}</option>
-                      ))}
-                    </select>
+                    <span className="text-sm text-gray-400">Shader: {SHADER_FILE.replace('.wgsl', '')}</span>
                   )}
                 </div>
               </div>
@@ -150,7 +139,6 @@ export default function App() {
                   playheadRow={sequencerCurrentRow}
                   cellWidth={10}
                   cellHeight={22}
-                  shaderFile={shaderVersion}
                   isPlaying={isPlaying}
                   bpm={moduleInfo.bpm}
                   timeSec={playbackSeconds}
