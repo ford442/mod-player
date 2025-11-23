@@ -364,6 +364,7 @@ export function useLibOpenMPT(volume: number = 1.0) {
       }
       gainNodeRef.current.gain.value = volume;
       const modPtr = currentModulePtr.current;
+      const lib = libopenmptRef.current;
       const leftBufferPtr = lib._malloc(BUFFER_SIZE * 4);
       const rightBufferPtr = lib._malloc(BUFFER_SIZE * 4);
 
