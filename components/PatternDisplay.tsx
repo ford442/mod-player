@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { ChannelShadowState, PatternMatrix } from '../types';
 
-const MIN_STORAGE = new Uint32Array([0, 0]);
 const EMPTY_CHANNEL: ChannelShadowState = { volume: 0, pan: 0, freq: 0, trigger: 0, noteAge: 0, activeEffect: 0, effectValue: 0, isMuted: 0 };
 type LayoutType = 'simple' | 'texture' | 'extended';
 
