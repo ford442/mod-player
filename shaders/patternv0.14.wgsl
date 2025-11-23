@@ -19,7 +19,7 @@ struct Uniforms {
   groove: f32,
   kickTrigger: f32,
   activeChannels: u32,
-  pad3: u32,
+  isModuleLoaded: u32, // was pad3
 };
 
 @group(0) @binding(0) var<storage, read> cells: array<u32>;
@@ -235,6 +235,9 @@ fn getFragmentConstants() -> FragmentConstants {
     return c;
 }
 
+fn hash21(p: vec2<f32>) -> f32 {
+    return fract(sin(dot(p, vec2<f32>(12.9898, 78.233))) * 43758.5453);
+}
 
 @fragment
 fn fs(in: VertexOut) -> @location(0) vec4<f32> {
@@ -244,6 +247,64 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   let tiledUV = in.uv;
   let singleButtonUV = tiledUV;
   var finalColor = textureSample(buttonsTexture, buttonsSampler, singleButtonUV).rgb;
+
+  // --- 0. STARTUP / IDLE ANIMATION ---
+  if (uniforms.isModuleLoaded == 0u) {
+      let t = uniforms.timeSec;
+      let r = f32(in.row);
+      let c = f32(in.channel);
+
+      // Define regions of the button
+      let x = tiledUV.x;
+      let y = tiledUV.y;
+      let indicatorXMask = smoothstep(0.4, 0.41, x) - smoothstep(0.6, 0.61, x);
+      let topLightMask    = (smoothstep(0.10, 0.11, y) - smoothstep(0.20, 0.21, y)) * indicatorXMask;
+      let mainButtonYMask  = smoothstep(0.23, 0.24, y) - smoothstep(0.82, 0.83, y);
+      let mainButtonXMask = smoothstep(0.1, 0.11, x) - smoothstep(0.9, 0.91, x);
+      let mainButtonMask = mainButtonYMask * mainButtonXMask;
+
+      var glow = vec3<f32>(0.0);
+
+      // Phase 1: Startup Dance (0 - 3 seconds)
+      if (t < 3.0) {
+          // A diagonal wave scanning through
+          let wavePos = t * 20.0; // speed
+          let gridPos = r + c * 2.0;
+          let dist = abs(gridPos - wavePos);
+          let intensity = smoothstep(5.0, 0.0, dist);
+
+          let color = neonPalette(t * 0.5 + c * 0.1);
+          glow = color * intensity;
+
+          // Apply to main button area
+          finalColor = mix(finalColor, finalColor + glow, mainButtonMask);
+          // Apply to top light
+          finalColor = mix(finalColor, finalColor + glow * 2.0, topLightMask);
+      } else {
+          // Phase 2: Waiting Blinking
+          // Random twinkling
+          let seed = floor(t * 2.0); // change 2 times per second
+          let rnd = hash21(vec2<f32>(r, c + seed));
+
+          if (rnd > 0.9) {
+             let blinkColor = neonPalette(rnd);
+             let fade = 1.0 - fract(t * 2.0); // decay
+             glow = blinkColor * fade * 1.5;
+
+             finalColor = mix(finalColor, finalColor + glow, mainButtonMask);
+             finalColor = mix(finalColor, finalColor + glow * 2.0, topLightMask);
+          }
+      }
+
+      // Borders
+      let uv_aa = vec2<f32>(fwidth(in.uv.x), fwidth(in.uv.y));
+      let borderX = smoothstep(1.0 - (fs.borderThickness * uv_aa.x), 1.0, in.uv.x);
+      let borderY = smoothstep(1.0 - (fs.borderThickness * uv_aa.y), 1.0, in.uv.y);
+      let borderAlpha = max(borderX, borderY);
+      finalColor = mix(finalColor, fs.borderColor, borderAlpha);
+
+      return vec4<f32>(finalColor, 1.0);
+  }
 
   // --- 2. UNPACK DATA ---
   let noteChar = (in.packedA >> 24) & 255u;
@@ -257,10 +318,10 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   // --- 3. IDENTIFY BUTTON REGIONS ---
   let y = tiledUV.y;
   let x = tiledUV.x;
-  
+
   let indicatorXMask = smoothstep(0.4, 0.41, x) - smoothstep(0.6, 0.61, x);
   let topLightMask    = (smoothstep(0.10, 0.11, y) - smoothstep(0.20, 0.21, y)) * indicatorXMask;
-  
+
 let mainButtonYMask  = smoothstep(0.23, 0.24, y) - smoothstep(0.82, 0.83, y);
 
   let mainButtonXMask = smoothstep(0.1, 0.11, x) - smoothstep(0.9, 0.91, x);
@@ -308,9 +369,9 @@ let mainButtonYMask  = smoothstep(0.23, 0.24, y) - smoothstep(0.82, 0.83, y);
       let octaveF = f32(octaveChar) - 48.0;
       let octaveDelta = clamp(octaveF, 1.0, 8.0) - 4.0;
       let octaveLightness = 1.0 + octaveDelta * 0.15;
-      
+
       noteColor = base_note_color * instBrightness * octaveLightness;
-      
+
       let triggerFlash = noteColor * 1.5 + 0.5;
       noteColor = mix(noteColor, triggerFlash, f32(ch.trigger) * 0.8);
 
@@ -335,7 +396,7 @@ let mainButtonYMask  = smoothstep(0.23, 0.24, y) - smoothstep(0.82, 0.83, y);
   }
   finalColor = mix(finalColor, finalColor + bottomGlow, bottomLightMask);
 
-  
+
   // --- 6. "BLINK OFF" LOGIC ---
   // --- NEW: This block dims the main button if on the playhead and empty ---
   if (rowDistance == 0 && !hasNote) {
