@@ -1,0 +1,5 @@
+
+{
+  "name": "React libopenmpt Note Viewer",
+  "description": "A web application built with React and TypeScript to play and visualize tracker music module files (.mod, .it, .s3m, .xm) using the libopenmpt library compiled to WebAssembly. It provides a real-time, tracker-style pattern data view."
+}
