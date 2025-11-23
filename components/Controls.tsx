@@ -13,6 +13,9 @@ interface ControlsProps {
   onLoopToggle: () => void;
   volume?: number;
   setVolume?: (v: number) => void;
+  // Global pan: -1 = left, 0 = center, 1 = right
+  pan?: number;
+  setPan?: (v: number) => void;
 }
 
 export const Controls: React.FC<ControlsProps> = ({
@@ -27,6 +30,8 @@ export const Controls: React.FC<ControlsProps> = ({
   onLoopToggle,
   volume,
   setVolume,
+  pan,
+  setPan,
 }) => {
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -113,6 +118,20 @@ export const Controls: React.FC<ControlsProps> = ({
             value={volume ?? 1}
             onChange={e => setVolume && setVolume(Number(e.target.value))}
             className="w-24 h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer"
+          />
+        </label>
+
+        <label className="flex items-center gap-2 text-sm">
+          Pan
+          <input
+            type="range"
+            min={-1}
+            max={1}
+            step={0.01}
+            value={pan ?? 0}
+            onChange={e => setPan && setPan(Number(e.target.value))}
+            className="w-32 h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer"
+            aria-label="Pan"
           />
         </label>
       </div>
