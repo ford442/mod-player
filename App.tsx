@@ -40,6 +40,8 @@ export default function App() {
     activeChannels,
     isLooping,
     setIsLooping,
+    panValue,
+    setPanValue,
   } = useLibOpenMPT(volume);
 
   const [media, setMedia] = useState<MediaItem[]>([]);
@@ -83,7 +85,7 @@ export default function App() {
   const activeMedia = media.find(m => m.id === activeMediaId);
   const webgpuSupported = typeof navigator !== 'undefined' && 'gpu' in navigator;
   const [patternMode, setPatternMode] = useState<'html' | 'webgpu'>(webgpuSupported ? 'webgpu' : 'html');
-  const [shaderVersion, setShaderVersion] = useState<string>('patternv0.14.wgsl');
+  const [shaderVersion, setShaderVersion] = useState<string>('patternv0.17.wgsl');
   const effectivePatternMode = webgpuSupported ? patternMode : 'html';
 
   return (
@@ -103,6 +105,8 @@ export default function App() {
           onLoopToggle={() => setIsLooping(!isLooping)}
           volume={volume}
           setVolume={setVolume}
+          pan={panValue}
+          setPan={setPanValue}
         />
 
         {isModuleLoaded || effectivePatternMode === 'webgpu' ? (
