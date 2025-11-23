@@ -363,6 +363,10 @@ export function useLibOpenMPT(volume: number = 1.0) {
         gainNodeRef.current.connect(audioContextRef.current.destination);
       }
       gainNodeRef.current.gain.value = volume;
+
+      // Ensure we have a typed reference to the lib before using it
+      const lib = libopenmptRef.current as LibOpenMPT;
+
       const modPtr = currentModulePtr.current;
       const leftBufferPtr = lib._malloc(BUFFER_SIZE * 4);
       const rightBufferPtr = lib._malloc(BUFFER_SIZE * 4);
