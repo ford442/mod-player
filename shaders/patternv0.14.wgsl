@@ -248,10 +248,15 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
 
       // Only apply lights if we are inside the button
       if (inButton > 0.5) {
-          let indicatorXMask = smoothstep(0.4, 0.41, x) - smoothstep(0.6, 0.61, x);
-          let topLightMask    = (smoothstep(0.10, 0.11, y) - smoothstep(0.20, 0.21, y)) * indicatorXMask;
-          let mainButtonYMask  = smoothstep(0.23, 0.24, y) - smoothstep(0.82, 0.83, y);
-          let mainButtonXMask = smoothstep(0.1, 0.11, x) - smoothstep(0.9, 0.91, x);
+           let indicatorXMask = smoothstep(0.4, 0.41, x) - smoothstep(0.6, 0.61, x);
+  let topLightMask    = (smoothstep(0.10, 0.11, y) - smoothstep(0.20, 0.21, y)) * indicatorXMask;
+
+let mainButtonYMask  = smoothstep(0.23, 0.24, y) - smoothstep(0.82, 0.83, y);
+
+  let mainButtonXMask = smoothstep(0.08, 0.09, x) - smoothstep(0.91, 0.92, x);
+  let mainButtonMask = mainButtonYMask * mainButtonXMask;
+
+  let bottomLightMask = (smoothstep(0.90, 0.91, y) - smoothstep(0.95, 0.96, y)) * indicatorXMask;
           let mainButtonMask = mainButtonYMask * mainButtonXMask;
 
           var glow = vec3<f32>(0.0);
