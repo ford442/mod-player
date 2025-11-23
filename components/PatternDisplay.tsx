@@ -5,6 +5,9 @@ const MIN_STORAGE = new Uint32Array([0, 0]);
 const EMPTY_CHANNEL: ChannelShadowState = { volume: 0, pan: 0, freq: 0, trigger: 0, noteAge: 0, activeEffect: 0, effectValue: 0, isMuted: 0 };
 type LayoutType = 'simple' | 'texture' | 'extended';
 
+const DEFAULT_ROWS = 64;
+const DEFAULT_CHANNELS = 8;
+
 const alignTo = (value: number, alignment: number) => Math.ceil(value / alignment) * alignment;
 const getLayoutType = (shaderFile: string): LayoutType => {
   if (shaderFile === 'patternShaderv0.12.wgsl') return 'texture';
@@ -30,6 +33,7 @@ const createUniformPayload = (
     groove: number;
     kickTrigger: number;
     activeChannels: number;
+    isModuleLoaded: boolean;
   }
 ): ArrayBuffer => {
   if (layoutType === 'extended') {
@@ -51,7 +55,7 @@ const createUniformPayload = (
     float[12] = params.groove;
     float[13] = params.kickTrigger;
     uint[14] = Math.max(0, params.activeChannels) >>> 0;
-    uint[15] = 0;
+    uint[15] = params.isModuleLoaded ? 1 : 0;
     return buffer;
   }
 
@@ -111,6 +115,7 @@ interface PatternDisplayProps {
   grooveAmount?: number;
   kickTrigger?: number;
   activeChannels?: number;
+  isModuleLoaded?: boolean;
 }
 
 const clampPlayhead = (value: number, numRows: number) => {
@@ -153,13 +158,18 @@ const parsePackedB = (text: string) => {
 };
 
 const packPatternMatrix = (matrix: PatternMatrix | null): Uint32Array => {
-  if (!matrix || matrix.numRows <= 0 || matrix.numChannels <= 0) {
-    return MIN_STORAGE.slice();
-  }
+  // If no matrix, create a dummy grid of zeros
+  const numRows = matrix?.numRows ?? DEFAULT_ROWS;
+  const numChannels = matrix?.numChannels ?? DEFAULT_CHANNELS;
 
-  const { numRows, numChannels, rows } = matrix;
   const packed = new Uint32Array(numRows * numChannels * 2);
 
+  if (!matrix) {
+      // Return zeroed buffer
+      return packed;
+  }
+
+  const { rows } = matrix;
   for (let r = 0; r < numRows; r++) {
     const rowCells = rows[r] || [];
     for (let c = 0; c < numChannels; c++) {
@@ -217,7 +227,23 @@ const buildRowFlags = (numRows: number): Uint32Array => {
   return flags;
 };
 
-export const PatternDisplay: React.FC<PatternDisplayProps> = ({ matrix, playheadRow, cellWidth = 18, cellHeight = 14, shaderFile = 'patternv0.12.wgsl', bpm = 120, timeSec = 0, tickOffset = 0, grooveAmount = 0, kickTrigger = 0, activeChannels = 0, channels = [], isPlaying = false, beatPhase = 0 }) => {
+export const PatternDisplay: React.FC<PatternDisplayProps> = ({
+    matrix,
+    playheadRow,
+    cellWidth = 18,
+    cellHeight = 14,
+    shaderFile = 'patternv0.12.wgsl',
+    bpm = 120,
+    timeSec = 0,
+    tickOffset = 0,
+    grooveAmount = 0,
+    kickTrigger = 0,
+    activeChannels = 0,
+    channels = [],
+    isPlaying = false,
+    beatPhase = 0,
+    isModuleLoaded = false
+}) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const deviceRef = useRef<GPUDevice | null>(null);
   const contextRef = useRef<GPUCanvasContext | null>(null);
@@ -230,19 +256,38 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({ matrix, playhead
   const layoutTypeRef = useRef<LayoutType>('simple');
   const textureResourcesRef = useRef<{ sampler: GPUSampler; view: GPUTextureView } | null>(null);
   const useExtendedRef = useRef<boolean>(false);
+  const animationFrameRef = useRef<number>(0);
 
   const [webgpuAvailable, setWebgpuAvailable] = useState(true);
   const [gpuReady, setGpuReady] = useState(false);
+  const [localTime, setLocalTime] = useState(0);
 
   const isHorizontal = shaderFile.includes('v0.12') || shaderFile.includes('v0.13') || shaderFile.includes('v0.14');
 
   const canvasMetrics = useMemo(() => {
-    const channelsCount = Math.max(1, matrix?.numChannels ?? 1);
-    const rows = Math.max(1, matrix?.numRows ?? 1);
+    const channelsCount = Math.max(1, matrix?.numChannels ?? DEFAULT_CHANNELS);
+    const rows = Math.max(1, matrix?.numRows ?? DEFAULT_ROWS);
     return isHorizontal
       ? { width: Math.ceil(rows * cellWidth), height: Math.ceil(channelsCount * cellHeight) }
       : { width: Math.ceil(channelsCount * cellWidth), height: Math.ceil(rows * cellHeight) };
   }, [matrix, cellWidth, cellHeight, isHorizontal]);
+
+  // Local animation loop when not playing or not loaded
+  useEffect(() => {
+    if (isModuleLoaded) {
+      cancelAnimationFrame(animationFrameRef.current);
+      return;
+    }
+
+    const startTime = performance.now();
+    const loop = () => {
+        const now = performance.now();
+        setLocalTime((now - startTime) / 1000.0);
+        animationFrameRef.current = requestAnimationFrame(loop);
+    };
+    loop();
+    return () => cancelAnimationFrame(animationFrameRef.current);
+  }, [isModuleLoaded]);
 
   const render = () => {
     const device = deviceRef.current;
@@ -265,7 +310,10 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({ matrix, playhead
 
     pass.setPipeline(pipeline);
     pass.setBindGroup(0, bindGroup);
-    const totalInstances = (matrix?.numRows ?? 0) * (matrix?.numChannels ?? 0);
+    const numRows = matrix?.numRows ?? DEFAULT_ROWS;
+    const numChannels = matrix?.numChannels ?? DEFAULT_CHANNELS;
+    const totalInstances = numRows * numChannels;
+
     if (totalInstances > 0) pass.draw(6, totalInstances, 0, 0);
     pass.end();
 
@@ -417,11 +465,13 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({ matrix, playhead
         contextRef.current = context;
         uniformBufferRef.current = uniformBuffer;
 
-        cellsBufferRef.current = createBufferWithData(device, MIN_STORAGE, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
+        // Initial buffer creation (handles null matrix now via packPatternMatrix)
+        cellsBufferRef.current = createBufferWithData(device, packPatternMatrix(matrix), GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
+
         if (layoutType === 'extended') {
-          const numRows = matrix?.numRows ?? 1;
+          const numRows = matrix?.numRows ?? DEFAULT_ROWS;
           rowFlagsBufferRef.current = createBufferWithData(device, buildRowFlags(numRows), GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
-          const channelsCount = Math.max(1, matrix?.numChannels ?? 1);
+          const channelsCount = Math.max(1, matrix?.numChannels ?? DEFAULT_CHANNELS);
           const emptyChannels = packChannelStates([], channelsCount);
           channelsBufferRef.current = createBufferWithData(device, emptyChannels, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
         }
@@ -449,33 +499,34 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({ matrix, playhead
     };
   }, [matrix, shaderFile]);
 
-  // Update buffers and re-render when matrix or playheadRow changes
+  // Update buffers and re-render
   useEffect(() => {
     const device = deviceRef.current;
     if (!device || !gpuReady) return;
 
-    // Update cells buffer
-    if (matrix) {
-      if (cellsBufferRef.current) {
+    // If matrix changes (or becomes null/non-null), update cells buffer
+    // But packPatternMatrix handles null now, so we always get a valid buffer
+    if (cellsBufferRef.current) {
         cellsBufferRef.current.destroy();
-      }
-      cellsBufferRef.current = createBufferWithData(device, packPatternMatrix(matrix), GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
-      refreshBindGroup(device);
-    } else if (!cellsBufferRef.current) {
-      cellsBufferRef.current = createBufferWithData(device, MIN_STORAGE, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
-      refreshBindGroup(device);
     }
+    cellsBufferRef.current = createBufferWithData(device, packPatternMatrix(matrix), GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
+    refreshBindGroup(device);
 
-    // Update uniform buffer with playhead and timing information
+    // Update uniform buffer
     const uniformBuffer = uniformBufferRef.current;
     if (uniformBuffer) {
-      const numRows = matrix?.numRows ?? 0;
+      const numRows = matrix?.numRows ?? DEFAULT_ROWS;
+      const numChannels = matrix?.numChannels ?? DEFAULT_CHANNELS;
       const rowLimit = Math.max(1, numRows);
       const tickRow = clampPlayhead(playheadRow, rowLimit);
       const fractionalTick = Math.min(1, Math.max(0, tickOffset));
+
+      // Use localTime if not loaded, otherwise timeSec
+      const effectiveTime = isModuleLoaded ? timeSec : localTime;
+
       const uniformPayload = createUniformPayload(layoutTypeRef.current, {
         numRows,
-        numChannels: matrix?.numChannels ?? 0,
+        numChannels,
         playheadRow: tickRow,
         isPlaying,
         cellW: cellWidth,
@@ -484,18 +535,19 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({ matrix, playhead
         canvasH: canvasMetrics.height,
         tickOffset: fractionalTick,
         bpm,
-        timeSec,
+        timeSec: effectiveTime,
         beatPhase,
         groove: Math.min(1, Math.max(0, grooveAmount)),
         kickTrigger,
         activeChannels,
+        isModuleLoaded
       });
       device.queue.writeBuffer(uniformBuffer, 0, uniformPayload);
     }
 
     const layoutType = layoutTypeRef.current;
     if (layoutType === 'extended') {
-      const count = Math.max(1, matrix?.numChannels ?? 1);
+      const count = Math.max(1, matrix?.numChannels ?? DEFAULT_CHANNELS);
       const packedBuffer = packChannelStates(channels, count);
       if (!channelsBufferRef.current || channelsBufferRef.current.size < packedBuffer.byteLength) {
         channelsBufferRef.current?.destroy();
@@ -505,7 +557,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({ matrix, playhead
         device.queue.writeBuffer(channelsBufferRef.current, 0, packedBuffer);
       }
 
-      const flags = buildRowFlags(Math.max(1, matrix?.numRows ?? 1));
+      const flags = buildRowFlags(Math.max(1, matrix?.numRows ?? DEFAULT_ROWS));
       if (!rowFlagsBufferRef.current || rowFlagsBufferRef.current.size < flags.byteLength) {
         rowFlagsBufferRef.current?.destroy();
         rowFlagsBufferRef.current = createBufferWithData(device, flags, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
@@ -516,7 +568,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({ matrix, playhead
     }
 
     render();
-  }, [matrix, playheadRow, timeSec, bpm, tickOffset, grooveAmount, kickTrigger, activeChannels, gpuReady, channels, canvasMetrics, isPlaying, beatPhase]);
+  }, [matrix, playheadRow, timeSec, localTime, bpm, tickOffset, grooveAmount, kickTrigger, activeChannels, gpuReady, channels, canvasMetrics, isPlaying, beatPhase, isModuleLoaded]);
 
   return (
     <div className="pattern-display">
