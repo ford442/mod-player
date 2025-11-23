@@ -119,3 +119,5 @@ export const Controls: React.FC<ControlsProps> = ({
     </section>
   );
 };
+
+export default Controls;

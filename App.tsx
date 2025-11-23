@@ -1,7 +1,7 @@
 import React, { useCallback, useState } from 'react';
 import { useLibOpenMPT } from './hooks/useLibOpenMPT';
 import { Header } from './components/Header';
-import { Controls } from './components/Controls';
+import Controls from './components/Controls';
 import { InfoDisplay } from './components/InfoDisplay';
 import { PatternSequencer } from './components/PatternSequencer';
 import { GithubIcon } from './components/icons';
