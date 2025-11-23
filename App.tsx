@@ -40,9 +40,6 @@ export default function App() {
     activeChannels,
     isLooping,
     setIsLooping,
-    // pan values from hook
-    panValue,
-    setPanValue,
   } = useLibOpenMPT(volume);
 
   const [media, setMedia] = useState<MediaItem[]>([]);
@@ -106,8 +103,6 @@ export default function App() {
           onLoopToggle={() => setIsLooping(!isLooping)}
           volume={volume}
           setVolume={setVolume}
-          pan={panValue}
-          setPan={setPanValue}
         />
 
         {isModuleLoaded || effectivePatternMode === 'webgpu' ? (
