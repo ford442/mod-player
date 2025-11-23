@@ -10,7 +10,7 @@ const DEFAULT_CHANNELS = 8;
 const alignTo = (value: number, alignment: number) => Math.ceil(value / alignment) * alignment;
 const getLayoutType = (shaderFile: string): LayoutType => {
   if (shaderFile === 'patternShaderv0.12.wgsl') return 'texture';
-  if (shaderFile === 'patternv0.13.wgsl' || shaderFile === 'patternv0.14.wgsl' || shaderFile === 'patternv0.16.wgsl' || shaderFile === 'patternv0.17.wgsl') return 'extended';
+  if (shaderFile === 'patternv0.13.wgsl' || shaderFile === 'patternv0.14.wgsl' || shaderFile === 'patternv0.16.wgsl' || shaderFile === 'patternv0.17.wgsl' || shaderFile === 'patternv0.18.wgsl') return 'extended';
   return 'simple';
 };
 
@@ -271,13 +271,16 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   const padTopChannel = shaderFile.includes('v0.16') || shaderFile.includes('v0.17');
 
   const canvasMetrics = useMemo(() => {
+    if (shaderFile.includes('v0.18')) {
+      return { width: 600, height: 600 };
+    }
     const rawChannels = Math.max(1, matrix?.numChannels ?? DEFAULT_CHANNELS);
     const displayChannels = padTopChannel ? rawChannels + 1 : rawChannels;
     const rows = Math.max(1, matrix?.numRows ?? DEFAULT_ROWS);
     return isHorizontal
       ? { width: Math.ceil(rows * cellWidth), height: Math.ceil(displayChannels * cellHeight) }
       : { width: Math.ceil(displayChannels * cellWidth), height: Math.ceil(rows * cellHeight) };
-  }, [matrix, cellWidth, cellHeight, isHorizontal, padTopChannel]);
+  }, [matrix, cellWidth, cellHeight, isHorizontal, padTopChannel, shaderFile]);
 
   // Local animation loop when not playing or not loaded
   useEffect(() => {
@@ -359,7 +362,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   const ensureButtonTexture = async (device: GPUDevice) => {
     if (textureResourcesRef.current) return;
     const img = new Image();
-    img.src = './public/unlit-button.png';
+    img.src = '/unlit-button.png';
     await img.decode();
     const bitmap = await createImageBitmap(img);
     const texture = device.createTexture({
