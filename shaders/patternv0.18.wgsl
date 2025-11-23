@@ -129,10 +129,10 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     // Twist factor increases with radius
     let twist = a + 2.0 * log(r + 0.001);
     // Animation
-    let move = time * speed * 0.5;
+    let cloudMove = time * speed * 0.5;
 
     // FBM Cloud
-    let cloudUV = vec2<f32>(r * 3.0 - move, twist * 1.0);
+    let cloudUV = vec2<f32>(r * 3.0 - cloudMove, twist * 1.0);
     let density = fbm(cloudUV);
 
     // Darken center, vignetting
