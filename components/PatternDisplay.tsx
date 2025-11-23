@@ -498,18 +498,59 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     };
   }, [matrix, shaderFile]);
 
-  // Update buffers and re-render
+  // 1. Matrix & Cell Buffer Management
   useEffect(() => {
     const device = deviceRef.current;
     if (!device || !gpuReady) return;
 
-    // If matrix changes (or becomes null/non-null), update cells buffer
-    // But packPatternMatrix handles null now, so we always get a valid buffer
     if (cellsBufferRef.current) {
         cellsBufferRef.current.destroy();
     }
     cellsBufferRef.current = createBufferWithData(device, packPatternMatrix(matrix), GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
+
+    // Also update row flags if extended
+    if (layoutTypeRef.current === 'extended') {
+        const numRows = matrix?.numRows ?? DEFAULT_ROWS;
+        const flags = buildRowFlags(numRows);
+        if (!rowFlagsBufferRef.current || rowFlagsBufferRef.current.size < flags.byteLength) {
+            rowFlagsBufferRef.current?.destroy();
+            rowFlagsBufferRef.current = createBufferWithData(device, flags, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
+        } else {
+            device.queue.writeBuffer(rowFlagsBufferRef.current, 0, flags.buffer, flags.byteOffset, flags.byteLength);
+        }
+    }
+
     refreshBindGroup(device);
+  }, [matrix, gpuReady]);
+
+  // 2. Channels Buffer Management
+  useEffect(() => {
+    const device = deviceRef.current;
+    if (!device || !gpuReady) return;
+
+    if (layoutTypeRef.current === 'extended') {
+        const count = Math.max(1, matrix?.numChannels ?? DEFAULT_CHANNELS);
+        const packedBuffer = packChannelStates(channels, count);
+        let recreated = false;
+
+        if (!channelsBufferRef.current || channelsBufferRef.current.size < packedBuffer.byteLength) {
+            channelsBufferRef.current?.destroy();
+            channelsBufferRef.current = createBufferWithData(device, packedBuffer, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
+            recreated = true;
+        } else {
+            device.queue.writeBuffer(channelsBufferRef.current, 0, packedBuffer);
+        }
+
+        if (recreated) {
+            refreshBindGroup(device);
+        }
+    }
+  }, [channels, matrix?.numChannels, gpuReady]);
+
+  // 3. Render Loop (Uniforms & Draw)
+  useEffect(() => {
+    const device = deviceRef.current;
+    if (!device || !gpuReady) return;
 
     // Update uniform buffer
     const uniformBuffer = uniformBufferRef.current;
@@ -520,7 +561,6 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
       const tickRow = clampPlayhead(playheadRow, rowLimit);
       const fractionalTick = Math.min(1, Math.max(0, tickOffset));
 
-      // Use localTime if not loaded, otherwise timeSec
       const effectiveTime = isModuleLoaded ? timeSec : localTime;
 
       const uniformPayload = createUniformPayload(layoutTypeRef.current, {
@@ -544,30 +584,8 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
       device.queue.writeBuffer(uniformBuffer, 0, uniformPayload);
     }
 
-    const layoutType = layoutTypeRef.current;
-    if (layoutType === 'extended') {
-      const count = Math.max(1, matrix?.numChannels ?? DEFAULT_CHANNELS);
-      const packedBuffer = packChannelStates(channels, count);
-      if (!channelsBufferRef.current || channelsBufferRef.current.size < packedBuffer.byteLength) {
-        channelsBufferRef.current?.destroy();
-        channelsBufferRef.current = createBufferWithData(device, packedBuffer, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
-        refreshBindGroup(device);
-      } else {
-        device.queue.writeBuffer(channelsBufferRef.current, 0, packedBuffer);
-      }
-
-      const flags = buildRowFlags(Math.max(1, matrix?.numRows ?? DEFAULT_ROWS));
-      if (!rowFlagsBufferRef.current || rowFlagsBufferRef.current.size < flags.byteLength) {
-        rowFlagsBufferRef.current?.destroy();
-        rowFlagsBufferRef.current = createBufferWithData(device, flags, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
-        refreshBindGroup(device);
-      } else {
-        device.queue.writeBuffer(rowFlagsBufferRef.current, 0, flags.buffer, flags.byteOffset, flags.byteLength);
-      }
-    }
-
     render();
-  }, [matrix, playheadRow, timeSec, localTime, bpm, tickOffset, grooveAmount, kickTrigger, activeChannels, gpuReady, channels, canvasMetrics, isPlaying, beatPhase, isModuleLoaded]);
+  }, [playheadRow, timeSec, localTime, bpm, tickOffset, grooveAmount, kickTrigger, activeChannels, gpuReady, isPlaying, beatPhase, isModuleLoaded, matrix?.numRows, matrix?.numChannels, cellWidth, cellHeight, canvasMetrics]);
 
   return (
     <div className="pattern-display">

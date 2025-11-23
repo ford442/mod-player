@@ -19,7 +19,7 @@ struct Uniforms {
   groove: f32,
   kickTrigger: f32,
   activeChannels: u32,
-  isModuleLoaded: u32, // was pad3
+  isModuleLoaded: u32,
 };
 
 @group(0) @binding(0) var<storage, read> cells: array<u32>;
@@ -121,60 +121,6 @@ fn pitchClassFromPacked(packed: u32) -> f32 {
     return f32(semitone) / 12.0;
 }
 
-fn classifyEffectGlyph(code: u32) -> u32 {
-    let c = toUpperAscii(code & 255u);
-    switch c {
-        case 49u: { return 1u; }
-        case 50u: { return 2u; }
-        case 51u: { return 1u; }
-        case 52u: { return 3u; }
-        case 55u: { return 4u; }
-        case 65u: { return 5u; }
-        default: { return 0u; }
-    }
-}
-
-fn sdEquilateralTriangle(p: vec2<f32>, size: f32) -> f32 {
-    const k = 1.7320508;
-    var q = p;
-    q.x = abs(q.x);
-    q.x -= size;
-    q.y += size / k;
-    if (q.x + k * q.y > 0.0) {
-        q = vec2<f32>(q.x - k * q.y, -k * q.y) * 0.5;
-    }
-    q.x -= clamp(q.x, -2.0 * size, 0.0);
-    return -length(q) * sign(q.y);
-}
-
-fn sdDiamond(p: vec2<f32>, size: f32) -> f32 {
-    let q = abs(p);
-    return (q.x + q.y) - size;
-}
-
-fn effectGlyphSDF(kind: u32, offset: vec2<f32>, radius: f32) -> f32 {
-    switch kind {
-        case 1u: {
-            return sdEquilateralTriangle(vec2<f32>(offset.x, offset.y + radius * 0.1), radius);
-        }
-        case 2u: {
-            return sdEquilateralTriangle(vec2<f32>(offset.x, -offset.y + radius * 0.1), radius);
-        }
-        case 3u: {
-            return sdRoundedBox(offset, vec2<f32>(radius * 0.9, radius * 0.35), radius * 0.35);
-        }
-        case 4u: {
-            return sdRoundedBox(offset, vec2<f32>(radius * 0.7, radius * 0.7), radius * 0.15);
-        }
-        case 5u: {
-            return sdDiamond(offset, radius * 0.9);
-        }
-        default: {
-            return length(offset) - radius;
-        }
-    }
-}
-
 fn effectColorFromCode(code: u32, fallback: vec3<f32>) -> vec3<f32> {
     let c = toUpperAscii(code & 255u);
     switch c {
@@ -243,10 +189,52 @@ fn hash21(p: vec2<f32>) -> f32 {
 fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   let fs = getFragmentConstants();
 
-  // --- 1. TILE & SAMPLE THE *SINGLE* BUTTON ---
-  let tiledUV = in.uv;
-  let singleButtonUV = tiledUV;
-  var finalColor = textureSample(buttonsTexture, buttonsSampler, singleButtonUV).rgb;
+  // --- HARDWARE BACKDROP ---
+  // Define a housing area
+  let p = in.uv - 0.5;
+  let housingSize = vec2<f32>(0.92, 0.92);
+  let dHousing = sdRoundedBox(p, housingSize * 0.5, 0.1);
+  let aa = fwidth(dHousing);
+
+  var finalColor = vec3<f32>(0.1, 0.1, 0.12); // Base dark color
+
+  // Plate highlight/shadow (Bevel)
+  let bevel = smoothstep(0.02, 0.0, dHousing) * smoothstep(-0.05, 0.0, dHousing);
+  if (dHousing < 0.0) {
+      // Inner plate gradient
+      finalColor += vec3<f32>(0.05) * (0.5 - in.uv.y);
+      // Top highlight
+      finalColor += vec3<f32>(0.15) * smoothstep(-0.45, -0.5, p.y) * smoothstep(0.0, -0.1, dHousing);
+  }
+  // Bevel edge
+  if (dHousing < 0.0 && dHousing > -0.05) {
+      let angle = atan2(p.y, p.x);
+      let light = cos(angle + 2.0); // Top-left light
+      finalColor += vec3<f32>(0.15) * light;
+  }
+
+  // --- BUTTON TEXTURE ---
+  // Scale button to fit inside housing
+  // We want the button to take up ~80% of the cell
+  let btnScale = 1.25;
+  let btnUV = (in.uv - 0.5) * btnScale + 0.5;
+
+  var btnColor = vec3<f32>(0.0);
+  var inButton = 0.0;
+
+  if (btnUV.x > 0.0 && btnUV.x < 1.0 && btnUV.y > 0.0 && btnUV.y < 1.0) {
+      btnColor = textureSample(buttonsTexture, buttonsSampler, btnUV).rgb;
+      inButton = 1.0;
+  }
+
+  // Blend button onto plate
+  // We assume the texture has its own borders, but let's soft-mask it to be safe
+  if (inButton > 0.5) {
+      finalColor = mix(finalColor, btnColor, 1.0);
+  }
+
+  // Use btnUV for all light masks so they align with the shrunk button
+  let tiledUV = btnUV;
 
   // --- 0. STARTUP / IDLE ANIMATION ---
   if (uniforms.isModuleLoaded == 0u) {
@@ -254,54 +242,56 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
       let r = f32(in.row);
       let c = f32(in.channel);
 
-      // Define regions of the button
+      // Define regions using scaled UVs
       let x = tiledUV.x;
       let y = tiledUV.y;
-      let indicatorXMask = smoothstep(0.4, 0.41, x) - smoothstep(0.6, 0.61, x);
-      let topLightMask    = (smoothstep(0.10, 0.11, y) - smoothstep(0.20, 0.21, y)) * indicatorXMask;
-      let mainButtonYMask  = smoothstep(0.23, 0.24, y) - smoothstep(0.82, 0.83, y);
-      let mainButtonXMask = smoothstep(0.1, 0.11, x) - smoothstep(0.9, 0.91, x);
-      let mainButtonMask = mainButtonYMask * mainButtonXMask;
 
-      var glow = vec3<f32>(0.0);
+      // Only apply lights if we are inside the button
+      if (inButton > 0.5) {
+          let indicatorXMask = smoothstep(0.4, 0.41, x) - smoothstep(0.6, 0.61, x);
+          let topLightMask    = (smoothstep(0.10, 0.11, y) - smoothstep(0.20, 0.21, y)) * indicatorXMask;
+          let mainButtonYMask  = smoothstep(0.23, 0.24, y) - smoothstep(0.82, 0.83, y);
+          let mainButtonXMask = smoothstep(0.1, 0.11, x) - smoothstep(0.9, 0.91, x);
+          let mainButtonMask = mainButtonYMask * mainButtonXMask;
 
-      // Phase 1: Startup Dance (0 - 3 seconds)
-      if (t < 3.0) {
-          // A diagonal wave scanning through
-          let wavePos = t * 20.0; // speed
-          let gridPos = r + c * 2.0;
-          let dist = abs(gridPos - wavePos);
-          let intensity = smoothstep(5.0, 0.0, dist);
+          var glow = vec3<f32>(0.0);
 
-          let color = neonPalette(t * 0.5 + c * 0.1);
-          glow = color * intensity;
+          // Phase 1: Startup Dance (0 - 3 seconds)
+          if (t < 3.0) {
+              let wavePos = t * 20.0;
+              let gridPos = r + c * 2.0;
+              let dist = abs(gridPos - wavePos);
+              let intensity = smoothstep(5.0, 0.0, dist);
+              let color = neonPalette(t * 0.5 + c * 0.1);
+              glow = color * intensity;
 
-          // Apply to main button area
-          finalColor = mix(finalColor, finalColor + glow, mainButtonMask);
-          // Apply to top light
-          finalColor = mix(finalColor, finalColor + glow * 2.0, topLightMask);
-      } else {
-          // Phase 2: Waiting Blinking
-          // Random twinkling
-          let seed = floor(t * 2.0); // change 2 times per second
-          let rnd = hash21(vec2<f32>(r, c + seed));
-
-          if (rnd > 0.9) {
-             let blinkColor = neonPalette(rnd);
-             let fade = 1.0 - fract(t * 2.0); // decay
-             glow = blinkColor * fade * 1.5;
-
-             finalColor = mix(finalColor, finalColor + glow, mainButtonMask);
-             finalColor = mix(finalColor, finalColor + glow * 2.0, topLightMask);
+              finalColor = mix(finalColor, finalColor + glow, mainButtonMask);
+              finalColor = mix(finalColor, finalColor + glow * 2.0, topLightMask);
+          } else {
+              // Phase 2: Waiting Blinking
+              let seed = floor(t * 2.0);
+              let rnd = hash21(vec2<f32>(r, c + seed));
+              if (rnd > 0.9) {
+                 let blinkColor = neonPalette(rnd);
+                 let fade = 1.0 - fract(t * 2.0);
+                 glow = blinkColor * fade * 1.5;
+                 finalColor = mix(finalColor, finalColor + glow, mainButtonMask);
+                 finalColor = mix(finalColor, finalColor + glow * 2.0, topLightMask);
+              }
           }
       }
 
-      // Borders
+      // Border for cell (outermost)
+      let borderX = smoothstep(1.0 - (fs.borderThickness * fwidth(in.uv.x)), 1.0, abs(in.uv.x * 2.0 - 1.0)); // Edge of cell
+      // actually using standard UV borders
       let uv_aa = vec2<f32>(fwidth(in.uv.x), fwidth(in.uv.y));
-      let borderX = smoothstep(1.0 - (fs.borderThickness * uv_aa.x), 1.0, in.uv.x);
-      let borderY = smoothstep(1.0 - (fs.borderThickness * uv_aa.y), 1.0, in.uv.y);
-      let borderAlpha = max(borderX, borderY);
-      finalColor = mix(finalColor, fs.borderColor, borderAlpha);
+      let bX = smoothstep(1.0 - (fs.borderThickness * uv_aa.x), 1.0, in.uv.x);
+      let bY = smoothstep(1.0 - (fs.borderThickness * uv_aa.y), 1.0, in.uv.y);
+      let borderAlpha = max(bX, bY);
+
+      // Don't draw border on top of everything, maybe blend?
+      // actually borders help separation
+      finalColor = mix(finalColor, vec3<f32>(0.0), borderAlpha); // Black gap
 
       return vec4<f32>(finalColor, 1.0);
   }
@@ -315,103 +305,99 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   let hasEffect = (effParam > 0u);
   let ch = channels[in.channel];
 
-  // --- 3. IDENTIFY BUTTON REGIONS ---
+  // --- 3. IDENTIFY BUTTON REGIONS (Using Scaled UVs) ---
   let y = tiledUV.y;
   let x = tiledUV.x;
 
-  let indicatorXMask = smoothstep(0.4, 0.41, x) - smoothstep(0.6, 0.61, x);
-  let topLightMask    = (smoothstep(0.10, 0.11, y) - smoothstep(0.20, 0.21, y)) * indicatorXMask;
+  if (inButton > 0.5) {
+      let indicatorXMask = smoothstep(0.4, 0.41, x) - smoothstep(0.6, 0.61, x);
+      let topLightMask    = (smoothstep(0.10, 0.11, y) - smoothstep(0.20, 0.21, y)) * indicatorXMask;
 
-let mainButtonYMask  = smoothstep(0.23, 0.24, y) - smoothstep(0.82, 0.83, y);
+      let mainButtonYMask  = smoothstep(0.23, 0.24, y) - smoothstep(0.82, 0.83, y);
+      let mainButtonXMask = smoothstep(0.1, 0.11, x) - smoothstep(0.9, 0.91, x);
+      let mainButtonMask = mainButtonYMask * mainButtonXMask;
 
-  let mainButtonXMask = smoothstep(0.1, 0.11, x) - smoothstep(0.9, 0.91, x);
-  let mainButtonMask = mainButtonYMask * mainButtonXMask;
+      let bottomLightMask = (smoothstep(0.90, 0.91, y) - smoothstep(0.95, 0.96, y)) * indicatorXMask;
 
-  let bottomLightMask = (smoothstep(0.90, 0.91, y) - smoothstep(0.95, 0.96, y)) * indicatorXMask;
+      // --- 5. NEW PLAYHEAD PROXIMITY ---
+      let rowDistance = abs(i32(in.row) - i32(uniforms.playheadRow));
+      var proximityGlow: f32 = 0.0;
+      switch rowDistance {
+          case 0: { proximityGlow = 0.0; }
+          case 1: { proximityGlow = 1.0; }
+          default: {}
+      }
 
-  // --- 5. NEW PLAYHEAD PROXIMITY ---
-  let rowDistance = abs(i32(in.row) - i32(uniforms.playheadRow));
-  var proximityGlow: f32 = 0.0;
-  switch rowDistance {
-      // --- CHANGE: 0.0 for current, 1.0 for adjacent ---
-      case 0: { proximityGlow = 0.0; } // "off"
-      case 1: { proximityGlow = 1.0; } // "blink bright"
-      default: {}
+      // --- 4. APPLY STATES TO REGIONS ---
+
+      // ** Muted Channel Dimming **
+      if (ch.isMuted == 1u) {
+          finalColor *= 0.2;
+      }
+
+      // ** "Channel Active" -> Top Light **
+      let noteTrail = exp(-ch.noteAge * 2.0);
+      let channelActive = step(0.1, noteTrail);
+
+      if (channelActive > 0.5) {
+          let topPulse = 0.7 + 0.3 * sin(uniforms.timeSec * 10.0);
+          let topGlow = vec3<f32>(0.5, 0.8, 1.0) * (topPulse + proximityGlow);
+          finalColor = mix(finalColor, finalColor + topGlow, topLightMask);
+      }
+
+      // ** "Has Note" -> Main Button **
+      var noteColor = vec3<f32>(0.0);
+      if (hasNote) {
+          let pitchHue = pitchClassFromPacked(in.packedA);
+          let base_note_color = neonPalette(pitchHue);
+          let instBand = inst & 15u;
+          let instBrightness = 0.7 + (select(0.0, f32(instBand) / 15.0, instBand > 0u)) * 0.3;
+
+          let octaveChar = (in.packedA >> 8) & 255u;
+          let octaveF = f32(octaveChar) - 48.0;
+          let octaveDelta = clamp(octaveF, 1.0, 8.0) - 4.0;
+          let octaveLightness = 1.0 + octaveDelta * 0.15;
+
+          noteColor = base_note_color * instBrightness * octaveLightness;
+
+          let triggerFlash = noteColor * 1.5 + 0.5;
+          noteColor = mix(noteColor, triggerFlash, f32(ch.trigger) * 0.8);
+
+          let volAlpha = clamp(ch.volume, 0.05, 1.0);
+          let mixAmount = mainButtonMask * volAlpha * noteTrail;
+          finalColor = mix(finalColor, noteColor, mixAmount);
+      }
+
+      // ** "Has Effect" -> Bottom Light **
+      var bottomGlow = vec3<f32>(0.0);
+
+      if (hasEffect) {
+          let effectColor = effectColorFromCode(effCode, fs.effectColor);
+          let strength = clamp(f32(effParam) / 255.0, 0.2, 1.0);
+          let effectPulse = 1.0 + 0.5 * sin(uniforms.timeSec * 15.0);
+          bottomGlow += (effectColor * strength * effectPulse) * 1.5;
+      }
+
+      if (proximityGlow > 0.0) {
+          let baseEffectColor = vec3<f32>(0.8, 0.7, 0.3);
+          bottomGlow += (baseEffectColor * proximityGlow) * 1.5;
+      }
+      finalColor = mix(finalColor, finalColor + bottomGlow, bottomLightMask);
+
+      // --- 6. "BLINK OFF" LOGIC ---
+      if (rowDistance == 0 && !hasNote) {
+          finalColor = mix(finalColor, finalColor * 0.2, mainButtonMask);
+      }
   }
 
-
-  // --- 4. APPLY STATES TO REGIONS ---
-
-  // ** Muted Channel Dimming **
-  if (ch.isMuted == 1u) {
-      finalColor *= 0.2;
-  }
-
-  // ** "Channel Active" -> Top Light **
-  let noteTrail = exp(-ch.noteAge * 2.0);
-  let channelActive = step(0.1, noteTrail);
-
-  if (channelActive > 0.5) {
-      let topPulse = 0.7 + 0.3 * sin(uniforms.timeSec * 10.0);
-      let topGlow = vec3<f32>(0.5, 0.8, 1.0) * (topPulse + proximityGlow);
-      finalColor = mix(finalColor, finalColor + topGlow, topLightMask);
-  }
-
-  // ** "Has Note" -> Main Button **
-  var noteColor = vec3<f32>(0.0);
-  if (hasNote) {
-      let pitchHue = pitchClassFromPacked(in.packedA);
-      let base_note_color = neonPalette(pitchHue);
-      let instBand = inst & 15u;
-      let instBrightness = 0.7 + (select(0.0, f32(instBand) / 15.0, instBand > 0u)) * 0.3;
-
-      let octaveChar = (in.packedA >> 8) & 255u;
-      let octaveF = f32(octaveChar) - 48.0;
-      let octaveDelta = clamp(octaveF, 1.0, 8.0) - 4.0;
-      let octaveLightness = 1.0 + octaveDelta * 0.15;
-
-      noteColor = base_note_color * instBrightness * octaveLightness;
-
-      let triggerFlash = noteColor * 1.5 + 0.5;
-      noteColor = mix(noteColor, triggerFlash, f32(ch.trigger) * 0.8);
-
-      let volAlpha = clamp(ch.volume, 0.05, 1.0);
-      let mixAmount = mainButtonMask * volAlpha * noteTrail;
-      finalColor = mix(finalColor, noteColor, mixAmount);
-  }
-
-  // ** "Has Effect" -> Bottom Light **
-  var bottomGlow = vec3<f32>(0.0);
-
-  if (hasEffect) {
-      let effectColor = effectColorFromCode(effCode, fs.effectColor);
-      let strength = clamp(f32(effParam) / 255.0, 0.2, 1.0);
-      let effectPulse = 1.0 + 0.5 * sin(uniforms.timeSec * 15.0);
-      bottomGlow += (effectColor * strength * effectPulse) * 1.5;
-  }
-
-  if (proximityGlow > 0.0) {
-      let baseEffectColor = vec3<f32>(0.8, 0.7, 0.3);
-      bottomGlow += (baseEffectColor * proximityGlow) * 1.5;
-  }
-  finalColor = mix(finalColor, finalColor + bottomGlow, bottomLightMask);
-
-
-  // --- 6. "BLINK OFF" LOGIC ---
-  // --- NEW: This block dims the main button if on the playhead and empty ---
-  if (rowDistance == 0 && !hasNote) {
-      // "blink off" by dimming the main button area
-      finalColor = mix(finalColor, finalColor * 0.2, mainButtonMask);
-  }
-
-
-  // --- 7. BORDERS ---
+  // --- 7. CELL BORDERS ---
+  // Always draw dark border for separation (Backdrop Gap)
   let uv_aa = vec2<f32>(fwidth(in.uv.x), fwidth(in.uv.y));
-  let borderX = smoothstep(1.0 - (fs.borderThickness * uv_aa.x), 1.0, in.uv.x);
-  let borderY = smoothstep(1.0 - (fs.borderThickness * uv_aa.y), 1.0, in.uv.y);
+  let borderX = smoothstep(1.0 - (fs.borderThickness * uv_aa.x * 2.0), 1.0, in.uv.x);
+  let borderY = smoothstep(1.0 - (fs.borderThickness * uv_aa.y * 2.0), 1.0, in.uv.y);
   let borderAlpha = max(borderX, borderY);
 
-  finalColor = mix(finalColor, fs.borderColor, borderAlpha);
+  finalColor = mix(finalColor, vec3<f32>(0.0), borderAlpha); // Black gap
 
   return vec4<f32>(finalColor, 1.0);
 }
