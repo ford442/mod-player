@@ -10,7 +10,7 @@ const DEFAULT_CHANNELS = 8;
 const alignTo = (value: number, alignment: number) => Math.ceil(value / alignment) * alignment;
 const getLayoutType = (shaderFile: string): LayoutType => {
   if (shaderFile === 'patternShaderv0.12.wgsl') return 'texture';
-  if (shaderFile === 'patternv0.13.wgsl' || shaderFile === 'patternv0.14.wgsl') return 'extended';
+  if (shaderFile === 'patternv0.13.wgsl' || shaderFile === 'patternv0.14.wgsl' || shaderFile === 'patternv0.16.wgsl') return 'extended';
   return 'simple';
 };
 
@@ -80,12 +80,15 @@ const createUniformPayload = (
   return buffer;
 };
 
-const packChannelStates = (channels: ChannelShadowState[], count: number): ArrayBuffer => {
-  const buffer = new ArrayBuffer(Math.max(1, count) * 32);
+const packChannelStates = (channels: ChannelShadowState[], count: number, padTopChannel = false): ArrayBuffer => {
+  const totalCount = padTopChannel ? count + 1 : Math.max(1, count);
+  const buffer = new ArrayBuffer(totalCount * 32);
   const view = new DataView(buffer);
+  const startIdx = padTopChannel ? 1 : 0;
+
   for (let i = 0; i < count; i++) {
     const ch = channels[i] || EMPTY_CHANNEL;
-    const offset = i * 32;
+    const offset = (startIdx + i) * 32;
     view.setFloat32(offset, ch.volume ?? 0, true);
     view.setFloat32(offset + 4, ch.pan ?? 0, true);
     view.setFloat32(offset + 8, ch.freq ?? 0, true);
@@ -156,10 +159,11 @@ const parsePackedB = (text: string) => {
   return ((volType & 0xff) << 24) | ((volValue & 0xff) << 16) | ((effCode & 0xff) << 8) | (effParam & 0xff);
 };
 
-const packPatternMatrix = (matrix: PatternMatrix | null): Uint32Array => {
+const packPatternMatrix = (matrix: PatternMatrix | null, padTopChannel = false): Uint32Array => {
   // If no matrix, create a dummy grid of zeros
+  const rawChannels = matrix?.numChannels ?? DEFAULT_CHANNELS;
   const numRows = matrix?.numRows ?? DEFAULT_ROWS;
-  const numChannels = matrix?.numChannels ?? DEFAULT_CHANNELS;
+  const numChannels = padTopChannel ? rawChannels + 1 : rawChannels;
 
   const packed = new Uint32Array(numRows * numChannels * 2);
 
@@ -169,10 +173,12 @@ const packPatternMatrix = (matrix: PatternMatrix | null): Uint32Array => {
   }
 
   const { rows } = matrix;
+  const startCol = padTopChannel ? 1 : 0;
+
   for (let r = 0; r < numRows; r++) {
     const rowCells = rows[r] || [];
-    for (let c = 0; c < numChannels; c++) {
-      const offset = (r * numChannels + c) * 2;
+    for (let c = 0; c < rawChannels; c++) {
+      const offset = (r * numChannels + (c + startCol)) * 2;
       const cell = rowCells[c];
       if (!cell || !cell.text) {
         packed[offset] = 0;
@@ -261,15 +267,17 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   const [gpuReady, setGpuReady] = useState(false);
   const [localTime, setLocalTime] = useState(0);
 
-  const isHorizontal = shaderFile.includes('v0.12') || shaderFile.includes('v0.13') || shaderFile.includes('v0.14');
+  const isHorizontal = shaderFile.includes('v0.12') || shaderFile.includes('v0.13') || shaderFile.includes('v0.14') || shaderFile.includes('v0.16');
+  const padTopChannel = shaderFile.includes('v0.16');
 
   const canvasMetrics = useMemo(() => {
-    const channelsCount = Math.max(1, matrix?.numChannels ?? DEFAULT_CHANNELS);
+    const rawChannels = Math.max(1, matrix?.numChannels ?? DEFAULT_CHANNELS);
+    const displayChannels = padTopChannel ? rawChannels + 1 : rawChannels;
     const rows = Math.max(1, matrix?.numRows ?? DEFAULT_ROWS);
     return isHorizontal
-      ? { width: Math.ceil(rows * cellWidth), height: Math.ceil(channelsCount * cellHeight) }
-      : { width: Math.ceil(channelsCount * cellWidth), height: Math.ceil(rows * cellHeight) };
-  }, [matrix, cellWidth, cellHeight, isHorizontal]);
+      ? { width: Math.ceil(rows * cellWidth), height: Math.ceil(displayChannels * cellHeight) }
+      : { width: Math.ceil(displayChannels * cellWidth), height: Math.ceil(rows * cellHeight) };
+  }, [matrix, cellWidth, cellHeight, isHorizontal, padTopChannel]);
 
   // Local animation loop when not playing or not loaded
   useEffect(() => {
@@ -310,7 +318,8 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     pass.setPipeline(pipeline);
     pass.setBindGroup(0, bindGroup);
     const numRows = matrix?.numRows ?? DEFAULT_ROWS;
-    const numChannels = matrix?.numChannels ?? DEFAULT_CHANNELS;
+    const rawChannels = matrix?.numChannels ?? DEFAULT_CHANNELS;
+    const numChannels = padTopChannel ? rawChannels + 1 : rawChannels;
     const totalInstances = numRows * numChannels;
 
     if (totalInstances > 0) pass.draw(6, totalInstances, 0, 0);
@@ -465,13 +474,13 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
         uniformBufferRef.current = uniformBuffer;
 
         // Initial buffer creation (handles null matrix now via packPatternMatrix)
-        cellsBufferRef.current = createBufferWithData(device, packPatternMatrix(matrix), GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
+        cellsBufferRef.current = createBufferWithData(device, packPatternMatrix(matrix, padTopChannel), GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
 
         if (layoutType === 'extended') {
           const numRows = matrix?.numRows ?? DEFAULT_ROWS;
           rowFlagsBufferRef.current = createBufferWithData(device, buildRowFlags(numRows), GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
           const channelsCount = Math.max(1, matrix?.numChannels ?? DEFAULT_CHANNELS);
-          const emptyChannels = packChannelStates([], channelsCount);
+          const emptyChannels = packChannelStates([], channelsCount, padTopChannel);
           channelsBufferRef.current = createBufferWithData(device, emptyChannels, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
         }
 
@@ -506,7 +515,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     if (cellsBufferRef.current) {
         cellsBufferRef.current.destroy();
     }
-    cellsBufferRef.current = createBufferWithData(device, packPatternMatrix(matrix), GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
+    cellsBufferRef.current = createBufferWithData(device, packPatternMatrix(matrix, padTopChannel), GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
 
     // Also update row flags if extended
     if (layoutTypeRef.current === 'extended') {
@@ -530,7 +539,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
 
     if (layoutTypeRef.current === 'extended') {
         const count = Math.max(1, matrix?.numChannels ?? DEFAULT_CHANNELS);
-        const packedBuffer = packChannelStates(channels, count);
+        const packedBuffer = packChannelStates(channels, count, padTopChannel);
         let recreated = false;
 
         if (!channelsBufferRef.current || channelsBufferRef.current.size < packedBuffer.byteLength) {
@@ -556,7 +565,8 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     const uniformBuffer = uniformBufferRef.current;
     if (uniformBuffer) {
       const numRows = matrix?.numRows ?? DEFAULT_ROWS;
-      const numChannels = matrix?.numChannels ?? DEFAULT_CHANNELS;
+      const rawChannels = matrix?.numChannels ?? DEFAULT_CHANNELS;
+      const numChannels = padTopChannel ? rawChannels + 1 : rawChannels;
       const rowLimit = Math.max(1, numRows);
       const tickRow = clampPlayhead(playheadRow, rowLimit);
       const fractionalTick = Math.min(1, Math.max(0, tickOffset));
@@ -588,8 +598,28 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   }, [playheadRow, timeSec, localTime, bpm, tickOffset, grooveAmount, kickTrigger, activeChannels, gpuReady, isPlaying, beatPhase, isModuleLoaded, matrix?.numRows, matrix?.numChannels, cellWidth, cellHeight, canvasMetrics]);
 
   return (
-    <div className="pattern-display">
-      <canvas ref={canvasRef} width={canvasMetrics.width} height={canvasMetrics.height} />
+    <div className={`pattern-display relative ${padTopChannel ? 'p-8 rounded-xl bg-[#18181a] shadow-2xl border border-[#333]' : ''}`}>
+      {padTopChannel && (
+          <>
+            {/* Rack Ears / Side Panels */}
+            <div className="absolute top-0 bottom-0 left-0 w-8 bg-[#111] border-r border-[#000] flex flex-col justify-between py-4 items-center rounded-l-xl">
+               {/* Screws */}
+               <div className="w-3 h-3 rounded-full bg-[#222] border border-[#444] shadow-inner flex items-center justify-center"><div className="w-2 h-0.5 bg-[#111] rotate-45"></div></div>
+               <div className="w-3 h-3 rounded-full bg-[#222] border border-[#444] shadow-inner flex items-center justify-center"><div className="w-2 h-0.5 bg-[#111] rotate-45"></div></div>
+            </div>
+            <div className="absolute top-0 bottom-0 right-0 w-8 bg-[#111] border-l border-[#000] flex flex-col justify-between py-4 items-center rounded-r-xl">
+               <div className="w-3 h-3 rounded-full bg-[#222] border border-[#444] shadow-inner flex items-center justify-center"><div className="w-2 h-0.5 bg-[#111] rotate-45"></div></div>
+               <div className="w-3 h-3 rounded-full bg-[#222] border border-[#444] shadow-inner flex items-center justify-center"><div className="w-2 h-0.5 bg-[#111] rotate-45"></div></div>
+            </div>
+
+            {/* Power LED & Text */}
+            <div className="absolute top-2 right-12 flex items-center gap-3">
+                <div className="text-[10px] font-mono font-bold text-gray-500 tracking-widest uppercase opacity-70">Tracker GPU-9000</div>
+                <div className="w-2 h-2 rounded-full bg-red-500 shadow-[0_0_8px_rgba(255,50,50,0.8)]"></div>
+            </div>
+          </>
+      )}
+      <canvas ref={canvasRef} width={canvasMetrics.width} height={canvasMetrics.height} className={padTopChannel ? 'rounded bg-black shadow-inner border border-black/50' : ''} />
       {!webgpuAvailable && <div className="error">WebGPU not available in this browser.</div>}
     </div>
   );
