@@ -114,7 +114,7 @@ fn pitchClassFromPacked(packed: u32) -> f32 {
     let c0 = toUpperAscii((packed >> 24) & 255u);
     var semitone: i32 = 0;
     var valid = true;
-    switch (c0) {
+    switch c0 {
         case 65u: { semitone = 9; }
         case 66u: { semitone = 11; }
         case 67u: { semitone = 0; }
@@ -138,7 +138,7 @@ fn pitchClassFromPacked(packed: u32) -> f32 {
 
 fn classifyEffectGlyph(code: u32) -> u32 {
     let c = toUpperAscii(code & 255u);
-    switch (c) {
+    switch c {
         case 49u: { return 1u; }         // '1' Porta Up
         case 50u: { return 2u; }         // '2' Porta Down
         case 51u: { return 1u; }         // '3' also Portamento style
@@ -168,7 +168,7 @@ fn sdDiamond(p: vec2<f32>, size: f32) -> f32 {
 }
 
 fn effectGlyphSDF(kind: u32, offset: vec2<f32>, radius: f32) -> f32 {
-    switch (kind) {
+    switch kind {
         case 1u: {
             return sdEquilateralTriangle(vec2<f32>(offset.x, offset.y + radius * 0.1), radius);
         }
@@ -192,7 +192,7 @@ fn effectGlyphSDF(kind: u32, offset: vec2<f32>, radius: f32) -> f32 {
 
 fn effectColorFromCode(code: u32, fallback: vec3<f32>) -> vec3<f32> {
     let c = toUpperAscii(code & 255u);
-    switch (c) {
+    switch c {
         case 49u: { return mix(fallback, vec3<f32>(0.2, 0.85, 0.4), 0.75); }
         case 50u: { return mix(fallback, vec3<f32>(0.85, 0.3, 0.3), 0.75); }
         case 52u: { return mix(fallback, vec3<f32>(0.4, 0.7, 1.0), 0.6); }
