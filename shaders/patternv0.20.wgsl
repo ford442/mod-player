@@ -82,7 +82,10 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     let p = (in.uv - 0.5) * 2.0; // Use original UV for geometry placement logic
 
     // Sample the video texture
-    let cloud = textureSampleLevel(buttonsTexture, buttonsSampler, uv, 0.0).rgb;
+    // WebGPU textures are often vertically flipped compared to DOM video/images
+    // Flip Y only for texture sampling so geometry/layout (p) stays correct
+    let sampleUv = vec2<f32>(uv.x, 1.0 - uv.y);
+    let cloud = textureSampleLevel(buttonsTexture, buttonsSampler, sampleUv, 0.0).rgb;
 
     // Accumulate Light
     var lightAccum = vec3<f32>(0.0);
