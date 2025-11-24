@@ -270,7 +270,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   useEffect(() => {
     if (shaderFile.includes('v0.20')) {
       const vid = document.createElement('video');
-      vid.src = 'https://img.noahcohn.com/media/clouds.mp4';
+      vid.src = 'clouds.mp4';
       vid.muted = true;
       vid.loop = false;
       vid.playsInline = true;
@@ -376,11 +376,15 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
           textureResourcesRef.current = { sampler, view: texture.createView() };
           refreshBindGroup(device);
         }
-        device.queue.copyExternalImageToTexture(
-          { source: videoRef.current },
-          { texture: videoTextureRef.current },
-          [vw, vh, 1]
-        );
+        try {
+          device.queue.copyExternalImageToTexture(
+            { source: videoRef.current },
+            { texture: videoTextureRef.current },
+            [vw, vh, 1]
+          );
+        } catch (e) {
+          // Ignore transient errors when video frame is not yet ready for GPU import
+        }
       }
     }
 
