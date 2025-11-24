@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="AgentMigrationStateService">
+    <option name="migrationStatus" value="IN_PROGRESS" />
+    <option name="pendingSessionIds">
+      <option value="03a59fe9-e9d8-476b-8077-8ddca8824179" />
+      <option value="684524e2-74c2-497f-8686-75cb984eeca9" />
+      <option value="7840d81d-ee40-4d2c-a1e6-853b140e8378" />
+    </option>
+    <option name="pendingTurns">
+      <map>
+        <entry key="684524e2-74c2-497f-8686-75cb984eeca9">
+          <value>
+            <set>
+              <option value="56626e54-477b-49ab-8db1-248f02aad686" />
+            </set>
+          </value>
+        </entry>
+        <entry key="7840d81d-ee40-4d2c-a1e6-853b140e8378">
+          <value>
+            <set>
+              <option value="1d2a28e2-6515-4df6-b15e-d7791479ca4a" />
+            </set>
+          </value>
+        </entry>
+      </map>
+    </option>
+    <pendingWorkingSetItems>
+      <entry key="684524e2-74c2-497f-8686-75cb984eeca9">
+        <set>
+          <option value="file://$PROJECT_DIR$/components/PatternDisplay.tsx" />
+        </set>
+      </entry>
+      <entry key="7840d81d-ee40-4d2c-a1e6-853b140e8378" />
+    </pendingWorkingSetItems>
+  </component>
+</project>
