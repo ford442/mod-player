@@ -270,7 +270,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   useEffect(() => {
     if (shaderFile.includes('v0.20')) {
       const vid = document.createElement('video');
-      vid.src = 'clouds.mp4';
+      vid.src = 'https://img.1ink.us/agent/clouds.mp4';
       vid.muted = true;
       vid.loop = false;
       vid.playsInline = true;
