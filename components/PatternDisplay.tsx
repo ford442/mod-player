@@ -415,8 +415,15 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
         context.configure({ device, format });
 
         const shaderSource = await fetch(`./shaders/${shaderFile}`).then(res => res.text());
+        // Defensive: some editors/encodings can introduce stray NUL characters which break WGSL parsing.
+        // Strip them and log if present so we surface the original problem without breaking the UI.
+        let cleanShaderSource = shaderSource;
+        if (cleanShaderSource.indexOf('\u0000') !== -1) {
+          console.warn(`Stripping ${cleanShaderSource.split('\u0000').length - 1} NUL characters from shader ${shaderFile}`);
+          cleanShaderSource = cleanShaderSource.replace(/\u0000/g, '');
+        }
         if (cancelled) return;
-        const module = device.createShaderModule({ code: shaderSource });
+        const module = device.createShaderModule({ code: cleanShaderSource });
         if ('getCompilationInfo' in module) {
           module.getCompilationInfo().then(info => {
             info.messages.forEach(msg => {
