@@ -102,7 +102,7 @@ fn pitchClassFromPacked(packed: u32) -> f32 {
     let c0 = toUpperAscii((packed >> 24) & 255u);
     var semitone: i32 = 0;
     var valid = true;
-    switch c0 {
+    switch (c0) {
         case 65u: { semitone = 9; }
         case 66u: { semitone = 11; }
         case 67u: { semitone = 0; }
