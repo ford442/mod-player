@@ -64,25 +64,28 @@ fn palette(t: f32) -> vec3<f32> {
     return a + b * cos(6.28318 * (c * t + d));
 }
 
-fn freqToColor(freq: f32) -> vec3<f32> {
+fn freqToColor(freq: f32, time: f32) -> vec3<f32> {
     let logF = log2(max(freq, 50.0)) - 5.0;
-    let hue = fract(logF * 0.15);
+    // Increased sensitivity (0.8) and added time drift for variety
+    let hue = fract(logF * 0.8 - time * 0.1);
     return palette(hue);
 }
 
 @fragment
 fn fs(in: VertexOut) -> @location(0) vec4<f32> {
-    let uv = in.uv;
-    // Fix Y if video is flipped? Usually WebGPU textures are Y-down, same as UV?
-    // If clouds look upside down, we flip.
+    var uv = in.uv;
 
-    let p = (uv - 0.5) * 2.0;
+    // Fix Aspect Ratio: Crop 16:9 video to 1:1 canvas (background-size: cover)
+    // Scale X by 9/16 so we sample a smaller portion of the texture horizontally
+    uv.x = (uv.x - 0.5) * (9.0 / 16.0) + 0.5;
+
+    let p = (in.uv - 0.5) * 2.0; // Use original UV for geometry placement logic
 
     // Sample the video texture
     let cloud = textureSampleLevel(buttonsTexture, buttonsSampler, uv, 0.0).rgb;
 
     // Accumulate Light
-    var lightAccum = vec3<f32>(0.1, 0.1, 0.1); // Ambient
+    var lightAccum = vec3<f32>(0.0);
 
     let numCh = uniforms.numChannels;
     for (var i = 0u; i < numCh; i++) {
@@ -101,22 +104,31 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
 
             // Large soft bloom
             let intensity = exp(-ch.noteAge * 1.0) * ch.volume;
-            let glow = smoothstep(0.6, 0.0, dist) * intensity;
+            let glow = smoothstep(0.8, 0.0, dist) * intensity;
 
             // Burst
-            let burst = smoothstep(0.1, 0.0, dist) * f32(ch.trigger);
+            let burst = smoothstep(0.15, 0.0, dist) * f32(ch.trigger);
 
-            let col = freqToColor(ch.freq);
+            let col = freqToColor(ch.freq, uniforms.timeSec);
 
-            lightAccum += col * (glow * 2.5 + burst * 5.0);
+            lightAccum += col * (glow * 2.0 + burst * 4.0);
         }
     }
 
-    // Multiply: Light colors the clouds
-    let finalCol = cloud * lightAccum;
+    // Blending: Lights behind clouds
+    // Calculate cloud luminance to approximate opacity/thickness
+    let lum = dot(cloud, vec3<f32>(0.299, 0.587, 0.114));
 
-    // Add a bit of the original cloud back so it's not pitch black where no light
-    // or clamp lightAccum?
+    // Occlusion mask: Dark areas (sky) are transparent (0.0), Bright areas (clouds) are opaque (1.0)
+    // We allow a little bit of light bleed through thick clouds (0.9 max occlusion)
+    let occlusion = smoothstep(0.2, 0.8, lum) * 0.9;
+
+    // Mask the light
+    let maskedLight = lightAccum * (1.0 - occlusion);
+
+    // Add masked light to the original cloud image
+    // This preserves the white cloud details while lighting up the sky/thin parts
+    let finalCol = cloud + maskedLight;
 
     return vec4<f32>(finalCol, 1.0);
 }
