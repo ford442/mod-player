@@ -10,7 +10,7 @@ const DEFAULT_CHANNELS = 8;
 const alignTo = (value: number, alignment: number) => Math.ceil(value / alignment) * alignment;
 const getLayoutType = (shaderFile: string): LayoutType => {
   if (shaderFile === 'patternShaderv0.12.wgsl') return 'texture';
-  if (shaderFile === 'patternv0.13.wgsl' || shaderFile === 'patternv0.14.wgsl' || shaderFile === 'patternv0.16.wgsl' || shaderFile === 'patternv0.17.wgsl') return 'extended';
+  if (shaderFile === 'patternv0.13.wgsl' || shaderFile === 'patternv0.14.wgsl' || shaderFile === 'patternv0.16.wgsl' || shaderFile === 'patternv0.17.wgsl' || shaderFile === 'patternv0.18.wgsl' || shaderFile === 'patternv0.19.wgsl' || shaderFile === 'patternv0.20.wgsl') return 'extended';
   return 'simple';
 };
 
@@ -262,6 +262,60 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   const textureResourcesRef = useRef<{ sampler: GPUSampler; view: GPUTextureView } | null>(null);
   const useExtendedRef = useRef<boolean>(false);
   const animationFrameRef = useRef<number>(0);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const videoTextureRef = useRef<GPUTexture | null>(null);
+  const videoLoopRef = useRef<number>(0);
+
+  // Video management for v0.20
+  useEffect(() => {
+    if (shaderFile.includes('v0.20')) {
+      const vid = document.createElement('video');
+      vid.src = 'clouds.mp4';
+      vid.muted = true;
+      vid.loop = false;
+      vid.playsInline = true;
+      vid.crossOrigin = "anonymous";
+
+      let direction = 1;
+      const checkLoop = () => {
+        if (!vid) return;
+        const t = vid.currentTime;
+        const d = vid.duration;
+        if (d > 0) {
+          if (direction === 1 && t >= d - 0.2) {
+            direction = -1;
+            try { vid.playbackRate = -1.0; } catch (e) { vid.currentTime = 0; }
+          } else if (direction === -1 && t <= 0.2) {
+            direction = 1;
+            try { vid.playbackRate = 1.0; } catch (e) { }
+          }
+          if (vid.paused) vid.play().catch(() => { });
+        }
+        videoLoopRef.current = requestAnimationFrame(checkLoop);
+      };
+
+      vid.onloadedmetadata = () => {
+        vid.play().then(() => {
+          cancelAnimationFrame(videoLoopRef.current);
+          checkLoop();
+        }).catch(e => console.warn("Video play error", e));
+      };
+
+      videoRef.current = vid;
+      return () => {
+        cancelAnimationFrame(videoLoopRef.current);
+        vid.pause();
+        vid.src = "";
+        videoRef.current = null;
+        if (videoTextureRef.current) {
+          videoTextureRef.current.destroy();
+          videoTextureRef.current = null;
+        }
+      };
+    } else {
+      videoRef.current = null;
+    }
+  }, [shaderFile]);
 
   const [webgpuAvailable, setWebgpuAvailable] = useState(true);
   const [gpuReady, setGpuReady] = useState(false);
@@ -271,13 +325,16 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   const padTopChannel = shaderFile.includes('v0.16') || shaderFile.includes('v0.17');
 
   const canvasMetrics = useMemo(() => {
+    if (shaderFile.includes('v0.18') || shaderFile.includes('v0.19') || shaderFile.includes('v0.20')) {
+      return { width: 1280, height: 1280 };
+    }
     const rawChannels = Math.max(1, matrix?.numChannels ?? DEFAULT_CHANNELS);
     const displayChannels = padTopChannel ? rawChannels + 1 : rawChannels;
     const rows = Math.max(1, matrix?.numRows ?? DEFAULT_ROWS);
     return isHorizontal
       ? { width: Math.ceil(rows * cellWidth), height: Math.ceil(displayChannels * cellHeight) }
       : { width: Math.ceil(displayChannels * cellWidth), height: Math.ceil(rows * cellHeight) };
-  }, [matrix, cellWidth, cellHeight, isHorizontal, padTopChannel]);
+  }, [matrix, cellWidth, cellHeight, isHorizontal, padTopChannel, shaderFile]);
 
   // Local animation loop when not playing or not loaded
   useEffect(() => {
@@ -302,6 +359,34 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     const pipeline = pipelineRef.current;
     const bindGroup = bindGroupRef.current;
     if (!device || !context || !pipeline || !bindGroup || !uniformBufferRef.current || !cellsBufferRef.current) return;
+
+    if (shaderFile.includes('v0.20') && videoRef.current && videoRef.current.readyState >= 2) {
+      const vw = videoRef.current.videoWidth;
+      const vh = videoRef.current.videoHeight;
+      if (vw > 0 && vh > 0) {
+        if (!videoTextureRef.current || videoTextureRef.current.width !== vw || videoTextureRef.current.height !== vh) {
+          videoTextureRef.current?.destroy();
+          const texture = device.createTexture({
+            size: [vw, vh, 1],
+            format: 'rgba8unorm',
+            usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT
+          });
+          videoTextureRef.current = texture;
+          const sampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear' });
+          textureResourcesRef.current = { sampler, view: texture.createView() };
+          refreshBindGroup(device);
+        }
+        try {
+          device.queue.copyExternalImageToTexture(
+            { source: videoRef.current },
+            { texture: videoTextureRef.current },
+            [vw, vh, 1]
+          );
+        } catch (e) {
+          // Ignore transient errors when video frame is not yet ready for GPU import
+        }
+      }
+    }
 
     const encoder = device.createCommandEncoder();
     const pass = encoder.beginRenderPass({
@@ -356,12 +441,43 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     bindGroupRef.current = device.createBindGroup({ layout, entries });
   };
 
+  const ensureVideoPlaceholder = (device: GPUDevice) => {
+    if (videoTextureRef.current) return;
+    const texture = device.createTexture({
+      size: [1, 1, 1],
+      format: 'rgba8unorm',
+      usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT,
+    });
+    // Fill with gray
+    const data = new Uint8Array([100, 100, 100, 255]);
+    device.queue.writeTexture({ texture }, data, { bytesPerRow: 4 }, { width: 1, height: 1 });
+    videoTextureRef.current = texture;
+    const sampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear' });
+    textureResourcesRef.current = { sampler, view: texture.createView() };
+  };
+
   const ensureButtonTexture = async (device: GPUDevice) => {
     if (textureResourcesRef.current) return;
-    const img = new Image();
-    img.src = './public/unlit-button.png';
-    await img.decode();
-    const bitmap = await createImageBitmap(img);
+
+    let bitmap: ImageBitmap;
+    try {
+      const img = new Image();
+      img.src = 'unlit-button.png';
+      await img.decode();
+      bitmap = await createImageBitmap(img);
+    } catch (e) {
+      console.warn('Failed to load button texture, using fallback.', e);
+      const canvas = document.createElement('canvas');
+      canvas.width = 1;
+      canvas.height = 1;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.fillStyle = '#222';
+        ctx.fillRect(0, 0, 1, 1);
+      }
+      bitmap = await createImageBitmap(canvas);
+    }
+
     const texture = device.createTexture({
       size: [bitmap.width, bitmap.height, 1],
       format: 'rgba8unorm',
@@ -486,7 +602,11 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
 
         const needsTexture = layoutType === 'texture' || layoutType === 'extended';
         if (needsTexture) {
-          await ensureButtonTexture(device);
+          if (shaderFile.includes('v0.20')) {
+            ensureVideoPlaceholder(device);
+          } else {
+            await ensureButtonTexture(device);
+          }
         }
 
         refreshBindGroup(device);
@@ -504,6 +624,16 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
       cancelled = true;
       setWebgpuAvailable(true);
       setGpuReady(false);
+      bindGroupRef.current = null;
+      pipelineRef.current = null;
+      cellsBufferRef.current = null;
+      uniformBufferRef.current = null;
+      rowFlagsBufferRef.current = null;
+      channelsBufferRef.current = null;
+      textureResourcesRef.current = null;
+      videoTextureRef.current = null;
+      deviceRef.current = null;
+      contextRef.current = null;
     };
   }, [matrix, shaderFile]);
 
