@@ -624,6 +624,16 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
       cancelled = true;
       setWebgpuAvailable(true);
       setGpuReady(false);
+      bindGroupRef.current = null;
+      pipelineRef.current = null;
+      cellsBufferRef.current = null;
+      uniformBufferRef.current = null;
+      rowFlagsBufferRef.current = null;
+      channelsBufferRef.current = null;
+      textureResourcesRef.current = null;
+      videoTextureRef.current = null;
+      deviceRef.current = null;
+      contextRef.current = null;
     };
   }, [matrix, shaderFile]);
 
