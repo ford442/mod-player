@@ -10,7 +10,7 @@ const DEFAULT_CHANNELS = 8;
 const alignTo = (value: number, alignment: number) => Math.ceil(value / alignment) * alignment;
 const getLayoutType = (shaderFile: string): LayoutType => {
   if (shaderFile === 'patternShaderv0.12.wgsl') return 'texture';
-  if (shaderFile === 'patternv0.13.wgsl' || shaderFile === 'patternv0.14.wgsl' || shaderFile === 'patternv0.16.wgsl' || shaderFile === 'patternv0.17.wgsl' || shaderFile === 'patternv0.18.wgsl' || shaderFile === 'patternv0.19.wgsl') return 'extended';
+  if (shaderFile === 'patternv0.13.wgsl' || shaderFile === 'patternv0.14.wgsl' || shaderFile === 'patternv0.16.wgsl' || shaderFile === 'patternv0.17.wgsl' || shaderFile === 'patternv0.18.wgsl' || shaderFile === 'patternv0.19.wgsl' || shaderFile === 'patternv0.20.wgsl') return 'extended';
   return 'simple';
 };
 
@@ -262,6 +262,60 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   const textureResourcesRef = useRef<{ sampler: GPUSampler; view: GPUTextureView } | null>(null);
   const useExtendedRef = useRef<boolean>(false);
   const animationFrameRef = useRef<number>(0);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const videoTextureRef = useRef<GPUTexture | null>(null);
+  const videoLoopRef = useRef<number>(0);
+
+  // Video management for v0.20
+  useEffect(() => {
+    if (shaderFile.includes('v0.20')) {
+      const vid = document.createElement('video');
+      vid.src = 'clouds.mp4';
+      vid.muted = true;
+      vid.loop = false;
+      vid.playsInline = true;
+      vid.crossOrigin = "anonymous";
+
+      let direction = 1;
+      const checkLoop = () => {
+        if (!vid) return;
+        const t = vid.currentTime;
+        const d = vid.duration;
+        if (d > 0) {
+          if (direction === 1 && t >= d - 0.2) {
+            direction = -1;
+            try { vid.playbackRate = -1.0; } catch (e) { vid.currentTime = 0; }
+          } else if (direction === -1 && t <= 0.2) {
+            direction = 1;
+            try { vid.playbackRate = 1.0; } catch (e) { }
+          }
+          if (vid.paused) vid.play().catch(() => { });
+        }
+        videoLoopRef.current = requestAnimationFrame(checkLoop);
+      };
+
+      vid.onloadedmetadata = () => {
+        vid.play().then(() => {
+          cancelAnimationFrame(videoLoopRef.current);
+          checkLoop();
+        }).catch(e => console.warn("Video play error", e));
+      };
+
+      videoRef.current = vid;
+      return () => {
+        cancelAnimationFrame(videoLoopRef.current);
+        vid.pause();
+        vid.src = "";
+        videoRef.current = null;
+        if (videoTextureRef.current) {
+          videoTextureRef.current.destroy();
+          videoTextureRef.current = null;
+        }
+      };
+    } else {
+      videoRef.current = null;
+    }
+  }, [shaderFile]);
 
   const [webgpuAvailable, setWebgpuAvailable] = useState(true);
   const [gpuReady, setGpuReady] = useState(false);
@@ -271,7 +325,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   const padTopChannel = shaderFile.includes('v0.16') || shaderFile.includes('v0.17');
 
   const canvasMetrics = useMemo(() => {
-    if (shaderFile.includes('v0.18') || shaderFile.includes('v0.19')) {
+    if (shaderFile.includes('v0.18') || shaderFile.includes('v0.19') || shaderFile.includes('v0.20')) {
       return { width: 1280, height: 1280 };
     }
     const rawChannels = Math.max(1, matrix?.numChannels ?? DEFAULT_CHANNELS);
@@ -305,6 +359,30 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     const pipeline = pipelineRef.current;
     const bindGroup = bindGroupRef.current;
     if (!device || !context || !pipeline || !bindGroup || !uniformBufferRef.current || !cellsBufferRef.current) return;
+
+    if (shaderFile.includes('v0.20') && videoRef.current && videoRef.current.readyState >= 2) {
+      const vw = videoRef.current.videoWidth;
+      const vh = videoRef.current.videoHeight;
+      if (vw > 0 && vh > 0) {
+        if (!videoTextureRef.current || videoTextureRef.current.width !== vw || videoTextureRef.current.height !== vh) {
+          videoTextureRef.current?.destroy();
+          const texture = device.createTexture({
+            size: [vw, vh, 1],
+            format: 'rgba8unorm',
+            usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT
+          });
+          videoTextureRef.current = texture;
+          const sampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear' });
+          textureResourcesRef.current = { sampler, view: texture.createView() };
+          refreshBindGroup(device);
+        }
+        device.queue.copyExternalImageToTexture(
+          { source: videoRef.current },
+          { texture: videoTextureRef.current },
+          [vw, vh, 1]
+        );
+      }
+    }
 
     const encoder = device.createCommandEncoder();
     const pass = encoder.beginRenderPass({
@@ -357,6 +435,21 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     }
 
     bindGroupRef.current = device.createBindGroup({ layout, entries });
+  };
+
+  const ensureVideoPlaceholder = (device: GPUDevice) => {
+    if (videoTextureRef.current) return;
+    const texture = device.createTexture({
+      size: [1, 1, 1],
+      format: 'rgba8unorm',
+      usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT,
+    });
+    // Fill with gray
+    const data = new Uint8Array([100, 100, 100, 255]);
+    device.queue.writeTexture({ texture }, data, { bytesPerRow: 4 }, { width: 1, height: 1 });
+    videoTextureRef.current = texture;
+    const sampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear' });
+    textureResourcesRef.current = { sampler, view: texture.createView() };
   };
 
   const ensureButtonTexture = async (device: GPUDevice) => {
@@ -415,15 +508,8 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
         context.configure({ device, format });
 
         const shaderSource = await fetch(`./shaders/${shaderFile}`).then(res => res.text());
-        // Defensive: some editors/encodings can introduce stray NUL characters which break WGSL parsing.
-        // Strip them and log if present so we surface the original problem without breaking the UI.
-        let cleanShaderSource = shaderSource;
-        if (cleanShaderSource.indexOf('\u0000') !== -1) {
-          console.warn(`Stripping ${cleanShaderSource.split('\u0000').length - 1} NUL characters from shader ${shaderFile}`);
-          cleanShaderSource = cleanShaderSource.replace(/\u0000/g, '');
-        }
         if (cancelled) return;
-        const module = device.createShaderModule({ code: cleanShaderSource });
+        const module = device.createShaderModule({ code: shaderSource });
         if ('getCompilationInfo' in module) {
           module.getCompilationInfo().then(info => {
             info.messages.forEach(msg => {
@@ -512,7 +598,11 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
 
         const needsTexture = layoutType === 'texture' || layoutType === 'extended';
         if (needsTexture) {
-          await ensureButtonTexture(device);
+          if (shaderFile.includes('v0.20')) {
+            ensureVideoPlaceholder(device);
+          } else {
+            await ensureButtonTexture(device);
+          }
         }
 
         refreshBindGroup(device);
