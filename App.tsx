@@ -63,18 +63,18 @@ export default function App() {
       createdAt: Date.now(),
       isObjectUrl: true,
     };
-    setMedia(prev => [item, ...prev]);
+    setMedia((prev: MediaItem[]) => [item, ...prev]);
     setActiveMediaId(item.id);
     setOverlayVisible(true);
   }, []);
 
   const removeMedia = useCallback((id: string) => {
-    setMedia(prev => {
-      const found = prev.find(m => m.id === id);
+    setMedia((prev: MediaItem[]) => {
+      const found = prev.find((m: MediaItem) => m.id === id);
       if (found && found.isObjectUrl) {
         try { URL.revokeObjectURL(found.url); } catch (e) { /* ignore */ }
       }
-      return prev.filter(m => m.id !== id);
+      return prev.filter((m: MediaItem) => m.id !== id);
     });
     if (activeMediaId === id) {
       setActiveMediaId(undefined);
@@ -82,7 +82,7 @@ export default function App() {
     }
   }, [activeMediaId]);
 
-  const activeMedia = media.find(m => m.id === activeMediaId);
+  const activeMedia = media.find((m: MediaItem) => m.id === activeMediaId);
   const webgpuSupported = typeof navigator !== 'undefined' && 'gpu' in navigator;
   const [patternMode, setPatternMode] = useState<'html' | 'webgpu'>(webgpuSupported ? 'webgpu' : 'html');
   const [shaderVersion, setShaderVersion] = useState<string>('patternv0.17.wgsl');
@@ -137,10 +137,10 @@ export default function App() {
                   {effectivePatternMode === 'webgpu' && (
                     <select
                       value={shaderVersion}
-                      onChange={(e) => setShaderVersion(e.target.value)}
+                      onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setShaderVersion(e.target.value)}
                       className="bg-gray-800 text-white text-sm px-3 py-2 rounded border border-white/10"
                     >
-                      {availableShaders.map(shader => (
+                      {availableShaders.map((shader: string) => (
                         <option key={shader} value={shader}>{shader.replace('.wgsl', '')}</option>
                       ))}
                     </select>
@@ -152,8 +152,8 @@ export default function App() {
                 <PatternDisplay
                   matrix={sequencerMatrix ?? null}
                   playheadRow={sequencerCurrentRow}
-                  cellWidth={18}
-                  cellHeight={26}
+                  cellWidth={24}
+                  cellHeight={35}
                   shaderFile={shaderVersion}
                   isPlaying={isPlaying}
                   bpm={moduleInfo.bpm}
@@ -179,10 +179,10 @@ export default function App() {
             </div>
 
             <div className="mt-6 grid grid-cols-1 md:grid-cols-3 gap-4">
-              <MediaPanel media={media} activeMediaId={activeMediaId} onSelect={(id) => { setActiveMediaId(id); setOverlayVisible(!!id); }} onRemove={removeMedia} />
+              <MediaPanel media={media} activeMediaId={activeMediaId} onSelect={(id?: string) => { setActiveMediaId(id); setOverlayVisible(!!id); }} onRemove={removeMedia} />
             </div>
 
-            <MediaOverlay item={activeMedia} visible={overlayVisible} onClose={() => setOverlayVisible(false)} onUpdate={(partial) => { if (!activeMedia) return; setMedia(prev => prev.map(m => m.id === activeMedia.id ? { ...m, ...partial } : m)); }} />
+            <MediaOverlay item={activeMedia} visible={overlayVisible} onClose={() => setOverlayVisible(false)} onUpdate={(partial: Partial<MediaItem>) => { if (!activeMedia) return; setMedia((prev: MediaItem[]) => prev.map((m: MediaItem) => m.id === activeMedia.id ? { ...m, ...partial } : m)); }} />
           </>
         ) : (
            <div className="mt-6 bg-gray-800 p-6 rounded-lg shadow-lg text-center text-gray-400">
