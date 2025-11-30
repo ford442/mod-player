@@ -249,7 +249,7 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
           finalColor += topGlow * topLightMask * 1.5;
       }
 
-      // MAIN LIGHT: Note (Additive)
+      // MAIN LIGHT: Note (Additive + Subsurface)
       if (hasNote) {
           let pitchHue = pitchClassFromPacked(in.packedA);
           let base_note_color = neonPalette(pitchHue);
@@ -265,8 +265,13 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
           let activeLevel = exp(-ch.noteAge * 3.0);
           let lightAmount = (activeLevel * 0.8 + flash) * clamp(ch.volume, 0.0, 1.2);
 
-          // Apply additive light to the main button area
+          // 1. Additive Core Bloom
           finalColor += noteColor * mainButtonMask * lightAmount * 2.0;
+
+          // 2. Tasteful Subsurface Scattering (Tint the housing)
+          // This makes the grey plastic look like it's glowing from inside
+          let subsurface = noteColor * housingMask * lightAmount * 0.15;
+          finalColor += subsurface;
       }
 
       // BOTTOM LIGHT: Effect (Additive)
@@ -274,6 +279,8 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
           let effectColor = effectColorFromCode(effCode, vec3<f32>(0.9, 0.8, 0.2));
           let strength = clamp(f32(effParam) / 255.0, 0.2, 1.0);
           finalColor += effectColor * bottomLightMask * strength * 2.5;
+          // Slight subsurface for effect too
+          finalColor += effectColor * housingMask * strength * 0.05;
       }
 
       // Row 0 Proximity (Playhead) Blink
