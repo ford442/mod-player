@@ -10,7 +10,7 @@ const DEFAULT_CHANNELS = 8;
 const alignTo = (value: number, alignment: number) => Math.ceil(value / alignment) * alignment;
 const getLayoutType = (shaderFile: string): LayoutType => {
   if (shaderFile === 'patternShaderv0.12.wgsl') return 'texture';
-  if (shaderFile === 'patternv0.13.wgsl' || shaderFile === 'patternv0.14.wgsl' || shaderFile === 'patternv0.16.wgsl' || shaderFile === 'patternv0.17.wgsl' || shaderFile === 'patternv0.18.wgsl' || shaderFile === 'patternv0.19.wgsl' || shaderFile === 'patternv0.20.wgsl') return 'extended';
+  if (shaderFile === 'patternv0.13.wgsl' || shaderFile === 'patternv0.14.wgsl' || shaderFile === 'patternv0.16.wgsl' || shaderFile === 'patternv0.17.wgsl' || shaderFile === 'patternv0.18.wgsl' || shaderFile === 'patternv0.19.wgsl' || shaderFile === 'patternv0.20.wgsl' || shaderFile === 'patternv0.21.wgsl') return 'extended';
   return 'simple';
 };
 
