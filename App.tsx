@@ -88,6 +88,13 @@ export default function App() {
   const [shaderVersion, setShaderVersion] = useState<string>('patternv0.17.wgsl');
   const effectivePatternMode = webgpuSupported ? patternMode : 'html';
 
+  // Dynamic cell sizing based on shader version
+  const getCellMetrics = (shader: string) => {
+    if (shader.includes('v0.21')) return { w: 32, h: 48 }; // Extra Large Precision
+    return { w: 18, h: 26 }; // Standard Default
+  };
+  const { w: cellW, h: cellH } = getCellMetrics(shaderVersion);
+
   return (
     <div className="min-h-screen p-4 md:p-8 flex flex-col">
       <main className="max-w-7xl mx-auto w-full flex-grow">
@@ -152,8 +159,8 @@ export default function App() {
                 <PatternDisplay
                   matrix={sequencerMatrix ?? null}
                   playheadRow={sequencerCurrentRow}
-                  cellWidth={24}
-                  cellHeight={35}
+                  cellWidth={cellW}
+                  cellHeight={cellH}
                   shaderFile={shaderVersion}
                   isPlaying={isPlaying}
                   bpm={moduleInfo.bpm}
