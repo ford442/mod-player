@@ -98,7 +98,7 @@ fn pitchClassFromPacked(packed: u32) -> f32 {
     let c0 = toUpperAscii((packed >> 24) & 255u);
     var semitone: i32 = 0;
     var valid = true;
-    switch c0 {
+    switch (c0) {
         case 65u: { semitone = 9; }
         case 66u: { semitone = 11; }
         case 67u: { semitone = 0; }
@@ -159,26 +159,28 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
 
   // --- TOP ROW: INDICATORS ---
   if (in.channel == 0u) {
-      var col = fs.bgColor * 0.6;
+      var col = fs.bgColor * 0.5;
 
       let onPlayhead = (in.row == uniforms.playheadRow);
       let ledSize = vec2<f32>(0.3, 0.3);
       let dLed = sdRoundedBox(p, ledSize, 0.05);
 
+      // Dark "off" state
       var ledCol = fs.ledOffColor;
-      if (onPlayhead) {
-          ledCol = fs.ledOnColor * 1.2;
-      } else if (in.row % 4u == 0u) {
-         ledCol = vec3<f32>(0.2, 0.2, 0.25);
-      }
 
-      // Sharp LED rendering
+      // Sharp LED rendering (Base Plastic)
       let ledMask = 1.0 - smoothstep(-aa, aa, dLed);
       col = mix(col, ledCol, ledMask);
 
+      // BLEND: Additive Glow for "On" state
       if (onPlayhead) {
-         // Subtle crisp glow
-         col += exp(-dLed * 8.0) * fs.ledOnColor * 0.4;
+         let glowIntensity = exp(-dLed * 5.0);
+         // Add bright core + soft bloom
+         col += fs.ledOnColor * ledMask * 1.5;
+         col += fs.ledOnColor * glowIntensity * 0.8;
+      } else if (in.row % 4u == 0u) {
+         // Faint marker for beats
+         col += vec3<f32>(0.2, 0.2, 0.25) * ledMask * 0.3;
       }
 
       return vec4<f32>(col, 1.0);
@@ -211,7 +213,7 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   }
   if (inButton > 0.5) {
       // Darken texture for "stealth" look
-      finalColor = mix(finalColor, btnColor * 0.8, 0.9);
+      finalColor = mix(finalColor, btnColor * 0.6, 0.9);
   }
 
   // --- DATA VISUALIZATION ---
@@ -229,7 +231,6 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
 
   if (inButton > 0.5) {
       // Refined masks using AA sharpness
-      // We use standard smoothstep here for soft light falloff, not shape definition
       let indicatorXMask = smoothstep(0.4, 0.41, x) - smoothstep(0.6, 0.61, x);
       let topLightMask    = (smoothstep(0.12, 0.13, y) - smoothstep(0.18, 0.19, y)) * indicatorXMask;
       let mainButtonYMask  = smoothstep(0.25, 0.26, y) - smoothstep(0.80, 0.81, y);
@@ -241,13 +242,14 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
           finalColor *= 0.3;
       }
 
-      // TOP LIGHT: Activity
+      // TOP LIGHT: Activity (Additive)
       if (step(0.1, exp(-ch.noteAge * 2.0)) > 0.5) {
-          let topGlow = vec3<f32>(0.0, 0.8, 1.0) * 0.8;
-          finalColor = mix(finalColor, finalColor + topGlow, topLightMask);
+          let topGlow = vec3<f32>(0.0, 0.9, 1.0);
+          // Additive blend
+          finalColor += topGlow * topLightMask * 1.5;
       }
 
-      // MAIN LIGHT: Note
+      // MAIN LIGHT: Note (Additive)
       if (hasNote) {
           let pitchHue = pitchClassFromPacked(in.packedA);
           let base_note_color = neonPalette(pitchHue);
@@ -255,44 +257,37 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
           let instBrightness = 0.8 + (select(0.0, f32(instBand) / 15.0, instBand > 0u)) * 0.2;
 
           var noteColor = base_note_color * instBrightness;
-          // Sharper flash
-          let triggerFlash = vec3<f32>(1.0) * f32(ch.trigger);
-          noteColor = mix(noteColor, triggerFlash, 0.5);
 
-          let volAlpha = clamp(ch.volume, 0.0, 1.0);
-          // Crisp mix
-          let mixAmount = mainButtonMask * volAlpha * exp(-ch.noteAge * 3.0);
-          finalColor = mix(finalColor, noteColor, mixAmount);
+          // Flash intensity based on trigger
+          let flash = f32(ch.trigger) * 0.8;
+
+          // Calculate additive light amount
+          let activeLevel = exp(-ch.noteAge * 3.0);
+          let lightAmount = (activeLevel * 0.8 + flash) * clamp(ch.volume, 0.0, 1.2);
+
+          // Apply additive light to the main button area
+          finalColor += noteColor * mainButtonMask * lightAmount * 2.0;
       }
 
-      // BOTTOM LIGHT: Effect
+      // BOTTOM LIGHT: Effect (Additive)
       if (hasEffect) {
           let effectColor = effectColorFromCode(effCode, vec3<f32>(0.9, 0.8, 0.2));
           let strength = clamp(f32(effParam) / 255.0, 0.2, 1.0);
-          let bottomGlow = effectColor * strength;
-          finalColor = mix(finalColor, finalColor + bottomGlow, bottomLightMask);
+          finalColor += effectColor * bottomLightMask * strength * 2.5;
       }
 
       // Row 0 Proximity (Playhead) Blink
       let rowDist = abs(i32(in.row) - i32(uniforms.playheadRow));
       if (rowDist == 0 && !hasNote) {
-          // Dim empty active cell for emphasis
-          finalColor = mix(finalColor, vec3<f32>(0.05), mainButtonMask * 0.5);
-      }
-      if (rowDist == 1) {
-          // Slight highlight for next/prev row
-          finalColor += vec3<f32>(0.02) * mainButtonMask;
+          // Additive white glance on empty active cell
+          finalColor += vec3<f32>(0.15, 0.2, 0.25) * mainButtonMask;
       }
   }
 
   // --- 1px BORDER GAP ---
-  // Use housingMask to cleanly cut the gap
-  // housingMask is 1.0 inside, 0.0 outside
-  // We simply return borderColor where mask is 0
   if (housingMask < 0.5) {
       return vec4<f32>(fs.borderColor, 1.0);
   }
 
   return vec4<f32>(finalColor, 1.0);
 }
-
