@@ -1,5 +1,9 @@
 // Horizontal Pattern Grid Shader (Time = X, Channels = Y)
-// V0.21: "Precision Interface" - Sharpened details, larger cells, fwidth-based AA
+// V4: Hardware Rack Style + Top Indicators
+// - Added visual row 0 as playhead indicators
+// - Increased spacing between steps
+// - Lighter "plastic" background
+// - Removed old playhead column highlight
 
 struct Uniforms {
   numRows: u32,
@@ -34,8 +38,8 @@ struct VertexOut {
   @location(0) @interpolate(flat) row: u32,
   @location(1) @interpolate(flat) channel: u32,
   @location(2) @interpolate(linear) uv: vec2<f32>,
-  @location(3) @interpolate(flat) packedA: u32,
-  @location(4) @interpolate(flat) packedB: u32,
+  @location(3) @interpolate(flat) packedA: u32, // Note/Inst
+  @location(4) @interpolate(flat) packedB: u32, // Vol/Effect/Param
 };
 
 // --- VERTEX SHADER ---
@@ -46,7 +50,7 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
     vec2<f32>(0.0, 1.0), vec2<f32>(1.0, 0.0), vec2<f32>(1.0, 1.0)
   );
 
-  let numChannels = uniforms.numChannels;
+  let numChannels = uniforms.numChannels; // This is now N+1
   let row = instanceIndex / numChannels;
   let channel = instanceIndex % numChannels;
 
@@ -60,6 +64,7 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
   let clipX = (worldX / uniforms.canvasW) * 2.0 - 1.0;
   let clipY = 1.0 - (worldY / uniforms.canvasH) * 2.0;
 
+  // Data access: Assumes buffer is padded/interleaved correctly by CPU
   let idx = instanceIndex * 2u;
   let a = cells[idx];
   let b = cells[idx + 1u];
@@ -77,11 +82,10 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
 // --- FRAGMENT SHADER ---
 
 fn neonPalette(t: f32) -> vec3<f32> {
-    // Precise, colder spectrum
     let a = vec3<f32>(0.5, 0.5, 0.5);
     let b = vec3<f32>(0.5, 0.5, 0.5);
     let c = vec3<f32>(1.0, 1.0, 1.0);
-    let d = vec3<f32>(0.0, 0.33, 0.67);
+    let d = vec3<f32>(0.263, 0.416, 0.557);
     return a + b * cos(6.28318 * (c * t + d));
 }
 
@@ -98,7 +102,7 @@ fn pitchClassFromPacked(packed: u32) -> f32 {
     let c0 = toUpperAscii((packed >> 24) & 255u);
     var semitone: i32 = 0;
     var valid = true;
-    switch (c0) {
+    switch c0 {
         case 65u: { semitone = 9; }
         case 66u: { semitone = 11; }
         case 67u: { semitone = 0; }
@@ -134,17 +138,17 @@ struct FragmentConstants {
   bgColor: vec3<f32>,
   ledOnColor: vec3<f32>,
   ledOffColor: vec3<f32>,
+  borderThickness: f32,
   borderColor: vec3<f32>,
-  housingSize: vec2<f32>,
 };
 
 fn getFragmentConstants() -> FragmentConstants {
     var c: FragmentConstants;
-    c.bgColor = vec3<f32>(0.10, 0.11, 0.13); // Deep technical grey
-    c.ledOnColor = vec3<f32>(0.0, 0.85, 0.95); // Precision Cyan
-    c.ledOffColor = vec3<f32>(0.08, 0.12, 0.15); // Dark blue-grey
-    c.borderColor = vec3<f32>(0.0, 0.0, 0.0); // Pure black gap
-    c.housingSize = vec2<f32>(0.96, 0.96); // Maximized cell usage (Bigger Display)
+    c.bgColor = vec3<f32>(0.12, 0.12, 0.14); // Lighter dark plastic
+    c.ledOnColor = vec3<f32>(1.0, 0.3, 0.2); // Orange/Red glow
+    c.ledOffColor = vec3<f32>(0.15, 0.05, 0.05); // Dark red
+    c.borderThickness = 2.0; // Thicker spacing
+    c.borderColor = vec3<f32>(0.05, 0.05, 0.07); // Gap color
     return c;
 }
 
@@ -154,145 +158,158 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   let uv = in.uv;
   let p = uv - 0.5;
 
-  // Calculate Pixel-Perfect AA width based on derivatives
-  let aa = fwidth(p.y) * 0.75;
-
   // --- TOP ROW: INDICATORS ---
   if (in.channel == 0u) {
-      var col = fs.bgColor * 0.5;
+      // Background for header
+      var col = fs.bgColor * 0.8;
 
+      // Draw LED
+      // Small circle or box
       let onPlayhead = (in.row == uniforms.playheadRow);
-      let ledSize = vec2<f32>(0.3, 0.3);
-      let dLed = sdRoundedBox(p, ledSize, 0.05);
+      let ledSize = vec2<f32>(0.25, 0.25);
+      let dLed = sdRoundedBox(p, ledSize, 0.1);
 
-      // Dark "off" state
       var ledCol = fs.ledOffColor;
+      if (onPlayhead) {
+          ledCol = fs.ledOnColor * 1.5;
+          // Add pulse
+          ledCol += sin(uniforms.timeSec * 20.0) * 0.2;
+      } else {
+         // Beat markers (every 4th)
+         if (in.row % 4u == 0u) {
+             ledCol = vec3<f32>(0.2, 0.2, 0.25);
+         }
+      }
 
-      // Sharp LED rendering (Base Plastic)
-      let ledMask = 1.0 - smoothstep(-aa, aa, dLed);
+      let ledMask = smoothstep(0.01, -0.01, dLed);
       col = mix(col, ledCol, ledMask);
 
-      // BLEND: Additive Glow for "On" state
+      // Glow for active LED
       if (onPlayhead) {
-         let glowIntensity = exp(-dLed * 5.0);
-         // Add bright core + soft bloom
-         col += fs.ledOnColor * ledMask * 1.5;
-         col += fs.ledOnColor * glowIntensity * 0.8;
-      } else if (in.row % 4u == 0u) {
-         // Faint marker for beats
-         col += vec3<f32>(0.2, 0.2, 0.25) * ledMask * 0.3;
+         let glow = exp(-dLed * 4.0) * fs.ledOnColor * 0.5;
+         col += glow;
       }
 
       return vec4<f32>(col, 1.0);
   }
 
   // --- PATTERN ROWS ---
-  // Housing (Cell Body) - Larger and sharper
-  let dHousing = sdRoundedBox(p, fs.housingSize * 0.5, 0.04);
-  let housingMask = 1.0 - smoothstep(0.0, aa * 2.0, dHousing);
+  // Channel 1..N correspond to data channels 0..N-1
+  // We use in.channel directly because the buffer is padded (channels[0] is dummy)
+  // But for logic relying on 'channel index', we might want (in.channel - 1)
+
+  // Housing (Cell Body)
+  // Make it smaller to increase gaps
+  let housingSize = vec2<f32>(0.85, 0.85); // Previously 0.92
+  let dHousing = sdRoundedBox(p, housingSize * 0.5, 0.08);
 
   var finalColor = fs.bgColor;
 
-  // Subtle Gradient for "machined" look
-  finalColor += vec3<f32>(0.03) * (0.5 - uv.y);
-
-  // Bevel Highlight (Top Edge)
-  if (dHousing < 0.0 && dHousing > -0.04) {
-      finalColor += vec3<f32>(0.15) * smoothstep(0.0, -0.1, p.y);
+  // Bevel/3D effect for the button hole
+  let bevel = smoothstep(0.05, 0.0, dHousing) * smoothstep(-0.1, 0.0, dHousing);
+  if (dHousing < 0.0) {
+      finalColor += vec3<f32>(0.05) * (0.5 - uv.y); // Gradient
+  }
+  // Highlight edge
+  if (dHousing < 0.02 && dHousing > -0.02) {
+      let angle = atan2(p.y, p.x);
+      let light = cos(angle + 2.0);
+      finalColor += vec3<f32>(0.1) * light;
   }
 
-  // --- BUTTON TEXTURE OVERLAY ---
-  let btnScale = 1.05;
+  // --- BUTTON TEXTURE ---
+  let btnScale = 1.1; // Slightly smaller button
   let btnUV = (uv - 0.5) * btnScale + 0.5;
   var btnColor = vec3<f32>(0.0);
   var inButton = 0.0;
 
   if (btnUV.x > 0.0 && btnUV.x < 1.0 && btnUV.y > 0.0 && btnUV.y < 1.0) {
-      btnColor = textureSampleLevel(buttonsTexture, buttonsSampler, btnUV, 0.0).rgb;
+      btnColor = textureSample(buttonsTexture, buttonsSampler, btnUV).rgb;
       inButton = 1.0;
   }
+
   if (inButton > 0.5) {
-      // Darken texture for "stealth" look
-      finalColor = mix(finalColor, btnColor * 0.6, 0.9);
+      finalColor = mix(finalColor, btnColor, 1.0);
   }
 
-  // --- DATA VISUALIZATION ---
+  // Use btnUV for inner lights
   let tiledUV = btnUV;
   let x = tiledUV.x;
   let y = tiledUV.y;
 
+  // --- UNPACK DATA ---
   let noteChar = (in.packedA >> 24) & 255u;
   let inst = in.packedA & 255u;
   let effCode = (in.packedB >> 8) & 255u;
   let effParam = in.packedB & 255u;
   let hasNote = (noteChar >= 65u && noteChar <= 71u);
   let hasEffect = (effParam > 0u);
-  let ch = channels[in.channel];
+  let ch = channels[in.channel]; // Using padded channel buffer
 
   if (inButton > 0.5) {
-      // Refined masks using AA sharpness
+      // Masks for lights (same as v0.14 but maybe tweaked)
       let indicatorXMask = smoothstep(0.4, 0.41, x) - smoothstep(0.6, 0.61, x);
-      let topLightMask    = (smoothstep(0.12, 0.13, y) - smoothstep(0.18, 0.19, y)) * indicatorXMask;
-      let mainButtonYMask  = smoothstep(0.25, 0.26, y) - smoothstep(0.80, 0.81, y);
-      let mainButtonXMask = smoothstep(0.12, 0.13, x) - smoothstep(0.88, 0.89, x);
+      let topLightMask    = (smoothstep(0.10, 0.11, y) - smoothstep(0.20, 0.21, y)) * indicatorXMask;
+      let mainButtonYMask  = smoothstep(0.23, 0.24, y) - smoothstep(0.82, 0.83, y);
+      let mainButtonXMask = smoothstep(0.1, 0.11, x) - smoothstep(0.9, 0.91, x);
       let mainButtonMask = mainButtonYMask * mainButtonXMask;
-      let bottomLightMask = (smoothstep(0.91, 0.92, y) - smoothstep(0.95, 0.96, y)) * indicatorXMask;
+      let bottomLightMask = (smoothstep(0.90, 0.91, y) - smoothstep(0.95, 0.96, y)) * indicatorXMask;
 
+      // ** Muted Channel Dimming **
       if (ch.isMuted == 1u) {
           finalColor *= 0.3;
       }
 
-      // TOP LIGHT: Activity (Additive)
-      if (step(0.1, exp(-ch.noteAge * 2.0)) > 0.5) {
-          let topGlow = vec3<f32>(0.0, 0.9, 1.0);
-          // Additive blend
-          finalColor += topGlow * topLightMask * 1.5;
+      // ** "Channel Active" -> Top Light **
+      let noteTrail = exp(-ch.noteAge * 2.0);
+      let channelActive = step(0.1, noteTrail);
+      if (channelActive > 0.5) {
+          let topGlow = vec3<f32>(0.5, 0.8, 1.0);
+          finalColor = mix(finalColor, finalColor + topGlow, topLightMask);
       }
 
-      // MAIN LIGHT: Note (Additive + Subsurface)
+      // ** "Has Note" -> Main Button **
       if (hasNote) {
           let pitchHue = pitchClassFromPacked(in.packedA);
           let base_note_color = neonPalette(pitchHue);
           let instBand = inst & 15u;
-          let instBrightness = 0.8 + (select(0.0, f32(instBand) / 15.0, instBand > 0u)) * 0.2;
+          let instBrightness = 0.7 + (select(0.0, f32(instBand) / 15.0, instBand > 0u)) * 0.3;
+          let octaveChar = (in.packedA >> 8) & 255u;
+          let octaveF = f32(octaveChar) - 48.0;
+          let octaveDelta = clamp(octaveF, 1.0, 8.0) - 4.0;
+          let octaveLightness = 1.0 + octaveDelta * 0.15;
 
-          var noteColor = base_note_color * instBrightness;
+          var noteColor = base_note_color * instBrightness * octaveLightness;
+          let triggerFlash = noteColor * 1.5 + 0.5;
+          noteColor = mix(noteColor, triggerFlash, f32(ch.trigger) * 0.8);
 
-          // Flash intensity based on trigger
-          let flash = f32(ch.trigger) * 0.8;
-
-          // Calculate additive light amount
-          let activeLevel = exp(-ch.noteAge * 3.0);
-          let lightAmount = (activeLevel * 0.8 + flash) * clamp(ch.volume, 0.0, 1.2);
-
-          // 1. Additive Core Bloom
-          finalColor += noteColor * mainButtonMask * lightAmount * 2.0;
-
-          // 2. Tasteful Subsurface Scattering (Tint the housing)
-          // This makes the grey plastic look like it's glowing from inside
-          let subsurface = noteColor * housingMask * lightAmount * 0.15;
-          finalColor += subsurface;
+          let volAlpha = clamp(ch.volume, 0.05, 1.0);
+          let mixAmount = mainButtonMask * volAlpha * noteTrail;
+          finalColor = mix(finalColor, noteColor, mixAmount);
       }
 
-      // BOTTOM LIGHT: Effect (Additive)
+      // ** "Has Effect" -> Bottom Light **
       if (hasEffect) {
-          let effectColor = effectColorFromCode(effCode, vec3<f32>(0.9, 0.8, 0.2));
+          let effectColor = effectColorFromCode(effCode, vec3<f32>(0.8, 0.8, 0.8));
           let strength = clamp(f32(effParam) / 255.0, 0.2, 1.0);
-          finalColor += effectColor * bottomLightMask * strength * 2.5;
-          // Slight subsurface for effect too
-          finalColor += effectColor * housingMask * strength * 0.05;
+          let effectPulse = 1.0 + 0.5 * sin(uniforms.timeSec * 15.0);
+          let bottomGlow = (effectColor * strength * effectPulse) * 1.5;
+          finalColor = mix(finalColor, finalColor + bottomGlow, bottomLightMask);
       }
 
-      // Row 0 Proximity (Playhead) Blink
-      let rowDist = abs(i32(in.row) - i32(uniforms.playheadRow));
-      if (rowDist == 0 && !hasNote) {
-          // Additive white glance on empty active cell
-          finalColor += vec3<f32>(0.15, 0.2, 0.25) * mainButtonMask;
-      }
+      // Removed Playhead Dimming/Highlight logic on the cells
   }
 
-  // --- 1px BORDER GAP ---
-  if (housingMask < 0.5) {
+  // --- GAP / BORDER ---
+  // Using background color for gaps
+  // No need to draw black, just let the housing define the shape
+  // But we want a "gap" color (darker plastic/metal) outside the housing
+
+  // Calculate alpha for housing vs gap
+  // Actually, sdRoundedBox is centered. Outside of it is the gap.
+  // We can just return finalColor. The areas outside dHousing < 0.08 were not touched much except by "bevel"
+  // Let's ensure the background outside the cell is dark
+  if (dHousing > 0.05) {
       return vec4<f32>(fs.borderColor, 1.0);
   }
 
