@@ -1,6 +1,6 @@
 // patternv0.22.wgsl
-// Concept: The Holographic Tank
-// Features: Stationary Playhead, 3D Perspective, Physical Vibrato/Tremolo
+// Concept: "The Glass Brick Wall" (Side-scrolling)
+// Features: Horizontal Flow, Glass/Voxel Aesthetic, Physical Vibrato
 
 struct Uniforms {
   numRows: u32,
@@ -23,7 +23,6 @@ struct Uniforms {
 
 @group(0) @binding(0) var<storage, read> cells: array<u32>;
 @group(0) @binding(1) var<uniform> uniforms: Uniforms;
-// Bindings 2-5 unused in this mode but required for layout compatibility
 @group(0) @binding(2) var<storage, read> rowFlags: array<u32>;
 struct ChannelState { volume: f32, pan: f32, freq: f32, trigger: u32, noteAge: f32, activeEffect: u32, effectValue: f32, isMuted: u32 };
 @group(0) @binding(3) var<storage, read> channels: array<ChannelState>;
@@ -37,7 +36,7 @@ struct VertexOut {
   @location(2) @interpolate(linear) uv: vec2<f32>,
   @location(3) @interpolate(flat) packedA: u32,
   @location(4) @interpolate(flat) packedB: u32,
-  @location(5) @interpolate(linear) depth: f32, // Fade out distant notes
+  @location(5) @interpolate(linear) dist: f32,
   @location(6) @interpolate(flat) isTremolo: u32,
 };
 
@@ -47,187 +46,185 @@ fn toUpperAscii(code: u32) -> u32 {
 
 @vertex
 fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instanceIndex: u32) -> VertexOut {
-  // --- 1. DECODE DATA ---
   let numChannels = uniforms.numChannels;
   let row = instanceIndex / numChannels;
   let channel = instanceIndex % numChannels;
-  
-  // Data access
+
   let idx = instanceIndex * 2u;
   let a = cells[idx];
   let b = cells[idx + 1u];
 
-  // Decode Effect for Vertex Deformation (Vibrato)
   let effCode = (b >> 8) & 255u;
   let effParam = b & 255u;
-  // '4' is Vibrato (ASCII 52), '7' is Tremolo (ASCII 55)
   let effChar = toUpperAscii(effCode);
-  let isVibrato = (effChar == 52u); 
-  let isTremolo = (effChar == 55u);
+  let isVibrato = (effChar == 52u); // '4'
+  let isTremolo = (effChar == 55u); // '7'
 
-  // --- 2. STATIONARY PLAYHEAD LOGIC ---
-  // Calculate "World Z" relative to playhead
-  // Future rows are positive Z, Past rows are negative Z
+  // --- HORIZONTAL SCROLLING ---
   let playheadPos = f32(uniforms.playheadRow) + uniforms.tickOffset;
   let rowPos = f32(row);
-  let dist = rowPos - playheadPos; // 0.0 = Current playing row
+  let dist = rowPos - playheadPos;
 
-  // Only render a specific window of rows to save fill rate
-  // Show 4 rows of history (-4.0) and 32 rows of future (32.0)
-  // We can "squash" degenerate vertices to hide them
+  // Culling window (-8 to +48)
   var isActive = 1.0;
-  if (dist < -4.0 || dist > 48.0) { isActive = 0.0; }
+  if (dist < -8.0 || dist > 48.0) { isActive = 0.0; }
 
-  // --- 3. 3D PERSPECTIVE CALCULATION ---
-  // We want a "Highway" look. 
-  // Z = depth into screen.
-  // Y = vertical height (optional, maybe flat highway).
-  // X = channel separation.
+  // --- POSITIONING & ASPECT RATIO ---
+  // To prevent "Too Tall" look, we scale Y based on channel count
 
-  // Perspective factor: Things get smaller as dist increases
-  // "Camera" is slightly above and behind the playhead
-  let perspective = 1.0 / (1.0 + max(0.0, dist) * 0.15); 
-  
-  // Base X position (Channel spacing)
-  // Center the channels around 0.0
-  let channelWidth = 0.25; 
-  let totalWidth = f32(numChannels) * channelWidth;
-  let offsetX = (f32(channel) * channelWidth) - (totalWidth * 0.5) + (channelWidth * 0.5);
+  // X Axis (Time)
+  let spacingX = 0.07; // Tighter horizontal spacing
+  let startX = -0.7;   // Playhead position on screen
+  let screenX = startX + (dist * spacingX);
 
-  // Apply Vibrato Wiggle
+  // Y Axis (Channels)
+  // Fit all channels within -0.8 to 0.8
+  let safeAreaY = 1.6;
+  let chHeight = safeAreaY / f32(max(numChannels, 1u));
+  // Center the stack
+  let totalH = chHeight * f32(numChannels);
+  let startY = -totalH * 0.5 + (chHeight * 0.5);
+  let screenY = startY + (f32(channel) * chHeight);
+
+  // --- BRICK SIZE ---
+  // Ensure bricks are roughly square/cubic
+  // We use the canvas aspect ratio to correct the quad shape
+  let aspect = uniforms.canvasW / uniforms.canvasH;
+  let baseSize = 0.06; // Global scale of bricks
+
+  let brickW = baseSize;
+  let brickH = baseSize * aspect; // Correct for aspect ratio so it's square
+
+  // Clamp height if channels are too dense
+  let maxSizeY = chHeight * 0.9;
+  if (brickH > maxSizeY) {
+      brickH = maxSizeY;
+      brickW = brickH / aspect; // Shrink width to maintain squareness
+  }
+
+  // Vibrato Effect (Vertical Wiggle)
   var vibOffset = 0.0;
   if (isActive > 0.5 && isVibrato && uniforms.isPlaying == 1u) {
-      let speed = 15.0; // Fast wiggle
-      let depth = 0.05 * (f32(effParam) / 255.0 + 0.2); 
+      let speed = 15.0;
+      let depth = brickH * 0.5; // Proportional to brick size
       vibOffset = sin(uniforms.timeSec * speed + rowPos) * depth;
   }
 
-  // Final Screen X
-  // Apply perspective to X position
-  let screenX = (offsetX + vibOffset) * perspective;
-
-  // Final Screen Y
-  // 0.0 is center. We want the playhead near the bottom (-0.8).
-  // Future notes go UP (+Y) and shrink.
-  // Past notes drop DOWN (-Y) and grow/fade.
-  // Let's map 'dist' to Y.
-  // We compress the distance logarithmically so the highway looks infinite
-  let screenY = -0.6 + (dist * 0.08 * perspective); 
-
-  // --- 4. QUAD EXPANSION ---
-  // Standard quad vertices
   var quad = array<vec2<f32>, 6>(
     vec2<f32>(-1.0, -1.0), vec2<f32>( 1.0, -1.0), vec2<f32>(-1.0,  1.0),
     vec2<f32>(-1.0,  1.0), vec2<f32>( 1.0, -1.0), vec2<f32>( 1.0,  1.0)
   );
   let lp = quad[vertexIndex];
 
-  // Scale the quad itself by perspective (notes get smaller in distance)
-  let noteScale = 0.08 * perspective * isActive; // Scale down to box size
-  
   let finalPos = vec2<f32>(
-      screenX + lp.x * noteScale, // Aspect ratio fix might be needed here depending on canvas
-      screenY + lp.y * noteScale * (uniforms.canvasW / uniforms.canvasH) // Correct aspect
+      screenX + lp.x * brickW * isActive,
+      screenY + lp.y * brickH * isActive + vibOffset
   );
 
   var out: VertexOut;
   out.position = vec4<f32>(finalPos, 0.0, 1.0);
   out.row = row;
   out.channel = channel;
-  out.uv = lp * 0.5 + 0.5; // 0..1
+  out.uv = lp * 0.5 + 0.5;
   out.packedA = a;
   out.packedB = b;
-  out.depth = clamp(1.0 - (dist / 32.0), 0.0, 1.0); // 1.0 = near, 0.0 = far
+  out.dist = dist;
   out.isTremolo = u32(isTremolo);
-  
+
   return out;
 }
 
 // --- FRAGMENT SHADER ---
 
-fn neonPalette(t: f32) -> vec3<f32> {
+fn palette(t: f32) -> vec3<f32> {
+    // Glassy Palette: Cyan, Magenta, Amber, Blue
     let a = vec3<f32>(0.5, 0.5, 0.5);
     let b = vec3<f32>(0.5, 0.5, 0.5);
     let c = vec3<f32>(1.0, 1.0, 1.0);
-    let d = vec3<f32>(0.263, 0.416, 0.557);
+    let d = vec3<f32>(0.0, 0.33, 0.67);
     return a + b * cos(6.28318 * (c * t + d));
 }
 
-fn sdBox(p: vec2<f32>, b: vec2<f32>) -> f32 {
-    let d = abs(p) - b;
-    return length(max(d, vec2<f32>(0.0))) + min(max(d.x, d.y), 0.0);
+fn sdRoundedBox(p: vec2<f32>, b: vec2<f32>, r: f32) -> f32 {
+    let q = abs(p) - b + r;
+    return length(max(q, vec2<f32>(0.0))) + min(max(q.x, q.y), 0.0) - r;
 }
 
 @fragment
 fn fs(in: VertexOut) -> @location(0) vec4<f32> {
-    // Unpack Note
     let noteChar = (in.packedA >> 24) & 255u;
     let inst = in.packedA & 255u;
-    let hasNote = (noteChar >= 65u && noteChar <= 71u);
+    let hasNote = (noteChar > 0u);
 
-    // Coordinate system (-0.5 to 0.5)
     let uv = in.uv - 0.5;
 
-    // 1. Cube Shape (Voxel Look)
-    // We create a "fake" 3D cube look using 2D borders
-    let box = sdBox(uv, vec2<f32>(0.4, 0.4));
-    let innerBox = sdBox(uv, vec2<f32>(0.3, 0.3));
-    
-    var color = vec3<f32>(0.0);
+    // --- KEY FIX: UNCONDITIONAL SDF CALCULATION ---
+    // fwidth must be called in uniform control flow
+    // We calculate the shape for every pixel, even if empty
+    let boxSize = vec2<f32>(0.42, 0.42);
+    let dBox = sdRoundedBox(uv, boxSize, 0.08);
+    let aa = fwidth(dBox);
+    // ---------------------------------------------
+
+    var color = vec3<f32>(0.02, 0.02, 0.03); // Dark void background
     var alpha = 0.0;
 
-    // 2. Playhead Scanner Line
-    // If this row is effectively the current one (dist near 0)
-    // We calculated dist in vertex, but let's re-calc approximate locally or just use row index
-    let playheadPos = f32(uniforms.playheadRow); // Integer row
-    let isCurrentRow = (abs(f32(in.row) - playheadPos) < 0.5);
-
     if (hasNote) {
-        // Base Color from Instrument
-        // Use hash of instrument to pick color from palette
-        let hue = f32(inst) * 0.123 + 0.4;
-        var noteColor = neonPalette(hue);
+        let hue = f32(inst) * 0.123 + 0.5;
+        var baseColor = palette(hue);
 
-        // TREMOLO EFFECT (Pulsing Opacity/Brightness)
         if (in.isTremolo == 1u && uniforms.isPlaying == 1u) {
             let pulse = 0.5 + 0.5 * sin(uniforms.timeSec * 20.0);
-            noteColor += vec3<f32>(pulse * 0.8); // Add white flash
+            baseColor += vec3<f32>(pulse * 0.5);
         }
 
-        // Draw Voxel Edges
-        let edge = smoothstep(0.02, 0.0, abs(box)) * 0.8; // Outer glow
-        let face = smoothstep(0.02, 0.0, innerBox); // Inner face
+        // Glass Material Shading
+        // 1. Soft Fill
+        let fill = smoothstep(0.0, -0.1, dBox);
 
-        // "Glass" fill
-        color = noteColor * (edge + face * 0.3);
-        
-        // Active Hit Flash
-        if (isCurrentRow) {
-            color += vec3<f32>(1.0, 1.0, 1.0) * 0.8; // Flash white on hit
-        }
+        // 2. Sharp Bevel (Rim)
+        let border = 1.0 - smoothstep(0.0, aa * 1.5, dBox);
+        let inner = 1.0 - smoothstep(-0.06, -0.06 + aa * 1.5, dBox);
+        let rim = border - inner;
 
-        alpha = smoothstep(0.01, 0.0, box); // Hard edge for shape
+        // 3. Inner Gloss/Refraction
+        let gloss = smoothstep(0.1, 0.0, length(uv - vec2<f32>(0.1, 0.1)));
+
+        color = mix(color, baseColor * 0.3, fill); // Translucent body
+        color = mix(color, baseColor + vec3<f32>(0.4), rim * 0.9); // Bright rim
+        color += vec3<f32>(1.0) * gloss * fill * 0.4; // Highlight
+
+        alpha = border;
     } else {
-        // Empty slots - draw faint grid markers
-        // Only drawing a tiny dot or dash to maintain the "grid" feel without clutter
-        let dot = 1.0 - smoothstep(0.0, 0.05, length(uv));
-        color = vec3<f32>(0.1, 0.1, 0.2) * dot * 0.5;
-        alpha = dot;
+        // Empty Slot: Tiny faint dot
+        let dot = 1.0 - smoothstep(0.0, 0.03, length(uv));
+        color += vec3<f32>(0.15) * dot;
+        alpha = dot * 0.5;
     }
 
-    // 3. Depth Fog
-    // Fade out color based on depth passed from vertex
-    color *= in.depth;
-    alpha *= in.depth;
+    // --- PLAYHEAD EFFECTS ---
+    // Laser Line at x = -0.7 (dist = 0)
+    // Map dist to UV space approx to draw line
+    let hit = 1.0 - smoothstep(0.0, 0.5, abs(in.dist));
 
-    // 4. Scanner Line Visual (Global)
-    // If this is the current row, draw a horizontal laser line across the note
-    if (isCurrentRow) {
-        let laser = smoothstep(0.1, 0.0, abs(uv.y));
-        color += vec3<f32>(0.0, 1.0, 1.0) * laser * 0.5;
-        alpha = max(alpha, laser * in.depth);
+    // Impact Flash
+    if (hit > 0.01 && hasNote) {
+        color += vec3<f32>(0.8, 0.9, 1.0) * hit * 0.6;
     }
 
-    // Pre-multiply alpha for additive/normal blend
+    // Draw the Laser Line (Global)
+    // We render this on every tile but fade it based on distance from 0
+    let laserW = 0.08;
+    let laser = 1.0 - smoothstep(0.0, laserW, abs(in.dist));
+    // Dotted line effect
+    let laserPattern = step(0.5, sin(uv.y * 20.0));
+
+    color += vec3<f32>(0.0, 1.0, 1.0) * laser * laserPattern * 0.4;
+
+    // Distance Fog
+    let fog = clamp(1.0 - (in.dist / 40.0), 0.0, 1.0);
+    color *= fog;
+    alpha *= fog;
+
     return vec4<f32>(color * alpha, alpha);
 }

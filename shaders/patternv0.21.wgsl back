@@ -231,19 +231,12 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
 
   if (inButton > 0.5) {
       // Refined masks using AA sharpness
-
-      // 1. Top Indicator (The Blue "Half Square")
-      // widened the Y range (0.05 to 0.20) to make it a block rather than a slit
       let indicatorXMask = smoothstep(0.4, 0.41, x) - smoothstep(0.6, 0.61, x);
-      let topLightMask   = (smoothstep(0.05, 0.06, y) - smoothstep(0.15, 0.16, y)) * indicatorXMask;
-
-
-
-      let mainButtonYMask  = smoothstep(0.23, 0.24, y) - smoothstep(0.80, 0.81, y);
-      let mainButtonXMask = smoothstep(0.13, 0.14, x) - smoothstep(0.86, 0.87, x);
-
+      let topLightMask    = (smoothstep(0.12, 0.13, y) - smoothstep(0.18, 0.19, y)) * indicatorXMask;
+      let mainButtonYMask  = smoothstep(0.25, 0.26, y) - smoothstep(0.80, 0.81, y);
+      let mainButtonXMask = smoothstep(0.12, 0.13, x) - smoothstep(0.88, 0.89, x);
       let mainButtonMask = mainButtonYMask * mainButtonXMask;
-      let bottomLightMask = (smoothstep(0.90, 0.91, y) - smoothstep(0.95, 0.96, y)) * indicatorXMask;
+      let bottomLightMask = (smoothstep(0.91, 0.92, y) - smoothstep(0.95, 0.96, y)) * indicatorXMask;
 
       if (ch.isMuted == 1u) {
           finalColor *= 0.3;
