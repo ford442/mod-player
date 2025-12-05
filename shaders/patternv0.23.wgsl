@@ -1,6 +1,6 @@
 // patternv0.23.wgsl
 // Mode: "The Hologram Stage"
-// Features: Audio-reactive video glitch, Laser light show
+// Features: Audio-reactive video glitch, Laser light show, Volumetric Haze, Digital Decay
 
 struct Uniforms {
   numRows: u32,
@@ -79,6 +79,27 @@ fn sdLine(p: vec2<f32>, a: vec2<f32>, b: vec2<f32>) -> f32 {
     return length(pa - ba * h);
 }
 
+// Simple 2D noise function for haze
+fn noise(p: vec2<f32>) -> f32 {
+    let i = floor(p);
+    let f = fract(p);
+    return fract(sin(dot(i, vec2<f32>(12.9898, 78.233))) * 43758.5453);
+}
+
+// Simple hash for block_slide
+fn hash1(p: vec2<f32>) -> f32 {
+    return fract(sin(dot(p, vec2<f32>(12.9898, 78.233))) * 43758.5453);
+}
+
+// Digital decay glitch function
+fn block_slide(uv: vec2<f32>, strength: f32, block_size: f32) -> vec2<f32> {
+    let blocks = vec2<f32>(block_size, block_size * (uniforms.canvasH / uniforms.canvasW));
+    let block_uv = floor(uv * blocks);
+    let slide_amount = (hash1(block_uv) - 0.5) * 2.0; // Centered hash
+    return vec2<f32>(uv.x + slide_amount * strength, uv.y);
+}
+
+
 @fragment
 fn fs(fragIn: VertexOut) -> @location(0) vec4<f32> {
     var uv = fragIn.uv;
@@ -89,9 +110,7 @@ fn fs(fragIn: VertexOut) -> @location(0) vec4<f32> {
     var finalColor = vec3<f32>(0.05, 0.05, 0.08); // Dark stage background
 
     // --- 1. LASER SHOW (Background) ---
-    // Draw beams shooting from bottom of screen based on channels
     let numCh = uniforms.numChannels;
-    // Spread lasers across width [-1.5 to 1.5]
     let width = 3.0; 
     let spacing = width / f32(numCh);
     let startX = -width * 0.5 + spacing * 0.5;
@@ -101,60 +120,57 @@ fn fs(fragIn: VertexOut) -> @location(0) vec4<f32> {
         if (ch.noteAge < 1.0 && ch.isMuted == 0u) {
             let xPos = startX + f32(i) * spacing;
             
-            // Laser origin (bottom) and target (angled up)
             let origin = vec2<f32>(xPos, -1.2);
-            // Slight angle variation per channel
             let angle = (xPos) * -0.5; 
             let laserTarget = vec2<f32>(xPos + angle, 1.5);
 
             let d = sdLine(p, origin, laserTarget);
             
-            // Beam width narrows with distance
-            let intensity = exp(-ch.noteAge * 4.0) * ch.volume;
-            let beam = 0.005 / (d + 0.001) * intensity;
+            // Use smoothstep for a softer, wider beam falloff
+            let intensity = pow(1.0 - ch.noteAge, 2.0) * ch.volume;
+            let beam = smoothstep(0.05, 0.0, d) * intensity;
             
-            // Add flash on trigger - REDUCED from 2.0 to 0.5
             let flash = step(0.95, 1.0 - ch.noteAge) * f32(ch.trigger) * 0.5;
             
+            // Add Haze
+            let haze = noise(p * 30.0 + uniforms.timeSec) * 0.2;
+            let finalBeam = beam + flash + (haze * beam * 2.0);
+
             let col = freqToColor(ch.freq);
-            finalColor += col * (beam + flash);
+            finalColor += col * finalBeam;
         }
     }
 
     // --- 2. THE DANCER (Hologram Plane) ---
     let kick = uniforms.kickTrigger;
-    let shift = vec2<f32>(0.02, 0.0) * kick;
-    let scanline = sin(uv.y * 100.0 + uniforms.timeSec * 20.0);
-    let displacement = vec2<f32>(scanline * 0.01 * kick, 0.0);
-
+    
     let texScale = 0.8; 
     var charUV = (fragIn.uv - 0.5) * (1.0/texScale) + 0.5; 
     charUV.y = 1.0 - charUV.y; // Flip Y-coordinate
 
+    // --- DIGITAL DECAY GLITCH ---
+    let block_size = mix(200.0, 40.0, kick);
+    let slide_strength = kick * kick;
+    let glitchUV = block_slide(charUV, slide_strength, block_size);
+
     // --- UNCONDITIONAL SAMPLING ---
-    let r = textureSample(myTexture, mySampler, charUV - shift + displacement).r;
-    let g = textureSample(myTexture, mySampler, charUV + displacement).g;
-    let b = textureSample(myTexture, mySampler, charUV + shift + displacement).b;
-    let a = textureSample(myTexture, mySampler, charUV).a;
+    let r = textureSample(myTexture, mySampler, glitchUV).r;
+    let g = textureSample(myTexture, mySampler, glitchUV).g;
+    let b = textureSample(myTexture, mySampler, glitchUV).b;
 
     // --- MASKING & COMPOSITING ---
-    // Create a mask based on UV coordinates
     let uvMask = step(0.0, charUV.x) * step(charUV.x, 1.0) * step(0.0, charUV.y) * step(charUV.y, 1.0);
 
     if (uvMask > 0.5) {
         var charColor = vec3<f32>(r, g, b);
 
-        // "Hologram" Scanlines overlay
         let holoGrid = sin(charUV.y * 200.0 + uniforms.timeSec * 5.0) * 0.1;
         charColor += vec3<f32>(0.2, 0.5, 1.0) * holoGrid;
 
-        // Beat Pulse Opacity
         let pulse = 0.8 + 0.2 * sin(uniforms.timeSec * 10.0);
         
-        // Luma key mask (if no alpha)
         let lumaMask = smoothstep(0.1, 0.3, (r+g+b)/3.0);
         
-        // Additive blending for "Hologram" feel - REDUCED from (1.0 + kick) to (0.8 + kick * 0.5)
         finalColor += charColor * lumaMask * pulse * (0.8 + kick * 0.5);
     }
 
