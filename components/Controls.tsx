@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { PlayIcon, StopIcon, UploadIcon, LoopIcon } from './icons';
+import type { MediaItem } from '../types';
 
 interface ControlsProps {
   isReady: boolean;
@@ -15,6 +16,8 @@ interface ControlsProps {
   setVolume?: (v: number) => void;
   pan?: number;
   setPan?: (p: number) => void;
+  onRemoteMediaSelect?: (item: MediaItem) => void;
+  remoteMediaList?: MediaItem[];
 }
 
 export const Controls: React.FC<ControlsProps> = ({
@@ -31,6 +34,8 @@ export const Controls: React.FC<ControlsProps> = ({
   setVolume,
   pan,
   setPan,
+  onRemoteMediaSelect,
+  remoteMediaList = [],
 }) => {
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -69,6 +74,34 @@ export const Controls: React.FC<ControlsProps> = ({
           onChange={handleMediaFile}
           accept=".png,.jpg,.jpeg,.gif,.mp4"
         />
+      </div>
+
+      {/* NEW: Remote Media Dropdown */}
+      <div className="flex items-center gap-2">
+        <label className="text-sm text-gray-400 flex items-center gap-2">
+          <span className="hidden md:inline">Server Media:</span>
+          <select 
+            className="bg-gray-700 text-white text-sm px-2 py-1 rounded border border-gray-600 focus:border-blue-500 outline-none"
+            onChange={(e) => {
+              const selectedId = e.target.value;
+              const item = remoteMediaList.find(m => m.id === selectedId);
+              if (item && onRemoteMediaSelect) {
+                onRemoteMediaSelect(item);
+                // Reset select if desired, or keep selected
+                e.target.value = ""; 
+              }
+            }}
+            defaultValue=""
+          >
+            <option value="" disabled>Select File...</option>
+            {remoteMediaList.map(item => (
+              <option key={item.id} value={item.id}>
+                {item.fileName}
+              </option>
+            ))}
+          </select>
+        </label>
+        {/* Optional: Refresh button */}
       </div>
 
       <div className="flex gap-4">
