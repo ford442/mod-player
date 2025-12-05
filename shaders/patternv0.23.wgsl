@@ -105,9 +105,9 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
             let origin = vec2<f32>(xPos, -1.2);
             // Slight angle variation per channel
             let angle = (xPos) * -0.5; 
-            let target = vec2<f32>(xPos + angle, 1.5);
+            let laserTarget = vec2<f32>(xPos + angle, 1.5);
 
-            let d = sdLine(p, origin, target);
+            let d = sdLine(p, origin, laserTarget);
             
             // Beam width narrows with distance
             let intensity = exp(-ch.noteAge * 4.0) * ch.volume;
