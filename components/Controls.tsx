@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import { PlayIcon, StopIcon, UploadIcon, LoopIcon } from './icons';
 import type { MediaItem } from '../types';
 
