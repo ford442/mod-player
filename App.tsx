@@ -9,6 +9,7 @@ import { MediaPanel } from './components/MediaPanel';
 import { MediaOverlay } from './components/MediaOverlay';
 import { PatternDisplay } from './components/PatternDisplay';
 import type { MediaItem } from './types';
+import { fetchRemoteMedia } from './utils/remoteMedia';
 
 // Dynamically load all WGSL shader files
 const shaderModules = import.meta.glob('./shaders/*.wgsl', { as: 'url' });
@@ -45,10 +46,22 @@ export default function App() {
   } = useLibOpenMPT(volume);
 
   const [media, setMedia] = useState<MediaItem[]>([]);
+  const [remoteFiles, setRemoteFiles] = useState<MediaItem[]>([]);
   const [activeMediaId, setActiveMediaId] = useState<string | undefined>(undefined);
   const [overlayVisible, setOverlayVisible] = useState<boolean>(false);
   const [mediaElement, setMediaElement] = useState<HTMLVideoElement | HTMLImageElement | null>(null);
   const videoLoopRef = useRef<number>(0);
+
+  useEffect(() => {
+    fetchRemoteMedia().then(items => setRemoteFiles(items));
+  }, []);
+
+  const handleRemoteSelect = useCallback((item: MediaItem) => {
+    const newItem = { ...item, id: `remote-${Date.now()}` }; 
+    setMedia(prev => [newItem, ...prev]);
+    setActiveMediaId(newItem.id);
+    setOverlayVisible(true);
+  }, []);
 
   const addMediaFile = useCallback((file: File) => {
     const url = URL.createObjectURL(file);
@@ -181,6 +194,8 @@ export default function App() {
           setVolume={setVolume}
           pan={panValue}
           setPan={setPanValue}
+          remoteMediaList={remoteFiles}
+          onRemoteMediaSelect={handleRemoteSelect}
         />
 
         {isModuleLoaded || effectivePatternMode === 'webgpu' ? (
