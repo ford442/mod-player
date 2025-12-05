@@ -10,7 +10,7 @@ const DEFAULT_CHANNELS = 8;
 const alignTo = (value: number, alignment: number) => Math.ceil(value / alignment) * alignment;
 const getLayoutType = (shaderFile: string): LayoutType => {
   if (shaderFile === 'patternShaderv0.12.wgsl') return 'texture';
-  if (shaderFile === 'patternv0.13.wgsl' || shaderFile === 'patternv0.14.wgsl' || shaderFile === 'patternv0.16.wgsl' || shaderFile === 'patternv0.17.wgsl' || shaderFile === 'patternv0.18.wgsl' || shaderFile === 'patternv0.19.wgsl' || shaderFile === 'patternv0.20.wgsl' || shaderFile === 'patternv0.21.wgsl') return 'extended';
+  if (shaderFile === 'patternv0.13.wgsl' || shaderFile === 'patternv0.14.wgsl' || shaderFile === 'patternv0.16.wgsl' || shaderFile === 'patternv0.17.wgsl' || shaderFile === 'patternv0.18.wgsl' || shaderFile === 'patternv0.19.wgsl' || shaderFile === 'patternv0.20.wgsl' || shaderFile === 'patternv0.21.wgsl' || shaderFile === 'patternv0.23.wgsl') return 'extended';
   return 'simple';
 };
 
@@ -118,6 +118,7 @@ interface PatternDisplayProps {
   kickTrigger?: number;
   activeChannels?: number;
   isModuleLoaded?: boolean;
+  externalVideoSource?: HTMLVideoElement | HTMLImageElement | null;
 }
 
 const clampPlayhead = (value: number, numRows: number) => {
@@ -247,7 +248,8 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     channels = [],
     isPlaying = false,
     beatPhase = 0,
-    isModuleLoaded = false
+    isModuleLoaded = false,
+    externalVideoSource = null,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const deviceRef = useRef<GPUDevice | null>(null);
@@ -262,13 +264,23 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   const textureResourcesRef = useRef<{ sampler: GPUSampler; view: GPUTextureView } | null>(null);
   const useExtendedRef = useRef<boolean>(false);
   const animationFrameRef = useRef<number>(0);
-  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const videoRef = useRef<HTMLVideoElement | HTMLImageElement | null>(null);
   const videoTextureRef = useRef<GPUTexture | null>(null);
   const videoLoopRef = useRef<number>(0);
 
-  // Video management for v0.20
+  // Video management
   useEffect(() => {
-    if (shaderFile.includes('v0.20')) {
+    const isVideoShader = shaderFile.includes('v0.20') || shaderFile.includes('v0.23');
+    cancelAnimationFrame(videoLoopRef.current);
+    videoRef.current = null; // Clear previous ref
+
+    if (externalVideoSource) {
+      videoRef.current = externalVideoSource;
+      // External source playback is managed by App.tsx
+      return; // Don't create a fallback video
+    }
+
+    if (isVideoShader) {
       const vid = document.createElement('video');
       vid.src = 'clouds.mp4';
       vid.muted = true;
@@ -312,10 +324,8 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
           videoTextureRef.current = null;
         }
       };
-    } else {
-      videoRef.current = null;
     }
-  }, [shaderFile]);
+  }, [shaderFile, externalVideoSource]);
 
   const [webgpuAvailable, setWebgpuAvailable] = useState(true);
   const [gpuReady, setGpuReady] = useState(false);
@@ -325,7 +335,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   const padTopChannel = shaderFile.includes('v0.16') || shaderFile.includes('v0.17') || shaderFile.includes('v0.21');
 
   const canvasMetrics = useMemo(() => {
-    if (shaderFile.includes('v0.18') || shaderFile.includes('v0.19') || shaderFile.includes('v0.20')) {
+    if (shaderFile.includes('v0.18') || shaderFile.includes('v0.19') || shaderFile.includes('v0.20') || shaderFile.includes('v0.23')) {
       return { width: 1280, height: 1280 };
     }
     const rawChannels = Math.max(1, matrix?.numChannels ?? DEFAULT_CHANNELS);
@@ -360,14 +370,28 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     const bindGroup = bindGroupRef.current;
     if (!device || !context || !pipeline || !bindGroup || !uniformBufferRef.current || !cellsBufferRef.current) return;
 
-    if (shaderFile.includes('v0.20') && videoRef.current && videoRef.current.readyState >= 2) {
-      const vw = videoRef.current.videoWidth;
-      const vh = videoRef.current.videoHeight;
-      if (vw > 0 && vh > 0) {
-        if (!videoTextureRef.current || videoTextureRef.current.width !== vw || videoTextureRef.current.height !== vh) {
+    const isVideoShader = shaderFile.includes('v0.20') || shaderFile.includes('v0.23');
+    if (isVideoShader && videoRef.current) {
+      const source = videoRef.current;
+      let sourceWidth = 0;
+      let sourceHeight = 0;
+      let sourceReady = false;
+
+      if (source instanceof HTMLVideoElement && source.readyState >= 2) {
+        sourceWidth = source.videoWidth;
+        sourceHeight = source.videoHeight;
+        sourceReady = true;
+      } else if (source instanceof HTMLImageElement && source.complete) {
+        sourceWidth = source.naturalWidth;
+        sourceHeight = source.naturalHeight;
+        sourceReady = true;
+      }
+
+      if (sourceReady && sourceWidth > 0 && sourceHeight > 0) {
+        if (!videoTextureRef.current || videoTextureRef.current.width !== sourceWidth || videoTextureRef.current.height !== sourceHeight) {
           videoTextureRef.current?.destroy();
           const texture = device.createTexture({
-            size: [vw, vh, 1],
+            size: [sourceWidth, sourceHeight, 1],
             format: 'rgba8unorm',
             usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT
           });
@@ -378,9 +402,9 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
         }
         try {
           device.queue.copyExternalImageToTexture(
-            { source: videoRef.current },
+            { source },
             { texture: videoTextureRef.current },
-            [vw, vh, 1]
+            [sourceWidth, sourceHeight, 1]
           );
         } catch (e) {
           // Ignore transient errors when video frame is not yet ready for GPU import
@@ -602,7 +626,8 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
 
         const needsTexture = layoutType === 'texture' || layoutType === 'extended';
         if (needsTexture) {
-          if (shaderFile.includes('v0.20')) {
+          const isVideoShader = shaderFile.includes('v0.20') || shaderFile.includes('v0.23');
+          if (isVideoShader) {
             ensureVideoPlaceholder(device);
           } else {
             await ensureButtonTexture(device);

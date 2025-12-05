@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useState, useEffect, useRef } from 'react';
 import { useLibOpenMPT } from './hooks/useLibOpenMPT';
 import { Header } from './components/Header';
 import { Controls } from './components/Controls';
@@ -47,6 +47,8 @@ export default function App() {
   const [media, setMedia] = useState<MediaItem[]>([]);
   const [activeMediaId, setActiveMediaId] = useState<string | undefined>(undefined);
   const [overlayVisible, setOverlayVisible] = useState<boolean>(false);
+  const [mediaElement, setMediaElement] = useState<HTMLVideoElement | HTMLImageElement | null>(null);
+  const videoLoopRef = useRef<number>(0);
 
   const addMediaFile = useCallback((file: File) => {
     const url = URL.createObjectURL(file);
@@ -83,9 +85,74 @@ export default function App() {
   }, [activeMediaId]);
 
   const activeMedia = media.find((m: MediaItem) => m.id === activeMediaId);
+
+  useEffect(() => {
+    cancelAnimationFrame(videoLoopRef.current);
+    const currentMedia = media.find(m => m.id === activeMediaId);
+
+    if (!currentMedia) {
+      setMediaElement(null);
+      return;
+    }
+
+    let el: HTMLVideoElement | HTMLImageElement | null = null;
+
+    if (currentMedia.kind === 'video') {
+      const vid = document.createElement('video');
+      vid.src = currentMedia.url;
+      vid.crossOrigin = "anonymous";
+      vid.loop = currentMedia.loop ?? false;
+      vid.muted = currentMedia.muted ?? true;
+      vid.playsInline = true;
+
+      vid.onloadedmetadata = () => {
+        vid.play().catch(e => console.warn("Video play error for shader", e));
+      };
+
+      if (!vid.loop) {
+        let direction = 1;
+        const checkLoop = () => {
+          if (!vid) return;
+          const t = vid.currentTime;
+          const d = vid.duration;
+          if (d > 0) {
+            if (direction === 1 && t >= d - 0.2) {
+              direction = -1;
+              try { vid.playbackRate = -1.0; } catch (e) { vid.currentTime = 0; }
+            } else if (direction === -1 && t <= 0.2) {
+              direction = 1;
+              try { vid.playbackRate = 1.0; } catch (e) { /* ignore */ }
+            }
+            if (vid.paused) vid.play().catch(() => {});
+          }
+          videoLoopRef.current = requestAnimationFrame(checkLoop);
+        };
+        vid.play().then(checkLoop).catch(() => {});
+      }
+
+      el = vid;
+    } else if (currentMedia.kind === 'image' || currentMedia.kind === 'gif') {
+      const img = new Image();
+      img.src = currentMedia.url;
+      img.crossOrigin = "anonymous";
+      el = img;
+    }
+
+    setMediaElement(el);
+
+    return () => {
+      cancelAnimationFrame(videoLoopRef.current);
+      if (el && el instanceof HTMLVideoElement) {
+        el.pause();
+        el.src = '';
+      }
+      setMediaElement(null);
+    };
+  }, [activeMediaId, media]);
+
   const webgpuSupported = typeof navigator !== 'undefined' && 'gpu' in navigator;
   const [patternMode, setPatternMode] = useState<'html' | 'webgpu'>(webgpuSupported ? 'webgpu' : 'html');
-  const [shaderVersion, setShaderVersion] = useState<string>('patternv0.17.wgsl');
+  const [shaderVersion, setShaderVersion] = useState<string>('patternv0.23.wgsl');
   const effectivePatternMode = webgpuSupported ? patternMode : 'html';
 
   // Dynamic cell sizing based on shader version
@@ -172,6 +239,7 @@ export default function App() {
                   kickTrigger={kickTrigger}
                   activeChannels={activeChannels}
                   isModuleLoaded={isModuleLoaded}
+                  externalVideoSource={mediaElement}
                 />
               ) : (
                 <PatternSequencer
