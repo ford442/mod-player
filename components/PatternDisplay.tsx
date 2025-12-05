@@ -10,7 +10,7 @@ const DEFAULT_CHANNELS = 8;
 const alignTo = (value: number, alignment: number) => Math.ceil(value / alignment) * alignment;
 const getLayoutType = (shaderFile: string): LayoutType => {
   if (shaderFile === 'patternShaderv0.12.wgsl') return 'texture';
-  if (shaderFile === 'patternv0.13.wgsl' || shaderFile === 'patternv0.14.wgsl' || shaderFile === 'patternv0.16.wgsl' || shaderFile === 'patternv0.17.wgsl' || shaderFile === 'patternv0.18.wgsl' || shaderFile === 'patternv0.19.wgsl' || shaderFile === 'patternv0.20.wgsl' || shaderFile === 'patternv0.21.wgsl' || shaderFile === 'patternv0.23.wgsl') return 'extended';
+  if (shaderFile.includes('v0.13') || shaderFile.includes('v0.14') || shaderFile.includes('v0.16') || shaderFile.includes('v0.17') || shaderFile.includes('v0.18') || shaderFile.includes('v0.19') || shaderFile.includes('v0.20') || shaderFile.includes('v0.21') || shaderFile.includes('v0.23') || shaderFile.includes('v0.24') || shaderFile.includes('v0.25')) return 'extended';
   return 'simple';
 };
 
@@ -270,7 +270,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
 
   // Video management
   useEffect(() => {
-    const isVideoShader = shaderFile.includes('v0.20') || shaderFile.includes('v0.23');
+    const isVideoShader = shaderFile.includes('v0.20') || shaderFile.includes('v0.23') || shaderFile.includes('v0.24') || shaderFile.includes('v0.25');
     cancelAnimationFrame(videoLoopRef.current);
     videoRef.current = null; // Clear previous ref
 
@@ -335,7 +335,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   const padTopChannel = shaderFile.includes('v0.16') || shaderFile.includes('v0.17') || shaderFile.includes('v0.21');
 
   const canvasMetrics = useMemo(() => {
-    if (shaderFile.includes('v0.18') || shaderFile.includes('v0.19') || shaderFile.includes('v0.20') || shaderFile.includes('v0.23')) {
+    if (shaderFile.includes('v0.18') || shaderFile.includes('v0.19') || shaderFile.includes('v0.20') || shaderFile.includes('v0.23') || shaderFile.includes('v0.24') || shaderFile.includes('v0.25')) {
       return { width: 1280, height: 1280 };
     }
     const rawChannels = Math.max(1, matrix?.numChannels ?? DEFAULT_CHANNELS);
@@ -370,7 +370,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     const bindGroup = bindGroupRef.current;
     if (!device || !context || !pipeline || !bindGroup || !uniformBufferRef.current || !cellsBufferRef.current) return;
 
-    const isVideoShader = shaderFile.includes('v0.20') || shaderFile.includes('v0.23');
+    const isVideoShader = shaderFile.includes('v0.20') || shaderFile.includes('v0.23') || shaderFile.includes('v0.24') || shaderFile.includes('v0.25');
     if (isVideoShader && videoRef.current) {
       const source = videoRef.current;
       let sourceWidth = 0;
@@ -626,7 +626,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
 
         const needsTexture = layoutType === 'texture' || layoutType === 'extended';
         if (needsTexture) {
-          const isVideoShader = shaderFile.includes('v0.20') || shaderFile.includes('v0.23');
+          const isVideoShader = shaderFile.includes('v0.20') || shaderFile.includes('v0.23') || shaderFile.includes('v0.24') || shaderFile.includes('v0.25');
           if (isVideoShader) {
             ensureVideoPlaceholder(device);
           } else {
