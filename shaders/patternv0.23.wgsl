@@ -38,11 +38,11 @@ struct VertexOut {
 @vertex
 fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instanceIndex: u32) -> VertexOut {
   // Draw a single full-screen quad (ignoring the grid instance count)
-  var out: VertexOut;
+  var vertexOut: VertexOut;
   if (instanceIndex > 0u) {
-    out.position = vec4<f32>(0.0);
-    out.uv = vec2<f32>(0.0);
-    return out;
+    vertexOut.position = vec4<f32>(0.0);
+    vertexOut.uv = vec2<f32>(0.0);
+    return vertexOut;
   }
   
   var quad = array<vec2<f32>, 6>(
@@ -50,9 +50,9 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
     vec2<f32>(-1.0,  1.0), vec2<f32>( 1.0, -1.0), vec2<f32>( 1.0,  1.0)
   );
   let pos = quad[vertexIndex];
-  out.position = vec4<f32>(pos, 0.0, 1.0);
-  out.uv = pos * 0.5 + 0.5;
-  return out;
+  vertexOut.position = vec4<f32>(pos, 0.0, 1.0);
+  vertexOut.uv = pos * 0.5 + 0.5;
+  return vertexOut;
 }
 
 // --- HELPERS ---
@@ -80,8 +80,8 @@ fn sdLine(p: vec2<f32>, a: vec2<f32>, b: vec2<f32>) -> f32 {
 }
 
 @fragment
-fn fs(in: VertexOut) -> @location(0) vec4<f32> {
-    var uv = in.uv;
+fn fs(fragIn: VertexOut) -> @location(0) vec4<f32> {
+    var uv = fragIn.uv;
     // Fix aspect ratio for the scene coordinates
     let aspect = uniforms.canvasW / uniforms.canvasH;
     var p = (uv - 0.5) * vec2<f32>(aspect, 1.0) * 2.0; // Centered at 0,0
@@ -122,47 +122,43 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     }
 
     // --- 2. THE DANCER (Hologram Plane) ---
-    // Apply "Glitch" effects based on kickTrigger
     let kick = uniforms.kickTrigger;
-    
-    // a. Chromatic Aberration (RGB Split)
     let shift = vec2<f32>(0.02, 0.0) * kick;
-    
-    // b. Scanline Displacement (Horizontal Tearing)
     let scanline = sin(uv.y * 100.0 + uniforms.timeSec * 20.0);
     let displacement = vec2<f32>(scanline * 0.01 * kick, 0.0);
 
-    // Sample texture with offsets
-    // Note: Assuming texture is standard aspect. Adjust 'scale' to fit.
     let texScale = 0.8; 
-    var charUV = (in.uv - 0.5) * (1.0/texScale) + 0.5; 
-    
-    // Mask to keep character inside 0..1 UVs
-    if (charUV.x > 0.0 && charUV.x < 1.0 && charUV.y > 0.0 && charUV.y < 1.0) {
-        let r = textureSample(myTexture, mySampler, charUV - shift + displacement).r;
-        let g = textureSample(myTexture, mySampler, charUV + displacement).g;
-        let b = textureSample(myTexture, mySampler, charUV + shift + displacement).b;
-        let a = textureSample(myTexture, mySampler, charUV).a; // Use alpha if available
+    var charUV = (fragIn.uv - 0.5) * (1.0/texScale) + 0.5; 
 
+    // --- UNCONDITIONAL SAMPLING ---
+    let r = textureSample(myTexture, mySampler, charUV - shift + displacement).r;
+    let g = textureSample(myTexture, mySampler, charUV + displacement).g;
+    let b = textureSample(myTexture, mySampler, charUV + shift + displacement).b;
+    let a = textureSample(myTexture, mySampler, charUV).a;
+
+    // --- MASKING & COMPOSITING ---
+    // Create a mask based on UV coordinates
+    let uvMask = step(0.0, charUV.x) * step(charUV.x, 1.0) * step(0.0, charUV.y) * step(charUV.y, 1.0);
+
+    if (uvMask > 0.5) {
         var charColor = vec3<f32>(r, g, b);
 
-        // c. "Hologram" Scanlines overlay
+        // "Hologram" Scanlines overlay
         let holoGrid = sin(charUV.y * 200.0 + uniforms.timeSec * 5.0) * 0.1;
-        charColor += vec3<f32>(0.2, 0.5, 1.0) * holoGrid; // Blue tint
+        charColor += vec3<f32>(0.2, 0.5, 1.0) * holoGrid;
 
-        // d. Beat Pulse Opacity
+        // Beat Pulse Opacity
         let pulse = 0.8 + 0.2 * sin(uniforms.timeSec * 10.0);
         
-        // Composite
-        // Assumes premultiplied alpha or black background video
-        let mask = smoothstep(0.1, 0.3, (r+g+b)/3.0); // Luma key if no alpha
+        // Luma key mask (if no alpha)
+        let lumaMask = smoothstep(0.1, 0.3, (r+g+b)/3.0);
         
         // Additive blending for "Hologram" feel
-        finalColor += charColor * mask * pulse * (1.0 + kick);
+        finalColor += charColor * lumaMask * pulse * (1.0 + kick);
     }
 
     // Vignette
-    let vig = 1.0 - length(in.uv - 0.5) * 0.8;
+    let vig = 1.0 - length(fragIn.uv - 0.5) * 0.8;
     finalColor *= vig;
 
     return vec4<f32>(finalColor, 1.0);
