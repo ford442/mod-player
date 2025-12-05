@@ -168,6 +168,9 @@ export default function App() {
   const [shaderVersion, setShaderVersion] = useState<string>('patternv0.23.wgsl');
   const effectivePatternMode = webgpuSupported ? patternMode : 'html';
 
+  const isVideoShaderActive = effectivePatternMode === 'webgpu' && (shaderVersion.includes('v0.20') || shaderVersion.includes('v0.23'));
+  const showOverlay = overlayVisible && !isVideoShaderActive;
+
   // Dynamic cell sizing based on shader version
   const getCellMetrics = (shader: string) => {
     if (shader.includes('v0.21')) return { w: 32, h: 48 }; // Extra Large Precision
@@ -272,7 +275,7 @@ export default function App() {
               <MediaPanel media={media} activeMediaId={activeMediaId} onSelect={(id?: string) => { setActiveMediaId(id); setOverlayVisible(!!id); }} onRemove={removeMedia} />
             </div>
 
-            <MediaOverlay item={activeMedia} visible={overlayVisible} onClose={() => setOverlayVisible(false)} onUpdate={(partial: Partial<MediaItem>) => { if (!activeMedia) return; setMedia((prev: MediaItem[]) => prev.map((m: MediaItem) => m.id === activeMedia.id ? { ...m, ...partial } : m)); }} />
+            <MediaOverlay item={activeMedia} visible={showOverlay} onClose={() => setOverlayVisible(false)} onUpdate={(partial: Partial<MediaItem>) => { if (!activeMedia) return; setMedia((prev: MediaItem[]) => prev.map((m: MediaItem) => m.id === activeMedia.id ? { ...m, ...partial } : m)); }} />
           </>
         ) : (
            <div className="mt-6 bg-gray-800 p-6 rounded-lg shadow-lg text-center text-gray-400">
