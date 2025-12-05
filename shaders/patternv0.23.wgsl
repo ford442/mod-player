@@ -129,6 +129,7 @@ fn fs(fragIn: VertexOut) -> @location(0) vec4<f32> {
 
     let texScale = 0.8; 
     var charUV = (fragIn.uv - 0.5) * (1.0/texScale) + 0.5; 
+    charUV.y = 1.0 - charUV.y; // Flip Y-coordinate
 
     // --- UNCONDITIONAL SAMPLING ---
     let r = textureSample(myTexture, mySampler, charUV - shift + displacement).r;
