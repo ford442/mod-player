@@ -252,8 +252,8 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
 
   // Background instance
   // Compute a screen-space AA estimate first (must be in uniform control flow)
-  let p = in.uv - vec2<f32>(0.5, 0.5);
-  let aa = fwidth(p.y) * 0.75;
+  //let p = in.uv - vec2<f32>(0.5, 0.5);
+ // let aa = fwidth(p.y) * 0.75;
 
   if (in.isBg == 1u) {
     return vec4<f32>(bezelColor(in.uv, aa), 1.0);
