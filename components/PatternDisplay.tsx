@@ -362,9 +362,16 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   const padTopChannel = shaderFile.includes('v0.16') || shaderFile.includes('v0.17') || shaderFile.includes('v0.21');
 
   const canvasMetrics = useMemo(() => {
+    // Keep a large square canvas for circular ring shaders so the ring fills
+    // the viewport similar to v0.25 (was the source of the visual size mismatch).
+    if (isCircularLayoutShader(shaderFile)) {
+      return { width: 1280, height: 1280 };
+    }
+
     if (shaderFile.includes('v0.18') || shaderFile.includes('v0.19') || shaderFile.includes('v0.20') || shaderFile.includes('v0.23') || shaderFile.includes('v0.24') || shaderFile.includes('v0.25')) {
       return { width: 1280, height: 1280 };
     }
+
     const rawChannels = Math.max(1, matrix?.numChannels ?? DEFAULT_CHANNELS);
     const displayChannels = padTopChannel ? rawChannels + 1 : rawChannels;
     const rows = Math.max(1, matrix?.numRows ?? DEFAULT_ROWS);
