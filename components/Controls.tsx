@@ -1,5 +1,6 @@
 import React from 'react';
 import { PlayIcon, StopIcon, UploadIcon, LoopIcon } from './icons';
+import type { MediaItem } from '../types';
 
 interface ControlsProps {
   isReady: boolean;
@@ -13,6 +14,10 @@ interface ControlsProps {
   onLoopToggle: () => void;
   volume?: number;
   setVolume?: (v: number) => void;
+  pan?: number;
+  setPan?: (p: number) => void;
+  onRemoteMediaSelect?: (item: MediaItem) => void;
+  remoteMediaList?: MediaItem[];
 }
 
 export const Controls: React.FC<ControlsProps> = ({
@@ -27,6 +32,10 @@ export const Controls: React.FC<ControlsProps> = ({
   onLoopToggle,
   volume,
   setVolume,
+  pan,
+  setPan,
+  onRemoteMediaSelect,
+  remoteMediaList = [],
 }) => {
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -67,6 +76,34 @@ export const Controls: React.FC<ControlsProps> = ({
         />
       </div>
 
+      {/* NEW: Remote Media Dropdown */}
+      <div className="flex items-center gap-2">
+        <label className="text-sm text-gray-400 flex items-center gap-2">
+          <span className="hidden md:inline">Server Media:</span>
+          <select 
+            className="bg-gray-700 text-white text-sm px-2 py-1 rounded border border-gray-600 focus:border-blue-500 outline-none"
+            onChange={(e) => {
+              const selectedId = e.target.value;
+              const item = remoteMediaList.find(m => m.id === selectedId);
+              if (item && onRemoteMediaSelect) {
+                onRemoteMediaSelect(item);
+                // Reset select if desired, or keep selected
+                e.target.value = ""; 
+              }
+            }}
+            defaultValue=""
+          >
+            <option value="" disabled>Select File...</option>
+            {remoteMediaList.map(item => (
+              <option key={item.id} value={item.id}>
+                {item.fileName}
+              </option>
+            ))}
+          </select>
+        </label>
+        {/* Optional: Refresh button */}
+      </div>
+
       <div className="flex gap-4">
         <button
           id="play-button"
@@ -104,7 +141,7 @@ export const Controls: React.FC<ControlsProps> = ({
 
       <div className="flex items-center gap-4 text-gray-300">
         <label className="flex items-center gap-2 text-sm">
-          Volume
+          Vol
           <input
             type="range"
             min={0}
@@ -112,7 +149,19 @@ export const Controls: React.FC<ControlsProps> = ({
             step={0.01}
             value={volume ?? 1}
             onChange={e => setVolume && setVolume(Number(e.target.value))}
-            className="w-24 h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer"
+            className="w-20 h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer"
+          />
+        </label>
+        <label className="flex items-center gap-2 text-sm">
+          Pan
+          <input
+            type="range"
+            min={-1}
+            max={1}
+            step={0.05}
+            value={pan ?? 0}
+            onChange={e => setPan && setPan(Number(e.target.value))}
+            className="w-20 h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer"
           />
         </label>
       </div>
