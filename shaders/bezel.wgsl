@@ -117,7 +117,7 @@ fn fs(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
     let s1 = distance(uv, center + screwPos * vec2<f32>( 1.0, -1.0));
     let s2 = distance(uv, center + screwPos * vec2<f32>(-1.0,  1.0));
     let s3 = distance(uv, center + screwPos * vec2<f32>(-1.0, -1.0));
-    let screwMask = 1.0 - smoothstep(bez.screwRadius, bez.screwRadius + 0.02, vec4<f32>(s0, s1, s2, s3));
+    let screwMask = 1.0 - smoothstep(vec4<f32>(bez.screwRadius), vec4<f32>(bez.screwRadius + 0.02), vec4<f32>(s0, s1, s2, s3));
     let screwSum = screwMask.x + screwMask.y + screwMask.z + screwMask.w;
     color = mix(color, vec3<f32>(0.85, 0.85, 0.85), clamp(screwSum, 0.0, 1.0));
 
