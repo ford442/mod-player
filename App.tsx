@@ -19,6 +19,12 @@ const availableShaders = Object.keys(shaderModules)
   .filter(name => name.startsWith('patternv'))
   .sort();
 
+// Helpful runtime debug when the shader list doesn't update in the running app
+if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
+  // eslint-disable-next-line no-console
+  console.log('availableShaders (runtime):', availableShaders);
+}
+
 export default function App() {
   const [volume, setVolume] = useState(1.0);
 
