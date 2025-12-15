@@ -252,18 +252,18 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
 
   // Background instance
   // Compute a screen-space AA estimate first (must be in uniform control flow)
-  let p = in.uv - vec2<f32>(0.5, 0.5);
-  let aa = fwidth(p.y) * 0.75;
-
-  if (in.isBg == 1u) {
-    return vec4<f32>(bezelColor(in.uv, aa), 1.0);
-  }
-
+  //let p = in.uv - vec2<f32>(0.5, 0.5);
+ // let aa = fwidth(p.y) * 0.75;
   let uv = in.uv;
   let p = uv - 0.5;
 
   // More stable AA under rotation/minification
   let aa = max(fwidth(p.x), fwidth(p.y)) * 0.85;
+
+  if (in.isBg == 1u) {
+    return vec4<f32>(bezelColor(in.uv, aa), 1.0);
+  }
+
 
   // --- Indicator ring (inner channel)
   if (in.channel == 0u) {
