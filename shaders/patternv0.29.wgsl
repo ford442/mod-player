@@ -300,7 +300,9 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
 
   // --- Pattern cells
   let dHousing = sdRoundedBox(p, fc.housingSize * 0.5, 0.08);
-  let housingAA = max(fwidth(dHousing), aa);
+  // Avoid derivative-based fwidth on computed distances within non-uniform
+  // control flow; fallback to the screen-space AA estimate 'aa'.
+  let housingAA = aa;
   let housingMask = 1.0 - smoothstep(0.0, housingAA * 2.0, dHousing);
 
   var finalColor = fc.bgColor;
