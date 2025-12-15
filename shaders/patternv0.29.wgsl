@@ -195,7 +195,7 @@ fn getFragmentConstants() -> FragmentConstants {
   return c;
 }
 
-fn bezelColor(uv: vec2<f32>) -> vec3<f32> {
+fn bezelColor(uv: vec2<f32>, aa: f32) -> vec3<f32> {
   let center = vec2<f32>(0.5, 0.5);
   let p = uv - center;
   let minDim = min(uniforms.canvasW, uniforms.canvasH);
@@ -216,7 +216,7 @@ fn bezelColor(uv: vec2<f32>) -> vec3<f32> {
   let dOuter = distCircle - outerR;
   let dInner = distCircle - innerR;
 
-  let aa = fwidth(dOuter) * 1.2;
+  // Use the provided screen-space AA estimate rather than calling fwidth() here.
   let recessMask = 1.0 - smoothstep(0.0, aa, dOuter);
   col = mix(col, col * 0.92, recessMask);
 
@@ -226,8 +226,8 @@ fn bezelColor(uv: vec2<f32>) -> vec3<f32> {
   let lipInner = (1.0 - smoothstep(-thickness * 2.0, 0.0, dOuter)) * smoothstep(-thickness * 6.0, -thickness * 2.0, dOuter);
   col = mix(col, bezelCol, clamp(lipOuter * 0.65 + lipInner * 0.35, 0.0, 1.0));
 
-  // Inner cut darkening
-  let innerMask = 1.0 - smoothstep(0.0, fwidth(dInner) * 1.2, dInner);
+  // Inner cut darkening — use the provided 'aa' for edge width
+  let innerMask = 1.0 - smoothstep(0.0, aa, dInner);
   col = mix(col, col * 0.65, innerMask * 0.85);
 
   // Screws
@@ -251,8 +251,12 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   let fc = getFragmentConstants();
 
   // Background instance
+  // Compute a screen-space AA estimate first (must be in uniform control flow)
+  let p = in.uv - vec2<f32>(0.5, 0.5);
+  let aa = fwidth(p.y) * 0.75;
+
   if (in.isBg == 1u) {
-    return vec4<f32>(bezelColor(in.uv), 1.0);
+    return vec4<f32>(bezelColor(in.uv, aa), 1.0);
   }
 
   let uv = in.uv;
