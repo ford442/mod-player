@@ -236,7 +236,7 @@ fn bezelColor(uv: vec2<f32>) -> vec3<f32> {
   let s1 = distance(uv, center + screwPos * vec2<f32>( 1.0, -1.0));
   let s2 = distance(uv, center + screwPos * vec2<f32>(-1.0,  1.0));
   let s3 = distance(uv, center + screwPos * vec2<f32>(-1.0, -1.0));
-  let screwMask = 1.0 - smoothstep(0.02, 0.04, vec4<f32>(s0, s1, s2, s3));
+  let screwMask = 1.0 - smoothstep(vec4<f32>(0.02), vec4<f32>(0.04), vec4<f32>(s0, s1, s2, s3));
   let screwSum = screwMask.x + screwMask.y + screwMask.z + screwMask.w;
   col = mix(col, vec3<f32>(0.82, 0.82, 0.83), clamp(screwSum, 0.0, 1.0));
 
@@ -300,7 +300,9 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
 
   // --- Pattern cells
   let dHousing = sdRoundedBox(p, fc.housingSize * 0.5, 0.08);
-  let housingAA = max(fwidth(dHousing), aa);
+  // Avoid derivative-based fwidth on computed distances within non-uniform
+  // control flow; fallback to the screen-space AA estimate 'aa'.
+  let housingAA = aa;
   let housingMask = 1.0 - smoothstep(0.0, housingAA * 2.0, dHousing);
 
   var finalColor = fc.bgColor;
