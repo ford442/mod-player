@@ -10,8 +10,31 @@ const DEFAULT_CHANNELS = 8;
 const alignTo = (value: number, alignment: number) => Math.ceil(value / alignment) * alignment;
 const getLayoutType = (shaderFile: string): LayoutType => {
   if (shaderFile === 'patternShaderv0.12.wgsl') return 'texture';
-  if (shaderFile.includes('v0.13') || shaderFile.includes('v0.14') || shaderFile.includes('v0.16') || shaderFile.includes('v0.17') || shaderFile.includes('v0.18') || shaderFile.includes('v0.19') || shaderFile.includes('v0.20') || shaderFile.includes('v0.21') || shaderFile.includes('v0.23') || shaderFile.includes('v0.24') || shaderFile.includes('v0.25')) return 'extended';
+  if (shaderFile.includes('v0.13') || shaderFile.includes('v0.14') || shaderFile.includes('v0.16') || shaderFile.includes('v0.17') || shaderFile.includes('v0.18') || shaderFile.includes('v0.19') || shaderFile.includes('v0.20') || shaderFile.includes('v0.21') || shaderFile.includes('v0.23') || shaderFile.includes('v0.24') || shaderFile.includes('v0.25') || shaderFile.includes('v0.26') || shaderFile.includes('v0.27') || shaderFile.includes('v0.28') || shaderFile.includes('v0.29')) return 'extended';
   return 'simple';
+};
+
+const isSinglePassCompositeShader = (shaderFile: string) => {
+  return shaderFile.includes('v0.29');
+};
+
+const shouldEnableAlphaBlending = (shaderFile: string) => {
+  return shaderFile.includes('v0.28');
+};
+
+const isCircularLayoutShader = (shaderFile: string) => {
+  return shaderFile.includes('v0.25') || shaderFile.includes('v0.26') || shaderFile.includes('v0.27') || shaderFile.includes('v0.29');
+};
+
+const shouldUseBackgroundPass = (shaderFile: string) => {
+  // Some shaders draw their own background in a single pass.
+  return !isSinglePassCompositeShader(shaderFile);
+};
+
+const getBackgroundShaderFile = (shaderFile: string): string => {
+  // Only use the chassis pass when explicitly called.
+  if (shaderFile.includes('v0.27') || shaderFile.includes('v0.28')) return 'chassisv0.1.wgsl';
+  return 'bezel.wgsl';
 };
 
 const createUniformPayload = (
@@ -267,6 +290,10 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   const videoRef = useRef<HTMLVideoElement | HTMLImageElement | null>(null);
   const videoTextureRef = useRef<GPUTexture | null>(null);
   const videoLoopRef = useRef<number>(0);
+  // Bezel pass resources
+  const bezelPipelineRef = useRef<GPURenderPipeline | null>(null);
+  const bezelUniformBufferRef = useRef<GPUBuffer | null>(null);
+  const bezelBindGroupRef = useRef<GPUBindGroup | null>(null);
 
   // Video management
   useEffect(() => {
@@ -418,12 +445,21 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
         {
           view: context.getCurrentTexture().createView(),
           loadOp: 'clear',
-          clearValue: { r: 0, g: 0, b: 0, a: 1 },
+          // Off-white clear to match bezel hardware aesthetic
+          clearValue: { r: 0.98, g: 0.98, b: 0.98, a: 1 },
           storeOp: 'store',
         },
       ],
     });
 
+    // First pass: draw bezel (full-screen)
+    if (bezelPipelineRef.current && bezelBindGroupRef.current) {
+      pass.setPipeline(bezelPipelineRef.current);
+      pass.setBindGroup(0, bezelBindGroupRef.current);
+      pass.draw(6, 1, 0, 0);
+    }
+
+    // Second pass: pattern display
     pass.setPipeline(pipeline);
     pass.setBindGroup(0, bindGroup);
     const numRows = matrix?.numRows ?? DEFAULT_ROWS;
@@ -431,7 +467,15 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     const numChannels = padTopChannel ? rawChannels + 1 : rawChannels;
     const totalInstances = numRows * numChannels;
 
-    if (totalInstances > 0) pass.draw(6, totalInstances, 0, 0);
+    if (totalInstances > 0) {
+      if (isSinglePassCompositeShader(shaderFile)) {
+        // Background instance (firstInstance = totalInstances) then pattern instances.
+        pass.draw(6, 1, 0, totalInstances);
+        pass.draw(6, totalInstances, 0, 0);
+      } else {
+        pass.draw(6, totalInstances, 0, 0);
+      }
+    }
     pass.end();
 
     device.queue.submit([encoder.finish()]);
@@ -590,24 +634,89 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
 
         let entryVert = 'vs';
         let entryFrag = 'fs';
+
+        const enableAlphaBlend = shouldEnableAlphaBlending(shaderFile);
+        const targets: GPUColorTargetState[] = [
+          {
+            format,
+            ...(enableAlphaBlend
+              ? {
+                  blend: {
+                    color: { srcFactor: 'src-alpha', dstFactor: 'one-minus-src-alpha', operation: 'add' },
+                    alpha: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha', operation: 'add' },
+                  },
+                }
+              : {}),
+          },
+        ];
         try {
           pipelineRef.current = device.createRenderPipeline({
             layout: device.createPipelineLayout({ bindGroupLayouts: [bindGroupLayout] }),
             vertex: { module, entryPoint: entryVert },
-            fragment: { module, entryPoint: entryFrag, targets: [{ format }] },
+            fragment: { module, entryPoint: entryFrag, targets },
             primitive: { topology: 'triangle-list' },
           });
         } catch {
           pipelineRef.current = device.createRenderPipeline({
             layout: device.createPipelineLayout({ bindGroupLayouts: [bindGroupLayout] }),
             vertex: { module, entryPoint: 'vertex_main' },
-            fragment: { module, entryPoint: 'fragment_main', targets: [{ format }] },
+            fragment: { module, entryPoint: 'fragment_main', targets },
             primitive: { topology: 'triangle-list' },
           });
         }
 
         const uniformSize = layoutType === 'simple' ? 32 : 64;
         const uniformBuffer = device.createBuffer({ size: alignTo(uniformSize, 256), usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+
+        // --- Background pass (fullscreen bezel/chassis)
+        if (shouldUseBackgroundPass(shaderFile)) {
+          try {
+            const backgroundShaderFile = getBackgroundShaderFile(shaderFile);
+            const backgroundSource = await fetch(`./shaders/${backgroundShaderFile}`).then(res => res.text());
+            const bezelModule = device.createShaderModule({ code: backgroundSource });
+            if ('getCompilationInfo' in bezelModule) {
+              bezelModule
+                .getCompilationInfo()
+                .then(info => {
+                  info.messages.forEach(msg => {
+                    const log = msg.type === 'error' ? console.error : console.warn;
+                    log(`[WGSL bg ${backgroundShaderFile} ${msg.type}]: ${msg.lineNum}:${msg.linePos} ${msg.message}`);
+                  });
+                })
+                .catch(() => {});
+            }
+
+            const bezelBindLayout = device.createBindGroupLayout({
+              entries: [{ binding: 0, visibility: GPUShaderStage.FRAGMENT, buffer: { type: 'uniform' } }],
+            });
+
+            try {
+              bezelPipelineRef.current = device.createRenderPipeline({
+                layout: device.createPipelineLayout({ bindGroupLayouts: [bezelBindLayout] }),
+                vertex: { module: bezelModule, entryPoint: 'vs' },
+                fragment: { module: bezelModule, entryPoint: 'fs', targets: [{ format }] },
+                primitive: { topology: 'triangle-list' },
+              });
+            } catch (be) {
+              console.warn('Failed to create bezel pipeline', be);
+            }
+
+            bezelUniformBufferRef.current = device.createBuffer({ size: alignTo(64, 256), usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+            bezelBindGroupRef.current = device.createBindGroup({
+              layout: bezelBindLayout,
+              entries: [{ binding: 0, resource: { buffer: bezelUniformBufferRef.current } }],
+            });
+          } catch (e) {
+            console.warn('Failed to initialize bezel shader', e);
+          }
+        } else {
+          bezelPipelineRef.current = null;
+          bezelBindGroupRef.current = null;
+          if (bezelUniformBufferRef.current) {
+            bezelUniformBufferRef.current.destroy();
+            bezelUniformBufferRef.current = null;
+          }
+        }
 
         deviceRef.current = device;
         contextRef.current = context;
@@ -651,6 +760,10 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
       setGpuReady(false);
       bindGroupRef.current = null;
       pipelineRef.current = null;
+      // Destroy bezel resources if present
+      if (bezelUniformBufferRef.current) { bezelUniformBufferRef.current.destroy(); bezelUniformBufferRef.current = null; }
+      bezelBindGroupRef.current = null;
+      bezelPipelineRef.current = null;
       cellsBufferRef.current = null;
       uniformBufferRef.current = null;
       rowFlagsBufferRef.current = null;
@@ -747,6 +860,33 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
         isModuleLoaded
       });
       device.queue.writeBuffer(uniformBuffer, 0, uniformPayload);
+    }
+
+    // Update bezel uniforms (canvas size, colors, bezel width, screw radius)
+    if (bezelUniformBufferRef.current) {
+      const buf = new Float32Array(16);
+      buf[0] = canvasMetrics.width;
+      buf[1] = canvasMetrics.height;
+          const minDim = Math.min(canvasMetrics.width, canvasMetrics.height);
+          const circularLayout = isCircularLayoutShader(shaderFile);
+
+          // bezel width in pixels
+          buf[2] = minDim * (circularLayout ? 0.05 : 0.07);
+      // surface color (off-white)
+      buf[3] = 0.98; buf[4] = 0.98; buf[5] = 0.98;
+      // bezel color (slightly darker)
+      buf[6] = 0.92; buf[7] = 0.92; buf[8] = 0.93;
+      // screw radius (normalized)
+      buf[9] = 0.02;
+
+          // Recess shaping: circle for circular shaders, rounded-rect for all non-circular
+          buf[10] = circularLayout ? 0.0 : 1.0; // recessKind
+          buf[11] = circularLayout ? 1.0 : 1.25; // recessOuterScale (bigger so it doesn't "cut through" wide grids)
+          buf[12] = circularLayout ? 1.0 : 0.0; // recessInnerScale (no inner hole for grids)
+          buf[13] = 0.10; // recessCorner (used for rounded-rect)
+          buf[14] = 0.0;
+          buf[15] = 0.0;
+      device.queue.writeBuffer(bezelUniformBufferRef.current, 0, buf.buffer, buf.byteOffset, buf.byteLength);
     }
 
     render();

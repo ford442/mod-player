@@ -13,7 +13,11 @@ import { fetchRemoteMedia } from './utils/remoteMedia';
 
 // Dynamically load all WGSL shader files
 const shaderModules = import.meta.glob('./shaders/*.wgsl', { as: 'url' });
-const availableShaders = Object.keys(shaderModules).map(path => path.replace('./shaders/', ''));
+const availableShaders = Object.keys(shaderModules)
+  .map(path => path.replace('./shaders/', ''))
+  // Hide non-pattern helper shaders (bezel/chassis/etc)
+  .filter(name => name.startsWith('patternv'))
+  .sort();
 
 export default function App() {
   const [volume, setVolume] = useState(1.0);
