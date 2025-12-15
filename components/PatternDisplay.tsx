@@ -380,6 +380,13 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
       : { width: Math.ceil(displayChannels * cellWidth), height: Math.ceil(rows * cellHeight) };
   }, [matrix, cellWidth, cellHeight, isHorizontal, padTopChannel, shaderFile]);
 
+  // Dev instrumentation: log canvas size computed for each shader so we can
+  // verify that circular shaders get a large square canvas at runtime.
+  if (typeof window !== 'undefined' && import.meta.env.MODE !== 'production') {
+    // eslint-disable-next-line no-console
+    console.log('canvasMetrics:', { shader: shaderFile, canvasMetrics });
+  }
+
   // Local animation loop when not playing or not loaded
   useEffect(() => {
     if (isModuleLoaded) {
