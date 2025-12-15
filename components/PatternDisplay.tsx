@@ -530,7 +530,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     let bitmap: ImageBitmap;
     try {
       const img = new Image();
-      img.src = 'unlit-button.png';
+      img.src = 'https://test.1ink.us/xm-player/unlit-button.png';
       await img.decode();
       bitmap = await createImageBitmap(img);
     } catch (e) {
