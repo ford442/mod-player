@@ -20,7 +20,7 @@ const availableShaders = Object.keys(shaderModules)
   .sort();
 
 // Helpful runtime debug when the shader list doesn't update in the running app
-if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
+if (typeof window !== 'undefined' && import.meta.env.MODE !== 'production') {
   // eslint-disable-next-line no-console
   console.log('availableShaders (runtime):', availableShaders);
 }
