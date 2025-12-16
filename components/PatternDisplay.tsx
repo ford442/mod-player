@@ -23,7 +23,10 @@ const shouldEnableAlphaBlending = (shaderFile: string) => {
 };
 
 const isCircularLayoutShader = (shaderFile: string) => {
-  return shaderFile.includes('v0.25') || shaderFile.includes('v0.26') || shaderFile.includes('v0.27') || shaderFile.includes('v0.29');
+  // IMPORTANT: v0.26, v0.27, v0.29 are NOT circular despite sharing similar logic previously.
+  // They are hardware chassis shaders that require 1024x1008.
+  // Only v0.25 is circular in this set.
+  return shaderFile.includes('v0.25');
 };
 
 const shouldUseBackgroundPass = (shaderFile: string) => {
@@ -363,6 +366,11 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   const padTopChannel = shaderFile.includes('v0.16') || shaderFile.includes('v0.17') || shaderFile.includes('v0.21');
 
   const canvasMetrics = useMemo(() => {
+    // Specific size override for hardware chassis shaders (v0.26, v0.27, v0.28, v0.29)
+    if (shaderFile.includes('v0.26') || shaderFile.includes('v0.27') || shaderFile.includes('v0.28') || shaderFile.includes('v0.29')) {
+      return { width: 1024, height: 1008 };
+    }
+
     // Keep a large square canvas for circular ring shaders so the ring fills
     // the viewport similar to v0.25 (was the source of the visual size mismatch).
     if (isCircularLayoutShader(shaderFile)) {
