@@ -219,11 +219,14 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   let btnScale = 1.25;
   let btnUV = (in.uv - 0.5) * btnScale + 0.5;
 
-  var btnColor = vec3<f32>(0.0);
+  // Sample unconditionally to satisfy uniform control flow requirements, then
+  // only use the sampled color when inside the button area.
+  let sampleUV = clamp(btnUV, vec2<f32>(0.0), vec2<f32>(1.0));
+  let sampledBtn = textureSample(buttonsTexture, buttonsSampler, sampleUV).rgb;
+  var btnColor = sampledBtn;
   var inButton = 0.0;
 
   if (btnUV.x > 0.0 && btnUV.x < 1.0 && btnUV.y > 0.0 && btnUV.y < 1.0) {
-      btnColor = textureSample(buttonsTexture, buttonsSampler, btnUV).rgb;
       inButton = 1.0;
   }
 
@@ -257,7 +260,6 @@ let mainButtonYMask  = smoothstep(0.23, 0.24, y) - smoothstep(0.82, 0.83, y);
   let mainButtonMask = mainButtonYMask * mainButtonXMask;
 
   let bottomLightMask = (smoothstep(0.90, 0.91, y) - smoothstep(0.95, 0.96, y)) * indicatorXMask;
-          let mainButtonMask = mainButtonYMask * mainButtonXMask;
 
           var glow = vec3<f32>(0.0);
 
