@@ -22,6 +22,8 @@ struct BezelUniforms {
 };
 
 @group(0) @binding(0) var<uniform> bez: BezelUniforms;
+@group(0) @binding(1) var bezelSampler: sampler;
+@group(0) @binding(2) var bezelTexture: texture_2d<f32>;
 
 fn hash(p: vec2<f32>) -> f32 {
   return fract(sin(dot(p, vec2<f32>(12.9898, 78.233))) * 43758.5453);
@@ -100,6 +102,13 @@ fn fs(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
   // Subtle grain
   let noise = hash(uv * vec2<f32>(bez.canvasW, bez.canvasH));
   color -= noise * 0.02;
+
+  // Sample bezel texture and prefer it when non-transparent
+  let texSample = textureSampleLevel(bezelTexture, bezelSampler, uv, 0.0);
+  let luminance = dot(texSample.rgb, vec3<f32>(0.299, 0.587, 0.114));
+  if (texSample.a > 0.01 && luminance < 0.98) {
+      color = texSample.rgb;
+  }
 
   return vec4<f32>(color, 1.0);
 }

@@ -294,6 +294,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   const bezelPipelineRef = useRef<GPURenderPipeline | null>(null);
   const bezelUniformBufferRef = useRef<GPUBuffer | null>(null);
   const bezelBindGroupRef = useRef<GPUBindGroup | null>(null);
+  const bezelTextureResourcesRef = useRef<{ sampler: GPUSampler; view: GPUTextureView } | null>(null);
 
   // Video management
   useEffect(() => {
@@ -570,6 +571,38 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     textureResourcesRef.current = { sampler, view: texture.createView() };
   };
 
+  const loadBezelTexture = async (device: GPUDevice) => {
+    if (bezelTextureResourcesRef.current) return;
+
+    let bitmap: ImageBitmap;
+    try {
+      const img = new Image();
+      img.src = 'bezel.png';
+      await img.decode();
+      bitmap = await createImageBitmap(img);
+    } catch (e) {
+      console.warn('Failed to load bezel.png, using fallback.', e);
+      const canvas = document.createElement('canvas');
+      canvas.width = 1;
+      canvas.height = 1;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.fillStyle = 'rgba(0,0,0,0)';
+        ctx.fillRect(0, 0, 1, 1);
+      }
+      bitmap = await createImageBitmap(canvas);
+    }
+
+    const texture = device.createTexture({
+      size: [bitmap.width, bitmap.height, 1],
+      format: 'rgba8unorm',
+      usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT,
+    });
+    device.queue.copyExternalImageToTexture({ source: bitmap }, { texture }, [bitmap.width, bitmap.height, 1]);
+    const sampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear' });
+    bezelTextureResourcesRef.current = { sampler, view: texture.createView() };
+  };
+
   // GPU initialization
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -701,7 +734,11 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
             }
 
             const bezelBindLayout = device.createBindGroupLayout({
-              entries: [{ binding: 0, visibility: GPUShaderStage.FRAGMENT, buffer: { type: 'uniform' } }],
+              entries: [
+                { binding: 0, visibility: GPUShaderStage.FRAGMENT, buffer: { type: 'uniform' } },
+                { binding: 1, visibility: GPUShaderStage.FRAGMENT, sampler: { type: 'filtering' } },
+                { binding: 2, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float' } },
+              ],
             });
 
             try {
@@ -716,9 +753,17 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
             }
 
             bezelUniformBufferRef.current = device.createBuffer({ size: alignTo(64, 256), usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+            
+            // Load bezel texture
+            await loadBezelTexture(device);
+            
             bezelBindGroupRef.current = device.createBindGroup({
               layout: bezelBindLayout,
-              entries: [{ binding: 0, resource: { buffer: bezelUniformBufferRef.current } }],
+              entries: [
+                { binding: 0, resource: { buffer: bezelUniformBufferRef.current } },
+                { binding: 1, resource: bezelTextureResourcesRef.current!.sampler },
+                { binding: 2, resource: bezelTextureResourcesRef.current!.view },
+              ],
             });
           } catch (e) {
             console.warn('Failed to initialize bezel shader', e);
