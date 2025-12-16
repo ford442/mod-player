@@ -855,7 +855,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
       deviceRef.current = null;
       contextRef.current = null;
     };
-  }, [matrix, shaderFile]);
+  }, [shaderFile]); // REMOVED matrix from dependencies to prevent re-init flash
 
   // 1. Matrix & Cell Buffer Management
   useEffect(() => {
