@@ -15,7 +15,7 @@ const getLayoutType = (shaderFile: string): LayoutType => {
 };
 
 const isSinglePassCompositeShader = (shaderFile: string) => {
-  return shaderFile.includes('v0.29');
+  return shaderFile.includes('v0.29') || shaderFile.includes('v0.26');
 };
 
 const shouldEnableAlphaBlending = (shaderFile: string) => {
@@ -26,7 +26,7 @@ const isCircularLayoutShader = (shaderFile: string) => {
   // IMPORTANT: v0.26, v0.27, v0.29 are NOT circular despite sharing similar logic previously.
   // They are hardware chassis shaders that require 1024x1008.
   // Only v0.25 is circular in this set.
-  return shaderFile.includes('v0.25');
+  return shaderFile.includes('v0.25') || shaderFile.includes('v0.26');
 };
 
 const shouldUseBackgroundPass = (shaderFile: string) => {
@@ -350,10 +350,8 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
         vid.pause();
         vid.src = "";
         videoRef.current = null;
-        if (videoTextureRef.current) {
-          videoTextureRef.current.destroy();
-          videoTextureRef.current = null;
-        }
+        // NOTE: We do NOT destroy videoTextureRef here anymore. 
+        // It is owned by the GPU lifecycle and will be destroyed when the GPU device is cleaned up.
       };
     }
   }, [shaderFile, externalVideoSource]);
@@ -388,13 +386,6 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
       ? { width: Math.ceil(rows * cellWidth), height: Math.ceil(displayChannels * cellHeight) }
       : { width: Math.ceil(displayChannels * cellWidth), height: Math.ceil(rows * cellHeight) };
   }, [matrix, cellWidth, cellHeight, isHorizontal, padTopChannel, shaderFile]);
-
-  // Dev instrumentation: log canvas size computed for each shader so we can
-  // verify that circular shaders get a large square canvas at runtime.
-  if (typeof window !== 'undefined' && import.meta.env.MODE !== 'production') {
-    // eslint-disable-next-line no-console
-    console.log('canvasMetrics:', { shader: shaderFile, canvasMetrics });
-  }
 
   // Local animation loop when not playing or not loaded
   useEffect(() => {
@@ -437,7 +428,10 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
         sourceReady = true;
       }
 
+      // Check validation constraints for copyExternalImageToTexture
+      // Source width/height must be > 0
       if (sourceReady && sourceWidth > 0 && sourceHeight > 0) {
+        // Recreate texture if size changed or missing
         if (!videoTextureRef.current || videoTextureRef.current.width !== sourceWidth || videoTextureRef.current.height !== sourceHeight) {
           videoTextureRef.current?.destroy();
           const texture = device.createTexture({
@@ -450,14 +444,18 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
           textureResourcesRef.current = { sampler, view: texture.createView() };
           refreshBindGroup(device);
         }
+        
         try {
-          device.queue.copyExternalImageToTexture(
-            { source },
-            { texture: videoTextureRef.current },
-            [sourceWidth, sourceHeight, 1]
-          );
+          if (videoTextureRef.current) {
+            device.queue.copyExternalImageToTexture(
+              { source },
+              { texture: videoTextureRef.current },
+              [sourceWidth, sourceHeight, 1]
+            );
+          }
         } catch (e) {
           // Ignore transient errors when video frame is not yet ready for GPU import
+          // This prevents crashes like "Browser fails extracting valid resource"
         }
       }
     }
@@ -548,6 +546,8 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   };
 
   const ensureButtonTexture = async (device: GPUDevice) => {
+    // If we have a texture but it matches the current device, keep it.
+    // If it's null, create it.
     if (textureResourcesRef.current) return;
 
     let bitmap: ImageBitmap;
@@ -634,6 +634,11 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
         const format = navigator.gpu.getPreferredCanvasFormat();
         context.configure({ device, format });
 
+        // IMPORTANT: Clear old refs that might hold resources from a previous device
+        // to avoid "Sampler associated with [Device] cannot be used with [Device]" errors.
+        textureResourcesRef.current = null;
+        bezelTextureResourcesRef.current = null;
+
         const shaderSource = await fetch(`./shaders/${shaderFile}`).then(res => res.text());
         if (cancelled) return;
         const module = device.createShaderModule({ code: shaderSource });
@@ -655,7 +660,6 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
           channelsBufferRef.current?.destroy();
           channelsBufferRef.current = null;
         }
-        textureResourcesRef.current = null;
 
         let bindGroupLayout: GPUBindGroupLayout;
         if (layoutType === 'texture') {
@@ -831,12 +835,21 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
       if (bezelUniformBufferRef.current) { bezelUniformBufferRef.current.destroy(); bezelUniformBufferRef.current = null; }
       bezelBindGroupRef.current = null;
       bezelPipelineRef.current = null;
+      // IMPORTANT: Clear bezel texture refs so next init doesn't reuse old device sampler
+      bezelTextureResourcesRef.current = null; 
+
       cellsBufferRef.current = null;
       uniformBufferRef.current = null;
       rowFlagsBufferRef.current = null;
       channelsBufferRef.current = null;
       textureResourcesRef.current = null;
-      videoTextureRef.current = null;
+      
+      // Cleanup video texture which is owned by this device lifecycle
+      if (videoTextureRef.current) {
+        videoTextureRef.current.destroy();
+        videoTextureRef.current = null;
+      }
+
       deviceRef.current = null;
       contextRef.current = null;
     };
