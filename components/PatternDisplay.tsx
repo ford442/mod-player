@@ -448,7 +448,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
         try {
           if (videoTextureRef.current) {
             device.queue.copyExternalImageToTexture(
-              { source },
+              { source, flipY: true }, // Flip Y-axis to fix upside-down issue
               { texture: videoTextureRef.current },
               [sourceWidth, sourceHeight, 1]
             );
@@ -574,7 +574,8 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
       format: 'rgba8unorm',
       usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT,
     });
-    device.queue.copyExternalImageToTexture({ source: bitmap }, { texture }, [bitmap.width, bitmap.height, 1]);
+    // Flip Y-axis to fix upside-down issue
+    device.queue.copyExternalImageToTexture({ source: bitmap, flipY: true }, { texture }, [bitmap.width, bitmap.height, 1]);
     const sampler = device.createSampler({ magFilter: 'nearest', minFilter: 'nearest' });
     textureResourcesRef.current = { sampler, view: texture.createView() };
   };
@@ -606,7 +607,8 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
       format: 'rgba8unorm',
       usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT,
     });
-    device.queue.copyExternalImageToTexture({ source: bitmap }, { texture }, [bitmap.width, bitmap.height, 1]);
+    // Flip Y-axis to fix upside-down issue
+    device.queue.copyExternalImageToTexture({ source: bitmap, flipY: true }, { texture }, [bitmap.width, bitmap.height, 1]);
     const sampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear' });
     bezelTextureResourcesRef.current = { sampler, view: texture.createView() };
   };
