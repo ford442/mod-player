@@ -67,7 +67,7 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
   // 2. Calculate Angle (Row Index)
   // 128 Steps total. Start at -PI/2 (Top of screen)
   // Clockwise rotation
-  let totalSteps = 128.0;
+  let totalSteps = f32(uniforms.numRows);
   let anglePerStep = 6.2831853 / totalSteps;
   let theta = -1.570796 + f32(row % 128u) * anglePerStep;
 
