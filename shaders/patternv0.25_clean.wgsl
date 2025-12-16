@@ -64,7 +64,7 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
   let radius = minRadius + f32(channel) * ringDepth;
 
   // 2. Calculate Angle (Row Index)
-  let totalSteps = 128.0;
+  let totalSteps = f32(uniforms.numRows);
   let anglePerStep = 6.2831853 / totalSteps;
   let theta = -1.570796 + f32(row % 128u) * anglePerStep;
 
