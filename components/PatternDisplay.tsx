@@ -4,8 +4,8 @@ import type { ChannelShadowState, PatternMatrix } from '../types';
 const EMPTY_CHANNEL: ChannelShadowState = { volume: 0, pan: 0, freq: 0, trigger: 0, noteAge: 0, activeEffect: 0, effectValue: 0, isMuted: 0 };
 type LayoutType = 'simple' | 'texture' | 'extended';
 
-const DEFAULT_ROWS = 64;
-const DEFAULT_CHANNELS = 8;
+const DEFAULT_ROWS = 128;
+const DEFAULT_CHANNELS = 32;
 
 const alignTo = (value: number, alignment: number) => Math.ceil(value / alignment) * alignment;
 const getLayoutType = (shaderFile: string): LayoutType => {
@@ -629,7 +629,61 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
       try {
         const adapter = await navigator.gpu.requestAdapter();
         if (!adapter || cancelled) { setWebgpuAvailable(false); return; }
-        const device = await adapter.requestDevice();
+
+  //  add WebGPU extensions
+        const requiredFeatures: GPUFeatureName[] = [];
+        if (adapter.features.has('float32-filterable')) {
+            requiredFeatures.push('float32-filterable');
+        } else {
+            console.log("Device does not support 'float32-filterable', using two-sampler workaround.");
+        }
+        if (adapter.features.has('float32-blendable')) {
+            requiredFeatures.push('float32-blendable');
+        } else {
+            console.log("Device does not support 'float32-blendable'.");
+        }
+
+                if (adapter.features.has('clip-distances')) {
+            requiredFeatures.push('clip-distances');
+        } else {
+            console.log("Device does not support 'clip-distances'.");
+        }
+
+                if (adapter.features.has('depth32float-stencil8')) {
+            requiredFeatures.push('depth32float-stencil8');
+        } else {
+            console.log("Device does not support 'depth32float-stencil8'.");
+        }
+
+                if (adapter.features.has('dual-source-blending')) {
+            requiredFeatures.push('dual-source-blending');
+        } else {
+            console.log("Device does not support 'dual-source-blending'.");
+        }
+
+                if (adapter.features.has('subgroups')) {
+            requiredFeatures.push('subgroups');
+        } else {
+            console.log("Device does not support 'subgroups'.");
+        }
+
+                if (adapter.features.has('texture-component-swizzle')) {
+            requiredFeatures.push('texture-component-swizzle');
+        } else {
+            console.log("Device does not support 'texture-component-swizzle'.");
+        }
+
+                if (adapter.features.has('shader-f16')) {
+            requiredFeatures.push('shader-f16');
+        } else {
+            console.log("Device does not support 'shader-f16'.");
+        }
+
+        
+        const device = await adapter.requestDevice({
+            requiredFeatures,
+        });
+        
         if (!device || cancelled) { setWebgpuAvailable(false); return; }
 
         const context = canvas.getContext('webgpu') as GPUCanvasContext;

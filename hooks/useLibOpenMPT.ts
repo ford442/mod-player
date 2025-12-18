@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import type { LibOpenMPT, ModuleInfo, PatternMatrix, PatternCell } from '../types';
 
 const SAMPLE_RATE = 44100;
-const BUFFER_SIZE = 4096;
+const BUFFER_SIZE = 1024;
 const INITIAL_STATUS = "Loading library...";
 const INITIAL_MODULE_INFO: ModuleInfo = { title: '...', order: 0, row: 0, bpm: 0, numChannels: 0 };
 const DEFAULT_MODULE_URL = 'https://raw.githubusercontent.com/deskjet/chiptunes/master/mods/4mat/4-mat_-_space_debris.mod';
