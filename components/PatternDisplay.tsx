@@ -436,7 +436,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
           videoTextureRef.current?.destroy();
           const texture = device.createTexture({
             size: [sourceWidth, sourceHeight, 1],
-            format: 'rgba8unorm',
+            format: preferredImageFormat(device),
             usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT
           });
           videoTextureRef.current = texture;
@@ -530,19 +530,31 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     bindGroupRef.current = device.createBindGroup({ layout, entries });
   };
 
+  const preferredImageFormat = (device: GPUDevice) => {
+    // Prefer float32 images when the device advertises support for float filtering.
+    return device.features.has('float32-filterable') ? ('rgba32float' as GPUTextureFormat) : ('rgba8unorm' as GPUTextureFormat);
+  };
+
   const ensureVideoPlaceholder = (device: GPUDevice) => {
     if (videoTextureRef.current) return;
+    const fmt = preferredImageFormat(device);
     const texture = device.createTexture({
       size: [1, 1, 1],
-      format: 'rgba8unorm',
+      format: fmt,
       usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT,
     });
     // Fill with gray
-    const data = new Uint8Array([100, 100, 100, 255]);
-    device.queue.writeTexture({ texture }, data, { bytesPerRow: 4 }, { width: 1, height: 1 });
+    if (fmt === 'rgba32float') {
+      const data = new Float32Array([100.0/255.0, 100.0/255.0, 100.0/255.0, 1.0]);
+      // bytesPerRow = 4 channels * 4 bytes = 16
+      device.queue.writeTexture({ texture }, data, { bytesPerRow: 16 }, { width: 1, height: 1 });
+    } else {
+      const data = new Uint8Array([100, 100, 100, 255]);
+      device.queue.writeTexture({ texture }, data, { bytesPerRow: 4 }, { width: 1, height: 1 });
+    }
     videoTextureRef.current = texture;
     const sampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear' });
-    textureResourcesRef.current = { sampler, view: texture.createView() };
+    textureResourcesRef.current = { sampler, view: texture.createView() }; 
   };
 
   const ensureButtonTexture = async (device: GPUDevice) => {
@@ -571,13 +583,13 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
 
     const texture = device.createTexture({
       size: [bitmap.width, bitmap.height, 1],
-      format: 'rgba8unorm',
+      format: preferredImageFormat(device),
       usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT,
     });
     // Flip Y-axis to fix upside-down issue
     device.queue.copyExternalImageToTexture({ source: bitmap, flipY: true }, { texture }, [bitmap.width, bitmap.height, 1]);
     const sampler = device.createSampler({ magFilter: 'nearest', minFilter: 'nearest' });
-    textureResourcesRef.current = { sampler, view: texture.createView() };
+    textureResourcesRef.current = { sampler, view: texture.createView() }; 
   };
 
   const loadBezelTexture = async (device: GPUDevice) => {
@@ -604,7 +616,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
 
     const texture = device.createTexture({
       size: [bitmap.width, bitmap.height, 1],
-      format: 'rgba8unorm',
+      format: preferredImageFormat(device),
       usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT,
     });
     // Flip Y-axis to fix upside-down issue
