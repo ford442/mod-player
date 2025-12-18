@@ -171,6 +171,9 @@ fn getFragmentConstants() -> FragmentConstants {
 
 // --- 2. CHROME & GLASS RENDERING (Depends on sdRoundedBox) ---
 
+// Physical glass + bezel model (lens dome, normals, diffuse+specular)
+// Also includes a small metal bezel pass when outside the lens radius.
+// The function expects `uv` in centered coordinates (e.g., -0.5..0.5) and `size` in UV units.
 fn drawChromeIndicator(
     uv: vec2<f32>,
     size: vec2<f32>,
@@ -178,49 +181,89 @@ fn drawChromeIndicator(
     isOn: bool,
     aa: f32
 ) -> vec4<f32> {
-    // 1. Shapes
-    let r = min(size.x, size.y) * 0.45;
-    let dBase = sdRoundedBox(uv, size * 0.5, r); // Now this will work!
+    // Convert from centered coordinates (-0.5..0.5) into 0..1 quad space
+    let uv01 = (uv / size) + vec2<f32>(0.5);
 
-    // Bezel Thickness
-    let bezelW = 0.035;
-    let dBezel = dBase + bezelW;
+    // Geometry radii (normalized in 0..1 space where 0 = center, 1 = outer)
+    let lensR = 0.7;   // inner dome radius
+    let bezelR = 0.9;  // bezel outer radius
+    let center = vec2<f32>(0.5, 0.5);
 
-    // 2. Chrome Bezel Rendering
-    let angle = atan2(uv.y, uv.x);
-    let metalReflect = 0.5 + 0.5 * sin(angle * 8.0 + uv.x * 20.0);
-    let ridge = smoothstep(aa, -aa, abs(dBezel + bezelW * 0.5) - bezelW * 0.3);
+    // Normalized radial distance (0 at center, ~1 at edge of quad)
+    let dist = length(uv01 - center) * 2.0;
 
-    let chromeCol = vec3(0.6, 0.65, 0.70) * metalReflect + vec3(0.4) * ridge;
+    var col = vec3<f32>(0.0);
+    var alpha = 0.0;
 
-    // 3. Glass Lens Rendering
-    let dLens = dBase - 0.005;
-    var glassCol = vec3(0.05, 0.06, 0.08);
+    if (dist < bezelR) {
+        if (dist > lensR) {
+            // BEZEL (metal)
+            // subtle angular specular to give a machined rim
+            let angle = atan2(uv01.y - center.y, uv01.x - center.x);
+            let rim = 0.2 + 0.8 * abs(sin(angle * 10.0));
+            col = vec3<f32>(0.25, 0.28, 0.30) * rim; // dark metal
+            alpha = 1.0;
+        } else {
+            // LENS (dome)
+            let lensNormR = dist / lensR;
+            // Dome height (z) for a unit hemisphere
+            let z = sqrt(max(0.0, 1.0 - lensNormR * lensNormR));
 
-    if (isOn) {
-        let glow = exp(-max(dLens, 0.0) * 12.0);
-        glassCol = mix(glassCol, color, 0.8);
-        glassCol += color * glow * 1.5;
-        glassCol += vec3(1.0) * smoothstep(0.08, 0.0, length(uv * vec2(1.0, 2.0))) * 0.6;
+            // Reconstruct normal in local lens space (scale xy by lensR)
+            let localXY = (uv01 - center) / lensR;
+            let normal = normalize(vec3<f32>(localXY.x, localXY.y, z));
+
+            // Lighting
+            let lightDir = normalize(vec3<f32>(-0.5, 0.5, 1.0));
+            let diffuse = max(0.0, dot(normal, lightDir));
+            let reflectDir = reflect(-lightDir, normal);
+            let specular = pow(max(0.0, dot(reflectDir, vec3<f32>(0.0, 0.0, 1.0))), 10.0);
+
+            // Combine
+            let baseColor = color;
+            col = baseColor * (0.5 + 0.8 * diffuse);
+            col += vec3<f32>(1.0) * specular * 0.5;
+
+            // Soft bloom inside the lens
+            let rimGlow = exp(-pow(lensNormR, 2.0) * 6.0);
+            col += baseColor * rimGlow * 0.25;
+
+            alpha = 1.0;
+        }
+    } else {
+        // Outside bezel: transparent / discard-like behavior
+        return vec4<f32>(vec3<f32>(0.0), 0.0);
     }
 
-    // 4. Specular Highlight
-    let highlightPos = uv - vec2(-size.x * 0.2, -size.y * 0.2);
-    let hDist = length(highlightPos) - (min(size.x, size.y) * 0.12);
-    let highlight = smoothstep(aa * 2.0, -aa, hDist);
-    glassCol = mix(glassCol, vec3(0.95), highlight * 0.7);
+    // Soft vignette near bezel to blend into housing
+    let vignette = smoothstep(bezelR * 0.95, bezelR, dist);
+    col = mix(col * (1.0 - 0.08 * vignette), vec3<f32>(0.02), vignette);
 
-    // 5. Compositing
-    let bezelMask = smoothstep(aa, -aa, dBezel);
-    let lensMask = smoothstep(aa, -aa, dLens);
-
-    var outCol = vec3(0.0);
-    outCol = mix(outCol, chromeCol, bezelMask);
-    outCol = mix(outCol, vec3(0.02), lensMask);
-    outCol = mix(outCol, glassCol, smoothstep(aa, -aa, dBase));
-
-    return vec4(outCol, bezelMask);
+    return vec4<f32>(col, alpha);
 }
+
+// ---------------------------
+// WebGL2 Vertex Shader Snippet (GLSL adaptation):
+// Placed here for reference: adapt "Energy Trail" maths to your WebGL2 vertex shader.
+//
+// // In your WebGL2 Vertex Shader
+// // OLD: Linear distance check
+// // float dist = abs(xOffset - blipPos);
+// // float activeVal = 1.0 - smoothstep(0.0, 0.15, dist);
+//
+// // NEW: Energy Trail Logic (Adapted from WGSL)
+// float dx = xOffset - blipPos; // Signed distance
+// // 1. The "Spark" (Inverse square law for hot core)
+// float coreDist = abs(dx);
+// float energy = 0.01 / (coreDist + 0.01); // Tuned for LED spacing
+// // 2. The "Tail" (Exponential decay only behind the movement)
+// // Assuming movement is positive-x. If direction changes, flip sign of dx.
+// float directionSign = (speed > 0.0) ? 1.0 : -1.0;
+// float trail = exp(-8.0 * max(0.0, -dx * directionSign));
+// // Combine them
+// float activeVal = clamp(pow(energy, 1.5) + trail, 0.0, 1.0);
+// // Use activeVal to mix colors as before...
+// ---------------------------
 
 // --- MAIN FRAGMENT SHADER ---
 @fragment
@@ -318,8 +361,30 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
 
             // Animation Physics
             let flash = f32(ch.trigger) * 0.8;
-            let activeLevel = exp(-ch.noteAge * 3.0);
-            lightAmount = (activeLevel * 0.8 + flash) * clamp(ch.volume, 0.0, 1.2);
+
+            // Energy Trail (plasma-like decay) adapted for circular rows
+            // Compute signed distance from playhead, including fractional tick offset.
+            var d = f32(in.row) + uniforms.tickOffset - f32(uniforms.playheadRow);
+            // Wrap into -32 .. +32 range for a 64-step ring
+            let totalSteps = 64.0;
+            if (d > totalSteps * 0.5) { d = d - totalSteps; }
+            if (d < -totalSteps * 0.5) { d = d + totalSteps; }
+
+            let dx = d; // positive = ahead, negative = behind
+            let coreDist = abs(dx);
+
+            // Core inverse-square-ish 'spark'
+            let energy = 0.02 / (coreDist + 0.001); // tuned for 64-step spacing
+
+            // Tail exponential decay behind movement (assumes forward play)
+            let directionSign = 1.0;
+            let trail = exp(-10.0 * max(0.0, -dx * directionSign));
+
+            // Combine and clamp to 0..1
+            let activeVal = clamp(pow(energy, 1.5) + trail, 0.0, 1.0);
+
+            // Use the computed activeVal in place of the simple age-exponential
+            lightAmount = (activeVal * 0.8 + flash) * clamp(ch.volume, 0.0, 1.2);
 
             if (isMuted) { lightAmount *= 0.2; }
             isNoteOn = true; // Always "draw" the note glass, but vary intensity
