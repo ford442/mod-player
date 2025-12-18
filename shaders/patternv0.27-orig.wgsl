@@ -1,6 +1,6 @@
-// patternv0.25_clean.wgsl
-// [Cleaned] Circular Ring Configuration (Fixed Cell Size)
-// V0.25-Clean: 128-step ring with v0.29 styling + uniform cell sizes
+// patternv0.27.wgsl
+// Circular Ring Configuration (64 steps)
+// V0.27: "White Hardware 64" - 64-step full circle + polished indicator ring
 
 struct Uniforms {
   numRows: u32,
@@ -39,7 +39,6 @@ struct VertexOut {
   @location(4) @interpolate(flat) packedB: u32,
 };
 
-// --- VERTEX SHADER ---
 @vertex
 fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instanceIndex: u32) -> VertexOut {
   var quad = array<vec2<f32>, 6>(
@@ -51,34 +50,26 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
   let row = instanceIndex / numChannels;
   let channel = instanceIndex % numChannels;
 
-  // --- Circular Configuration ---
   let center = vec2<f32>(uniforms.canvasW * 0.5, uniforms.canvasH * 0.5);
   let minDim = min(uniforms.canvasW, uniforms.canvasH);
 
-  // Layout Dimensions
-  let maxRadius = minDim * 0.45; // Keep away from edges
-  let minRadius = minDim * 0.15; // Inner hole size
+  let maxRadius = minDim * 0.45;
+  let minRadius = minDim * 0.15;
   let ringDepth = (maxRadius - minRadius) / f32(numChannels);
 
-  // 1. Calculate Radius (Channel Index)
   let radius = minRadius + f32(channel) * ringDepth;
 
-  // 2. Calculate Angle (Row Index)
-  let totalSteps = f32(uniforms.numRows);
+  // 64 steps around the full circle
+  let totalSteps = 64.0;
   let anglePerStep = 6.2831853 / totalSteps;
-  let theta = -1.570796 + f32(row % 128u) * anglePerStep;
+  let theta = -1.570796 + f32(row % 64u) * anglePerStep;
 
-  // 3. Calculate Cell Size (FIXED SIZE)
-  // Instead of using the current radius (which makes outer cells huge),
-  // we use minRadius for the width calculation. This ensures cells fit
-  // on the innermost ring, and outer rings will just have more spacing.
-  let innerCircumference = 2.0 * 3.14159265 * minRadius;
-  let arcLength = innerCircumference / totalSteps;
+  let circumference = 2.0 * 3.14159265 * radius;
+  let arcLength = circumference / totalSteps;
 
   let btnW = arcLength * 0.92;
   let btnH = ringDepth * 0.92;
 
-  // 4. Transform Local Quad to World Space
   let lp = quad[vertexIndex];
   let localPos = (lp - 0.5) * vec2<f32>(btnW, btnH);
 
@@ -92,11 +83,9 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
   let worldX = center.x + cos(theta) * radius + rotX;
   let worldY = center.y + sin(theta) * radius + rotY;
 
-  // 5. Convert to Clip Space
   let clipX = (worldX / uniforms.canvasW) * 2.0 - 1.0;
   let clipY = 1.0 - (worldY / uniforms.canvasH) * 2.0;
 
-  // Fetch Data
   let idx = instanceIndex * 2u;
   let a = cells[idx];
   let b = cells[idx + 1u];
@@ -110,8 +99,6 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
   out.packedB = b;
   return out;
 }
-
-// --- FRAGMENT SHADER (Unchanged) ---
 
 fn neonPalette(t: f32) -> vec3<f32> {
   let a = vec3<f32>(0.5, 0.5, 0.5);
@@ -170,54 +157,67 @@ struct FragmentConstants {
   bgColor: vec3<f32>,
   ledOnColor: vec3<f32>,
   ledOffColor: vec3<f32>,
+  borderColor: vec3<f32>,
   housingSize: vec2<f32>,
 };
 
 fn getFragmentConstants() -> FragmentConstants {
   var c: FragmentConstants;
-  c.bgColor = vec3<f32>(0.12, 0.13, 0.15); // Darker technical grey
-  c.ledOnColor = vec3<f32>(0.0, 0.90, 1.0); // Bright cyan
-  c.ledOffColor = vec3<f32>(0.06, 0.08, 0.10);
-  c.housingSize = vec2<f32>(0.92, 0.92); // Physical size of the 'chip'
+  // Dark chiclet keys to contrast with the white chassis pass
+  c.bgColor = vec3<f32>(0.15, 0.16, 0.18);
+  c.ledOnColor = vec3<f32>(0.0, 0.85, 0.95);
+  c.ledOffColor = vec3<f32>(0.08, 0.08, 0.10);
+  c.borderColor = vec3<f32>(0.0, 0.0, 0.0);
+  c.housingSize = vec2<f32>(0.92, 0.92);
   return c;
 }
 
 @fragment
 fn fs(in: VertexOut) -> @location(0) vec4<f32> {
-  let fc = getFragmentConstants();
+  let fs = getFragmentConstants();
   let uv = in.uv;
   let p = uv - 0.5;
 
+  // More stable AA under rotation/minification than fwidth(p.y) alone
   let aa = max(fwidth(p.x), fwidth(p.y)) * 0.85;
 
-  // --- INDICATOR RING (Channel 0) ---
+  let row64 = in.row % 64u;
+  let play64 = uniforms.playheadRow % 64u;
+
+  // --- INDICATOR RING (channel 0) ---
   if (in.channel == 0u) {
-    var col = fc.bgColor;
+    var col = vec3<f32>(0.08, 0.09, 0.11);
 
-    let dHousing = sdRoundedBox(p, vec2<f32>(0.86, 0.72) * 0.5, 0.08);
-    let housingMask = 1.0 - smoothstep(0.0, aa * 2.0, dHousing);
+    // Housing
+    let housingSize = vec2<f32>(0.80, 0.60);
+    let dHousing = sdRoundedBox(p, housingSize * 0.5, 0.06);
+    let housingMask = 1.0 - smoothstep(0.0, aa, dHousing);
 
-    if (dHousing < 0.0 && dHousing > -0.08) {
+    // Subtle top bevel
+    if (dHousing < 0.0 && dHousing > -0.06) {
       col += vec3<f32>(0.06) * smoothstep(0.0, -0.20, p.y);
     }
-
     col = mix(vec3<f32>(0.01), col, housingMask);
 
-    let onPlayhead = ((in.row % 128u) == (uniforms.playheadRow % 128u));
-    let isBeatMarker = ((in.row % 4u) == 0u);
+    let onPlayhead = (row64 == play64);
+    let isBeatMarker = (row64 % 4u == 0u);
 
-    let ledP = p - vec2<f32>(0.0, 0.14);
-    let dLed = sdRoundedBox(ledP, vec2<f32>(0.30, 0.10) * 0.5, 0.03);
+    // LED window
+    let ledP = p - vec2<f32>(0.0, 0.15);
+    let ledSize = vec2<f32>(0.22, 0.06);
+    let dLed = sdRoundedBox(ledP, ledSize * 0.5, 0.02);
     let ledMask = 1.0 - smoothstep(-aa, aa, dLed);
 
-    col = mix(col, fc.ledOffColor, ledMask);
-
     if (onPlayhead) {
-      let bloom = exp(-max(dLed, 0.0) * 35.0);
-      col += fc.ledOnColor * ledMask * 1.7;
-      col += fc.ledOnColor * bloom * 0.32;
+      let ledColor = vec3<f32>(0.40, 0.90, 1.00);
+      let bloom = exp(-max(dLed, 0.0) * 45.0);
+      col += ledColor * ledMask * 1.8;
+      col += ledColor * bloom * 0.28;
     } else if (isBeatMarker) {
-      col += vec3<f32>(0.10, 0.18, 0.20) * ledMask;
+      let markerColor = vec3<f32>(0.10, 0.25, 0.30);
+      col += markerColor * ledMask;
+    } else {
+      col = mix(col, vec3<f32>(0.02), ledMask * 0.8);
     }
 
     if (housingMask < 0.15) {
@@ -227,26 +227,39 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     return vec4<f32>(col, 1.0);
   }
 
-  // --- PATTERN CELLS (Other Channels) ---
+  // --- PATTERN ROWS ---
+  let dHousing = sdRoundedBox(p, fs.housingSize * 0.5, 0.06);
+  // Avoid calling fwidth() on computed distances within non-uniform control flow
+  // (derivative ops are only allowed under uniform control flow). Use the
+  // precomputed pixel-scale AA 'aa' instead.
+  let housingAA = aa;
+  let housingMask = 1.0 - smoothstep(0.0, housingAA * 2.0, dHousing);
 
-  let dHousing = sdRoundedBox(p, fc.housingSize * 0.5, 0.08);
-  let housingMask = 1.0 - smoothstep(0.0, aa * 2.0, dHousing);
+  var finalColor = fs.bgColor;
 
-  var finalColor = fc.bgColor;
-
+  // Gentle chiclet gradient
   finalColor += vec3<f32>(0.02) * (0.5 - uv.y);
 
-  if (dHousing < 0.0 && dHousing > -0.10) {
-    finalColor += vec3<f32>(0.10) * smoothstep(0.0, -0.18, p.y);
+  // Small bevel highlight
+  if (dHousing < 0.0 && dHousing > -0.06) {
+    finalColor += vec3<f32>(0.10) * smoothstep(0.0, -0.12, p.y);
   }
 
+  // --- BUTTON TEXTURE OVERLAY ---
   let btnScale = 1.05;
   let btnUV = (uv - 0.5) * btnScale + 0.5;
+  var btnColor = vec3<f32>(0.0);
+  var inButton = 0.0;
+
   if (btnUV.x > 0.0 && btnUV.x < 1.0 && btnUV.y > 0.0 && btnUV.y < 1.0) {
-    let btnColor = textureSampleLevel(buttonsTexture, buttonsSampler, btnUV, 0.0).rgb;
+    btnColor = textureSampleLevel(buttonsTexture, buttonsSampler, btnUV, 0.0).rgb;
+    inButton = 1.0;
+  }
+  if (inButton > 0.5) {
     finalColor = mix(finalColor, btnColor * 0.65, 0.9);
   }
 
+  // --- DATA VISUALIZATION ---
   let x = btnUV.x;
   let y = btnUV.y;
 
@@ -258,54 +271,63 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   let hasEffect = (effParam > 0u);
   let ch = channels[in.channel];
 
-  let indicatorXMask = smoothstep(0.4, 0.41, x) - smoothstep(0.6, 0.61, x);
-  let topLightMask = (smoothstep(0.05, 0.06, y) - smoothstep(0.15, 0.16, y)) * indicatorXMask;
+  if (inButton > 0.5) {
+    let indicatorXMask = smoothstep(0.4, 0.41, x) - smoothstep(0.6, 0.61, x);
+    let topLightMask = (smoothstep(0.05, 0.06, y) - smoothstep(0.15, 0.16, y)) * indicatorXMask;
 
-  let mainButtonYMask = smoothstep(0.23, 0.24, y) - smoothstep(0.80, 0.81, y);
-  let mainButtonXMask = smoothstep(0.13, 0.14, x) - smoothstep(0.86, 0.87, x);
-  let mainButtonMask = mainButtonYMask * mainButtonXMask;
+    let mainButtonYMask = smoothstep(0.23, 0.24, y) - smoothstep(0.80, 0.81, y);
+    let mainButtonXMask = smoothstep(0.13, 0.14, x) - smoothstep(0.86, 0.87, x);
 
-  let bottomLightMask = (smoothstep(0.90, 0.91, y) - smoothstep(0.95, 0.96, y)) * indicatorXMask;
+    let mainButtonMask = mainButtonYMask * mainButtonXMask;
+    let bottomLightMask = (smoothstep(0.90, 0.91, y) - smoothstep(0.95, 0.96, y)) * indicatorXMask;
 
-  if (ch.isMuted == 1u) {
-    finalColor *= 0.3;
+    if (ch.isMuted == 1u) {
+      finalColor *= 0.3;
+    }
+
+    // TOP LIGHT: Activity
+    if (step(0.1, exp(-ch.noteAge * 2.0)) > 0.5) {
+      let topGlow = vec3<f32>(0.0, 0.9, 1.0);
+      finalColor += topGlow * topLightMask * 1.2;
+    }
+
+    // MAIN LIGHT: Note
+    if (hasNote) {
+      let pitchHue = pitchClassFromPacked(in.packedA);
+      let base_note_color = neonPalette(pitchHue);
+      let instBand = inst & 15u;
+      let instBrightness = 0.8 + (select(0.0, f32(instBand) / 15.0, instBand > 0u)) * 0.2;
+
+      var noteColor = base_note_color * instBrightness;
+      let flash = f32(ch.trigger) * 0.8;
+      let activeLevel = exp(-ch.noteAge * 3.0);
+      let lightAmount = (activeLevel * 0.8 + flash) * clamp(ch.volume, 0.0, 1.2);
+
+      finalColor += noteColor * mainButtonMask * lightAmount * 2.0;
+      finalColor += noteColor * housingMask * lightAmount * 0.12;
+    }
+
+    // BOTTOM LIGHT: Effect
+    if (hasEffect) {
+      let effectColor = effectColorFromCode(effCode, vec3<f32>(0.9, 0.8, 0.2));
+      let strength = clamp(f32(effParam) / 255.0, 0.2, 1.0);
+      finalColor += effectColor * bottomLightMask * strength * 2.0;
+      finalColor += effectColor * housingMask * strength * 0.05;
+    }
+
+    // Playhead blink with 64-step wrap
+    let rA = i32(row64);
+    let rB = i32(play64);
+    let distDirect = abs(rA - rB);
+    let distWrap = 64 - distDirect;
+    let rowDist = min(distDirect, distWrap);
+
+    if (rowDist == 0 && !hasNote) {
+      finalColor += vec3<f32>(0.15, 0.2, 0.25) * mainButtonMask;
+    }
   }
 
-  if (step(0.1, exp(-ch.noteAge * 2.0)) > 0.5) {
-    finalColor += vec3<f32>(0.0, 0.9, 1.0) * topLightMask * 1.2;
-  }
-
-  if (hasNote) {
-    let pitchHue = pitchClassFromPacked(in.packedA);
-    let base_note_color = neonPalette(pitchHue);
-    let instBand = inst & 15u;
-    let instBrightness = 0.8 + (select(0.0, f32(instBand) / 15.0, instBand > 0u)) * 0.2;
-
-    let noteColor = base_note_color * instBrightness;
-    let flash = f32(ch.trigger) * 0.8;
-    let activeLevel = exp(-ch.noteAge * 3.0);
-    let lightAmount = (activeLevel * 0.8 + flash) * clamp(ch.volume, 0.0, 1.2);
-
-    finalColor += noteColor * mainButtonMask * lightAmount * 2.0;
-    finalColor += noteColor * housingMask * lightAmount * 0.12;
-  }
-
-  if (hasEffect) {
-    let effectColor = effectColorFromCode(effCode, vec3<f32>(0.9, 0.8, 0.2));
-    let strength = clamp(f32(effParam) / 255.0, 0.2, 1.0);
-    finalColor += effectColor * bottomLightMask * strength * 2.0;
-    finalColor += effectColor * housingMask * strength * 0.05;
-  }
-
-  let rA = i32(in.row % 128u);
-  let rB = i32(uniforms.playheadRow % 128u);
-  let distDirect = abs(rA - rB);
-  let distWrap = 128 - distDirect;
-  let rowDist = min(distDirect, distWrap);
-  if (rowDist == 0 && !hasNote) {
-    finalColor += vec3<f32>(0.15, 0.2, 0.25) * mainButtonMask;
-  }
-
+  // Border gap
   if (housingMask < 0.5) {
     discard;
   }
