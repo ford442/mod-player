@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useState, useEffect, useRef } from 'react';
 import { useLibOpenMPT } from './hooks/useLibOpenMPT';
 import { Header } from './components/Header';
 import { Controls } from './components/Controls';
@@ -9,10 +9,21 @@ import { MediaPanel } from './components/MediaPanel';
 import { MediaOverlay } from './components/MediaOverlay';
 import { PatternDisplay } from './components/PatternDisplay';
 import type { MediaItem } from './types';
+import { fetchRemoteMedia } from './utils/remoteMedia';
 
 // Dynamically load all WGSL shader files
 const shaderModules = import.meta.glob('./shaders/*.wgsl', { as: 'url' });
-const availableShaders = Object.keys(shaderModules).map(path => path.replace('./shaders/', ''));
+const availableShaders = Object.keys(shaderModules)
+  .map(path => path.replace('./shaders/', ''))
+  // Hide non-pattern helper shaders (bezel/chassis/etc)
+  .filter(name => name.startsWith('patternv'))
+  .sort();
+
+// Helpful runtime debug when the shader list doesn't update in the running app
+if (typeof window !== 'undefined' && import.meta.env.MODE !== 'production') {
+  // eslint-disable-next-line no-console
+  console.log('availableShaders (runtime):', availableShaders);
+}
 
 export default function App() {
   const [volume, setVolume] = useState(1.0);
@@ -45,8 +56,22 @@ export default function App() {
   } = useLibOpenMPT(volume);
 
   const [media, setMedia] = useState<MediaItem[]>([]);
+  const [remoteFiles, setRemoteFiles] = useState<MediaItem[]>([]);
   const [activeMediaId, setActiveMediaId] = useState<string | undefined>(undefined);
   const [overlayVisible, setOverlayVisible] = useState<boolean>(false);
+  const [mediaElement, setMediaElement] = useState<HTMLVideoElement | HTMLImageElement | null>(null);
+  const videoLoopRef = useRef<number>(0);
+
+  useEffect(() => {
+    fetchRemoteMedia().then(items => setRemoteFiles(items));
+  }, []);
+
+  const handleRemoteSelect = useCallback((item: MediaItem) => {
+    const newItem = { ...item, id: `remote-${Date.now()}` }; 
+    setMedia(prev => [newItem, ...prev]);
+    setActiveMediaId(newItem.id);
+    setOverlayVisible(true);
+  }, []);
 
   const addMediaFile = useCallback((file: File) => {
     const url = URL.createObjectURL(file);
@@ -83,10 +108,78 @@ export default function App() {
   }, [activeMediaId]);
 
   const activeMedia = media.find((m: MediaItem) => m.id === activeMediaId);
+
+  useEffect(() => {
+    cancelAnimationFrame(videoLoopRef.current);
+    const currentMedia = media.find(m => m.id === activeMediaId);
+
+    if (!currentMedia) {
+      setMediaElement(null);
+      return;
+    }
+
+    let el: HTMLVideoElement | HTMLImageElement | null = null;
+
+    if (currentMedia.kind === 'video') {
+      const vid = document.createElement('video');
+      vid.src = currentMedia.url;
+      vid.crossOrigin = "anonymous";
+      vid.loop = currentMedia.loop ?? false;
+      vid.muted = currentMedia.muted ?? true;
+      vid.playsInline = true;
+
+      vid.onloadedmetadata = () => {
+        vid.play().catch(e => console.warn("Video play error for shader", e));
+      };
+
+      if (!vid.loop) {
+        let direction = 1;
+        const checkLoop = () => {
+          if (!vid) return;
+          const t = vid.currentTime;
+          const d = vid.duration;
+          if (d > 0) {
+            if (direction === 1 && t >= d - 0.2) {
+              direction = -1;
+              try { vid.playbackRate = -1.0; } catch (e) { vid.currentTime = 0; }
+            } else if (direction === -1 && t <= 0.2) {
+              direction = 1;
+              try { vid.playbackRate = 1.0; } catch (e) { /* ignore */ }
+            }
+            if (vid.paused) vid.play().catch(() => {});
+          }
+          videoLoopRef.current = requestAnimationFrame(checkLoop);
+        };
+        vid.play().then(checkLoop).catch(() => {});
+      }
+
+      el = vid;
+    } else if (currentMedia.kind === 'image' || currentMedia.kind === 'gif') {
+      const img = new Image();
+      img.src = currentMedia.url;
+      img.crossOrigin = "anonymous";
+      el = img;
+    }
+
+    setMediaElement(el);
+
+    return () => {
+      cancelAnimationFrame(videoLoopRef.current);
+      if (el && el instanceof HTMLVideoElement) {
+        el.pause();
+        el.src = '';
+      }
+      setMediaElement(null);
+    };
+  }, [activeMediaId, media]);
+
   const webgpuSupported = typeof navigator !== 'undefined' && 'gpu' in navigator;
   const [patternMode, setPatternMode] = useState<'html' | 'webgpu'>(webgpuSupported ? 'webgpu' : 'html');
-  const [shaderVersion, setShaderVersion] = useState<string>('patternv0.17.wgsl');
+  const [shaderVersion, setShaderVersion] = useState<string>('patternv0.25.wgsl');
   const effectivePatternMode = webgpuSupported ? patternMode : 'html';
+
+  const isVideoShaderActive = effectivePatternMode === 'webgpu' && (shaderVersion.includes('v0.20') || shaderVersion.includes('v0.23'));
+  const showOverlay = overlayVisible && !isVideoShaderActive;
 
   // Dynamic cell sizing based on shader version
   const getCellMetrics = (shader: string) => {
@@ -114,6 +207,8 @@ export default function App() {
           setVolume={setVolume}
           pan={panValue}
           setPan={setPanValue}
+          remoteMediaList={remoteFiles}
+          onRemoteMediaSelect={handleRemoteSelect}
         />
 
         {isModuleLoaded || effectivePatternMode === 'webgpu' ? (
@@ -172,6 +267,7 @@ export default function App() {
                   kickTrigger={kickTrigger}
                   activeChannels={activeChannels}
                   isModuleLoaded={isModuleLoaded}
+                  externalVideoSource={mediaElement}
                 />
               ) : (
                 <PatternSequencer
@@ -189,7 +285,7 @@ export default function App() {
               <MediaPanel media={media} activeMediaId={activeMediaId} onSelect={(id?: string) => { setActiveMediaId(id); setOverlayVisible(!!id); }} onRemove={removeMedia} />
             </div>
 
-            <MediaOverlay item={activeMedia} visible={overlayVisible} onClose={() => setOverlayVisible(false)} onUpdate={(partial: Partial<MediaItem>) => { if (!activeMedia) return; setMedia((prev: MediaItem[]) => prev.map((m: MediaItem) => m.id === activeMedia.id ? { ...m, ...partial } : m)); }} />
+            <MediaOverlay item={activeMedia} visible={showOverlay} onClose={() => setOverlayVisible(false)} onUpdate={(partial: Partial<MediaItem>) => { if (!activeMedia) return; setMedia((prev: MediaItem[]) => prev.map((m: MediaItem) => m.id === activeMedia.id ? { ...m, ...partial } : m)); }} />
           </>
         ) : (
            <div className="mt-6 bg-gray-800 p-6 rounded-lg shadow-lg text-center text-gray-400">
