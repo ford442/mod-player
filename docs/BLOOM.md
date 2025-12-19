@@ -3,8 +3,8 @@
 This document explains how to use the new bloom shaders and `BloomPostProcessor` helper.
 
 Files added:
-- `shaders/patternv0.31.wgsl` — Official v0.31 HDR-capable sequencer fragment shader (adds bloom uniforms).
-- `shaders/patternv0.30_bloom.wgsl` — Legacy bloom proof-of-concept (kept for reference).
+- `shaders/patternv0.32.wgsl` — Official v0.32 HDR-capable sequencer fragment shader (adds bloom uniforms, brighter/slower main-note flash).
+- `shaders/patternv0.31.wgsl` — v0.31 was truncated and is kept for reference; use v0.32 instead.
 - `shaders/bloom_threshold.wgsl` — brightness extraction (soft threshold).
 - `shaders/bloom_blur.wgsl` — separable Gaussian blur (horizontal & vertical passes).
 - `shaders/bloom_composite.wgsl` — composite HDR bloom back onto the scene.
