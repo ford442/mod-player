@@ -10,7 +10,7 @@ const DEFAULT_CHANNELS = 32;
 const alignTo = (value: number, alignment: number) => Math.ceil(value / alignment) * alignment;
 const getLayoutType = (shaderFile: string): LayoutType => {
   if (shaderFile === 'patternShaderv0.12.wgsl') return 'texture';
-  if (shaderFile.includes('v0.13') || shaderFile.includes('v0.14') || shaderFile.includes('v0.15') || shaderFile.includes('v0.16') || shaderFile.includes('v0.17') || shaderFile.includes('v0.18') || shaderFile.includes('v0.19') || shaderFile.includes('v0.20') || shaderFile.includes('v0.21') || shaderFile.includes('v0.23') || shaderFile.includes('v0.24') || shaderFile.includes('v0.25') || shaderFile.includes('v0.26') || shaderFile.includes('v0.27') || shaderFile.includes('v0.28') || shaderFile.includes('v0.29')) return 'extended';
+  if (shaderFile.includes('v0.13') || shaderFile.includes('v0.14') || shaderFile.includes('v0.15') || shaderFile.includes('v0.16') || shaderFile.includes('v0.17') || shaderFile.includes('v0.18') || shaderFile.includes('v0.19') || shaderFile.includes('v0.20') || shaderFile.includes('v0.21') || shaderFile.includes('v0.23') || shaderFile.includes('v0.24') || shaderFile.includes('v0.25') || shaderFile.includes('v0.26') || shaderFile.includes('v0.27') || shaderFile.includes('v0.28') || shaderFile.includes('v0.29') || shaderFile.includes('v0.30')) return 'extended';
   return 'simple';
 };
 
@@ -36,7 +36,7 @@ const shouldUseBackgroundPass = (shaderFile: string) => {
 
 const getBackgroundShaderFile = (shaderFile: string): string => {
   // Only use the chassis pass when explicitly called.
-  if (shaderFile.includes('v0.27') || shaderFile.includes('v0.28')) return 'chassisv0.1.wgsl';
+  if (shaderFile.includes('v0.27') || shaderFile.includes('v0.28') || shaderFile.includes('v0.30')) return 'chassisv0.1.wgsl';
   return 'bezel.wgsl';
 };
 
@@ -928,8 +928,24 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
       
       // Cleanup video texture which is owned by this device lifecycle
       if (videoTextureRef.current) {
-        videoTextureRef.current.destroy();
-        videoTextureRef.current = null;
+        const deviceToWait = deviceRef.current;
+        if (deviceToWait) {
+          // Wait for any submitted work to complete before destroying the texture to avoid
+          // "Destroyed texture used in a submit" errors when the GPU is still using the resource.
+          deviceToWait.queue
+            .onSubmittedWorkDone()
+            .then(() => {
+              try { videoTextureRef.current?.destroy(); } catch (e) {}
+              videoTextureRef.current = null;
+            })
+            .catch(() => {
+              try { videoTextureRef.current?.destroy(); } catch (e) {}
+              videoTextureRef.current = null;
+            });
+        } else {
+          try { videoTextureRef.current.destroy(); } catch (e) {}
+          videoTextureRef.current = null;
+        }
       }
 
       deviceRef.current = null;
