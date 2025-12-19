@@ -365,5 +365,21 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     finalColor = mix(finalColor, botLed.rgb, botLed.a);
 
     // COMPONENT 4: PLAYHEAD GLANCE
+    let rA = i32(in.row);
+    let rB = i32(uniforms.playheadRow);
+    let distDirect = abs(rA - rB);
+    let distWrap = 128 - distDirect;
+    let rowDist = min(distDirect, distWrap);
 
-We will modify the main note light block accordingly. Now create patternv0.32 changes. We'll replace the block from 'let flash = f32(ch.trigger) * 0.8;' through 'if (isMuted) { lightAmount *= 0.2; }' with the new snippet, and also change displayColor multiplier. Let's perform replace_string_in_file with oldString including context lines above and below.**
+    if (rowDist == 0) {
+      finalColor += vec3(0.15, 0.2, 0.25) * housingMask * 0.4;
+    }
+  }
+
+  if (housingMask < 0.5) {
+    return vec4(fs.borderColor, 0.0);
+  }
+
+  // Clamp geometry, but allow glow to exceed 1.0 (HDR)
+  return vec4(finalColor, 1.0);
+}
