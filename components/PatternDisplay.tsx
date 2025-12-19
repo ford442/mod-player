@@ -404,39 +404,72 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   // Track the actual internal canvas pixel size (may be driven by CSS client size or by fixed logical sizes above).
   const [canvasMetrics, setCanvasMetrics] = React.useState(() => computeLogicalCanvasMetrics());
 
-  // Keep canvas internal resolution in sync with display size (handles browser resizes / DPR)
+  // Keep canvas internal resolution in sync with display size (handles browser resizes / DPR).
+  // Use ResizeObserver when available and avoid mutating canvas.width directly to prevent layout feedback loops.
   useEffect(() => {
-    const onResize = () => {
-      const canvas = canvasRef.current;
-      if (!canvas) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
 
+    const computeAndSetSize = () => {
       const logical = computeLogicalCanvasMetrics();
       const dpr = window.devicePixelRatio || 1;
 
-      // For fixed logical shaders, prefer the logical size. Otherwise match the CSS display size.
       let targetW: number, targetH: number;
       const isFixed = (logical.width === 1024 && logical.height === 1008) || (logical.width === 1280 && logical.height === 1280);
+
       if (isFixed) {
         targetW = logical.width;
         targetH = logical.height;
       } else {
-        // Use the canvas's CSS size (clientWidth/clientHeight) multiplied by DPR
-        targetW = Math.max(1, Math.floor(canvas.clientWidth * dpr));
-        targetH = Math.max(1, Math.floor(canvas.clientHeight * dpr));
+        // Use the canvas's layout size (bounding rect) multiplied by DPR for accurate fractional widths
+        const rect = canvas.getBoundingClientRect();
+        targetW = Math.max(1, Math.round(rect.width * dpr));
+        targetH = Math.max(1, Math.round(rect.height * dpr));
       }
 
-      if (canvas.width !== targetW || canvas.height !== targetH) {
-        canvas.width = targetW;
-        canvas.height = targetH;
-        setCanvasMetrics({ width: targetW, height: targetH });
-      }
+      setCanvasMetrics(prev => {
+        if (prev.width === targetW && prev.height === targetH) return prev;
+        return { width: targetW, height: targetH };
+      });
     };
 
-    window.addEventListener('resize', onResize);
-    // Run once on mount to pick up initial CSS size
-    onResize();
-    return () => window.removeEventListener('resize', onResize);
+    // Prefer ResizeObserver for precise element sizing, fall back to window resize
+    let ro: ResizeObserver | null = null;
+    if ((window as any).ResizeObserver) {
+      ro = new (window as any).ResizeObserver(() => computeAndSetSize());
+      if (ro) ro.observe(canvas);
+    } else {
+      window.addEventListener('resize', computeAndSetSize);
+    }
+
+    // Run once immediately
+    computeAndSetSize();
+
+    return () => {
+      if (ro) ro.disconnect();
+      else window.removeEventListener('resize', computeAndSetSize);
+    };
   }, [shaderFile, matrix?.numRows, matrix?.numChannels, cellWidth, cellHeight, isHorizontal, padTopChannel]);
+
+  // Immediately update uniforms when the canvas pixel size changes so the GPU shader gets correct dimensions
+  useEffect(() => {
+    const device = deviceRef.current;
+    const uniformBuffer = uniformBufferRef.current;
+    if (!device || !uniformBuffer) return;
+
+    // Read current uniform payload, update the canvas fields and re-upload.
+    // We assume the uniform layout is stable and that canvasW/canvasH are at float indices 6 and 7 for extended layouts.
+    // Recreate a small float buffer view and write into the uniform buffer directly to reduce latency.
+    const floatBuf = new Float32Array([canvasMetrics.width, canvasMetrics.height]);
+    // The uniform buffer layout places canvasW and canvasH at byte offsets 4*6=24 and 4*7=28 respectively for the simple/texture layout,
+    // but for extended layout they are at floats 6 and 7 as well. We'll write into byte offset 6*4 = 24.
+    try {
+      device.queue.writeBuffer(uniformBuffer, 6 * 4, floatBuf.buffer, floatBuf.byteOffset, floatBuf.byteLength);
+    } catch (e) {
+      // Some devices may require a full rewrite; fall back to writing from the start when the small write fails.
+      device.queue.writeBuffer(uniformBuffer, 0, floatBuf.buffer, floatBuf.byteOffset, floatBuf.byteLength);
+    }
+  }, [canvasMetrics]);
 
   // Local animation loop when not playing or not loaded
   useEffect(() => {
