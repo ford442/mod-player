@@ -19,7 +19,7 @@ const isSinglePassCompositeShader = (shaderFile: string) => {
 };
 
 const shouldEnableAlphaBlending = (shaderFile: string) => {
-  return shaderFile.includes('v0.28');
+  return shaderFile.includes('v0.28') || shaderFile.includes('v0.30');
 };
 
 const isCircularLayoutShader = (shaderFile: string) => {
@@ -364,8 +364,8 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   const padTopChannel = shaderFile.includes('v0.16') || shaderFile.includes('v0.17') || shaderFile.includes('v0.21');
 
   const canvasMetrics = useMemo(() => {
-    // Specific size override for hardware chassis shaders (v0.26, v0.27, v0.28, v0.29)
-    if (shaderFile.includes('v0.26') || shaderFile.includes('v0.27') || shaderFile.includes('v0.28') || shaderFile.includes('v0.29')) {
+    // Specific size override for hardware chassis shaders (v0.26, v0.27, v0.28, v0.29, v0.30)
+    if (shaderFile.includes('v0.26') || shaderFile.includes('v0.27') || shaderFile.includes('v0.28') || shaderFile.includes('v0.29') || shaderFile.includes('v0.30')) {
       return { width: 1024, height: 1008 };
     }
 
