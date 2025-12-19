@@ -59,10 +59,13 @@ const createUniformPayload = (
     kickTrigger: number;
     activeChannels: number;
     isModuleLoaded: boolean;
+    bloomIntensity?: number;        // NEW: optional HDR bloom uniform
+    bloomThreshold?: number;        // NEW: optional hint for post-process
   }
 ): ArrayBuffer => {
   if (layoutType === 'extended') {
-    const buffer = new ArrayBuffer(64);
+    // Expanded to 80 bytes to include two extra floats (bloomIntensity, bloomThreshold)
+    const buffer = new ArrayBuffer(80);
     const uint = new Uint32Array(buffer);
     const float = new Float32Array(buffer);
     uint[0] = Math.max(0, params.numRows) >>> 0;
@@ -81,6 +84,9 @@ const createUniformPayload = (
     float[13] = params.kickTrigger;
     uint[14] = Math.max(0, params.activeChannels) >>> 0;
     uint[15] = params.isModuleLoaded ? 1 : 0;
+    // Bloom uniforms (defaults)
+    float[16] = params.bloomIntensity ?? 1.0;
+    float[17] = params.bloomThreshold ?? 0.8;
     return buffer;
   }
 
@@ -145,6 +151,10 @@ interface PatternDisplayProps {
   activeChannels?: number;
   isModuleLoaded?: boolean;
   externalVideoSource?: HTMLVideoElement | HTMLImageElement | null;
+
+  // Bloom controls (optional)
+  bloomIntensity?: number;
+  bloomThreshold?: number;
 }
 
 const clampPlayhead = (value: number, numRows: number) => {
@@ -1035,7 +1045,9 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
         groove: Math.min(1, Math.max(0, grooveAmount)),
         kickTrigger,
         activeChannels,
-        isModuleLoaded
+        isModuleLoaded,
+        bloomIntensity: bloomIntensity ?? 1.0,
+        bloomThreshold: bloomThreshold ?? 0.8,
       });
       device.queue.writeBuffer(uniformBuffer, 0, uniformPayload);
     }
