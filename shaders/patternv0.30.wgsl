@@ -231,7 +231,8 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   let fs = getFragmentConstants();
   let uv = in.uv;
   let p = uv - 0.5;
-  let aa = fwidth(p.y) * 0.8;
+  // CHANGE: Reduced multiplier from 0.8 to 0.5 for sharper edges
+  let aa = fwidth(p.y) * 0.5;
 
   // --- INDICATOR RING (Channel 0 / Outer Ring) ---
   if (in.channel == 0u) {
@@ -243,29 +244,31 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     var col = indLed.rgb;
     var alpha = indLed.a;
     if (onPlayhead) {
-      let glow = fs.ledOnColor * 0.5 * exp(-length(p) * 4.0);
+      // CHANGE: Sharper decay on the bloom (4.0 -> 5.0) for less "haze"
+      let glow = fs.ledOnColor * 0.5 * exp(-length(p) * 5.0);
       col += glow;
-      alpha = max(alpha, smoothstep(0.0, 0.2, length(glow)));
+      alpha = max(alpha, smoothstep(0.0, 0.1, length(glow)));
     }
     return vec4<f32>(col, clamp(alpha, 0.0, 1.0));
   }
 
   // --- PATTERN ROWS ---
+  // Sharper housing box
   let dHousing = sdRoundedBox(p, fs.housingSize * 0.5, 0.06);
-  let housingMask = 1.0 - smoothstep(0.0, aa * 2.0, dHousing);
+  let housingMask = 1.0 - smoothstep(0.0, aa * 1.5, dHousing);
 
   var finalColor = fs.bgColor;
   // Subtle gradient on housing
   finalColor += vec3(0.04) * (0.5 - uv.y);
 
-  // --- TEXTURE OVERLAY (Using unlit-button-2.png via PatternDisplay logic) ---
+  // --- TEXTURE OVERLAY ---
   let btnScale = 1.05;
   let btnUV = (uv - 0.5) * btnScale + 0.5;
   var inButton = 0.0;
   if (btnUV.x > 0.0 && btnUV.x < 1.0 && btnUV.y > 0.0 && btnUV.y < 1.0) {
     let texColor = textureSampleLevel(buttonsTexture, buttonsSampler, btnUV, 0.0).rgb;
-    // Mix texture with background - adjusted for the new image brightness
-    finalColor = mix(finalColor, texColor * 0.6, 0.9); 
+    // Less mixing with background to keep texture contrast high
+    finalColor = mix(finalColor, texColor, 0.7); 
     inButton = 1.0;
   }
 

@@ -599,8 +599,8 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     // Flip Y-axis to fix upside-down issue
     device.queue.copyExternalImageToTexture({ source: bitmap, flipY: true }, { texture }, [bitmap.width, bitmap.height, 1]);
 
-    // Use linear filtering for higher-res textures (v0.30 benefits from linear filtering if texture is high-res)
-    const filterMode: GPUFilterMode = (bitmap.width > 128) ? 'linear' : 'nearest';
+// CHANGE: Force 'nearest' to keep pixels defined and crisp
+    const filterMode: GPUFilterMode = 'nearest';
     const sampler = device.createSampler({ magFilter: filterMode, minFilter: filterMode });
 
     textureResourcesRef.current = { sampler, view: texture.createView() }; 
