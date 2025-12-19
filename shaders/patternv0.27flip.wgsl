@@ -16,6 +16,9 @@ struct Uniforms {
   kickTrigger: f32,
   activeChannels: u32,
   isModuleLoaded: u32,
+  bloomIntensity: f32,
+  bloomThreshold: f32,
+  invertChannels: u32,
 };
 
 @group(0) @binding(0) var<storage, read> cells: array<u32>;
@@ -50,6 +53,7 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
   // Previously: 0 was inner.
   // Now: We invert the index so 0 is Outer, and (numChannels-1) is Inner.
   let invertedChannel = numChannels - 1u - channel;
+  let ringIndex = select(invertedChannel, channel, (uniforms.invertChannels == 1u));
 
   let center = vec2<f32>(uniforms.canvasW * 0.5, uniforms.canvasH * 0.5);
   let minDim = min(uniforms.canvasW, uniforms.canvasH);
@@ -58,8 +62,8 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
   let minRadius = minDim * 0.15;
   let ringDepth = (maxRadius - minRadius) / f32(numChannels);
 
-  // Use invertedChannel for radius calculation
-  let radius = minRadius + f32(invertedChannel) * ringDepth;
+  // Use invertedChannel (or ringIndex when flipped) for radius calculation
+  let radius = minRadius + f32(ringIndex) * ringDepth;
 
   // 64 steps around the full circle
   let totalSteps = 64.0;

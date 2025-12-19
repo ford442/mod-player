@@ -21,6 +21,7 @@ struct Uniforms {
   isModuleLoaded: u32,
   bloomIntensity: f32,    // NEW: controls HDR emission strength
   bloomThreshold: f32,    // NEW: optional hint (not used directly in this shader)
+  invertChannels: u32,    // NEW: 0 = outer low (default), 1 = inner low (flipped ring direction)
 };
 
 @group(0) @binding(0) var<storage, read> cells: array<u32>;
@@ -54,6 +55,8 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
 
   // --- LAYOUT FLIP (v0.27flip logic): 0 is Outer ---
   let invertedChannel = numChannels - 1u - channel;
+  // If uniforms.invertChannels == 1, channel 0 is inner (INNER LOW). Otherwise, channel 0 is outer (OUTER LOW).
+  let ringIndex = select(invertedChannel, channel, (uniforms.invertChannels == 1u));
 
   let center = vec2<f32>(uniforms.canvasW * 0.5, uniforms.canvasH * 0.5);
   let minDim = min(uniforms.canvasW, uniforms.canvasH);
@@ -62,7 +65,7 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
   let minRadius = minDim * 0.15;
   let ringDepth = (maxRadius - minRadius) / f32(numChannels);
 
-  let radius = minRadius + f32(invertedChannel) * ringDepth;
+  let radius = minRadius + f32(ringIndex) * ringDepth;
 
   let totalSteps = 64.0;
   let anglePerStep = 6.2831853 / totalSteps;
