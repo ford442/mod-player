@@ -1,7 +1,7 @@
 // patternv0.35_bloom.wgsl
-// - "Night Mode" (Dims when playing)
-// - UV Purple Ring (Outer)
-// - Channel Direction Toggle (Lowest channel can be Inner or Outer)
+// - "Night Mode" (Dims housing/chrome when playing)
+// - UV Purple Ring (Outer) with Bezel Cast
+// - Channel Direction Toggle
 // - Compatible with "Donut" chassis (White center island)
 
 struct Uniforms {
@@ -245,6 +245,7 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   let aa = fwidth(p.y) * 0.5;
   let bloom = uniforms.bloomIntensity;
 
+  // STUDIO DARKNESS: Dim everything significantly when playing
   let isPlaying = (uniforms.isPlaying == 1u);
   let dimFactor = select(1.0, 0.35, isPlaying);
 
@@ -268,7 +269,11 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     var col = indLed.rgb;
     var alpha = indLed.a;
 
-    if (isPlaying) { col += uvPurple * 0.4 * bloom; }
+    // UV CAST: When playing, boost the purple glow so it blooms onto the bezel
+    if (isPlaying) {
+        col += uvPurple * 0.4 * bloom;
+    }
+
     if (onPlayhead) {
       let flashColor = select(fs.ledOnColor, activePurple, isPlaying);
       let glow = flashColor * (bloom * 5.0) * exp(-length(p) * 4.0);
@@ -305,6 +310,7 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     let ch = channels[in.channel];
     let isMuted = (ch.isMuted == 1u);
 
+    // COMPONENT 1: DATA LIGHT
     let topUV = btnUV - vec2(0.5, 0.16);
     let topSize = vec2(0.20, 0.20);
     let isDataPresent = hasExpression && !isMuted;
@@ -314,6 +320,7 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     finalColor = mix(finalColor, topLed.rgb, topLed.a);
     if (isDataPresent) { finalColor += topColor * topLed.a * 0.3; }
 
+    // COMPONENT 2: MAIN NOTE LIGHT
     let mainUV = btnUV - vec2(0.5, 0.5);
     let mainSize = vec2(0.55, 0.45);
     var noteColor = vec3(0.2);
@@ -325,9 +332,13 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
       let instBand = inst & 15u;
       let instBright = 0.8 + (select(0.0, f32(instBand) / 15.0, instBand > 0u)) * 0.2;
       noteColor = baseColor * instBright;
+
       let linger = exp(-ch.noteAge * 1.5);
+
+      // BLIP LOGIC: Instant strike when playhead hits
       let onPlayhead = (in.row == uniforms.playheadRow);
       let strike = select(0.0, 3.0, onPlayhead);
+
       let flash = f32(ch.trigger) * 1.0;
       var d = f32(in.row) + uniforms.tickOffset - f32(uniforms.playheadRow);
       let totalSteps = 64.0;
@@ -337,6 +348,7 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
       let energy = 0.02 / (coreDist + 0.001);
       let trail = exp(-10.0 * max(0.0, -d));
       let activeVal = clamp(pow(energy, 1.5) + trail, 0.0, 1.0);
+
       lightAmount = (activeVal * 0.8 + flash + strike + (linger * 2.0)) * clamp(ch.volume, 0.0, 1.2);
       if (isMuted) { lightAmount *= 0.2; }
     }
@@ -345,6 +357,7 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     let mainPad = drawChromeIndicator(mainUV, mainSize, displayColor, isLit, aa, dimFactor);
     finalColor = mix(finalColor, mainPad.rgb, mainPad.a);
 
+    // COMPONENT 3: EFFECT LIGHT
     let botUV = btnUV - vec2(0.5, 0.85);
     let botSize = vec2(0.25, 0.12);
     var effColor = vec3(0.0);
