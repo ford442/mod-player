@@ -5,7 +5,7 @@ A small React + TypeScript web app for loading and previewing tracker module fil
 Key features
 
 Recent changes
-- v0.32: added HDR + bloom-ready shader `shaders/patternv0.32.wgsl` and bloom postprocessing helpers (`/shaders/bloom_*.wgsl`, `utils/bloomPostProcessor.ts`).
+- v0.33: added HDR + bloom-ready shader `shaders/patternv0.33_bloom.wgsl` (default WGSL shader) with per-step data lights and playhead strike, plus bloom helpers in `utils/bloomPostProcessor.ts`.
 
 - Play tracker modules in the browser using libopenmpt (WASM).
 - Pattern view with two modes: HTML fallback and optional WebGPU (WGSL shaders included in /shaders).
