@@ -10,7 +10,7 @@ const DEFAULT_CHANNELS = 32;
 const alignTo = (value: number, alignment: number) => Math.ceil(value / alignment) * alignment;
 const getLayoutType = (shaderFile: string): LayoutType => {
   if (shaderFile === 'patternShaderv0.12.wgsl') return 'texture';
-  if (shaderFile.includes('v0.13') || shaderFile.includes('v0.14') || shaderFile.includes('v0.15') || shaderFile.includes('v0.16') || shaderFile.includes('v0.17') || shaderFile.includes('v0.18') || shaderFile.includes('v0.19') || shaderFile.includes('v0.20') || shaderFile.includes('v0.21') || shaderFile.includes('v0.23') || shaderFile.includes('v0.24') || shaderFile.includes('v0.25') || shaderFile.includes('v0.26') || shaderFile.includes('v0.27') || shaderFile.includes('v0.28') || shaderFile.includes('v0.29') || shaderFile.includes('v0.30') || shaderFile.includes('v0.31') || shaderFile.includes('v0.32')) return 'extended';
+  if (shaderFile.includes('v0.13') || shaderFile.includes('v0.14') || shaderFile.includes('v0.15') || shaderFile.includes('v0.16') || shaderFile.includes('v0.17') || shaderFile.includes('v0.18') || shaderFile.includes('v0.19') || shaderFile.includes('v0.20') || shaderFile.includes('v0.21') || shaderFile.includes('v0.23') || shaderFile.includes('v0.24') || shaderFile.includes('v0.25') || shaderFile.includes('v0.26') || shaderFile.includes('v0.27') || shaderFile.includes('v0.28') || shaderFile.includes('v0.29') || shaderFile.includes('v0.30') || shaderFile.includes('v0.31') || shaderFile.includes('v0.32') || shaderFile.includes('v0.33') || shaderFile.includes('v0.34') || shaderFile.includes('v0.35')) return 'extended';
   return 'simple';
 };
 
@@ -19,14 +19,12 @@ const isSinglePassCompositeShader = (shaderFile: string) => {
 };
 
 const shouldEnableAlphaBlending = (shaderFile: string) => {
-  return shaderFile.includes('v0.28') || shaderFile.includes('v0.30') || shaderFile.includes('v0.31') || shaderFile.includes('v0.32');
+  return shaderFile.includes('v0.28') || shaderFile.includes('v0.30') || shaderFile.includes('v0.31') || shaderFile.includes('v0.32') || shaderFile.includes('v0.33') || shaderFile.includes('v0.34') || shaderFile.includes('v0.35');
 };
 
 const isCircularLayoutShader = (shaderFile: string) => {
-  // IMPORTANT: v0.26, v0.27, v0.29 are NOT circular despite sharing similar logic previously.
-  // They are hardware chassis shaders that require 1024x1008.
-  // Only v0.25 is circular in this set.
-  return shaderFile.includes('v0.25') || shaderFile.includes('v0.26');
+  // v0.25, v0.26, and v0.35 are considered circular/donut style for bezel rendering.
+  return shaderFile.includes('v0.25') || shaderFile.includes('v0.26') || shaderFile.includes('v0.35');
 };
 
 const shouldUseBackgroundPass = (shaderFile: string) => {
@@ -36,7 +34,7 @@ const shouldUseBackgroundPass = (shaderFile: string) => {
 
 const getBackgroundShaderFile = (shaderFile: string): string => {
   // Only use the chassis pass when explicitly called.
-  if (shaderFile.includes('v0.27') || shaderFile.includes('v0.28') || shaderFile.includes('v0.30') || shaderFile.includes('v0.31') || shaderFile.includes('v0.32')) return 'chassisv0.1.wgsl';
+  if (shaderFile.includes('v0.27') || shaderFile.includes('v0.28') || shaderFile.includes('v0.30') || shaderFile.includes('v0.31') || shaderFile.includes('v0.32') || shaderFile.includes('v0.33') || shaderFile.includes('v0.34') || shaderFile.includes('v0.35')) return 'chassisv0.1.wgsl';
   return 'bezel.wgsl';
 };
 
@@ -59,8 +57,9 @@ const createUniformPayload = (
     kickTrigger: number;
     activeChannels: number;
     isModuleLoaded: boolean;
-    bloomIntensity?: number;        // NEW: optional HDR bloom uniform
-    bloomThreshold?: number;        // NEW: optional hint for post-process
+    bloomIntensity?: number;        // optional HDR bloom uniform
+    bloomThreshold?: number;        // optional hint for post-process
+    invertChannels?: boolean;       // NEW: controls ring direction
   }
 ): ArrayBuffer => {
   if (layoutType === 'extended') {
@@ -87,6 +86,8 @@ const createUniformPayload = (
     // Bloom uniforms (defaults)
     float[16] = params.bloomIntensity ?? 1.0;
     float[17] = params.bloomThreshold ?? 0.8;
+    // Invert channels flag (0 = outer low, 1 = inner low)
+    uint[18] = params.invertChannels ? 1 : 0;
     return buffer;
   }
 
@@ -373,6 +374,9 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   const [gpuReady, setGpuReady] = useState(false);
   const [localTime, setLocalTime] = useState(0);
 
+  // NEW: toggle for channel direction (v0.35)
+  const [invertChannels, setInvertChannels] = useState(false);
+
   const isHorizontal = shaderFile.includes('v0.12') || shaderFile.includes('v0.13') || shaderFile.includes('v0.14') || shaderFile.includes('v0.16') || shaderFile.includes('v0.17') || shaderFile.includes('v0.21');
   const padTopChannel = shaderFile.includes('v0.16') || shaderFile.includes('v0.17') || shaderFile.includes('v0.21');
 
@@ -380,7 +384,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   const computeLogicalCanvasMetrics = () => {
     // FIX: Render chassis shaders at HIGH RES (2048x2016) to avoid layout blowups and provide supersampling.
     // This prevents the layout engine from computing massive dimensions and guarantees a consistent aspect.
-    if (shaderFile.includes('v0.26') || shaderFile.includes('v0.27') || shaderFile.includes('v0.28') || shaderFile.includes('v0.29') || shaderFile.includes('v0.30') || shaderFile.includes('v0.31') || shaderFile.includes('v0.32')) {
+    if (shaderFile.includes('v0.26') || shaderFile.includes('v0.27') || shaderFile.includes('v0.28') || shaderFile.includes('v0.29') || shaderFile.includes('v0.30') || shaderFile.includes('v0.31') || shaderFile.includes('v0.32') || shaderFile.includes('v0.33') || shaderFile.includes('v0.34')) {
       return { width: 2048, height: 2016 };
     }
 
@@ -1123,6 +1127,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
         isModuleLoaded,
         bloomIntensity: bloomIntensity ?? 1.0,
         bloomThreshold: bloomThreshold ?? 0.8,
+        invertChannels: invertChannels,
       });
       device.queue.writeBuffer(uniformBuffer, 0, uniformPayload);
     }
@@ -1145,9 +1150,16 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
       buf[9] = 0.02;
 
           // Recess shaping: circle for circular shaders, rounded-rect for all non-circular
-          buf[10] = circularLayout ? 0.0 : 1.0; // recessKind
-          buf[11] = circularLayout ? 1.0 : 1.25; // recessOuterScale (bigger so it doesn't "cut through" wide grids)
-          buf[12] = circularLayout ? 1.0 : 0.0; // recessInnerScale (no inner hole for grids)
+          if (shaderFile.includes('v0.35')) {
+            // Donut chassis: circular with a smaller inner cutout to create a white island
+            buf[10] = 0.0; // recessKind = circle
+            buf[11] = 0.95; // recessOuterScale (slightly scaled)
+            buf[12] = 0.32; // recessInnerScale (creates white island in center)
+          } else {
+            buf[10] = circularLayout ? 0.0 : 1.0; // recessKind
+            buf[11] = circularLayout ? 1.0 : 1.25; // recessOuterScale (bigger so it doesn't "cut through" wide grids)
+            buf[12] = circularLayout ? 1.0 : 0.0; // recessInnerScale (no inner hole for grids)
+          }
           buf[13] = 0.10; // recessCorner (used for rounded-rect)
           buf[14] = 0.0;
           buf[15] = 0.0;
@@ -1155,7 +1167,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     }
 
     render();
-  }, [playheadRow, timeSec, localTime, bpm, tickOffset, grooveAmount, kickTrigger, activeChannels, gpuReady, isPlaying, beatPhase, isModuleLoaded, matrix?.numRows, matrix?.numChannels, cellWidth, cellHeight, canvasMetrics, bloomIntensity, bloomThreshold]);
+  }, [playheadRow, timeSec, localTime, bpm, tickOffset, grooveAmount, kickTrigger, activeChannels, gpuReady, isPlaying, beatPhase, isModuleLoaded, matrix?.numRows, matrix?.numChannels, cellWidth, cellHeight, canvasMetrics, bloomIntensity, bloomThreshold, invertChannels]);
 
   return (
     <div className={`pattern-display relative ${padTopChannel ? 'p-8 rounded-xl bg-[#18181a] shadow-2xl border border-[#333]' : ''}`}>
@@ -1179,6 +1191,17 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
             </div>
           </>
       )}
+
+      {/* NEW: Toggle Button for Ring Direction (v0.35) */}
+      {shaderFile.includes('v0.35') && (
+        <button 
+            onClick={() => setInvertChannels(p => !p)}
+            className="absolute top-2 left-12 px-2 py-1 bg-[#222] text-xs font-mono text-gray-400 border border-[#444] rounded hover:bg-[#333] hover:text-white transition-colors"
+        >
+            {invertChannels ? "[INNER LOW]" : "[OUTER LOW]"}
+        </button>
+      )}
+
       <canvas 
         ref={canvasRef} 
         width={canvasMetrics.width} 

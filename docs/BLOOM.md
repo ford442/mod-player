@@ -3,9 +3,11 @@
 This document explains how to use the new bloom shaders and `BloomPostProcessor` helper.
 
 Files added:
-- `shaders/patternv0.33_bloom.wgsl` — Official v0.33 HDR-capable sequencer fragment shader (blue data lights tied to per-step expression data; brighter playhead strike; set as the default WGSL shader).
+- `shaders/patternv0.35_bloom.wgsl` — Official v0.35 "Donut & Night Mode" shader (channel invert toggle, white center island, studio dim + UV ring).
+- `shaders/patternv0.34_bloom.wgsl` — v0.34 "Night Mode" shader (studio dimming, UV outer ring, bezel bloom/overdrive).
+- `shaders/patternv0.33_bloom.wgsl` — v0.33 added blue data lights and playhead strike (previous default).
 - `shaders/patternv0.32.wgsl` — v0.32 introduced HDR + bloom-ready logic and remains available for reference.
-- `shaders/patternv0.31.wgsl` — v0.31 was truncated and is kept for reference; use v0.33 instead.
+- `shaders/patternv0.31.wgsl` — v0.31 was truncated and is kept for reference; use v0.35 instead.
 - `shaders/bloom_threshold.wgsl` — brightness extraction (soft threshold).
 - `shaders/bloom_blur.wgsl` — separable Gaussian blur (horizontal & vertical passes).
 - `shaders/bloom_composite.wgsl` — composite HDR bloom back onto the scene.
