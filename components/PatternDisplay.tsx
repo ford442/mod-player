@@ -384,7 +384,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   const computeLogicalCanvasMetrics = () => {
     // FIX: Render chassis shaders at HIGH RES (2048x2016) to avoid layout blowups and provide supersampling.
     // This prevents the layout engine from computing massive dimensions and guarantees a consistent aspect.
-    if (shaderFile.includes('v0.26') || shaderFile.includes('v0.27') || shaderFile.includes('v0.28') || shaderFile.includes('v0.29') || shaderFile.includes('v0.30') || shaderFile.includes('v0.31') || shaderFile.includes('v0.32') || shaderFile.includes('v0.33') || shaderFile.includes('v0.34')) {
+    if (shaderFile.includes('v0.26') || shaderFile.includes('v0.27') || shaderFile.includes('v0.28') || shaderFile.includes('v0.29') || shaderFile.includes('v0.30') || shaderFile.includes('v0.31') || shaderFile.includes('v0.32') || shaderFile.includes('v0.33') || shaderFile.includes('v0.34') || shaderFile.includes('v0.35')) {
       return { width: 2048, height: 2016 };
     }
 
