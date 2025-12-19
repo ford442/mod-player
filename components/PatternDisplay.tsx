@@ -378,9 +378,10 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
 
   // Compute the "logical" canvas metrics used for layout and for special fixed-size shaders
   const computeLogicalCanvasMetrics = () => {
-    // Specific size override for hardware chassis shaders (v0.26, v0.27, v0.28, v0.29, v0.30)
-    if (shaderFile.includes('v0.26') || shaderFile.includes('v0.27') || shaderFile.includes('v0.28') || shaderFile.includes('v0.29') || shaderFile.includes('v0.30')) {
-      return { width: 1024, height: 1008 };
+    // FIX: Render chassis shaders at HIGH RES (2048x2016) to avoid layout blowups and provide supersampling.
+    // This prevents the layout engine from computing massive dimensions and guarantees a consistent aspect.
+    if (shaderFile.includes('v0.26') || shaderFile.includes('v0.27') || shaderFile.includes('v0.28') || shaderFile.includes('v0.29') || shaderFile.includes('v0.30') || shaderFile.includes('v0.31') || shaderFile.includes('v0.32')) {
+      return { width: 2048, height: 2016 };
     }
 
     // Keep a large square canvas for circular ring shaders so the ring fills
@@ -415,7 +416,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
       const dpr = window.devicePixelRatio || 1;
 
       let targetW: number, targetH: number;
-      const isFixed = (logical.width === 1024 && logical.height === 1008) || (logical.width === 1280 && logical.height === 1280);
+      const isFixed = (logical.width === 2048 && logical.height === 2016) || (logical.width === 1024 && logical.height === 1008) || (logical.width === 1280 && logical.height === 1280);
 
       if (isFixed) {
         targetW = logical.width;
@@ -1178,7 +1179,20 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
             </div>
           </>
       )}
-      <canvas ref={canvasRef} width={canvasMetrics.width} height={canvasMetrics.height} className={padTopChannel ? 'rounded bg-black shadow-inner border border-black/50' : ''} />
+      <canvas 
+        ref={canvasRef} 
+        width={canvasMetrics.width} 
+        height={canvasMetrics.height} 
+        className={padTopChannel ? 'rounded bg-black shadow-inner border border-black/50' : ''}
+        style={{
+          maxWidth: '100%',
+          maxHeight: '100%',
+          width: 'auto',
+          height: 'auto',
+          objectFit: 'contain',
+          aspectRatio: `${canvasMetrics.width} / ${canvasMetrics.height}`,
+        }}
+      />
       {!webgpuAvailable && <div className="error">WebGPU not available in this browser.</div>}
     </div>
   );
