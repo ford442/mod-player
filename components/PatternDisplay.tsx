@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import type { ChannelShadowState, PatternMatrix } from '../types';
 
 const EMPTY_CHANNEL: ChannelShadowState = { volume: 0, pan: 0, freq: 0, trigger: 0, noteAge: 0, activeEffect: 0, effectValue: 0, isMuted: 0 };
@@ -376,7 +376,8 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   const isHorizontal = shaderFile.includes('v0.12') || shaderFile.includes('v0.13') || shaderFile.includes('v0.14') || shaderFile.includes('v0.16') || shaderFile.includes('v0.17') || shaderFile.includes('v0.21');
   const padTopChannel = shaderFile.includes('v0.16') || shaderFile.includes('v0.17') || shaderFile.includes('v0.21');
 
-  const canvasMetrics = useMemo(() => {
+  // Compute the "logical" canvas metrics used for layout and for special fixed-size shaders
+  const computeLogicalCanvasMetrics = () => {
     // Specific size override for hardware chassis shaders (v0.26, v0.27, v0.28, v0.29, v0.30)
     if (shaderFile.includes('v0.26') || shaderFile.includes('v0.27') || shaderFile.includes('v0.28') || shaderFile.includes('v0.29') || shaderFile.includes('v0.30')) {
       return { width: 1024, height: 1008 };
@@ -398,7 +399,44 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     return isHorizontal
       ? { width: Math.ceil(rows * cellWidth), height: Math.ceil(displayChannels * cellHeight) }
       : { width: Math.ceil(displayChannels * cellWidth), height: Math.ceil(rows * cellHeight) };
-  }, [matrix, cellWidth, cellHeight, isHorizontal, padTopChannel, shaderFile]);
+  };
+
+  // Track the actual internal canvas pixel size (may be driven by CSS client size or by fixed logical sizes above).
+  const [canvasMetrics, setCanvasMetrics] = React.useState(() => computeLogicalCanvasMetrics());
+
+  // Keep canvas internal resolution in sync with display size (handles browser resizes / DPR)
+  useEffect(() => {
+    const onResize = () => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+
+      const logical = computeLogicalCanvasMetrics();
+      const dpr = window.devicePixelRatio || 1;
+
+      // For fixed logical shaders, prefer the logical size. Otherwise match the CSS display size.
+      let targetW: number, targetH: number;
+      const isFixed = (logical.width === 1024 && logical.height === 1008) || (logical.width === 1280 && logical.height === 1280);
+      if (isFixed) {
+        targetW = logical.width;
+        targetH = logical.height;
+      } else {
+        // Use the canvas's CSS size (clientWidth/clientHeight) multiplied by DPR
+        targetW = Math.max(1, Math.floor(canvas.clientWidth * dpr));
+        targetH = Math.max(1, Math.floor(canvas.clientHeight * dpr));
+      }
+
+      if (canvas.width !== targetW || canvas.height !== targetH) {
+        canvas.width = targetW;
+        canvas.height = targetH;
+        setCanvasMetrics({ width: targetW, height: targetH });
+      }
+    };
+
+    window.addEventListener('resize', onResize);
+    // Run once on mount to pick up initial CSS size
+    onResize();
+    return () => window.removeEventListener('resize', onResize);
+  }, [shaderFile, matrix?.numRows, matrix?.numChannels, cellWidth, cellHeight, isHorizontal, padTopChannel]);
 
   // Local animation loop when not playing or not loaded
   useEffect(() => {
