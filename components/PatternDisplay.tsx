@@ -562,21 +562,31 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     // If it's null, create it.
     if (textureResourcesRef.current) return;
 
+    // Detect which texture to use based on shader version
+    // If v0.30, use unlit-button-2.png. Otherwise fallback to original.
+    const textureUrl = shaderFile.includes('v0.30')
+      ? 'unlit-button-2.png' // Local public file
+      : 'https://test.1ink.us/xm-player/unlit-button.png'; // Original remote file
+
     let bitmap: ImageBitmap;
     try {
       const img = new Image();
-      img.src = 'https://test.1ink.us/xm-player/unlit-button.png';
+      img.src = textureUrl;
+      img.crossOrigin = 'anonymous'; // Important for texture loading if remote
       await img.decode();
       bitmap = await createImageBitmap(img);
     } catch (e) {
-      console.warn('Failed to load button texture, using fallback.', e);
+      console.warn(`Failed to load button texture (${textureUrl}), using fallback.`, e);
       const canvas = document.createElement('canvas');
-      canvas.width = 1;
-      canvas.height = 1;
+      canvas.width = 128; // fallback size
+      canvas.height = 128;
       const ctx = canvas.getContext('2d');
       if (ctx) {
         ctx.fillStyle = '#222';
-        ctx.fillRect(0, 0, 1, 1);
+        ctx.fillRect(0, 0, 128, 128);
+        // Draw a visual placeholder debug box
+        ctx.strokeStyle = '#444';
+        ctx.strokeRect(10, 10, 108, 108);
       }
       bitmap = await createImageBitmap(canvas);
     }
@@ -588,7 +598,11 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     });
     // Flip Y-axis to fix upside-down issue
     device.queue.copyExternalImageToTexture({ source: bitmap, flipY: true }, { texture }, [bitmap.width, bitmap.height, 1]);
-    const sampler = device.createSampler({ magFilter: 'nearest', minFilter: 'nearest' });
+
+    // Use linear filtering for higher-res textures (v0.30 benefits from linear filtering if texture is high-res)
+    const filterMode: GPUFilterMode = (bitmap.width > 128) ? 'linear' : 'nearest';
+    const sampler = device.createSampler({ magFilter: filterMode, minFilter: filterMode });
+
     textureResourcesRef.current = { sampler, view: texture.createView() }; 
   };
 
