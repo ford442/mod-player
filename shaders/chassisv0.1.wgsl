@@ -17,7 +17,7 @@ struct BezelUniforms {
   recessOuterScale: f32,
   recessInnerScale: f32,
   recessCorner: f32,
-  _pad0: f32,
+  dimFactor: f32,   // REPURPOSED: Controls overall brightness (1.0 = Day, 0.35 = Night)
   _pad1: f32,
 };
 
@@ -109,6 +109,11 @@ fn fs(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
   if (texSample.a > 0.01 && luminance < 0.98) {
       color = texSample.rgb;
   }
+
+  // NIGHT MODE: Apply dimming to the final chassis color
+  // We use a safe lower bound so it's not pitch black
+  let dim = max(0.2, bez.dimFactor);
+  color *= dim;
 
   return vec4<f32>(color, 1.0);
 }
