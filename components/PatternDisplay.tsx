@@ -10,7 +10,7 @@ const DEFAULT_CHANNELS = 32;
 const alignTo = (value: number, alignment: number) => Math.ceil(value / alignment) * alignment;
 const getLayoutType = (shaderFile: string): LayoutType => {
   if (shaderFile === 'patternShaderv0.12.wgsl') return 'texture';
-  if (shaderFile.includes('v0.13') || shaderFile.includes('v0.14') || shaderFile.includes('v0.15') || shaderFile.includes('v0.16') || shaderFile.includes('v0.17') || shaderFile.includes('v0.18') || shaderFile.includes('v0.19') || shaderFile.includes('v0.20') || shaderFile.includes('v0.21') || shaderFile.includes('v0.23') || shaderFile.includes('v0.24') || shaderFile.includes('v0.25') || shaderFile.includes('v0.26') || shaderFile.includes('v0.27') || shaderFile.includes('v0.28') || shaderFile.includes('v0.29') || shaderFile.includes('v0.30') || shaderFile.includes('v0.31') || shaderFile.includes('v0.32') || shaderFile.includes('v0.33') || shaderFile.includes('v0.34') || shaderFile.includes('v0.35')) return 'extended';
+  if (shaderFile.includes('v0.13') || shaderFile.includes('v0.14') || shaderFile.includes('v0.15') || shaderFile.includes('v0.16') || shaderFile.includes('v0.17') || shaderFile.includes('v0.18') || shaderFile.includes('v0.19') || shaderFile.includes('v0.20') || shaderFile.includes('v0.21') || shaderFile.includes('v0.23') || shaderFile.includes('v0.24') || shaderFile.includes('v0.25') || shaderFile.includes('v0.26') || shaderFile.includes('v0.27') || shaderFile.includes('v0.28') || shaderFile.includes('v0.29') || shaderFile.includes('v0.30') || shaderFile.includes('v0.31') || shaderFile.includes('v0.32') || shaderFile.includes('v0.33') || shaderFile.includes('v0.34') || shaderFile.includes('v0.35') || shaderFile.includes('v0.36')) return 'extended';
   return 'simple';
 };
 
@@ -19,7 +19,7 @@ const isSinglePassCompositeShader = (shaderFile: string) => {
 };
 
 const shouldEnableAlphaBlending = (shaderFile: string) => {
-  return shaderFile.includes('v0.28') || shaderFile.includes('v0.30') || shaderFile.includes('v0.31') || shaderFile.includes('v0.32') || shaderFile.includes('v0.33') || shaderFile.includes('v0.34') || shaderFile.includes('v0.35');
+  return shaderFile.includes('v0.28') || shaderFile.includes('v0.30') || shaderFile.includes('v0.31') || shaderFile.includes('v0.32') || shaderFile.includes('v0.33') || shaderFile.includes('v0.34') || shaderFile.includes('v0.35') || shaderFile.includes('v0.36');
 };
 
 const isCircularLayoutShader = (shaderFile: string) => {
@@ -34,7 +34,7 @@ const shouldUseBackgroundPass = (shaderFile: string) => {
 
 const getBackgroundShaderFile = (shaderFile: string): string => {
   // Only use the chassis pass when explicitly called.
-  if (shaderFile.includes('v0.27') || shaderFile.includes('v0.28') || shaderFile.includes('v0.30') || shaderFile.includes('v0.31') || shaderFile.includes('v0.32') || shaderFile.includes('v0.33') || shaderFile.includes('v0.34') || shaderFile.includes('v0.35')) return 'chassisv0.1.wgsl';
+  if (shaderFile.includes('v0.27') || shaderFile.includes('v0.28') || shaderFile.includes('v0.30') || shaderFile.includes('v0.31') || shaderFile.includes('v0.32') || shaderFile.includes('v0.33') || shaderFile.includes('v0.34') || shaderFile.includes('v0.35') || shaderFile.includes('v0.36')) return 'chassisv0.1.wgsl';
   return 'bezel.wgsl';
 };
 
@@ -242,6 +242,42 @@ const packPatternMatrix = (matrix: PatternMatrix | null, padTopChannel = false):
   return packed;
 };
 
+const packPatternMatrixHighPrecision = (matrix: PatternMatrix | null, padTopChannel = false): Uint32Array => {
+  const rawChannels = matrix?.numChannels ?? DEFAULT_CHANNELS;
+  const numRows = matrix?.numRows ?? DEFAULT_ROWS;
+  const numChannels = padTopChannel ? rawChannels + 1 : rawChannels;
+  const packed = new Uint32Array(numRows * numChannels * 2);
+
+  if (!matrix) return packed;
+
+  const { rows } = matrix;
+  const startCol = padTopChannel ? 1 : 0;
+
+  for (let r = 0; r < numRows; r++) {
+    const rowCells = rows[r] || [];
+    for (let c = 0; c < rawChannels; c++) {
+      const offset = (r * numChannels + (c + startCol)) * 2;
+      const cell = rowCells[c];
+      if (!cell) continue;
+
+      // Use structured data if available, else 0
+      const note = cell.note || 0;
+      const inst = cell.inst || 0;
+      const volCmd = cell.volCmd || 0;
+      const volVal = cell.volVal || 0;
+      const effCmd = cell.effCmd || 0;
+      const effVal = cell.effVal || 0;
+
+      // PackedA: [Note(8) | Instr(8) | VolCmd(8) | VolVal(8)]
+      packed[offset] = ((note & 0xFF) << 24) | ((inst & 0xFF) << 16) | ((volCmd & 0xFF) << 8) | (volVal & 0xFF);
+
+      // PackedB: [Unused(16) | EffCmd(8) | EffVal(8)]
+      packed[offset + 1] = ((effCmd & 0xFF) << 8) | (effVal & 0xFF);
+    }
+  }
+  return packed;
+};
+
 const createBufferWithData = (device: GPUDevice, data: ArrayBufferView | ArrayBuffer, usage: GPUBufferUsageFlags): GPUBuffer => {
   const byteLength = data instanceof ArrayBuffer ? data.byteLength : data.byteLength;
   const buffer = device.createBuffer({
@@ -384,7 +420,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   const computeLogicalCanvasMetrics = () => {
     // FIX: Render chassis shaders at HIGH RES (2048x2016) to avoid layout blowups and provide supersampling.
     // This prevents the layout engine from computing massive dimensions and guarantees a consistent aspect.
-    if (shaderFile.includes('v0.26') || shaderFile.includes('v0.27') || shaderFile.includes('v0.28') || shaderFile.includes('v0.29') || shaderFile.includes('v0.30') || shaderFile.includes('v0.31') || shaderFile.includes('v0.32') || shaderFile.includes('v0.33') || shaderFile.includes('v0.34') || shaderFile.includes('v0.35')) {
+    if (shaderFile.includes('v0.26') || shaderFile.includes('v0.27') || shaderFile.includes('v0.28') || shaderFile.includes('v0.29') || shaderFile.includes('v0.30') || shaderFile.includes('v0.31') || shaderFile.includes('v0.32') || shaderFile.includes('v0.33') || shaderFile.includes('v0.34') || shaderFile.includes('v0.35') || shaderFile.includes('v0.36')) {
       return { width: 2048, height: 2016 };
     }
 
@@ -965,7 +1001,9 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
         uniformBufferRef.current = uniformBuffer;
 
         // Initial buffer creation (handles null matrix now via packPatternMatrix)
-        cellsBufferRef.current = createBufferWithData(device, packPatternMatrix(matrix, padTopChannel), GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
+        const isHighPrec = shaderFile.includes('v0.36');
+        const packFunc = isHighPrec ? packPatternMatrixHighPrecision : packPatternMatrix;
+        cellsBufferRef.current = createBufferWithData(device, packFunc(matrix, padTopChannel), GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
 
         if (layoutType === 'extended') {
           const numRows = matrix?.numRows ?? DEFAULT_ROWS;
@@ -1050,7 +1088,9 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     if (cellsBufferRef.current) {
         cellsBufferRef.current.destroy();
     }
-    cellsBufferRef.current = createBufferWithData(device, packPatternMatrix(matrix, padTopChannel), GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
+    const isHighPrec = shaderFile.includes('v0.36');
+    const packFunc = isHighPrec ? packPatternMatrixHighPrecision : packPatternMatrix;
+    cellsBufferRef.current = createBufferWithData(device, packFunc(matrix, padTopChannel), GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
 
     // Also update row flags if extended
     if (layoutTypeRef.current === 'extended') {
