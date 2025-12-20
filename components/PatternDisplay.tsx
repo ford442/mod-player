@@ -1161,7 +1161,9 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
             buf[12] = circularLayout ? 1.0 : 0.0; // recessInnerScale (no inner hole for grids)
           }
           buf[13] = 0.10; // recessCorner (used for rounded-rect)
-          buf[14] = 0.0;
+          // NIGHT MODE DIMMING FOR CHASSIS
+          // We send 0.35 if playing, else 1.0. This makes the bezel darker so the UV light "shines"
+          buf[14] = isPlaying ? 0.35 : 1.0; // dimFactor
           buf[15] = 0.0;
       device.queue.writeBuffer(bezelUniformBufferRef.current, 0, buf.buffer, buf.byteOffset, buf.byteLength);
     }
