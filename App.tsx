@@ -175,7 +175,7 @@ export default function App() {
 
   const webgpuSupported = typeof navigator !== 'undefined' && 'gpu' in navigator;
   const [patternMode, setPatternMode] = useState<'html' | 'webgpu'>(webgpuSupported ? 'webgpu' : 'html');
-  const [shaderVersion, setShaderVersion] = useState<string>('patternv0.33_bloom.wgsl');
+  const [shaderVersion, setShaderVersion] = useState<string>('patternv0.36.wgsl');
   const effectivePatternMode = webgpuSupported ? patternMode : 'html';
 
   const isVideoShaderActive = effectivePatternMode === 'webgpu' && (shaderVersion.includes('v0.20') || shaderVersion.includes('v0.23'));
