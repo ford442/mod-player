@@ -181,7 +181,22 @@ export function useLibOpenMPT(volume: number = 1.0) {
                             cellType = 'effect';
                         }
 
-                        matrixRows[r][c] = { type: cellType, text: raw };
+                        // Structured Data Extraction (0=Note, 1=Inst, 2=VolCmd, 3=EffCmd, 4=VolVal, 5=EffVal)
+                        let note = 0, inst = 0, volCmd = 0, effCmd = 0, volVal = 0, effVal = 0;
+                        if (lib._openmpt_module_get_pattern_row_channel_command) {
+                           note = lib._openmpt_module_get_pattern_row_channel_command(modPtr, pattern, r, c, 0);
+                           inst = lib._openmpt_module_get_pattern_row_channel_command(modPtr, pattern, r, c, 1);
+                           volCmd = lib._openmpt_module_get_pattern_row_channel_command(modPtr, pattern, r, c, 2);
+                           effCmd = lib._openmpt_module_get_pattern_row_channel_command(modPtr, pattern, r, c, 3);
+                           volVal = lib._openmpt_module_get_pattern_row_channel_command(modPtr, pattern, r, c, 4);
+                           effVal = lib._openmpt_module_get_pattern_row_channel_command(modPtr, pattern, r, c, 5);
+                        }
+
+                        matrixRows[r][c] = {
+                            type: cellType,
+                            text: raw,
+                            note, inst, volCmd, effCmd, volVal, effVal
+                        };
                      }
                      rowBufferRef.current[`${o}-${r}`] = line;
                  }
