@@ -171,6 +171,9 @@ fn getFragmentConstants() -> FragmentConstants {
 
 // --- 2. CHROME & GLASS RENDERING (Depends on sdRoundedBox) ---
 
+// Physical glass + bezel model (lens dome, normals, diffuse+specular)
+// Also includes a small metal bezel pass when outside the lens radius.
+// The function expects `uv` in centered coordinates (e.g., -0.5..0.5) and `size` in UV units.
 fn drawChromeIndicator(
     uv: vec2<f32>,
     size: vec2<f32>,
@@ -178,200 +181,245 @@ fn drawChromeIndicator(
     isOn: bool,
     aa: f32
 ) -> vec4<f32> {
-    // 1. Shapes
-    let r = min(size.x, size.y) * 0.45;
-    let dBase = sdRoundedBox(uv, size * 0.5, r); // Now this will work!
+    // Convert from centered coordinates (-0.5..0.5) into 0..1 quad space
+    let uv01 = (uv / size) + vec2<f32>(0.5);
 
-    // Bezel Thickness
-    let bezelW = 0.035;
-    let dBezel = dBase + bezelW;
+    // Geometry radii (normalized in 0..1 space where 0 = center, 1 = outer)
+    let lensR = 0.7;   // inner dome radius
+    let bezelR = 0.9;  // bezel outer radius
+    let center = vec2<f32>(0.5, 0.5);
 
-    // 2. Chrome Bezel Rendering
-    let angle = atan2(uv.y, uv.x);
-    let metalReflect = 0.5 + 0.5 * sin(angle * 8.0 + uv.x * 20.0);
-    let ridge = smoothstep(aa, -aa, abs(dBezel + bezelW * 0.5) - bezelW * 0.3);
+    // Normalized radial distance (0 at center, ~1 at edge of quad)
+    let dist = length(uv01 - center) * 2.0;
 
-    let chromeCol = vec3(0.6, 0.65, 0.70) * metalReflect + vec3(0.4) * ridge;
+    var col = vec3<f32>(0.0);
+    var alpha = 0.0;
 
-    // 3. Glass Lens Rendering
-    let dLens = dBase - 0.005;
-    var glassCol = vec3(0.05, 0.06, 0.08);
+    if (dist < bezelR) {
+        if (dist > lensR) {
+            // BEZEL (metal)
+            // subtle angular specular to give a machined rim
+            let angle = atan2(uv01.y - center.y, uv01.x - center.x);
+            let rim = 0.2 + 0.8 * abs(sin(angle * 10.0));
+            col = vec3<f32>(0.25, 0.28, 0.30) * rim; // dark metal
+            alpha = 1.0;
+        } else {
+            // LENS (dome)
+            let lensNormR = dist / lensR;
+            // Dome height (z) for a unit hemisphere
+            let z = sqrt(max(0.0, 1.0 - lensNormR * lensNormR));
 
-    if (isOn) {
-        let glow = exp(-max(dLens, 0.0) * 12.0);
-        glassCol = mix(glassCol, color, 0.8);
-        glassCol += color * glow * 1.5;
-        glassCol += vec3(1.0) * smoothstep(0.08, 0.0, length(uv * vec2(1.0, 2.0))) * 0.6;
+            // Reconstruct normal in local lens space (scale xy by lensR)
+            let localXY = (uv01 - center) / lensR;
+            let normal = normalize(vec3<f32>(localXY.x, localXY.y, z));
+
+            // Lighting
+            let lightDir = normalize(vec3<f32>(-0.5, 0.5, 1.0));
+            let diffuse = max(0.0, dot(normal, lightDir));
+            let reflectDir = reflect(-lightDir, normal);
+            let specular = pow(max(0.0, dot(reflectDir, vec3<f32>(0.0, 0.0, 1.0))), 10.0);
+
+            // Combine
+            let baseColor = color;
+            col = baseColor * (0.5 + 0.8 * diffuse);
+            col += vec3<f32>(1.0) * specular * 0.5;
+
+            // Soft bloom inside the lens
+            let rimGlow = exp(-pow(lensNormR, 2.0) * 6.0);
+            col += baseColor * rimGlow * 0.25;
+
+            alpha = 1.0;
+        }
+    } else {
+        // Outside bezel: transparent / discard-like behavior
+        return vec4<f32>(vec3<f32>(0.0), 0.0);
     }
 
-    // 4. Specular Highlight
-    let highlightPos = uv - vec2(-size.x * 0.2, -size.y * 0.2);
-    let hDist = length(highlightPos) - (min(size.x, size.y) * 0.12);
-    let highlight = smoothstep(aa * 2.0, -aa, hDist);
-    glassCol = mix(glassCol, vec3(0.95), highlight * 0.7);
+    // Soft vignette near bezel to blend into housing
+    let vignette = smoothstep(bezelR * 0.95, bezelR, dist);
+    col = mix(col * (1.0 - 0.08 * vignette), vec3<f32>(0.02), vignette);
 
-    // 5. Compositing
-    let bezelMask = smoothstep(aa, -aa, dBezel);
-    let lensMask = smoothstep(aa, -aa, dLens);
-
-    var outCol = vec3(0.0);
-    outCol = mix(outCol, chromeCol, bezelMask);
-    outCol = mix(outCol, vec3(0.02), lensMask);
-    outCol = mix(outCol, glassCol, smoothstep(aa, -aa, dBase));
-
-    return vec4(outCol, bezelMask);
+    return vec4<f32>(col, alpha);
 }
 
-// --- MAIN FRAGMENT SHADER ---
+// ---------------------------
+// WebGL2 Vertex Shader Snippet (GLSL adaptation):
+// Placed here for reference: adapt "Energy Trail" maths to your WebGL2 vertex shader.
+//
+// // In your WebGL2 Vertex Shader
+// // OLD: Linear distance check
+// // float dist = abs(xOffset - blipPos);
+// // float activeVal = 1.0 - smoothstep(0.0, 0.15, dist);
+//
+// // NEW: Energy Trail Logic (Adapted from WGSL)
+// float dx = xOffset - blipPos; // Signed distance
+// // 1. The "Spark" (Inverse square law for hot core)
+// float coreDist = abs(dx);
+// float energy = 0.01 / (coreDist + 0.01); // Tuned for LED spacing
+// // 2. The "Tail" (Exponential decay only behind the movement)
+// // Assuming movement is positive-x. If direction changes, flip sign of dx.
+// float directionSign = (speed > 0.0) ? 1.0 : -1.0;
+// float trail = exp(-8.0 * max(0.0, -dx * directionSign));
+// // Combine them
+// float activeVal = clamp(pow(energy, 1.5) + trail, 0.0, 1.0);
+// // Use activeVal to mix colors as before...
+// ---------------------------
 @fragment
 fn fs(in: VertexOut) -> @location(0) vec4<f32> {
-    let fs = getFragmentConstants();
-    let uv = in.uv;
-    let p = uv - 0.5; // Centered Cell Coordinates (-0.5 to 0.5)
+  let fs = getFragmentConstants();
+  let uv = in.uv;
+  let p = uv - 0.5; // Centered Cell Coordinates (-0.5 to 0.5)
 
-    // Pixel-perfect AA based on screen derivatives
-    let aa = fwidth(p.y) * 0.8;
+  // Pixel-perfect AA based on screen derivatives
+  let aa = fwidth(p.y) * 0.8;
 
-    // --- INDICATOR RING (Channel 0) ---
-    // (Kept simple to focus on the main grid changes, or apply the chrome logic here too if desired)
-    if (in.channel == 0u) {
-        var col = fs.bgColor * 0.5;
-        let onPlayhead = (in.row == uniforms.playheadRow);
+  // --- INDICATOR RING (Channel 0) ---
+  // MODIFIED: Background is now transparent (alpha 0.0) unless the LED is drawn
+  if (in.channel == 0u) {
+    let onPlayhead = (in.row == uniforms.playheadRow);
 
-        // Use the new Chrome function for the indicator ring too!
-        let indSize = vec2(0.3, 0.3);
-        let indColor = select(vec3(0.2), fs.ledOnColor, onPlayhead);
-        let indLed = drawChromeIndicator(p, indSize, indColor, onPlayhead, aa);
+    // Use the Chrome function for the indicator ring
+    let indSize = vec2(0.3, 0.3);
+    let indColor = select(vec3(0.2), fs.ledOnColor, onPlayhead);
 
-        col = mix(col, indLed.rgb, indLed.a);
+    // drawChromeIndicator returns alpha 1.0 inside the bezel, 0.0 outside
+    let indLed = drawChromeIndicator(p, indSize, indColor, onPlayhead, aa);
 
-        // Playhead Glow Bloom
-        if (onPlayhead) {
-            col += fs.ledOnColor * 0.5 * exp(-length(p) * 4.0);
-        }
+    var col = indLed.rgb;
+    var alpha = indLed.a;
 
-        return vec4(col, 1.0);
+    // Playhead Glow Bloom
+    if (onPlayhead) {
+      // Calculate bloom color
+      let glow = fs.ledOnColor * 0.5 * exp(-length(p) * 4.0);
+      col += glow;
+
+      // Ensure the bloom is visible by boosting alpha slightly where glow is strong
+      // (This prevents the glow from being clipped by alpha=0.0 regions)
+      alpha = max(alpha, smoothstep(0.0, 0.2, length(glow)));
     }
 
-    // --- PATTERN ROWS (The Main Grid) ---
+    return vec4<f32>(col, clamp(alpha, 0.0, 1.0));
+  }
 
-    // 1. Base Plastic Housing
-    let dHousing = sdRoundedBox(p, fs.housingSize * 0.5, 0.06);
-    let housingMask = 1.0 - smoothstep(0.0, aa * 2.0, dHousing);
+  // --- PATTERN ROWS (The Main Grid) ---
+  // (This logic remains unchanged, handling the main button grid)
 
-    var finalColor = fs.bgColor;
-    // Machined plastic gradient
-    finalColor += vec3(0.04) * (0.5 - uv.y);
+  // 1. Base Plastic Housing
+  let dHousing = sdRoundedBox(p, fs.housingSize * 0.5, 0.06);
+  let housingMask = 1.0 - smoothstep(0.0, aa * 2.0, dHousing);
 
-    // 2. Texture Overlay (Carbon/Plastic Texture)
-    let btnScale = 1.05;
-    let btnUV = (uv - 0.5) * btnScale + 0.5;
-    var inButton = 0.0;
+  var finalColor = fs.bgColor;
+  // Machined plastic gradient
+  finalColor += vec3(0.04) * (0.5 - uv.y);
 
-    if (btnUV.x > 0.0 && btnUV.x < 1.0 && btnUV.y > 0.0 && btnUV.y < 1.0) {
-        let texColor = textureSampleLevel(buttonsTexture, buttonsSampler, btnUV, 0.0).rgb;
-        // Blend texture softly into background
-        finalColor = mix(finalColor, texColor * 0.5, 0.8);
-        inButton = 1.0;
+  // 2. Texture Overlay
+  let btnScale = 1.05;
+  let btnUV = (uv - 0.5) * btnScale + 0.5;
+  var inButton = 0.0;
+
+  if (btnUV.x > 0.0 && btnUV.x < 1.0 && btnUV.y > 0.0 && btnUV.y < 1.0) {
+    let texColor = textureSampleLevel(buttonsTexture, buttonsSampler, btnUV, 0.0).rgb;
+    finalColor = mix(finalColor, texColor * 0.5, 0.8);
+    inButton = 1.0;
+  }
+
+  // --- CHROME HARDWARE INDICATORS ---
+  if (inButton > 0.5) {
+    // Data Extraction
+    let noteChar = (in.packedA >> 24) & 255u;
+    let inst = in.packedA & 255u;
+    let effCode = (in.packedB >> 8) & 255u;
+    let effParam = in.packedB & 255u;
+
+    let hasNote = (noteChar >= 65u && noteChar <= 71u);
+    let hasEffect = (effParam > 0u);
+    let ch = channels[in.channel];
+    let isMuted = (ch.isMuted == 1u);
+
+    // COMPONENT 1: ACTIVITY LIGHT
+    let topUV = btnUV - vec2(0.5, 0.15);
+    let topSize = vec2(0.18, 0.08);
+    let isActive = (step(0.1, exp(-ch.noteAge * 2.0)) > 0.5) && !isMuted;
+    let topColor = vec3(0.0, 0.9, 1.0);
+
+    let topLed = drawChromeIndicator(topUV, topSize, topColor, isActive, aa);
+    finalColor = mix(finalColor, topLed.rgb, topLed.a);
+
+    // COMPONENT 2: MAIN NOTE LIGHT
+    let mainUV = btnUV - vec2(0.5, 0.5);
+    let mainSize = vec2(0.55, 0.45);
+
+    var noteColor = vec3(0.2);
+    var lightAmount = 0.0;
+    var isNoteOn = false;
+
+    if (hasNote) {
+      let pitchHue = pitchClassFromPacked(in.packedA);
+      let baseColor = neonPalette(pitchHue);
+      let instBand = inst & 15u;
+      let instBright = 0.8 + (select(0.0, f32(instBand) / 15.0, instBand > 0u)) * 0.2;
+      noteColor = baseColor * instBright;
+
+      let flash = f32(ch.trigger) * 0.8;
+
+      var d = f32(in.row) + uniforms.tickOffset - f32(uniforms.playheadRow);
+      let totalSteps = 64.0;
+      if (d > totalSteps * 0.5) { d = d - totalSteps; }
+      if (d < -totalSteps * 0.5) { d = d + totalSteps; }
+
+      let dx = d;
+      let coreDist = abs(dx);
+      let energy = 0.02 / (coreDist + 0.001);
+      let directionSign = 1.0;
+      let trail = exp(-10.0 * max(0.0, -dx * directionSign));
+      let activeVal = clamp(pow(energy, 1.5) + trail, 0.0, 1.0);
+
+      lightAmount = (activeVal * 0.8 + flash) * clamp(ch.volume, 0.0, 1.2);
+      if (isMuted) { lightAmount *= 0.2; }
+      isNoteOn = true;
     }
 
-    // --- CHROME HARDWARE INDICATORS ---
-    if (inButton > 0.5) {
-        // Data Extraction
-        let noteChar = (in.packedA >> 24) & 255u;
-        let inst = in.packedA & 255u;
-        let effCode = (in.packedB >> 8) & 255u;
-        let effParam = in.packedB & 255u;
+    let displayColor = noteColor * max(lightAmount, 0.1);
+    let isLit = (lightAmount > 0.05);
+    let mainPad = drawChromeIndicator(mainUV, mainSize, displayColor, isLit, aa);
+    finalColor = mix(finalColor, mainPad.rgb, mainPad.a);
 
-        let hasNote = (noteChar >= 65u && noteChar <= 71u);
-        let hasEffect = (effParam > 0u);
-        let ch = channels[in.channel];
-        let isMuted = (ch.isMuted == 1u);
+    // COMPONENT 3: EFFECT LIGHT
+    let botUV = btnUV - vec2(0.5, 0.85);
+    let botSize = vec2(0.18, 0.08);
 
-        // --- COMPONENT 1: ACTIVITY LIGHT (Top) ---
-        // Positioned at top of button
-        let topUV = btnUV - vec2(0.5, 0.15);
-        let topSize = vec2(0.18, 0.08); // Small pill
-        let isActive = (step(0.1, exp(-ch.noteAge * 2.0)) > 0.5) && !isMuted;
-        let topColor = vec3(0.0, 0.9, 1.0); // Cyan
+    var effColor = vec3(0.0);
+    var isEffOn = false;
 
-        let topLed = drawChromeIndicator(topUV, topSize, topColor, isActive, aa);
-        finalColor = mix(finalColor, topLed.rgb, topLed.a);
-
-        // --- COMPONENT 2: MAIN NOTE LIGHT (Middle) ---
-        // Positioned in center
-        let mainUV = btnUV - vec2(0.5, 0.5);
-        let mainSize = vec2(0.55, 0.45); // Large pad
-
-        var noteColor = vec3(0.2); // Default dim grey
-        var isNoteOn = false;
-        var lightAmount = 0.0;
-
-        if (hasNote) {
-            let pitchHue = pitchClassFromPacked(in.packedA);
-            let baseColor = neonPalette(pitchHue);
-            // Instrument brightness variation
-            let instBand = inst & 15u;
-            let instBright = 0.8 + (select(0.0, f32(instBand) / 15.0, instBand > 0u)) * 0.2;
-
-            noteColor = baseColor * instBright;
-
-            // Animation Physics
-            let flash = f32(ch.trigger) * 0.8;
-            let activeLevel = exp(-ch.noteAge * 3.0);
-            lightAmount = (activeLevel * 0.8 + flash) * clamp(ch.volume, 0.0, 1.2);
-
-            if (isMuted) { lightAmount *= 0.2; }
-            isNoteOn = true; // Always "draw" the note glass, but vary intensity
-        }
-
-        // Pass the calculated intensity into the color for the chrome function
-        let displayColor = noteColor * max(lightAmount, 0.1); // Keep it dim if not active
-        let isLit = (lightAmount > 0.05);
-
-        let mainPad = drawChromeIndicator(mainUV, mainSize, displayColor, isLit, aa);
-        finalColor = mix(finalColor, mainPad.rgb, mainPad.a);
-
-        // --- COMPONENT 3: EFFECT LIGHT (Bottom) ---
-        let botUV = btnUV - vec2(0.5, 0.85); // Near bottom
-        let botSize = vec2(0.18, 0.08);
-
-        var effColor = vec3(0.0);
-        var isEffOn = false;
-
-        if (hasEffect) {
-            effColor = effectColorFromCode(effCode, vec3(0.9, 0.8, 0.2));
-            let strength = clamp(f32(effParam) / 255.0, 0.2, 1.0);
-            if (!isMuted) {
-                effColor *= strength;
-                isEffOn = true;
-            }
-        }
-
-        let botLed = drawChromeIndicator(botUV, botSize, effColor, isEffOn, aa);
-        finalColor = mix(finalColor, botLed.rgb, botLed.a);
-
-        // --- COMPONENT 4: PLAYHEAD GLANCE ---
-        // Since we are using physical buttons, we simulate a light passing over the plastic
-        let rA = i32(in.row);
-        let rB = i32(uniforms.playheadRow);
-
-        // Circular wrap distance
-        let distDirect = abs(rA - rB);
-        let distWrap = 128 - distDirect; // Using 128 as per V0.25 logic
-        let rowDist = min(distDirect, distWrap);
-
-        if (rowDist == 0) {
-            // A subtle white "glint" over the whole housing when playhead passes
-            // This acts like a light attached to the playhead arm
-            finalColor += vec3(0.15, 0.2, 0.25) * housingMask * 0.4;
-        }
+    if (hasEffect) {
+      effColor = effectColorFromCode(effCode, vec3(0.9, 0.8, 0.2));
+      let strength = clamp(f32(effParam) / 255.0, 0.2, 1.0);
+      if (!isMuted) {
+        effColor *= strength;
+        isEffOn = true;
+      }
     }
 
-    // Border Gap (Transparent)
-    if (housingMask < 0.5) {
-        return vec4(fs.borderColor, 0.0);
-    }
+    let botLed = drawChromeIndicator(botUV, botSize, effColor, isEffOn, aa);
+    finalColor = mix(finalColor, botLed.rgb, botLed.a);
 
-    return vec4(finalColor, 1.0);
+    // COMPONENT 4: PLAYHEAD GLANCE
+    let rA = i32(in.row);
+    let rB = i32(uniforms.playheadRow);
+    let distDirect = abs(rA - rB);
+    let distWrap = 128 - distDirect;
+    let rowDist = min(distDirect, distWrap);
+
+    if (rowDist == 0) {
+      finalColor += vec3(0.15, 0.2, 0.25) * housingMask * 0.4;
+    }
+  }
+
+  // Border Gap (Transparent)
+  if (housingMask < 0.5) {
+    return vec4(fs.borderColor, 0.0);
+  }
+
+  return vec4(finalColor, 1.0);
 }

@@ -4,6 +4,9 @@ A small React + TypeScript web app for loading and previewing tracker module fil
 
 Key features
 
+Recent changes
+- v0.35: added "Donut & Night Mode" shader `shaders/patternv0.35_bloom.wgsl` (channel invert toggle, white center island, studio dim + UV ring); also includes previous bloom helpers in `utils/bloomPostProcessor.ts`.
+
 - Play tracker modules in the browser using libopenmpt (WASM).
 - Pattern view with two modes: HTML fallback and optional WebGPU (WGSL shaders included in /shaders).
 - Simple media panel & overlay for images, GIFs, and videos synchronized with playback.
