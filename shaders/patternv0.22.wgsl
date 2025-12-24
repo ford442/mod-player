@@ -92,8 +92,8 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
   let aspect = uniforms.canvasW / uniforms.canvasH;
   let baseSize = 0.06; // Global scale of bricks
 
-  let brickW = baseSize;
-  let brickH = baseSize * aspect; // Correct for aspect ratio so it's square
+  var brickW = baseSize;
+  var brickH = baseSize * aspect; // Correct for aspect ratio so it's square
 
   // Clamp height if channels are too dense
   let maxSizeY = chHeight * 0.9;
