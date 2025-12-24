@@ -39,6 +39,12 @@ export interface MediaState {
 export interface PatternCell {
   type: 'note' | 'effect' | 'instrument' | 'empty';
   text: string;
+  note?: number;
+  inst?: number;
+  volCmd?: number;
+  volVal?: number;
+  effCmd?: number;
+  effVal?: number;
 }
 
 // Pattern matrix for sequencer visualization: rows x channels cell grid
@@ -121,7 +127,8 @@ export interface LibOpenMPT {
   _openmpt_module_get_current_channel_vu_left?: (modulePtr: number, channel: number) => number;
   _openmpt_module_get_current_channel_vu_right?: (modulePtr: number, channel: number) => number;
   _openmpt_module_get_channel_mute_status?: (modulePtr: number, channel: number) => number;
-  _openmpt_module_get_pattern_row_channel_command?: (modulePtr: number, pattern: number, row: number, channel: number) => number;
+  _openmpt_module_get_pattern_row_channel_command: (modulePtr: number, pattern: number, row: number, channel: number, command: number) => number;
+  _openmpt_module_format_pattern_row_channel_command: (modulePtr: number, pattern: number, row: number, channel: number, command: number) => number; // returns strPtr
   _openmpt_module_get_position_seconds: (modulePtr: number) => number;
 }
 

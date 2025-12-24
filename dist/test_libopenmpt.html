@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>LibOpenMPT API Test</title>
+</head>
+<body>
+  <h1>LibOpenMPT API Test</h1>
+  <script>
+    window.libopenmptReady = new Promise(resolve => {
+      window.libopenmpt = {
+        onRuntimeInitialized: function() {
+          console.log('Runtime initialized');
+          const lib = this;
+          const keys = [];
+          for (let k in lib) {
+              if (typeof lib[k] === 'function' && k.includes('command')) {
+                  keys.push(k);
+              }
+          }
+          console.log('Command functions:', keys);
+
+          if (lib._openmpt_module_get_pattern_row_channel_command) {
+               console.log('FOUND: _openmpt_module_get_pattern_row_channel_command');
+          } else {
+               console.log('MISSING: _openmpt_module_get_pattern_row_channel_command');
+          }
+          resolve(this);
+        }
+      };
+    });
+  </script>
+  <script charset=utf-8 src="https://wasm.noahcohn.com/libmpt/libopenmptjs.1ijs"></script>
+</body>
+</html>

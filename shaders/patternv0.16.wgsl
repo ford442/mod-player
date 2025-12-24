@@ -220,11 +220,14 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   // --- BUTTON TEXTURE ---
   let btnScale = 1.1; // Slightly smaller button
   let btnUV = (uv - 0.5) * btnScale + 0.5;
-  var btnColor = vec3<f32>(0.0);
+
+  // Sample unconditionally to avoid non-uniform texture sampling
+  let sampleUV = clamp(btnUV, vec2<f32>(0.0), vec2<f32>(1.0));
+  let sampledBtn = textureSample(buttonsTexture, buttonsSampler, sampleUV).rgb;
+  var btnColor = sampledBtn;
   var inButton = 0.0;
 
   if (btnUV.x > 0.0 && btnUV.x < 1.0 && btnUV.y > 0.0 && btnUV.y < 1.0) {
-      btnColor = textureSample(buttonsTexture, buttonsSampler, btnUV).rgb;
       inButton = 1.0;
   }
 
