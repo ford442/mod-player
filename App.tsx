@@ -13,7 +13,17 @@ import { fetchRemoteMedia } from './utils/remoteMedia';
 
 // Dynamically load all WGSL shader files
 const shaderModules = import.meta.glob('./shaders/*.wgsl', { as: 'url' });
-const availableShaders = Object.keys(shaderModules).map(path => path.replace('./shaders/', ''));
+const availableShaders = Object.keys(shaderModules)
+  .map(path => path.replace('./shaders/', ''))
+  // Hide non-pattern helper shaders (bezel/chassis/etc)
+  .filter(name => name.startsWith('patternv'))
+  .sort();
+
+// Helpful runtime debug when the shader list doesn't update in the running app
+if (typeof window !== 'undefined' && import.meta.env.MODE !== 'production') {
+  // eslint-disable-next-line no-console
+  console.log('availableShaders (runtime):', availableShaders);
+}
 
 export default function App() {
   const [volume, setVolume] = useState(1.0);
@@ -165,7 +175,7 @@ export default function App() {
 
   const webgpuSupported = typeof navigator !== 'undefined' && 'gpu' in navigator;
   const [patternMode, setPatternMode] = useState<'html' | 'webgpu'>(webgpuSupported ? 'webgpu' : 'html');
-  const [shaderVersion, setShaderVersion] = useState<string>('patternv0.23.wgsl');
+  const [shaderVersion, setShaderVersion] = useState<string>('patternv0.36.wgsl');
   const effectivePatternMode = webgpuSupported ? patternMode : 'html';
 
   const isVideoShaderActive = effectivePatternMode === 'webgpu' && (shaderVersion.includes('v0.20') || shaderVersion.includes('v0.23'));

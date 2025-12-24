@@ -1,17 +1,41 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import type { ChannelShadowState, PatternMatrix } from '../types';
 
 const EMPTY_CHANNEL: ChannelShadowState = { volume: 0, pan: 0, freq: 0, trigger: 0, noteAge: 0, activeEffect: 0, effectValue: 0, isMuted: 0 };
 type LayoutType = 'simple' | 'texture' | 'extended';
 
-const DEFAULT_ROWS = 64;
-const DEFAULT_CHANNELS = 8;
+const DEFAULT_ROWS = 128;
+const DEFAULT_CHANNELS = 32;
 
 const alignTo = (value: number, alignment: number) => Math.ceil(value / alignment) * alignment;
 const getLayoutType = (shaderFile: string): LayoutType => {
   if (shaderFile === 'patternShaderv0.12.wgsl') return 'texture';
-  if (shaderFile.includes('v0.13') || shaderFile.includes('v0.14') || shaderFile.includes('v0.16') || shaderFile.includes('v0.17') || shaderFile.includes('v0.18') || shaderFile.includes('v0.19') || shaderFile.includes('v0.20') || shaderFile.includes('v0.21') || shaderFile.includes('v0.23') || shaderFile.includes('v0.24') || shaderFile.includes('v0.25')) return 'extended';
+  if (shaderFile.includes('v0.13') || shaderFile.includes('v0.14') || shaderFile.includes('v0.15') || shaderFile.includes('v0.16') || shaderFile.includes('v0.17') || shaderFile.includes('v0.18') || shaderFile.includes('v0.19') || shaderFile.includes('v0.20') || shaderFile.includes('v0.21') || shaderFile.includes('v0.23') || shaderFile.includes('v0.24') || shaderFile.includes('v0.25') || shaderFile.includes('v0.26') || shaderFile.includes('v0.27') || shaderFile.includes('v0.28') || shaderFile.includes('v0.29') || shaderFile.includes('v0.30') || shaderFile.includes('v0.31') || shaderFile.includes('v0.32') || shaderFile.includes('v0.33') || shaderFile.includes('v0.34') || shaderFile.includes('v0.35') || shaderFile.includes('v0.36')) return 'extended';
   return 'simple';
+};
+
+const isSinglePassCompositeShader = (shaderFile: string) => {
+  return shaderFile.includes('v0.29') || shaderFile.includes('v0.26');
+};
+
+const shouldEnableAlphaBlending = (shaderFile: string) => {
+  return shaderFile.includes('v0.28') || shaderFile.includes('v0.30') || shaderFile.includes('v0.31') || shaderFile.includes('v0.32') || shaderFile.includes('v0.33') || shaderFile.includes('v0.34') || shaderFile.includes('v0.35') || shaderFile.includes('v0.36');
+};
+
+const isCircularLayoutShader = (shaderFile: string) => {
+  // v0.25, v0.26, and v0.35 are considered circular/donut style for bezel rendering.
+  return shaderFile.includes('v0.25') || shaderFile.includes('v0.26') || shaderFile.includes('v0.35');
+};
+
+const shouldUseBackgroundPass = (shaderFile: string) => {
+  // Some shaders draw their own background in a single pass.
+  return !isSinglePassCompositeShader(shaderFile);
+};
+
+const getBackgroundShaderFile = (shaderFile: string): string => {
+  // Only use the chassis pass when explicitly called.
+  if (shaderFile.includes('v0.27') || shaderFile.includes('v0.28') || shaderFile.includes('v0.30') || shaderFile.includes('v0.31') || shaderFile.includes('v0.32') || shaderFile.includes('v0.33') || shaderFile.includes('v0.34') || shaderFile.includes('v0.35') || shaderFile.includes('v0.36')) return 'chassisv0.1.wgsl';
+  return 'bezel.wgsl';
 };
 
 const createUniformPayload = (
@@ -33,10 +57,14 @@ const createUniformPayload = (
     kickTrigger: number;
     activeChannels: number;
     isModuleLoaded: boolean;
+    bloomIntensity?: number;        // optional HDR bloom uniform
+    bloomThreshold?: number;        // optional hint for post-process
+    invertChannels?: boolean;       // NEW: controls ring direction
   }
 ): ArrayBuffer => {
   if (layoutType === 'extended') {
-    const buffer = new ArrayBuffer(64);
+    // Expanded to 80 bytes to include two extra floats (bloomIntensity, bloomThreshold)
+    const buffer = new ArrayBuffer(80);
     const uint = new Uint32Array(buffer);
     const float = new Float32Array(buffer);
     uint[0] = Math.max(0, params.numRows) >>> 0;
@@ -55,6 +83,11 @@ const createUniformPayload = (
     float[13] = params.kickTrigger;
     uint[14] = Math.max(0, params.activeChannels) >>> 0;
     uint[15] = params.isModuleLoaded ? 1 : 0;
+    // Bloom uniforms (defaults)
+    float[16] = params.bloomIntensity ?? 1.0;
+    float[17] = params.bloomThreshold ?? 0.8;
+    // Invert channels flag (0 = outer low, 1 = inner low)
+    uint[18] = params.invertChannels ? 1 : 0;
     return buffer;
   }
 
@@ -119,6 +152,10 @@ interface PatternDisplayProps {
   activeChannels?: number;
   isModuleLoaded?: boolean;
   externalVideoSource?: HTMLVideoElement | HTMLImageElement | null;
+
+  // Bloom controls (optional)
+  bloomIntensity?: number;
+  bloomThreshold?: number;
 }
 
 const clampPlayhead = (value: number, numRows: number) => {
@@ -205,6 +242,42 @@ const packPatternMatrix = (matrix: PatternMatrix | null, padTopChannel = false):
   return packed;
 };
 
+const packPatternMatrixHighPrecision = (matrix: PatternMatrix | null, padTopChannel = false): Uint32Array => {
+  const rawChannels = matrix?.numChannels ?? DEFAULT_CHANNELS;
+  const numRows = matrix?.numRows ?? DEFAULT_ROWS;
+  const numChannels = padTopChannel ? rawChannels + 1 : rawChannels;
+  const packed = new Uint32Array(numRows * numChannels * 2);
+
+  if (!matrix) return packed;
+
+  const { rows } = matrix;
+  const startCol = padTopChannel ? 1 : 0;
+
+  for (let r = 0; r < numRows; r++) {
+    const rowCells = rows[r] || [];
+    for (let c = 0; c < rawChannels; c++) {
+      const offset = (r * numChannels + (c + startCol)) * 2;
+      const cell = rowCells[c];
+      if (!cell) continue;
+
+      // Use structured data if available, else 0
+      const note = cell.note || 0;
+      const inst = cell.inst || 0;
+      const volCmd = cell.volCmd || 0;
+      const volVal = cell.volVal || 0;
+      const effCmd = cell.effCmd || 0;
+      const effVal = cell.effVal || 0;
+
+      // PackedA: [Note(8) | Instr(8) | VolCmd(8) | VolVal(8)]
+      packed[offset] = ((note & 0xFF) << 24) | ((inst & 0xFF) << 16) | ((volCmd & 0xFF) << 8) | (volVal & 0xFF);
+
+      // PackedB: [Unused(16) | EffCmd(8) | EffVal(8)]
+      packed[offset + 1] = ((effCmd & 0xFF) << 8) | (effVal & 0xFF);
+    }
+  }
+  return packed;
+};
+
 const createBufferWithData = (device: GPUDevice, data: ArrayBufferView | ArrayBuffer, usage: GPUBufferUsageFlags): GPUBuffer => {
   const byteLength = data instanceof ArrayBuffer ? data.byteLength : data.byteLength;
   const buffer = device.createBuffer({
@@ -249,6 +322,9 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     isPlaying = false,
     beatPhase = 0,
     isModuleLoaded = false,
+    // Bloom controls
+    bloomIntensity = 1.0,
+    bloomThreshold = 0.8,
     externalVideoSource = null,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -267,6 +343,11 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   const videoRef = useRef<HTMLVideoElement | HTMLImageElement | null>(null);
   const videoTextureRef = useRef<GPUTexture | null>(null);
   const videoLoopRef = useRef<number>(0);
+  // Bezel pass resources
+  const bezelPipelineRef = useRef<GPURenderPipeline | null>(null);
+  const bezelUniformBufferRef = useRef<GPUBuffer | null>(null);
+  const bezelBindGroupRef = useRef<GPUBindGroup | null>(null);
+  const bezelTextureResourcesRef = useRef<{ sampler: GPUSampler; view: GPUTextureView } | null>(null);
 
   // Video management
   useEffect(() => {
@@ -319,10 +400,8 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
         vid.pause();
         vid.src = "";
         videoRef.current = null;
-        if (videoTextureRef.current) {
-          videoTextureRef.current.destroy();
-          videoTextureRef.current = null;
-        }
+        // NOTE: We do NOT destroy videoTextureRef here anymore. 
+        // It is owned by the GPU lifecycle and will be destroyed when the GPU device is cleaned up.
       };
     }
   }, [shaderFile, externalVideoSource]);
@@ -331,20 +410,107 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   const [gpuReady, setGpuReady] = useState(false);
   const [localTime, setLocalTime] = useState(0);
 
+  // NEW: toggle for channel direction (v0.35)
+  const [invertChannels, setInvertChannels] = useState(false);
+
   const isHorizontal = shaderFile.includes('v0.12') || shaderFile.includes('v0.13') || shaderFile.includes('v0.14') || shaderFile.includes('v0.16') || shaderFile.includes('v0.17') || shaderFile.includes('v0.21');
   const padTopChannel = shaderFile.includes('v0.16') || shaderFile.includes('v0.17') || shaderFile.includes('v0.21');
 
-  const canvasMetrics = useMemo(() => {
+  // Compute the "logical" canvas metrics used for layout and for special fixed-size shaders
+  const computeLogicalCanvasMetrics = () => {
+    // FIX: Render chassis shaders at HIGH RES (2048x2016) to avoid layout blowups and provide supersampling.
+    // This prevents the layout engine from computing massive dimensions and guarantees a consistent aspect.
+    if (shaderFile.includes('v0.26') || shaderFile.includes('v0.27') || shaderFile.includes('v0.28') || shaderFile.includes('v0.29') || shaderFile.includes('v0.30') || shaderFile.includes('v0.31') || shaderFile.includes('v0.32') || shaderFile.includes('v0.33') || shaderFile.includes('v0.34') || shaderFile.includes('v0.35') || shaderFile.includes('v0.36')) {
+      return { width: 2048, height: 2016 };
+    }
+
+    // Keep a large square canvas for circular ring shaders so the ring fills
+    // the viewport similar to v0.25 (was the source of the visual size mismatch).
+    if (isCircularLayoutShader(shaderFile)) {
+      return { width: 1280, height: 1280 };
+    }
+
     if (shaderFile.includes('v0.18') || shaderFile.includes('v0.19') || shaderFile.includes('v0.20') || shaderFile.includes('v0.23') || shaderFile.includes('v0.24') || shaderFile.includes('v0.25')) {
       return { width: 1280, height: 1280 };
     }
+
     const rawChannels = Math.max(1, matrix?.numChannels ?? DEFAULT_CHANNELS);
     const displayChannels = padTopChannel ? rawChannels + 1 : rawChannels;
     const rows = Math.max(1, matrix?.numRows ?? DEFAULT_ROWS);
     return isHorizontal
       ? { width: Math.ceil(rows * cellWidth), height: Math.ceil(displayChannels * cellHeight) }
       : { width: Math.ceil(displayChannels * cellWidth), height: Math.ceil(rows * cellHeight) };
-  }, [matrix, cellWidth, cellHeight, isHorizontal, padTopChannel, shaderFile]);
+  };
+
+  // Track the actual internal canvas pixel size (may be driven by CSS client size or by fixed logical sizes above).
+  const [canvasMetrics, setCanvasMetrics] = React.useState(() => computeLogicalCanvasMetrics());
+
+  // Keep canvas internal resolution in sync with display size (handles browser resizes / DPR).
+  // Use ResizeObserver when available and avoid mutating canvas.width directly to prevent layout feedback loops.
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const computeAndSetSize = () => {
+      const logical = computeLogicalCanvasMetrics();
+      const dpr = window.devicePixelRatio || 1;
+
+      let targetW: number, targetH: number;
+      const isFixed = (logical.width === 2048 && logical.height === 2016) || (logical.width === 1024 && logical.height === 1008) || (logical.width === 1280 && logical.height === 1280);
+
+      if (isFixed) {
+        targetW = logical.width;
+        targetH = logical.height;
+      } else {
+        // Use the canvas's layout size (bounding rect) multiplied by DPR for accurate fractional widths
+        const rect = canvas.getBoundingClientRect();
+        targetW = Math.max(1, Math.round(rect.width * dpr));
+        targetH = Math.max(1, Math.round(rect.height * dpr));
+      }
+
+      setCanvasMetrics(prev => {
+        if (prev.width === targetW && prev.height === targetH) return prev;
+        return { width: targetW, height: targetH };
+      });
+    };
+
+    // Prefer ResizeObserver for precise element sizing, fall back to window resize
+    let ro: ResizeObserver | null = null;
+    if ((window as any).ResizeObserver) {
+      ro = new (window as any).ResizeObserver(() => computeAndSetSize());
+      if (ro) ro.observe(canvas);
+    } else {
+      window.addEventListener('resize', computeAndSetSize);
+    }
+
+    // Run once immediately
+    computeAndSetSize();
+
+    return () => {
+      if (ro) ro.disconnect();
+      else window.removeEventListener('resize', computeAndSetSize);
+    };
+  }, [shaderFile, matrix?.numRows, matrix?.numChannels, cellWidth, cellHeight, isHorizontal, padTopChannel]);
+
+  // Immediately update uniforms when the canvas pixel size changes so the GPU shader gets correct dimensions
+  useEffect(() => {
+    const device = deviceRef.current;
+    const uniformBuffer = uniformBufferRef.current;
+    if (!device || !uniformBuffer) return;
+
+    // Read current uniform payload, update the canvas fields and re-upload.
+    // We assume the uniform layout is stable and that canvasW/canvasH are at float indices 6 and 7 for extended layouts.
+    // Recreate a small float buffer view and write into the uniform buffer directly to reduce latency.
+    const floatBuf = new Float32Array([canvasMetrics.width, canvasMetrics.height]);
+    // The uniform buffer layout places canvasW and canvasH at byte offsets 4*6=24 and 4*7=28 respectively for the simple/texture layout,
+    // but for extended layout they are at floats 6 and 7 as well. We'll write into byte offset 6*4 = 24.
+    try {
+      device.queue.writeBuffer(uniformBuffer, 6 * 4, floatBuf.buffer, floatBuf.byteOffset, floatBuf.byteLength);
+    } catch (e) {
+      // Some devices may require a full rewrite; fall back to writing from the start when the small write fails.
+      device.queue.writeBuffer(uniformBuffer, 0, floatBuf.buffer, floatBuf.byteOffset, floatBuf.byteLength);
+    }
+  }, [canvasMetrics]);
 
   // Local animation loop when not playing or not loaded
   useEffect(() => {
@@ -387,12 +553,15 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
         sourceReady = true;
       }
 
+      // Check validation constraints for copyExternalImageToTexture
+      // Source width/height must be > 0
       if (sourceReady && sourceWidth > 0 && sourceHeight > 0) {
+        // Recreate texture if size changed or missing
         if (!videoTextureRef.current || videoTextureRef.current.width !== sourceWidth || videoTextureRef.current.height !== sourceHeight) {
           videoTextureRef.current?.destroy();
           const texture = device.createTexture({
             size: [sourceWidth, sourceHeight, 1],
-            format: 'rgba8unorm',
+            format: preferredImageFormat(device),
             usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT
           });
           videoTextureRef.current = texture;
@@ -400,14 +569,18 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
           textureResourcesRef.current = { sampler, view: texture.createView() };
           refreshBindGroup(device);
         }
+        
         try {
-          device.queue.copyExternalImageToTexture(
-            { source },
-            { texture: videoTextureRef.current },
-            [sourceWidth, sourceHeight, 1]
-          );
+          if (videoTextureRef.current) {
+            device.queue.copyExternalImageToTexture(
+              { source, flipY: true }, // Flip Y-axis to fix upside-down issue
+              { texture: videoTextureRef.current },
+              [sourceWidth, sourceHeight, 1]
+            );
+          }
         } catch (e) {
           // Ignore transient errors when video frame is not yet ready for GPU import
+          // This prevents crashes like "Browser fails extracting valid resource"
         }
       }
     }
@@ -418,12 +591,21 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
         {
           view: context.getCurrentTexture().createView(),
           loadOp: 'clear',
-          clearValue: { r: 0, g: 0, b: 0, a: 1 },
+          // Off-white clear to match bezel hardware aesthetic
+          clearValue: { r: 0.98, g: 0.98, b: 0.98, a: 1 },
           storeOp: 'store',
         },
       ],
     });
 
+    // First pass: draw bezel (full-screen)
+    if (bezelPipelineRef.current && bezelBindGroupRef.current) {
+      pass.setPipeline(bezelPipelineRef.current);
+      pass.setBindGroup(0, bezelBindGroupRef.current);
+      pass.draw(6, 1, 0, 0);
+    }
+
+    // Second pass: pattern display
     pass.setPipeline(pipeline);
     pass.setBindGroup(0, bindGroup);
     const numRows = matrix?.numRows ?? DEFAULT_ROWS;
@@ -431,7 +613,15 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     const numChannels = padTopChannel ? rawChannels + 1 : rawChannels;
     const totalInstances = numRows * numChannels;
 
-    if (totalInstances > 0) pass.draw(6, totalInstances, 0, 0);
+    if (totalInstances > 0) {
+      if (isSinglePassCompositeShader(shaderFile)) {
+        // Background instance (firstInstance = totalInstances) then pattern instances.
+        pass.draw(6, 1, 0, totalInstances);
+        pass.draw(6, totalInstances, 0, 0);
+      } else {
+        pass.draw(6, totalInstances, 0, 0);
+      }
+    }
     pass.end();
 
     device.queue.submit([encoder.finish()]);
@@ -465,38 +655,99 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     bindGroupRef.current = device.createBindGroup({ layout, entries });
   };
 
+  const preferredImageFormat = (device: GPUDevice) => {
+    // Prefer float32 images when the device advertises support for float filtering.
+    return device.features.has('float32-filterable') ? ('rgba32float' as GPUTextureFormat) : ('rgba8unorm' as GPUTextureFormat);
+  };
+
   const ensureVideoPlaceholder = (device: GPUDevice) => {
     if (videoTextureRef.current) return;
+    const fmt = preferredImageFormat(device);
     const texture = device.createTexture({
       size: [1, 1, 1],
-      format: 'rgba8unorm',
+      format: fmt,
       usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT,
     });
     // Fill with gray
-    const data = new Uint8Array([100, 100, 100, 255]);
-    device.queue.writeTexture({ texture }, data, { bytesPerRow: 4 }, { width: 1, height: 1 });
+    if (fmt === 'rgba32float') {
+      const data = new Float32Array([100.0/255.0, 100.0/255.0, 100.0/255.0, 1.0]);
+      // bytesPerRow = 4 channels * 4 bytes = 16
+      device.queue.writeTexture({ texture }, data, { bytesPerRow: 16 }, { width: 1, height: 1 });
+    } else {
+      const data = new Uint8Array([100, 100, 100, 255]);
+      device.queue.writeTexture({ texture }, data, { bytesPerRow: 4 }, { width: 1, height: 1 });
+    }
     videoTextureRef.current = texture;
     const sampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear' });
-    textureResourcesRef.current = { sampler, view: texture.createView() };
+    textureResourcesRef.current = { sampler, view: texture.createView() }; 
   };
 
   const ensureButtonTexture = async (device: GPUDevice) => {
+    // If we have a texture but it matches the current device, keep it.
+    // If it's null, create it.
     if (textureResourcesRef.current) return;
+
+    // Detect which texture to use based on shader version
+    // If v0.30, use unlit-button-2.png. Otherwise fallback to original.
+    const textureUrl = shaderFile.includes('v0.30')
+      ? 'unlit-button-2.png' // Local public file
+      : 'https://test.1ink.us/xm-player/unlit-button.png'; // Original remote file
 
     let bitmap: ImageBitmap;
     try {
       const img = new Image();
-      img.src = 'unlit-button.png';
+      img.src = textureUrl;
+      img.crossOrigin = 'anonymous'; // Important for texture loading if remote
       await img.decode();
       bitmap = await createImageBitmap(img);
     } catch (e) {
-      console.warn('Failed to load button texture, using fallback.', e);
+      console.warn(`Failed to load button texture (${textureUrl}), using fallback.`, e);
+      const canvas = document.createElement('canvas');
+      canvas.width = 128; // fallback size
+      canvas.height = 128;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.fillStyle = '#222';
+        ctx.fillRect(0, 0, 128, 128);
+        // Draw a visual placeholder debug box
+        ctx.strokeStyle = '#444';
+        ctx.strokeRect(10, 10, 108, 108);
+      }
+      bitmap = await createImageBitmap(canvas);
+    }
+
+    const texture = device.createTexture({
+      size: [bitmap.width, bitmap.height, 1],
+      format: preferredImageFormat(device),
+      usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT,
+    });
+    // Flip Y-axis to fix upside-down issue
+    device.queue.copyExternalImageToTexture({ source: bitmap, flipY: true }, { texture }, [bitmap.width, bitmap.height, 1]);
+
+// CHANGE: Force 'nearest' to keep pixels defined and crisp
+    const filterMode: GPUFilterMode = 'nearest';
+    const sampler = device.createSampler({ magFilter: filterMode, minFilter: filterMode });
+
+    textureResourcesRef.current = { sampler, view: texture.createView() }; 
+  };
+
+  const loadBezelTexture = async (device: GPUDevice) => {
+    if (bezelTextureResourcesRef.current) return;
+
+    let bitmap: ImageBitmap;
+    try {
+      const img = new Image();
+      img.src = 'bezel.png';
+      await img.decode();
+      bitmap = await createImageBitmap(img);
+    } catch (e) {
+      console.warn('Failed to load bezel.png, using fallback.', e);
       const canvas = document.createElement('canvas');
       canvas.width = 1;
       canvas.height = 1;
       const ctx = canvas.getContext('2d');
       if (ctx) {
-        ctx.fillStyle = '#222';
+        ctx.fillStyle = 'rgba(0,0,0,0)';
         ctx.fillRect(0, 0, 1, 1);
       }
       bitmap = await createImageBitmap(canvas);
@@ -504,12 +755,13 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
 
     const texture = device.createTexture({
       size: [bitmap.width, bitmap.height, 1],
-      format: 'rgba8unorm',
+      format: preferredImageFormat(device),
       usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT,
     });
-    device.queue.copyExternalImageToTexture({ source: bitmap }, { texture }, [bitmap.width, bitmap.height, 1]);
-    const sampler = device.createSampler({ magFilter: 'nearest', minFilter: 'nearest' });
-    textureResourcesRef.current = { sampler, view: texture.createView() };
+    // Flip Y-axis to fix upside-down issue
+    device.queue.copyExternalImageToTexture({ source: bitmap, flipY: true }, { texture }, [bitmap.width, bitmap.height, 1]);
+    const sampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear' });
+    bezelTextureResourcesRef.current = { sampler, view: texture.createView() };
   };
 
   // GPU initialization
@@ -528,12 +780,71 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
       try {
         const adapter = await navigator.gpu.requestAdapter();
         if (!adapter || cancelled) { setWebgpuAvailable(false); return; }
-        const device = await adapter.requestDevice();
+
+  //  add WebGPU extensions
+        const requiredFeatures: GPUFeatureName[] = [];
+        if (adapter.features.has('float32-filterable')) {
+            requiredFeatures.push('float32-filterable');
+        } else {
+            console.log("Device does not support 'float32-filterable', using two-sampler workaround.");
+        }
+        if (adapter.features.has('float32-blendable')) {
+            requiredFeatures.push('float32-blendable');
+        } else {
+            console.log("Device does not support 'float32-blendable'.");
+        }
+
+                if (adapter.features.has('clip-distances')) {
+            requiredFeatures.push('clip-distances');
+        } else {
+            console.log("Device does not support 'clip-distances'.");
+        }
+
+                if (adapter.features.has('depth32float-stencil8')) {
+            requiredFeatures.push('depth32float-stencil8');
+        } else {
+            console.log("Device does not support 'depth32float-stencil8'.");
+        }
+
+                if (adapter.features.has('dual-source-blending')) {
+            requiredFeatures.push('dual-source-blending');
+        } else {
+            console.log("Device does not support 'dual-source-blending'.");
+        }
+
+                if (adapter.features.has('subgroups')) {
+            requiredFeatures.push('subgroups');
+        } else {
+            console.log("Device does not support 'subgroups'.");
+        }
+
+                if (adapter.features.has('texture-component-swizzle')) {
+            requiredFeatures.push('texture-component-swizzle');
+        } else {
+            console.log("Device does not support 'texture-component-swizzle'.");
+        }
+
+                if (adapter.features.has('shader-f16')) {
+            requiredFeatures.push('shader-f16');
+        } else {
+            console.log("Device does not support 'shader-f16'.");
+        }
+
+        
+        const device = await adapter.requestDevice({
+            requiredFeatures,
+        });
+        
         if (!device || cancelled) { setWebgpuAvailable(false); return; }
 
         const context = canvas.getContext('webgpu') as GPUCanvasContext;
         const format = navigator.gpu.getPreferredCanvasFormat();
         context.configure({ device, format });
+
+        // IMPORTANT: Clear old refs that might hold resources from a previous device
+        // to avoid "Sampler associated with [Device] cannot be used with [Device]" errors.
+        textureResourcesRef.current = null;
+        bezelTextureResourcesRef.current = null;
 
         const shaderSource = await fetch(`./shaders/${shaderFile}`).then(res => res.text());
         if (cancelled) return;
@@ -556,7 +867,6 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
           channelsBufferRef.current?.destroy();
           channelsBufferRef.current = null;
         }
-        textureResourcesRef.current = null;
 
         let bindGroupLayout: GPUBindGroupLayout;
         if (layoutType === 'texture') {
@@ -590,18 +900,33 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
 
         let entryVert = 'vs';
         let entryFrag = 'fs';
+
+        const enableAlphaBlend = shouldEnableAlphaBlending(shaderFile);
+        const targets: GPUColorTargetState[] = [
+          {
+            format,
+            ...(enableAlphaBlend
+              ? {
+                  blend: {
+                    color: { srcFactor: 'src-alpha', dstFactor: 'one-minus-src-alpha', operation: 'add' },
+                    alpha: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha', operation: 'add' },
+                  },
+                }
+              : {}),
+          },
+        ];
         try {
           pipelineRef.current = device.createRenderPipeline({
             layout: device.createPipelineLayout({ bindGroupLayouts: [bindGroupLayout] }),
             vertex: { module, entryPoint: entryVert },
-            fragment: { module, entryPoint: entryFrag, targets: [{ format }] },
+            fragment: { module, entryPoint: entryFrag, targets },
             primitive: { topology: 'triangle-list' },
           });
         } catch {
           pipelineRef.current = device.createRenderPipeline({
             layout: device.createPipelineLayout({ bindGroupLayouts: [bindGroupLayout] }),
             vertex: { module, entryPoint: 'vertex_main' },
-            fragment: { module, entryPoint: 'fragment_main', targets: [{ format }] },
+            fragment: { module, entryPoint: 'fragment_main', targets },
             primitive: { topology: 'triangle-list' },
           });
         }
@@ -609,12 +934,76 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
         const uniformSize = layoutType === 'simple' ? 32 : 64;
         const uniformBuffer = device.createBuffer({ size: alignTo(uniformSize, 256), usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
 
+        // --- Background pass (fullscreen bezel/chassis)
+        if (shouldUseBackgroundPass(shaderFile)) {
+          try {
+            const backgroundShaderFile = getBackgroundShaderFile(shaderFile);
+            const backgroundSource = await fetch(`./shaders/${backgroundShaderFile}`).then(res => res.text());
+            const bezelModule = device.createShaderModule({ code: backgroundSource });
+            if ('getCompilationInfo' in bezelModule) {
+              bezelModule
+                .getCompilationInfo()
+                .then(info => {
+                  info.messages.forEach(msg => {
+                    const log = msg.type === 'error' ? console.error : console.warn;
+                    log(`[WGSL bg ${backgroundShaderFile} ${msg.type}]: ${msg.lineNum}:${msg.linePos} ${msg.message}`);
+                  });
+                })
+                .catch(() => {});
+            }
+
+            const bezelBindLayout = device.createBindGroupLayout({
+              entries: [
+                { binding: 0, visibility: GPUShaderStage.FRAGMENT, buffer: { type: 'uniform' } },
+                { binding: 1, visibility: GPUShaderStage.FRAGMENT, sampler: { type: 'filtering' } },
+                { binding: 2, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float' } },
+              ],
+            });
+
+            try {
+              bezelPipelineRef.current = device.createRenderPipeline({
+                layout: device.createPipelineLayout({ bindGroupLayouts: [bezelBindLayout] }),
+                vertex: { module: bezelModule, entryPoint: 'vs' },
+                fragment: { module: bezelModule, entryPoint: 'fs', targets: [{ format }] },
+                primitive: { topology: 'triangle-list' },
+              });
+            } catch (be) {
+              console.warn('Failed to create bezel pipeline', be);
+            }
+
+            bezelUniformBufferRef.current = device.createBuffer({ size: alignTo(64, 256), usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+            
+            // Load bezel texture
+            await loadBezelTexture(device);
+            
+            bezelBindGroupRef.current = device.createBindGroup({
+              layout: bezelBindLayout,
+              entries: [
+                { binding: 0, resource: { buffer: bezelUniformBufferRef.current } },
+                { binding: 1, resource: bezelTextureResourcesRef.current!.sampler },
+                { binding: 2, resource: bezelTextureResourcesRef.current!.view },
+              ],
+            });
+          } catch (e) {
+            console.warn('Failed to initialize bezel shader', e);
+          }
+        } else {
+          bezelPipelineRef.current = null;
+          bezelBindGroupRef.current = null;
+          if (bezelUniformBufferRef.current) {
+            bezelUniformBufferRef.current.destroy();
+            bezelUniformBufferRef.current = null;
+          }
+        }
+
         deviceRef.current = device;
         contextRef.current = context;
         uniformBufferRef.current = uniformBuffer;
 
         // Initial buffer creation (handles null matrix now via packPatternMatrix)
-        cellsBufferRef.current = createBufferWithData(device, packPatternMatrix(matrix, padTopChannel), GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
+        const isHighPrec = shaderFile.includes('v0.36');
+        const packFunc = isHighPrec ? packPatternMatrixHighPrecision : packPatternMatrix;
+        cellsBufferRef.current = createBufferWithData(device, packFunc(matrix, padTopChannel), GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
 
         if (layoutType === 'extended') {
           const numRows = matrix?.numRows ?? DEFAULT_ROWS;
@@ -651,16 +1040,45 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
       setGpuReady(false);
       bindGroupRef.current = null;
       pipelineRef.current = null;
+      // Destroy bezel resources if present
+      if (bezelUniformBufferRef.current) { bezelUniformBufferRef.current.destroy(); bezelUniformBufferRef.current = null; }
+      bezelBindGroupRef.current = null;
+      bezelPipelineRef.current = null;
+      // IMPORTANT: Clear bezel texture refs so next init doesn't reuse old device sampler
+      bezelTextureResourcesRef.current = null; 
+
       cellsBufferRef.current = null;
       uniformBufferRef.current = null;
       rowFlagsBufferRef.current = null;
       channelsBufferRef.current = null;
       textureResourcesRef.current = null;
-      videoTextureRef.current = null;
+      
+      // Cleanup video texture which is owned by this device lifecycle
+      if (videoTextureRef.current) {
+        const deviceToWait = deviceRef.current;
+        if (deviceToWait) {
+          // Wait for any submitted work to complete before destroying the texture to avoid
+          // "Destroyed texture used in a submit" errors when the GPU is still using the resource.
+          deviceToWait.queue
+            .onSubmittedWorkDone()
+            .then(() => {
+              try { videoTextureRef.current?.destroy(); } catch (e) {}
+              videoTextureRef.current = null;
+            })
+            .catch(() => {
+              try { videoTextureRef.current?.destroy(); } catch (e) {}
+              videoTextureRef.current = null;
+            });
+        } else {
+          try { videoTextureRef.current.destroy(); } catch (e) {}
+          videoTextureRef.current = null;
+        }
+      }
+
       deviceRef.current = null;
       contextRef.current = null;
     };
-  }, [matrix, shaderFile]);
+  }, [shaderFile]); // REMOVED matrix from dependencies to prevent re-init flash
 
   // 1. Matrix & Cell Buffer Management
   useEffect(() => {
@@ -670,7 +1088,9 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     if (cellsBufferRef.current) {
         cellsBufferRef.current.destroy();
     }
-    cellsBufferRef.current = createBufferWithData(device, packPatternMatrix(matrix, padTopChannel), GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
+    const isHighPrec = shaderFile.includes('v0.36');
+    const packFunc = isHighPrec ? packPatternMatrixHighPrecision : packPatternMatrix;
+    cellsBufferRef.current = createBufferWithData(device, packFunc(matrix, padTopChannel), GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
 
     // Also update row flags if extended
     if (layoutTypeRef.current === 'extended') {
@@ -744,13 +1164,52 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
         groove: Math.min(1, Math.max(0, grooveAmount)),
         kickTrigger,
         activeChannels,
-        isModuleLoaded
+        isModuleLoaded,
+        bloomIntensity: bloomIntensity ?? 1.0,
+        bloomThreshold: bloomThreshold ?? 0.8,
+        invertChannels: invertChannels,
       });
       device.queue.writeBuffer(uniformBuffer, 0, uniformPayload);
     }
 
+    // Update bezel uniforms (canvas size, colors, bezel width, screw radius)
+    if (bezelUniformBufferRef.current) {
+      const buf = new Float32Array(16);
+      buf[0] = canvasMetrics.width;
+      buf[1] = canvasMetrics.height;
+          const minDim = Math.min(canvasMetrics.width, canvasMetrics.height);
+          const circularLayout = isCircularLayoutShader(shaderFile);
+
+          // bezel width in pixels
+          buf[2] = minDim * (circularLayout ? 0.05 : 0.07);
+      // surface color (off-white)
+      buf[3] = 0.98; buf[4] = 0.98; buf[5] = 0.98;
+      // bezel color (slightly darker)
+      buf[6] = 0.92; buf[7] = 0.92; buf[8] = 0.93;
+      // screw radius (normalized)
+      buf[9] = 0.02;
+
+          // Recess shaping: circle for circular shaders, rounded-rect for all non-circular
+          if (shaderFile.includes('v0.35')) {
+            // Donut chassis: circular with a smaller inner cutout to create a white island
+            buf[10] = 0.0; // recessKind = circle
+            buf[11] = 0.95; // recessOuterScale (slightly scaled)
+            buf[12] = 0.32; // recessInnerScale (creates white island in center)
+          } else {
+            buf[10] = circularLayout ? 0.0 : 1.0; // recessKind
+            buf[11] = circularLayout ? 1.0 : 1.25; // recessOuterScale (bigger so it doesn't "cut through" wide grids)
+            buf[12] = circularLayout ? 1.0 : 0.0; // recessInnerScale (no inner hole for grids)
+          }
+          buf[13] = 0.10; // recessCorner (used for rounded-rect)
+          // NIGHT MODE DIMMING FOR CHASSIS
+          // We send 0.35 if playing, else 1.0. This makes the bezel darker so the UV light "shines"
+          buf[14] = isPlaying ? 0.35 : 1.0; // dimFactor
+          buf[15] = 0.0;
+      device.queue.writeBuffer(bezelUniformBufferRef.current, 0, buf.buffer, buf.byteOffset, buf.byteLength);
+    }
+
     render();
-  }, [playheadRow, timeSec, localTime, bpm, tickOffset, grooveAmount, kickTrigger, activeChannels, gpuReady, isPlaying, beatPhase, isModuleLoaded, matrix?.numRows, matrix?.numChannels, cellWidth, cellHeight, canvasMetrics]);
+  }, [playheadRow, timeSec, localTime, bpm, tickOffset, grooveAmount, kickTrigger, activeChannels, gpuReady, isPlaying, beatPhase, isModuleLoaded, matrix?.numRows, matrix?.numChannels, cellWidth, cellHeight, canvasMetrics, bloomIntensity, bloomThreshold, invertChannels]);
 
   return (
     <div className={`pattern-display relative ${padTopChannel ? 'p-8 rounded-xl bg-[#18181a] shadow-2xl border border-[#333]' : ''}`}>
@@ -774,7 +1233,31 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
             </div>
           </>
       )}
-      <canvas ref={canvasRef} width={canvasMetrics.width} height={canvasMetrics.height} className={padTopChannel ? 'rounded bg-black shadow-inner border border-black/50' : ''} />
+
+      {/* NEW: Toggle Button for Ring Direction (v0.35) */}
+      {shaderFile.includes('v0.35') && (
+        <button 
+            onClick={() => setInvertChannels(p => !p)}
+            className="absolute top-2 left-12 px-2 py-1 bg-[#222] text-xs font-mono text-gray-400 border border-[#444] rounded hover:bg-[#333] hover:text-white transition-colors"
+        >
+            {invertChannels ? "[INNER LOW]" : "[OUTER LOW]"}
+        </button>
+      )}
+
+      <canvas 
+        ref={canvasRef} 
+        width={canvasMetrics.width} 
+        height={canvasMetrics.height} 
+        className={padTopChannel ? 'rounded bg-black shadow-inner border border-black/50' : ''}
+        style={{
+          maxWidth: '100%',
+          maxHeight: '100%',
+          width: 'auto',
+          height: 'auto',
+          objectFit: 'contain',
+          aspectRatio: `${canvasMetrics.width} / ${canvasMetrics.height}`,
+        }}
+      />
       {!webgpuAvailable && <div className="error">WebGPU not available in this browser.</div>}
     </div>
   );
