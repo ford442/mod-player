@@ -52,7 +52,7 @@ export const Controls: React.FC<ControlsProps> = ({
   };
 
   return (
-    <section className="bg-gray-800 p-4 rounded-lg shadow-lg mb-6 flex flex-wrap gap-4 items-center">
+    <section className="bg-gray-800 p-4 rounded-lg shadow-lg flex flex-wrap gap-4 items-center">
       <div className="flex items-center gap-2">
         <UploadIcon className="w-5 h-5 text-gray-400" />
         <input
