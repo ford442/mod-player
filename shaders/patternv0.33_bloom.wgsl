@@ -19,8 +19,8 @@ struct Uniforms {
   kickTrigger: f32,
   activeChannels: u32,
   isModuleLoaded: u32,
-  bloomIntensity: f32,    
-  bloomThreshold: f32,    
+  bloomIntensity: f32,
+  bloomThreshold: f32,
   invertChannels: u32,    // 0 = outer low (default), 1 = inner low
 };
 

@@ -4,13 +4,13 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>XASM-1 Player</title>
+  <title>React libopenmpt Note Viewer</title>
 <script src="https://js.1ink.us/tailwinds.1ijs"></script>
   <link rel="stylesheet" href="/index.css">
 </head>
 <body class="bg-gray-900 text-gray-200">
   <div id="root"></div>
-
+  
   <script type="importmap">
     {
       "imports": {
@@ -21,7 +21,7 @@
   </script>
 
   <script type="module" src="/index.tsx"></script>
-
+  
   <!--
     FIX: Define the libopenmpt configuration object BEFORE the script loads.
     This prevents the script from overwriting our onRuntimeInitialized callback.
@@ -41,3 +41,4 @@
   <script charset=utf-8 src="https://wasm.noahcohn.com/libmpt/libopenmptjs.1ijs"></script>
 </body>
 </html>
+

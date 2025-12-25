@@ -19,6 +19,12 @@ const availableShaders = Object.keys(shaderModules)
   .filter(name => name.startsWith('patternv'))
   .sort();
 
+// Helpful runtime debug when the shader list doesn't update in the running app
+if (typeof window !== 'undefined' && import.meta.env.MODE !== 'production') {
+  // eslint-disable-next-line no-console
+  console.log('availableShaders (runtime):', availableShaders);
+}
+
 export default function App() {
   const [volume, setVolume] = useState(1.0);
 
@@ -169,7 +175,7 @@ export default function App() {
 
   const webgpuSupported = typeof navigator !== 'undefined' && 'gpu' in navigator;
   const [patternMode, setPatternMode] = useState<'html' | 'webgpu'>(webgpuSupported ? 'webgpu' : 'html');
-  const [shaderVersion, setShaderVersion] = useState<string>('patternv0.36.wgsl');
+  const [shaderVersion, setShaderVersion] = useState<string>('patternv0.37.wgsl');
   const effectivePatternMode = webgpuSupported ? patternMode : 'html';
 
   const isVideoShaderActive = effectivePatternMode === 'webgpu' && (shaderVersion.includes('v0.20') || shaderVersion.includes('v0.23'));
@@ -183,152 +189,144 @@ export default function App() {
   const { w: cellW, h: cellH } = getCellMetrics(shaderVersion);
 
   return (
-    <div className="min-h-screen p-4 flex items-center justify-center bg-gray-950 font-sans">
-      <main className="max-w-6xl w-full bg-slate-900 rounded-xl border-4 border-slate-700 shadow-2xl p-4 md:p-6 relative">
-        {/* Device aesthetic details */}
-        <div className="absolute top-2 left-2 w-2 h-2 rounded-full bg-slate-600 shadow-inner"></div>
-        <div className="absolute top-2 right-2 w-2 h-2 rounded-full bg-slate-600 shadow-inner"></div>
-        <div className="absolute bottom-2 left-2 w-2 h-2 rounded-full bg-slate-600 shadow-inner"></div>
-        <div className="absolute bottom-2 right-2 w-2 h-2 rounded-full bg-slate-600 shadow-inner"></div>
-
+    <div className="min-h-screen p-4 md:p-8 flex flex-col">
+      <main className="max-w-7xl mx-auto w-full flex-grow">
         <Header status={status} />
 
-        {isModuleLoaded || effectivePatternMode === 'webgpu' ? (
-          <div className="flex flex-col gap-0">
-             {/* Display Area Wrapper */}
-             <div className="bg-black rounded-lg border-2 border-slate-600 shadow-[inset_0_0_20px_rgba(0,0,0,1)] p-4 relative overflow-hidden">
-                <InfoDisplay moduleInfo={moduleInfo} />
+        <Controls
+          isReady={isReady}
+          isPlaying={isPlaying}
+          isModuleLoaded={isModuleLoaded}
+          onFileSelected={loadModule}
+          onPlay={play}
+          onStop={stopMusic}
+          onMediaAdd={addMediaFile}
+          isLooping={isLooping}
+          onLoopToggle={() => setIsLooping(!isLooping)}
+          volume={volume}
+          setVolume={setVolume}
+          pan={panValue}
+          setPan={setPanValue}
+          remoteMediaList={remoteFiles}
+          onRemoteMediaSelect={handleRemoteSelect}
+        />
 
-                <div className="flex items-center justify-between flex-wrap gap-2 mb-2 px-1">
-                  <h2 className="text-xs uppercase tracking-widest text-gray-500 font-mono">Pattern View</h2>
-                  <div className="flex items-center gap-2">
-                    <div className="inline-flex rounded border border-gray-700 overflow-hidden bg-gray-900">
-                      <button
-                        type="button"
-                        onClick={() => setPatternMode('html')}
-                        className={`px-3 py-1 text-xs font-mono transition ${effectivePatternMode === 'html' ? 'bg-gray-700 text-white' : 'text-gray-500 hover:text-white'}`}
-                      >
-                        HTML
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setPatternMode('webgpu')}
-                        className={`px-3 py-1 text-xs font-mono transition ${effectivePatternMode === 'webgpu' ? 'bg-gray-700 text-white' : 'text-gray-500 hover:text-white'}`}
-                        disabled={!webgpuSupported}
-                      >
-                        WGSL
-                      </button>
-                    </div>
-                    {effectivePatternMode === 'webgpu' && (
-                      <select
+        {isModuleLoaded || effectivePatternMode === 'webgpu' ? (
+          <>
+            <InfoDisplay moduleInfo={moduleInfo} />
+
+            <div className="flex flex-col gap-4">
+              <div className="flex items-center justify-between flex-wrap gap-3">
+                <h2 className="text-sm uppercase tracking-widest text-gray-400">Pattern View</h2>
+                <div className="flex items-center gap-3">
+                  <div className="inline-flex rounded-lg border border-white/10 overflow-hidden">
+                    <button
+                      type="button"
+                      onClick={() => setPatternMode('html')}
+                      className={`px-4 py-2 text-sm font-semibold transition ${effectivePatternMode === 'html' ? 'bg-white/10 text-white' : 'text-gray-400 hover:text-white'}`}
+                    >
+                      HTML
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPatternMode('webgpu')}
+                      className={`px-4 py-2 text-sm font-semibold transition ${effectivePatternMode === 'webgpu' ? 'bg-white/10 text-white' : 'text-gray-400 hover:text-white'}`}
+                      disabled={!webgpuSupported}
+                    >
+                      WGSL
+                    </button>
+                  </div>
+                  {effectivePatternMode === 'webgpu' && (
+                    <div className="flex gap-2">
+                       {/* Quick Layout Switcher */}
+                       <div className="inline-flex rounded-lg border border-white/10 overflow-hidden">
+                          <button
+                            type="button"
+                            onClick={() => setShaderVersion('patternv0.21.wgsl')}
+                            className={`px-3 py-2 text-xs font-mono uppercase transition ${shaderVersion.includes('v0.21') ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400 hover:text-white'}`}
+                          >
+                            Horizontal
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setShaderVersion('patternv0.37.wgsl')}
+                            className={`px-3 py-2 text-xs font-mono uppercase transition ${shaderVersion.includes('v0.37') ? 'bg-purple-600 text-white' : 'bg-gray-800 text-gray-400 hover:text-white'}`}
+                          >
+                            Circular
+                          </button>
+                       </div>
+
+                       <select
                         value={shaderVersion}
                         onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setShaderVersion(e.target.value)}
-                        className="bg-gray-900 text-gray-400 text-xs px-2 py-1 rounded border border-gray-700 font-mono"
+                        className="bg-gray-800 text-white text-sm px-3 py-2 rounded border border-white/10 w-40"
                       >
                         {availableShaders.map((shader: string) => (
                           <option key={shader} value={shader}>{shader.replace('.wgsl', '')}</option>
                         ))}
                       </select>
-                    )}
-                  </div>
+                    </div>
+                  )}
                 </div>
+              </div>
 
-                {effectivePatternMode === 'webgpu' ? (
-                  <PatternDisplay
-                    matrix={sequencerMatrix ?? null}
-                    playheadRow={sequencerCurrentRow}
-                    cellWidth={cellW}
-                    cellHeight={cellH}
-                    shaderFile={shaderVersion}
-                    isPlaying={isPlaying}
-                    bpm={moduleInfo.bpm}
-                    timeSec={playbackSeconds}
-                    tickOffset={Math.max(0, (playbackRowFraction % 1))}
-                    channels={channelStates}
-                    beatPhase={beatPhase}
-                    grooveAmount={grooveAmount}
-                    kickTrigger={kickTrigger}
-                    activeChannels={activeChannels}
-                    isModuleLoaded={isModuleLoaded}
-                    externalVideoSource={mediaElement}
-                  />
-                ) : (
-                  <PatternSequencer
-                    matrix={sequencerMatrix ?? null}
-                    currentRow={sequencerCurrentRow}
-                    globalRow={sequencerGlobalRow}
-                    totalRows={totalPatternRows}
-                    onSeek={seekToStep}
-                    bpm={moduleInfo.bpm}
-                  />
-                )}
-             </div>
+              {effectivePatternMode === 'webgpu' ? (
+                <PatternDisplay
+                  matrix={sequencerMatrix ?? null}
+                  playheadRow={sequencerCurrentRow}
+                  cellWidth={cellW}
+                  cellHeight={cellH}
+                  shaderFile={shaderVersion}
+                  isPlaying={isPlaying}
+                  bpm={moduleInfo.bpm}
+                  timeSec={playbackSeconds}
+                  tickOffset={Math.max(0, (playbackRowFraction % 1))}
+                  channels={channelStates}
+                  beatPhase={beatPhase}
+                  grooveAmount={grooveAmount}
+                  kickTrigger={kickTrigger}
+                  activeChannels={activeChannels}
+                  isModuleLoaded={isModuleLoaded}
+                  externalVideoSource={mediaElement}
+                  onPlay={play}
+                  onStop={stopMusic}
+                  onFileSelected={loadModule}
+                  onLoopToggle={() => setIsLooping(!isLooping)}
+                  onSeek={(step) => seekToStep(step)}
+                  totalRows={totalPatternRows}
+                />
+              ) : (
+                <PatternSequencer
+                  matrix={sequencerMatrix ?? null}
+                  currentRow={sequencerCurrentRow}
+                  globalRow={sequencerGlobalRow}
+                  totalRows={totalPatternRows}
+                  onSeek={seekToStep}
+                  bpm={moduleInfo.bpm}
+                />
+              )}
+            </div>
 
-            {/* Controls moved below Display */}
-            <Controls
-              isReady={isReady}
-              isPlaying={isPlaying}
-              isModuleLoaded={isModuleLoaded}
-              onFileSelected={loadModule}
-              onPlay={play}
-              onStop={stopMusic}
-              onMediaAdd={addMediaFile}
-              isLooping={isLooping}
-              onLoopToggle={() => setIsLooping(!isLooping)}
-              volume={volume}
-              setVolume={setVolume}
-              pan={panValue}
-              setPan={setPanValue}
-              remoteMediaList={remoteFiles}
-              onRemoteMediaSelect={handleRemoteSelect}
-            />
-
-            <div className="mt-4 border-t border-slate-800 pt-4">
-               <MediaPanel media={media} activeMediaId={activeMediaId} onSelect={(id?: string) => { setActiveMediaId(id); setOverlayVisible(!!id); }} onRemove={removeMedia} />
+            <div className="mt-6 grid grid-cols-1 md:grid-cols-3 gap-4">
+              <MediaPanel media={media} activeMediaId={activeMediaId} onSelect={(id?: string) => { setActiveMediaId(id); setOverlayVisible(!!id); }} onRemove={removeMedia} />
             </div>
 
             <MediaOverlay item={activeMedia} visible={showOverlay} onClose={() => setOverlayVisible(false)} onUpdate={(partial: Partial<MediaItem>) => { if (!activeMedia) return; setMedia((prev: MediaItem[]) => prev.map((m: MediaItem) => m.id === activeMedia.id ? { ...m, ...partial } : m)); }} />
-          </div>
+          </>
         ) : (
-           <div className="py-20 flex flex-col items-center justify-center text-gray-500 bg-black rounded-lg border-2 border-slate-600 shadow-[inset_0_0_20px_rgba(0,0,0,1)]">
-             <div className="w-16 h-16 mb-4 rounded-full border-2 border-gray-700 flex items-center justify-center animate-pulse">
-                <div className="w-12 h-12 bg-gray-800 rounded-full"></div>
-             </div>
-             <h2 className="text-2xl font-mono text-gray-300 mb-2 tracking-widest">XASM-1</h2>
-             <p className="font-mono text-sm">WAITING FOR CARTRIDGE...</p>
-             <p className="text-xs mt-4 opacity-50">Load a module to begin</p>
-
-             {/* Show controls even when empty so user can load file */}
-             <div className="mt-8 w-full max-w-lg px-8">
-                <Controls
-                  isReady={isReady}
-                  isPlaying={isPlaying}
-                  isModuleLoaded={isModuleLoaded}
-                  onFileSelected={loadModule}
-                  onPlay={play}
-                  onStop={stopMusic}
-                  onMediaAdd={addMediaFile}
-                  isLooping={isLooping}
-                  onLoopToggle={() => setIsLooping(!isLooping)}
-                  volume={volume}
-                  setVolume={setVolume}
-                  pan={panValue}
-                  setPan={setPanValue}
-                  remoteMediaList={remoteFiles}
-                  onRemoteMediaSelect={handleRemoteSelect}
-                />
-             </div>
+           <div className="mt-6 bg-gray-800 p-6 rounded-lg shadow-lg text-center text-gray-400">
+             <h2 className="text-xl font-semibold text-white mb-2">Welcome!</h2>
+             <p>Load a tracker module file (e.g., .mod, .it, .s3m, .xm) to begin.</p>
            </div>
         )}
-
-        <footer className="text-center text-slate-600 mt-4 text-[10px] font-mono uppercase tracking-wider flex justify-between items-center px-4">
-          <p>System Ready</p>
-          <a href="https://github.com/ford442/react-dom" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 hover:text-slate-400 transition-colors">
-            <GithubIcon className="w-3 h-3" />
-            Source
-          </a>
-        </footer>
       </main>
+      <footer className="text-center text-gray-500 mt-8 text-sm">
+        <p>Powered by React and libopenmpt.</p>
+        <a href="https://github.com/ford442/react-dom" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 hover:text-white transition-colors">
+          <GithubIcon className="w-4 h-4" />
+          View on GitHub
+        </a>
+      </footer>
     </div>
   );
 }

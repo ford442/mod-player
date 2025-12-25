@@ -200,7 +200,7 @@ fn drawChromeIndicator(
             // Bezel
             let angle = atan2(uv01.y - center.y, uv01.x - center.x);
             let rim = 0.2 + 0.8 * abs(sin(angle * 10.0));
-            col = vec3<f32>(0.25, 0.28, 0.30) * rim; 
+            col = vec3<f32>(0.25, 0.28, 0.30) * rim;
             alpha = 1.0;
         } else {
             // Lens
@@ -275,7 +275,7 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   if (btnUV.x > 0.0 && btnUV.x < 1.0 && btnUV.y > 0.0 && btnUV.y < 1.0) {
     let texColor = textureSampleLevel(buttonsTexture, buttonsSampler, btnUV, 0.0).rgb;
     // Less mixing with background to keep texture contrast high
-    finalColor = mix(finalColor, texColor, 0.7); 
+    finalColor = mix(finalColor, texColor, 0.7);
     inButton = 1.0;
   }
 
@@ -292,16 +292,16 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     let isMuted = (ch.isMuted == 1u);
 
     // COMPONENT 1: ACTIVITY LIGHT (HDR Cyan)
-    let topUV = btnUV - vec2(0.5, 0.16); 
+    let topUV = btnUV - vec2(0.5, 0.16);
     let topSize = vec2(0.20, 0.20); // Square Aspect Ratio (0.2 x 0.2)
-    
+
     // Snappier decay for "blink" effect
-    let isActive = (step(0.3, exp(-ch.noteAge * 4.0)) > 0.5) && !isMuted; 
+    let isActive = (step(0.3, exp(-ch.noteAge * 4.0)) > 0.5) && !isMuted;
     let topColor = vec3(0.0, 0.9, 1.0) * (bloom * 3.0); // HDR boost
 
     let topLed = drawChromeIndicator(topUV, topSize, topColor, isActive, aa);
     finalColor = mix(finalColor, topLed.rgb, topLed.a);
-    
+
     // Additive glow that exceeds 1.0
     if (isActive) {
          finalColor += topColor * topLed.a * bloom * 2.0;

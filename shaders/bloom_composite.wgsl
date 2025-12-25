@@ -16,7 +16,7 @@ struct Uniforms {
 fn fs(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
     let sceneColor = textureSample(sceneTexture, sceneSampler, uv).rgb;
     let bloomColor = textureSample(bloomTexture, bloomSampler, uv).rgb;
-    
+
     // Linear combine (scene can be SDR; bloom is HDR)
     let finalColor = sceneColor * uniforms.sceneIntensity + bloomColor * uniforms.bloomIntensity;
 

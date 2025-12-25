@@ -54,16 +54,16 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
   // --- Circular Configuration ---
   let center = vec2<f32>(uniforms.canvasW * 0.5, uniforms.canvasH * 0.5);
   let minDim = min(uniforms.canvasW, uniforms.canvasH);
-  
+
   // Layout Dimensions
   let maxRadius = minDim * 0.45; // Keep away from edges
   let minRadius = minDim * 0.15; // Inner hole size
   let ringDepth = (maxRadius - minRadius) / f32(numChannels);
-  
+
   // 1. Calculate Radius (Channel Index)
   // Channel 0 is the innermost ring
   let radius = minRadius + f32(channel) * ringDepth;
-  
+
   // 2. Calculate Angle (Row Index)
   // 128 Steps total. Start at -PI/2 (Top of screen)
   // Clockwise rotation
@@ -74,7 +74,7 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
   // 3. Calculate Cell Size (Dynamic based on circumference)
   let circumference = 2.0 * 3.14159265 * radius;
   let arcLength = circumference / totalSteps;
-  
+
   // Add slight gaps between cells
   let btnW = arcLength * 0.92;
   let btnH = ringDepth * 0.92;
@@ -83,7 +83,7 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
   let lp = quad[vertexIndex];
   // Center local quad at (0,0) and scale
   let localPos = (lp - 0.5) * vec2<f32>(btnW, btnH);
-  
+
   // Rotate sprite to align with tangent
   // We want sprite Y-axis to point OUT (Radius)
   // We want sprite X-axis to point TANGENT (Angle)
@@ -91,10 +91,10 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
   let rotAng = theta + 1.570796;
   let cA = cos(rotAng);
   let sA = sin(rotAng);
-  
+
   let rotX = localPos.x * cA - localPos.y * sA;
   let rotY = localPos.x * sA + localPos.y * cA;
-  
+
   // Translate to ring position
   let worldX = center.x + cos(theta) * radius + rotX;
   let worldY = center.y + sin(theta) * radius + rotY;
@@ -326,7 +326,7 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
       let distDirect = abs(rA - rB);
       let distWrap = 128 - distDirect; // 128 step wrap
       let rowDist = min(distDirect, distWrap);
-      
+
       if (rowDist == 0 && !hasNote) {
           // Additive white glance on empty active cell
           finalColor += vec3<f32>(0.15, 0.2, 0.25) * mainButtonMask;

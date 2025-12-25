@@ -20,8 +20,8 @@ struct Uniforms {
   kickTrigger: f32,
   activeChannels: u32,
   isModuleLoaded: u32,
-  bloomIntensity: f32,    
-  bloomThreshold: f32,    
+  bloomIntensity: f32,
+  bloomThreshold: f32,
   invertChannels: u32,
 };
 
@@ -202,7 +202,7 @@ fn drawChromeIndicator(
             let angle = atan2(uv01.y - center.y, uv01.x - center.x);
             let rim = 0.2 + 0.8 * abs(sin(angle * 10.0));
             // Apply dimFactor to the hardware (chrome)
-            col = vec3<f32>(0.25, 0.28, 0.30) * rim * dimFactor; 
+            col = vec3<f32>(0.25, 0.28, 0.30) * rim * dimFactor;
             alpha = 1.0;
         } else {
             // Lens
@@ -216,7 +216,7 @@ fn drawChromeIndicator(
             let specular = pow(max(0.0, dot(reflectDir, vec3<f32>(0.0, 0.0, 1.0))), 10.0);
 
             // Apply dimFactor to the base color (if off)
-            let baseColor = color * (select(dimFactor, 1.0, isOn)); 
+            let baseColor = color * (select(dimFactor, 1.0, isOn));
             col = baseColor * (0.5 + 0.8 * diffuse);
             col += vec3<f32>(1.0) * specular * 0.5 * dimFactor;
 
@@ -242,7 +242,7 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   let p = uv - 0.5;
   let aa = fwidth(p.y) * 0.5;
   let bloom = uniforms.bloomIntensity;
-  
+
   // STUDIO DIMMING: If playing, darken everything that isn't light
   let isPlaying = (uniforms.isPlaying == 1u);
   let dimFactor = select(1.0, 0.35, isPlaying); // 35% brightness when playing
@@ -251,7 +251,7 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   if (in.channel == 0u) {
     let onPlayhead = (in.row == uniforms.playheadRow);
     let indSize = vec2(0.3, 0.3);
-    
+
     // UV PURPLE LOGIC
     // Standard Gray vs UV Purple
     let standardGray = vec3(0.2);
@@ -272,11 +272,11 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
 
     var col = indLed.rgb;
     var alpha = indLed.a;
-    
+
     // BEZEL ILLUMINATION (Bloom Boost)
     if (isPlaying) {
       // Add a base glow to the ring to bleed onto the bezel
-      col += uvPurple * 0.4 * bloom; 
+      col += uvPurple * 0.4 * bloom;
     }
 
     if (onPlayhead) {
@@ -302,7 +302,7 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   var inButton = 0.0;
   if (btnUV.x > 0.0 && btnUV.x < 1.0 && btnUV.y > 0.0 && btnUV.y < 1.0) {
     let texColor = textureSampleLevel(buttonsTexture, buttonsSampler, btnUV, 0.0).rgb;
-    finalColor = mix(finalColor, texColor * dimFactor, 0.7); 
+    finalColor = mix(finalColor, texColor * dimFactor, 0.7);
     inButton = 1.0;
   }
 
@@ -322,10 +322,10 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
 
     // COMPONENT 1: DATA LIGHT (Cyan/Blue)
     // Only illuminate if THIS STEP has expression data
-    let topUV = btnUV - vec2(0.5, 0.16); 
-    let topSize = vec2(0.20, 0.20); 
-    
-    let isDataPresent = hasExpression && !isMuted; 
+    let topUV = btnUV - vec2(0.5, 0.16);
+    let topSize = vec2(0.20, 0.20);
+
+    let isDataPresent = hasExpression && !isMuted;
     let topColorBase = vec3(0.0, 0.9, 1.0);
     let topColor = topColorBase * select(0.0, 1.5 + bloom, isDataPresent);
 
