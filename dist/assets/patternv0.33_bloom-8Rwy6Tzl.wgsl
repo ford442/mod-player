@@ -1,7 +1,6 @@
-// patternv0.37.wgsl
-// Features: Circular Layout (v0.36 base) + Integrated UI Controls (Play, Stop, Loop, Open) + Song Position Bar
-// PackedA: [Note(8) | Instr(8) | VolCmd(8) | VolVal(8)]
-// PackedB: [Unused(16) | EffCmd(8) | EffVal(8)]
+// patternv0.33_bloom.wgsl
+// - Blue LEDs now indicate "Expression Data" on the specific step (not channel activity)
+// - Notes flash brighter when playhead hits them
 
 struct Uniforms {
   numRows: u32,
@@ -22,7 +21,7 @@ struct Uniforms {
   isModuleLoaded: u32,
   bloomIntensity: f32,
   bloomThreshold: f32,
-  invertChannels: u32,
+  invertChannels: u32,    // 0 = outer low (default), 1 = inner low
 };
 
 @group(0) @binding(0) var<storage, read> cells: array<u32>;
@@ -54,7 +53,9 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
   let row = instanceIndex / numChannels;
   let channel = instanceIndex % numChannels;
 
+  // --- LAYOUT FLIP: 0 is Outer ---
   let invertedChannel = numChannels - 1u - channel;
+  // Honor invert flag (1 = inner low, 0 = outer low)
   let ringIndex = select(invertedChannel, channel, (uniforms.invertChannels == 1u));
 
   let center = vec2<f32>(uniforms.canvasW * 0.5, uniforms.canvasH * 0.5);
@@ -73,9 +74,8 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
   let circumference = 2.0 * 3.14159265 * radius;
   let arcLength = circumference / totalSteps;
 
-  // v0.37 enhancement: Increased spacing between buttons (0.75 vs original 0.92)
-  let btnW = arcLength * 0.75;
-  let btnH = ringDepth * 0.75;
+  let btnW = arcLength * 0.92;
+  let btnH = ringDepth * 0.92;
 
   let lp = quad[vertexIndex];
   let localPos = (lp - 0.5) * vec2<f32>(btnW, btnH);
@@ -120,35 +120,44 @@ fn sdRoundedBox(p: vec2<f32>, b: vec2<f32>, r: f32) -> f32 {
   return length(max(q, vec2<f32>(0.0))) + min(max(q.x, q.y), 0.0) - r;
 }
 
-fn sdCircle(p: vec2<f32>, r: f32) -> f32 {
-  return length(p) - r;
+fn toUpperAscii(code: u32) -> u32 {
+  return select(code, code - 32u, (code >= 97u) & (code <= 122u));
 }
 
-fn sdTriangle(p: vec2<f32>, r: f32) -> f32 {
-    let k = sqrt(3.0);
-    var p2 = p;
-    p2.x = abs(p2.x) - r;
-    p2.y = p2.y + r / k;
-    if (p2.x + k * p2.y > 0.0) {
-        p2 = vec2<f32>(p2.x - k * p2.y, -k * p2.x - p2.y) / 2.0;
-    }
-    p2.x = p2.x - clamp(p2.x, -2.0 * r, 0.0);
-    return -length(p2) * sign(p2.y);
+fn pitchClassFromPacked(packed: u32) -> f32 {
+  let c0 = toUpperAscii((packed >> 24) & 255u);
+  var semitone: i32 = 0;
+  var valid = true;
+  switch (c0) {
+    case 65u: { semitone = 9; }
+    case 66u: { semitone = 11; }
+    case 67u: { semitone = 0; }
+    case 68u: { semitone = 2; }
+    case 69u: { semitone = 4; }
+    case 70u: { semitone = 5; }
+    case 71u: { semitone = 7; }
+    default: { valid = false; }
+  }
+  if (!valid) { return 0.0; }
+  let c1 = toUpperAscii((packed >> 16) & 255u);
+  if ((c1 == 35u) || (c1 == 43u)) {
+    semitone = (semitone + 1) % 12;
+  } else if (c1 == 66u) {
+    semitone = (semitone + 11) % 12;
+  }
+  return f32(semitone) / 12.0;
 }
 
-fn sdBox(p: vec2<f32>, b: vec2<f32>) -> f32 {
-    let d = abs(p) - b;
-    return length(max(d, vec2<f32>(0.0))) + min(max(d.x, d.y), 0.0);
-}
-
-fn pitchClassFromIndex(note: u32) -> f32 {
-  if (note == 0u) { return 0.0; }
-  // Assuming standard OpenMPT note mapping: C-? is start of octave.
-  // We just want hue.
-  // Note 0 is empty. Note 1.. are notes.
-  // (note - 1) % 12
-  let semi = (note - 1u) % 12u;
-  return f32(semi) / 12.0;
+fn effectColorFromCode(code: u32, fallback: vec3<f32>) -> vec3<f32> {
+  let c = toUpperAscii(code & 255u);
+  switch c {
+    case 49u: { return mix(fallback, vec3<f32>(0.2, 0.85, 0.4), 0.75); }
+    case 50u: { return mix(fallback, vec3<f32>(0.85, 0.3, 0.3), 0.75); }
+    case 52u: { return mix(fallback, vec3<f32>(0.4, 0.7, 1.0), 0.6); }
+    case 55u: { return mix(fallback, vec3<f32>(0.9, 0.6, 0.2), 0.6); }
+    case 65u: { return mix(fallback, vec3<f32>(0.95, 0.9, 0.25), 0.7); }
+    default: { return fallback; }
+  }
 }
 
 struct FragmentConstants {
@@ -169,7 +178,14 @@ fn getFragmentConstants() -> FragmentConstants {
   return c;
 }
 
-fn drawChromeIndicator(uv: vec2<f32>, size: vec2<f32>, color: vec3<f32>, isOn: bool, aa: f32) -> vec4<f32> {
+// Chrome & Glass Rendering
+fn drawChromeIndicator(
+    uv: vec2<f32>,
+    size: vec2<f32>,
+    color: vec3<f32>,
+    isOn: bool,
+    aa: f32
+) -> vec4<f32> {
     let uv01 = (uv / size) + vec2<f32>(0.5);
     let lensR = 0.7;
     let bezelR = 0.9;
@@ -181,11 +197,13 @@ fn drawChromeIndicator(uv: vec2<f32>, size: vec2<f32>, color: vec3<f32>, isOn: b
 
     if (dist < bezelR) {
         if (dist > lensR) {
+            // Bezel
             let angle = atan2(uv01.y - center.y, uv01.x - center.x);
             let rim = 0.2 + 0.8 * abs(sin(angle * 10.0));
             col = vec3<f32>(0.25, 0.28, 0.30) * rim;
             alpha = 1.0;
         } else {
+            // Lens
             let lensNormR = dist / lensR;
             let z = sqrt(max(0.0, 1.0 - lensNormR * lensNormR));
             let localXY = (uv01 - center) / lensR;
@@ -199,6 +217,7 @@ fn drawChromeIndicator(uv: vec2<f32>, size: vec2<f32>, color: vec3<f32>, isOn: b
             col = baseColor * (0.5 + 0.8 * diffuse);
             col += vec3<f32>(1.0) * specular * 0.5;
 
+            // Inner bloom
             let rimGlow = exp(-pow(lensNormR, 2.0) * 6.0);
             col += baseColor * rimGlow * 0.25;
             alpha = 1.0;
@@ -206,8 +225,10 @@ fn drawChromeIndicator(uv: vec2<f32>, size: vec2<f32>, color: vec3<f32>, isOn: b
     } else {
         return vec4<f32>(vec3<f32>(0.0), 0.0);
     }
+
     let vignette = smoothstep(bezelR * 0.95, bezelR, dist);
     col = mix(col * (1.0 - 0.08 * vignette), vec3<f32>(0.02), vignette);
+
     return vec4<f32>(col, alpha);
 }
 
@@ -219,12 +240,13 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   let aa = fwidth(p.y) * 0.5;
   let bloom = uniforms.bloomIntensity;
 
-  // --- INDICATOR RING ---
+  // --- INDICATOR RING (Channel 0 / Outer Ring) ---
   if (in.channel == 0u) {
     let onPlayhead = (in.row == uniforms.playheadRow);
     let indSize = vec2(0.3, 0.3);
     let indColor = select(vec3(0.2), fs.ledOnColor, onPlayhead);
     let indLed = drawChromeIndicator(p, indSize, indColor, onPlayhead, aa);
+
     var col = indLed.rgb;
     var alpha = indLed.a;
     if (onPlayhead) {
@@ -235,12 +257,15 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     return vec4<f32>(col, clamp(alpha, 0.0, 1.0));
   }
 
+  // --- PATTERN ROWS ---
   let dHousing = sdRoundedBox(p, fs.housingSize * 0.5, 0.06);
   let housingMask = 1.0 - smoothstep(0.0, aa * 1.5, dHousing);
 
   var finalColor = fs.bgColor;
+  // Subtle gradient on housing
   finalColor += vec3(0.04) * (0.5 - uv.y);
 
+  // --- TEXTURE OVERLAY ---
   let btnScale = 1.05;
   let btnUV = (uv - 0.5) * btnScale + 0.5;
   var inButton = 0.0;
@@ -250,51 +275,65 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     inButton = 1.0;
   }
 
-  // --- DECODE PACKED DATA ---
+  // --- CHROME HARDWARE INDICATORS ---
   if (inButton > 0.5) {
-    let note = (in.packedA >> 24) & 255u;
-    let inst = (in.packedA >> 16) & 255u;
-    let volCmd = (in.packedA >> 8) & 255u;
-    let volVal = in.packedA & 255u;
+    let noteChar = (in.packedA >> 24) & 255u;
+    let inst = in.packedA & 255u;
+    // Decode packedB to check for effects/volume
+    let volType = (in.packedB >> 24) & 255u; // 1=Vol, 2=Pan
+    let effCode = (in.packedB >> 8) & 255u;
+    let effParam = in.packedB & 255u;
 
-    let effCmd = (in.packedB >> 8) & 255u; // Assuming we packed it in second byte
-    let effVal = in.packedB & 255u;
-
-    let hasNote = (note > 0u);
-    // Has Expression: Volume Command OR Effect Command present
-    let hasExpression = (volCmd > 0u) || (effCmd > 0u);
+    let hasNote = (noteChar >= 65u && noteChar <= 71u);
+    // Check if this specific cell has "expression data" (Vol/Pan or Effect)
+    let hasExpression = (volType > 0u) || (effCode > 0u);
 
     let ch = channels[in.channel];
     let isMuted = (ch.isMuted == 1u);
 
-    // COMPONENT 1: DATA LIGHT (Expression)
+    // COMPONENT 1: DATA LIGHT (Cyan/Blue)
+    // FIX: Only illuminate if THIS STEP has expression data.
     let topUV = btnUV - vec2(0.5, 0.16);
     let topSize = vec2(0.20, 0.20);
+
     let isDataPresent = hasExpression && !isMuted;
     let topColorBase = vec3(0.0, 0.9, 1.0);
+    // Static glow if data is present, no flashing needed for this indicator
     let topColor = topColorBase * select(0.0, 1.5 + bloom, isDataPresent);
+
     let topLed = drawChromeIndicator(topUV, topSize, topColor, isDataPresent, aa);
     finalColor = mix(finalColor, topLed.rgb, topLed.a);
-    if (isDataPresent) { finalColor += topColor * topLed.a * 0.3; }
 
-    // COMPONENT 2: NOTE LIGHT
+    if (isDataPresent) {
+         finalColor += topColor * topLed.a * 0.3;
+    }
+
+    // COMPONENT 2: MAIN NOTE LIGHT (HDR Neon)
     let mainUV = btnUV - vec2(0.5, 0.5);
     let mainSize = vec2(0.55, 0.45);
+
     var noteColor = vec3(0.2);
     var lightAmount = 0.0;
 
     if (hasNote) {
-      let pitchHue = pitchClassFromIndex(note);
+      let pitchHue = pitchClassFromPacked(in.packedA);
       let baseColor = neonPalette(pitchHue);
       let instBand = inst & 15u;
       let instBright = 0.8 + (select(0.0, f32(instBand) / 15.0, instBand > 0u)) * 0.2;
       noteColor = baseColor * instBright;
 
+      // Slow decay (linger) from channel state
       let linger = exp(-ch.noteAge * 1.5);
+
+      // FIX: Add "Playhead Strike" intensity
+      // If this row is the playhead row, flash BRIGHT!
       let onPlayhead = (in.row == uniforms.playheadRow);
-      let strike = select(0.0, 3.0, onPlayhead);
+      let strike = select(0.0, 3.0, onPlayhead); // Instant burst
+
+      // Also allow trigger from audio engine (flash)
       let flash = f32(ch.trigger) * 1.0;
 
+      // Distance glow (spatial)
       var d = f32(in.row) + uniforms.tickOffset - f32(uniforms.playheadRow);
       let totalSteps = 64.0;
       if (d > totalSteps * 0.5) { d = d - totalSteps; }
@@ -302,42 +341,45 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
       let coreDist = abs(d);
       let energy = 0.02 / (coreDist + 0.001);
       let trail = exp(-10.0 * max(0.0, -d));
+
       let activeVal = clamp(pow(energy, 1.5) + trail, 0.0, 1.0);
 
+      // Combine: Linger + Strike + Flash + Spatial
+      // Strike (3.0) and Flash (1.0) push it well into HDR territory
       lightAmount = (activeVal * 0.8 + flash + strike + (linger * 2.0)) * clamp(ch.volume, 0.0, 1.2);
       if (isMuted) { lightAmount *= 0.2; }
     }
 
+    // HDR Boost
     let displayColor = noteColor * max(lightAmount, 0.1) * (1.0 + bloom * 6.0);
     let isLit = (lightAmount > 0.05);
     let mainPad = drawChromeIndicator(mainUV, mainSize, displayColor, isLit, aa);
     finalColor = mix(finalColor, mainPad.rgb, mainPad.a);
 
-    // COMPONENT 3: EFFECT LIGHT
+    // COMPONENT 3: EFFECT LIGHT (HDR Pill)
     let botUV = btnUV - vec2(0.5, 0.85);
     let botSize = vec2(0.25, 0.12);
+
     var effColor = vec3(0.0);
     var isEffOn = false;
 
-    // Visualize Effect Command specifically
-    if (effCmd > 0u) {
-      // Use index hash for color
-      effColor = neonPalette(f32(effCmd) / 32.0);
-      let strength = clamp(f32(effVal) / 255.0, 0.2, 1.0);
+    // This pill specifically visualizes the Effect Code color
+    if (effCode > 0u) {
+      effColor = effectColorFromCode(effCode, vec3(0.9, 0.8, 0.2));
+      let strength = clamp(f32(effParam) / 255.0, 0.2, 1.0);
       if (!isMuted) {
         effColor *= strength * (1.0 + bloom * 2.5);
         isEffOn = true;
       }
-    } else if (volCmd > 0u) {
-      // If only volume command, maybe light up simpler
-      effColor = vec3(0.9, 0.9, 0.9);
-      if (!isMuted) { effColor *= 0.5; isEffOn = true; }
     }
 
     let botLed = drawChromeIndicator(botUV, botSize, effColor, isEffOn, aa);
     finalColor = mix(finalColor, botLed.rgb, botLed.a);
   }
 
-  if (housingMask < 0.5) { return vec4(fs.borderColor, 0.0); }
+  if (housingMask < 0.5) {
+    return vec4(fs.borderColor, 0.0);
+  }
+
   return vec4(finalColor, 1.0);
 }

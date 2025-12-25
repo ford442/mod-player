@@ -1,5 +1,5 @@
-// patternv0.37.wgsl
-// Features: Circular Layout (v0.36 base) + Integrated UI Controls (Play, Stop, Loop, Open) + Song Position Bar
+// patternv0.36.wgsl
+// Accuracy update: Uses direct Note/Instr/Vol/Effect integer data from LibOpenMPT
 // PackedA: [Note(8) | Instr(8) | VolCmd(8) | VolVal(8)]
 // PackedB: [Unused(16) | EffCmd(8) | EffVal(8)]
 
@@ -73,9 +73,8 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
   let circumference = 2.0 * 3.14159265 * radius;
   let arcLength = circumference / totalSteps;
 
-  // v0.37 enhancement: Increased spacing between buttons (0.75 vs original 0.92)
-  let btnW = arcLength * 0.75;
-  let btnH = ringDepth * 0.75;
+  let btnW = arcLength * 0.92;
+  let btnH = ringDepth * 0.92;
 
   let lp = quad[vertexIndex];
   let localPos = (lp - 0.5) * vec2<f32>(btnW, btnH);
@@ -118,27 +117,6 @@ fn neonPalette(t: f32) -> vec3<f32> {
 fn sdRoundedBox(p: vec2<f32>, b: vec2<f32>, r: f32) -> f32 {
   let q = abs(p) - b + r;
   return length(max(q, vec2<f32>(0.0))) + min(max(q.x, q.y), 0.0) - r;
-}
-
-fn sdCircle(p: vec2<f32>, r: f32) -> f32 {
-  return length(p) - r;
-}
-
-fn sdTriangle(p: vec2<f32>, r: f32) -> f32 {
-    let k = sqrt(3.0);
-    var p2 = p;
-    p2.x = abs(p2.x) - r;
-    p2.y = p2.y + r / k;
-    if (p2.x + k * p2.y > 0.0) {
-        p2 = vec2<f32>(p2.x - k * p2.y, -k * p2.x - p2.y) / 2.0;
-    }
-    p2.x = p2.x - clamp(p2.x, -2.0 * r, 0.0);
-    return -length(p2) * sign(p2.y);
-}
-
-fn sdBox(p: vec2<f32>, b: vec2<f32>) -> f32 {
-    let d = abs(p) - b;
-    return length(max(d, vec2<f32>(0.0))) + min(max(d.x, d.y), 0.0);
 }
 
 fn pitchClassFromIndex(note: u32) -> f32 {
