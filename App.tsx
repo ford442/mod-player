@@ -17,7 +17,10 @@ const availableShaders = Object.keys(shaderModules)
   .map(path => path.replace('./shaders/', ''))
   // Hide non-pattern helper shaders (bezel/chassis/etc)
   .filter(name => name.startsWith('patternv'))
-  .sort();
+  // Explicitly restrict online demo to v0.37 and v0.21
+  .filter(name => name.includes('v0.37') || name.includes('v0.21'))
+  .sort()
+  .reverse(); // Ensure v0.37 is first
 
 // Helpful runtime debug when the shader list doesn't update in the running app
 if (typeof window !== 'undefined' && import.meta.env.MODE !== 'production') {
@@ -175,7 +178,7 @@ export default function App() {
 
   const webgpuSupported = typeof navigator !== 'undefined' && 'gpu' in navigator;
   const [patternMode, setPatternMode] = useState<'html' | 'webgpu'>(webgpuSupported ? 'webgpu' : 'html');
-  const [shaderVersion, setShaderVersion] = useState<string>('patternv0.36.wgsl');
+  const [shaderVersion, setShaderVersion] = useState<string>('patternv0.37.wgsl');
   const effectivePatternMode = webgpuSupported ? patternMode : 'html';
 
   const isVideoShaderActive = effectivePatternMode === 'webgpu' && (shaderVersion.includes('v0.20') || shaderVersion.includes('v0.23'));

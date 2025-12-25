@@ -35,8 +35,9 @@ const shouldUseBackgroundPass = (shaderFile: string) => {
 };
 
 const getBackgroundShaderFile = (shaderFile: string): string => {
+  if (shaderFile.includes('v0.37')) return 'chassisv0.37.wgsl';
   // Only use the chassis pass when explicitly called.
-  if (shaderFile.includes('v0.27') || shaderFile.includes('v0.28') || shaderFile.includes('v0.30') || shaderFile.includes('v0.31') || shaderFile.includes('v0.32') || shaderFile.includes('v0.33') || shaderFile.includes('v0.34') || shaderFile.includes('v0.35') || shaderFile.includes('v0.36') || shaderFile.includes('v0.37')) return 'chassisv0.1.wgsl';
+  if (shaderFile.includes('v0.27') || shaderFile.includes('v0.28') || shaderFile.includes('v0.30') || shaderFile.includes('v0.31') || shaderFile.includes('v0.32') || shaderFile.includes('v0.33') || shaderFile.includes('v0.34') || shaderFile.includes('v0.35') || shaderFile.includes('v0.36')) return 'chassisv0.1.wgsl';
   return 'bezel.wgsl';
 };
 
