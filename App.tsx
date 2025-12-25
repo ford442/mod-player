@@ -193,24 +193,6 @@ export default function App() {
       <main className="max-w-7xl mx-auto w-full flex-grow">
         <Header status={status} />
 
-        <Controls
-          isReady={isReady}
-          isPlaying={isPlaying}
-          isModuleLoaded={isModuleLoaded}
-          onFileSelected={loadModule}
-          onPlay={play}
-          onStop={stopMusic}
-          onMediaAdd={addMediaFile}
-          isLooping={isLooping}
-          onLoopToggle={() => setIsLooping(!isLooping)}
-          volume={volume}
-          setVolume={setVolume}
-          pan={panValue}
-          setPan={setPanValue}
-          remoteMediaList={remoteFiles}
-          onRemoteMediaSelect={handleRemoteSelect}
-        />
-
         {isModuleLoaded || effectivePatternMode === 'webgpu' ? (
           <>
             <InfoDisplay moduleInfo={moduleInfo} />
@@ -218,93 +200,101 @@ export default function App() {
             <div className="flex flex-col gap-4">
               <div className="flex items-center justify-between flex-wrap gap-3">
                 <h2 className="text-sm uppercase tracking-widest text-gray-400">Pattern View</h2>
-                <div className="flex items-center gap-3">
-                  <div className="inline-flex rounded-lg border border-white/10 overflow-hidden">
+              </div>
+
+              <div className="relative">
+                {/* Left side controls - Mode toggle */}
+                <div className="absolute top-4 left-4 z-10">
+                  <div className="inline-flex flex-col gap-2 rounded-lg border border-white/10 overflow-hidden bg-gray-900/80 backdrop-blur-sm p-1">
                     <button
                       type="button"
                       onClick={() => setPatternMode('html')}
-                      className={`px-4 py-2 text-sm font-semibold transition ${effectivePatternMode === 'html' ? 'bg-white/10 text-white' : 'text-gray-400 hover:text-white'}`}
+                      className={`px-3 py-2 text-xs font-semibold transition rounded ${effectivePatternMode === 'html' ? 'bg-white/10 text-white' : 'text-gray-400 hover:text-white'}`}
                     >
                       HTML
                     </button>
                     <button
                       type="button"
                       onClick={() => setPatternMode('webgpu')}
-                      className={`px-4 py-2 text-sm font-semibold transition ${effectivePatternMode === 'webgpu' ? 'bg-white/10 text-white' : 'text-gray-400 hover:text-white'}`}
+                      className={`px-3 py-2 text-xs font-semibold transition rounded ${effectivePatternMode === 'webgpu' ? 'bg-white/10 text-white' : 'text-gray-400 hover:text-white'}`}
                       disabled={!webgpuSupported}
                     >
                       WGSL
                     </button>
                   </div>
-                  {effectivePatternMode === 'webgpu' && (
-                    <div className="flex gap-2">
-                       {/* Quick Layout Switcher */}
-                       <div className="inline-flex rounded-lg border border-white/10 overflow-hidden">
-                          <button
-                            type="button"
-                            onClick={() => setShaderVersion('patternv0.21.wgsl')}
-                            className={`px-3 py-2 text-xs font-mono uppercase transition ${shaderVersion.includes('v0.21') ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400 hover:text-white'}`}
-                          >
-                            Horizontal
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setShaderVersion('patternv0.37.wgsl')}
-                            className={`px-3 py-2 text-xs font-mono uppercase transition ${shaderVersion.includes('v0.37') ? 'bg-purple-600 text-white' : 'bg-gray-800 text-gray-400 hover:text-white'}`}
-                          >
-                            Circular
-                          </button>
-                       </div>
+                </div>
 
-                       <select
+                {/* Right side controls - Shader selector */}
+                {effectivePatternMode === 'webgpu' && (
+                  <div className="absolute top-4 right-4 z-10">
+                    <div className="flex flex-col gap-2 rounded-lg border border-white/10 bg-gray-900/80 backdrop-blur-sm p-2">
+                      {/* Quick Layout Switcher */}
+                      <div className="inline-flex rounded-lg border border-white/10 overflow-hidden">
+                        <button
+                          type="button"
+                          onClick={() => setShaderVersion('patternv0.21.wgsl')}
+                          className={`px-3 py-2 text-xs font-mono uppercase transition ${shaderVersion.includes('v0.21') ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400 hover:text-white'}`}
+                        >
+                          Horizontal
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setShaderVersion('patternv0.37.wgsl')}
+                          className={`px-3 py-2 text-xs font-mono uppercase transition ${shaderVersion.includes('v0.37') ? 'bg-purple-600 text-white' : 'bg-gray-800 text-gray-400 hover:text-white'}`}
+                        >
+                          Circular
+                        </button>
+                      </div>
+
+                      <select
                         value={shaderVersion}
                         onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setShaderVersion(e.target.value)}
-                        className="bg-gray-800 text-white text-sm px-3 py-2 rounded border border-white/10 w-40"
+                        className="bg-gray-800 text-white text-xs px-3 py-2 rounded border border-white/10"
                       >
                         {availableShaders.map((shader: string) => (
                           <option key={shader} value={shader}>{shader.replace('.wgsl', '')}</option>
                         ))}
                       </select>
                     </div>
-                  )}
-                </div>
-              </div>
+                  </div>
+                )}
 
-              {effectivePatternMode === 'webgpu' ? (
-                <PatternDisplay
-                  matrix={sequencerMatrix ?? null}
-                  playheadRow={sequencerCurrentRow}
-                  cellWidth={cellW}
-                  cellHeight={cellH}
-                  shaderFile={shaderVersion}
-                  isPlaying={isPlaying}
-                  bpm={moduleInfo.bpm}
-                  timeSec={playbackSeconds}
-                  tickOffset={Math.max(0, (playbackRowFraction % 1))}
-                  channels={channelStates}
-                  beatPhase={beatPhase}
-                  grooveAmount={grooveAmount}
-                  kickTrigger={kickTrigger}
-                  activeChannels={activeChannels}
-                  isModuleLoaded={isModuleLoaded}
-                  externalVideoSource={mediaElement}
-                  onPlay={play}
-                  onStop={stopMusic}
-                  onFileSelected={loadModule}
-                  onLoopToggle={() => setIsLooping(!isLooping)}
-                  onSeek={(step) => seekToStep(step)}
-                  totalRows={totalPatternRows}
-                />
-              ) : (
-                <PatternSequencer
-                  matrix={sequencerMatrix ?? null}
-                  currentRow={sequencerCurrentRow}
-                  globalRow={sequencerGlobalRow}
-                  totalRows={totalPatternRows}
-                  onSeek={seekToStep}
-                  bpm={moduleInfo.bpm}
-                />
-              )}
+                {effectivePatternMode === 'webgpu' ? (
+                  <PatternDisplay
+                    matrix={sequencerMatrix ?? null}
+                    playheadRow={sequencerCurrentRow}
+                    cellWidth={cellW}
+                    cellHeight={cellH}
+                    shaderFile={shaderVersion}
+                    isPlaying={isPlaying}
+                    bpm={moduleInfo.bpm}
+                    timeSec={playbackSeconds}
+                    tickOffset={Math.max(0, (playbackRowFraction % 1))}
+                    channels={channelStates}
+                    beatPhase={beatPhase}
+                    grooveAmount={grooveAmount}
+                    kickTrigger={kickTrigger}
+                    activeChannels={activeChannels}
+                    isModuleLoaded={isModuleLoaded}
+                    externalVideoSource={mediaElement}
+                    onPlay={play}
+                    onStop={stopMusic}
+                    onFileSelected={loadModule}
+                    onLoopToggle={() => setIsLooping(!isLooping)}
+                    onSeek={(step) => seekToStep(step)}
+                    totalRows={totalPatternRows}
+                  />
+                ) : (
+                  <PatternSequencer
+                    matrix={sequencerMatrix ?? null}
+                    currentRow={sequencerCurrentRow}
+                    globalRow={sequencerGlobalRow}
+                    totalRows={totalPatternRows}
+                    onSeek={seekToStep}
+                    bpm={moduleInfo.bpm}
+                  />
+                )}
+              </div>
             </div>
 
             <div className="mt-6 grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -319,6 +309,26 @@ export default function App() {
              <p>Load a tracker module file (e.g., .mod, .it, .s3m, .xm) to begin.</p>
            </div>
         )}
+
+        <div className="mt-8">
+          <Controls
+            isReady={isReady}
+            isPlaying={isPlaying}
+            isModuleLoaded={isModuleLoaded}
+            onFileSelected={loadModule}
+            onPlay={play}
+            onStop={stopMusic}
+            onMediaAdd={addMediaFile}
+            isLooping={isLooping}
+            onLoopToggle={() => setIsLooping(!isLooping)}
+            volume={volume}
+            setVolume={setVolume}
+            pan={panValue}
+            setPan={setPanValue}
+            remoteMediaList={remoteFiles}
+            onRemoteMediaSelect={handleRemoteSelect}
+          />
+        </div>
       </main>
       <footer className="text-center text-gray-500 mt-8 text-sm">
         <p>Powered by React and libopenmpt.</p>
