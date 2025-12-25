@@ -73,8 +73,9 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
   let circumference = 2.0 * 3.14159265 * radius;
   let arcLength = circumference / totalSteps;
 
-  let btnW = arcLength * 0.92;
-  let btnH = ringDepth * 0.92;
+  // v0.37 enhancement: Increased spacing between buttons (0.75 vs original 0.92)
+  let btnW = arcLength * 0.75;
+  let btnH = ringDepth * 0.75;
 
   let lp = quad[vertexIndex];
   let localPos = (lp - 0.5) * vec2<f32>(btnW, btnH);
