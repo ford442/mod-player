@@ -139,7 +139,12 @@ fn fs(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
 
       let dIcon = sdTriangle((p - posPlay) * vec2<f32>(1.0, -1.0) * 1.5, btnRadius * 0.4);
       if (dIcon < 0.0) {
-         btnCol = isPlaying ? vec3<f32>(0.2, 1.0, 0.4) : vec3<f32>(0.2, 0.6, 0.2);
+btnCol = select(
+    vec3<f32>(0.2, 0.6, 0.2),
+    vec3<f32>(0.2, 1.0, 0.4),
+    isPlaying
+);
+
       }
 
       let mask = smoothstep(0.0, aa * 2.0, -dPlayBg);
