@@ -2,9 +2,9 @@
 > react-libopenmpt-viewer@0.0.0 dev
 > vite
 
-Port 5173 is in use, trying another one...
 
-  VITE v5.4.21  ready in 239 ms
+  VITE v5.4.21  ready in 334 ms
 
-  ➜  Local:   http://localhost:5174/
+  ➜  Local:   http://localhost:5173/
   ➜  Network: use --host to expose
+The glob option "as" has been deprecated in favour of "query". Please update `as: 'url'` to `query: '?url', import: 'default'`.
