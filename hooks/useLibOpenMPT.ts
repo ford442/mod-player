@@ -2,6 +2,8 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import type { LibOpenMPT, ModuleInfo, PatternMatrix, PatternCell } from '../types';
 
 const SAMPLE_RATE = 44100;
+// Buffer size of 4096 provides better audio quality and fewer buffer underruns
+// Trade-off: ~93ms latency (4096/44100) vs ~23ms with 1024 samples
 const BUFFER_SIZE = 4096;
 const INITIAL_STATUS = "Loading library...";
 const INITIAL_MODULE_INFO: ModuleInfo = { title: '...', order: 0, row: 0, bpm: 0, numChannels: 0 };
@@ -79,6 +81,7 @@ export function useLibOpenMPT(volume: number = 1.0) {
   const currentModulePtr = useRef<number>(0);
   const audioContextRef = useRef<AudioContext | null>(null);
   const scriptNodeRef = useRef<ScriptProcessorNode | null>(null);
+  const audioWorkletNodeRef = useRef<AudioWorkletNode | null>(null);
   const stereoPannerRef = useRef<StereoPannerNode | null>(null);
   const rowBufferRef = useRef<Record<string, string>>({});
   const patternMatricesRef = useRef<Record<number, PatternMatrix>>({});
@@ -87,6 +90,8 @@ export function useLibOpenMPT(volume: number = 1.0) {
   const isPlayingRef = useRef(isPlaying);
   const isLoopingRef = useRef(isLooping);
   const gainNodeRef = useRef<GainNode | null>(null);
+  const useAudioWorklet = useRef<boolean>(false);
+  const audioWorkletReady = useRef<boolean>(false);
 
   useEffect(() => {
     moduleInfoRef.current = moduleInfo;
@@ -108,15 +113,18 @@ export function useLibOpenMPT(volume: number = 1.0) {
   }, [volume]);
 
   const stopMusic = useCallback((ended = false) => {
-    if (!scriptNodeRef.current) return;
-
-    scriptNodeRef.current.disconnect();
-    scriptNodeRef.current = null;
+    if (scriptNodeRef.current) {
+      scriptNodeRef.current.disconnect();
+      scriptNodeRef.current = null;
+    }
+    if (audioWorkletNodeRef.current) {
+      audioWorkletNodeRef.current.disconnect();
+      audioWorkletNodeRef.current = null;
+    }
     if (stereoPannerRef.current) {
       stereoPannerRef.current.disconnect();
       stereoPannerRef.current = null;
     }
-    // Disconnect gain node if needed, but it's usually fine to leave it connected to destination
 
     setIsPlaying(false);
     cancelAnimationFrame(animationFrameHandle.current);
@@ -364,13 +372,25 @@ export function useLibOpenMPT(volume: number = 1.0) {
     animationFrameHandle.current = requestAnimationFrame(updateUI);
   }, [channelStates]);
 
-  const play = useCallback(() => {
+  const play = useCallback(async () => {
     if (isPlaying || currentModulePtr.current === 0 || !libopenmptRef.current) return;
 
     try {
       if (!audioContextRef.current) {
         const AudioContext = window.AudioContext || window.webkitAudioContext;
         audioContextRef.current = new AudioContext({ sampleRate: SAMPLE_RATE });
+        
+        // Initialize AudioWorklet if not already done
+        if (useAudioWorklet.current && !audioWorkletReady.current) {
+          try {
+            await audioContextRef.current.audioWorklet.addModule('/worklets/openmpt-processor.js');
+            audioWorkletReady.current = true;
+            console.log('AudioWorklet initialized');
+          } catch (err) {
+            console.warn('Failed to initialize AudioWorklet, using ScriptProcessor:', err);
+            useAudioWorklet.current = false;
+          }
+        }
       }
 
       if (!gainNodeRef.current) {
@@ -379,43 +399,10 @@ export function useLibOpenMPT(volume: number = 1.0) {
       }
       gainNodeRef.current.gain.value = volume;
 
-      // Ensure we have a typed reference to the lib before using it
       const lib = libopenmptRef.current as LibOpenMPT;
-
       const modPtr = currentModulePtr.current;
       const leftBufferPtr = lib._malloc(BUFFER_SIZE * 4);
       const rightBufferPtr = lib._malloc(BUFFER_SIZE * 4);
-
-      scriptNodeRef.current = audioContextRef.current.createScriptProcessor(BUFFER_SIZE, 0, 2);
-      scriptNodeRef.current.onaudioprocess = (e) => {
-        try {
-          const frames = lib._openmpt_module_read_float_stereo(modPtr, SAMPLE_RATE, BUFFER_SIZE, leftBufferPtr, rightBufferPtr);
-          if (frames === 0) {
-            if (isLoopingRef.current) {
-              try {
-                lib._openmpt_module_set_position_order_row(modPtr, 0, 0);
-              } catch (resetErr) {
-                console.error("Error resetting position for loop:", resetErr);
-                setTimeout(() => stopMusic(true), 0);
-              }
-              return;
-            } else {
-              setTimeout(() => stopMusic(true), 0);
-              return;
-            }
-          }
-
-          const leftOutput = e.outputBuffer.getChannelData(0);
-          const rightOutput = e.outputBuffer.getChannelData(1);
-          const leftHeap = new Float32Array(lib.HEAPF32.buffer, leftBufferPtr, frames);
-          const rightHeap = new Float32Array(lib.HEAPF32.buffer, rightBufferPtr, frames);
-          leftOutput.set(leftHeap);
-          rightOutput.set(rightHeap);
-        } catch (audioErr) {
-          console.error("Error in audio process:", audioErr);
-          setTimeout(() => stopMusic(false), 0);
-        }
-      };
 
       // Clean up any existing panner before creating a new one
       if (stereoPannerRef.current) {
@@ -426,10 +413,103 @@ export function useLibOpenMPT(volume: number = 1.0) {
       stereoPannerRef.current = audioContextRef.current.createStereoPanner();
       stereoPannerRef.current.pan.value = panValue;
 
-      // Connect: ScriptProcessor -> StereoPanner -> GainNode -> Destination
-      scriptNodeRef.current.connect(stereoPannerRef.current);
-      stereoPannerRef.current.connect(gainNodeRef.current);
-      gainNodeRef.current.connect(audioContextRef.current.destination);
+      // Try AudioWorkletNode first, fall back to ScriptProcessorNode
+      if (useAudioWorklet.current && audioWorkletReady.current) {
+        try {
+          audioWorkletNodeRef.current = new AudioWorkletNode(audioContextRef.current, 'openmpt-processor');
+          
+          // Handle data requests from the worklet
+          audioWorkletNodeRef.current.port.onmessage = (event) => {
+            if (event.data.type === 'needData') {
+              try {
+                const frames = lib._openmpt_module_read_float_stereo(modPtr, SAMPLE_RATE, BUFFER_SIZE, leftBufferPtr, rightBufferPtr);
+                if (frames === 0) {
+                  if (isLoopingRef.current) {
+                    try {
+                      lib._openmpt_module_set_position_order_row(modPtr, 0, 0);
+                    } catch (resetErr) {
+                      console.error("Error resetting position for loop:", resetErr);
+                      setTimeout(() => stopMusic(true), 0);
+                    }
+                    return;
+                  } else {
+                    setTimeout(() => stopMusic(true), 0);
+                    return;
+                  }
+                }
+
+                const leftHeap = new Float32Array(lib.HEAPF32.buffer, leftBufferPtr, frames);
+                const rightHeap = new Float32Array(lib.HEAPF32.buffer, rightBufferPtr, frames);
+                
+                // Send audio data to worklet
+                audioWorkletNodeRef.current?.port.postMessage({
+                  type: 'audioData',
+                  left: leftHeap.slice(),
+                  right: rightHeap.slice()
+                });
+              } catch (audioErr) {
+                console.error("Error processing audio data:", audioErr);
+                setTimeout(() => stopMusic(false), 0);
+              }
+            }
+          };
+
+          // Connect: AudioWorkletNode -> StereoPanner -> GainNode -> Destination
+          audioWorkletNodeRef.current.connect(stereoPannerRef.current);
+          stereoPannerRef.current.connect(gainNodeRef.current);
+          gainNodeRef.current.connect(audioContextRef.current.destination);
+          
+          // Send initial data request
+          audioWorkletNodeRef.current.port.postMessage({ type: 'needData' });
+          
+          console.log('Using AudioWorkletNode for playback');
+        } catch (workletErr) {
+          console.warn('Failed to create AudioWorkletNode, falling back to ScriptProcessor:', workletErr);
+          useAudioWorklet.current = false;
+          // Fall through to ScriptProcessor
+        }
+      }
+
+      // Use ScriptProcessorNode if AudioWorklet is not available
+      if (!useAudioWorklet.current || !audioWorkletNodeRef.current) {
+        scriptNodeRef.current = audioContextRef.current.createScriptProcessor(BUFFER_SIZE, 0, 2);
+        scriptNodeRef.current.onaudioprocess = (e) => {
+          try {
+            const frames = lib._openmpt_module_read_float_stereo(modPtr, SAMPLE_RATE, BUFFER_SIZE, leftBufferPtr, rightBufferPtr);
+            if (frames === 0) {
+              if (isLoopingRef.current) {
+                try {
+                  lib._openmpt_module_set_position_order_row(modPtr, 0, 0);
+                } catch (resetErr) {
+                  console.error("Error resetting position for loop:", resetErr);
+                  setTimeout(() => stopMusic(true), 0);
+                }
+                return;
+              } else {
+                setTimeout(() => stopMusic(true), 0);
+                return;
+              }
+            }
+
+            const leftOutput = e.outputBuffer.getChannelData(0);
+            const rightOutput = e.outputBuffer.getChannelData(1);
+            const leftHeap = new Float32Array(lib.HEAPF32.buffer, leftBufferPtr, frames);
+            const rightHeap = new Float32Array(lib.HEAPF32.buffer, rightBufferPtr, frames);
+            leftOutput.set(leftHeap);
+            rightOutput.set(rightHeap);
+          } catch (audioErr) {
+            console.error("Error in audio process:", audioErr);
+            setTimeout(() => stopMusic(false), 0);
+          }
+        };
+
+        // Connect: ScriptProcessor -> StereoPanner -> GainNode -> Destination
+        scriptNodeRef.current.connect(stereoPannerRef.current);
+        stereoPannerRef.current.connect(gainNodeRef.current);
+        gainNodeRef.current.connect(audioContextRef.current.destination);
+        
+        console.log('Using ScriptProcessorNode for playback');
+      }
 
       setIsPlaying(true);
       setStatus(`Playing "${moduleInfoRef.current.title}"...`);
@@ -480,6 +560,21 @@ export function useLibOpenMPT(volume: number = 1.0) {
 
         libopenmptRef.current = lib;
         setIsReady(true);
+
+        // Try to initialize AudioWorklet support
+        try {
+          const AudioContext = window.AudioContext || window.webkitAudioContext;
+          const testCtx = new AudioContext({ sampleRate: SAMPLE_RATE });
+          await testCtx.audioWorklet.addModule('/worklets/openmpt-processor.js');
+          audioWorkletReady.current = true;
+          useAudioWorklet.current = true;
+          await testCtx.close();
+          console.log('AudioWorklet support enabled');
+        } catch (workletErr) {
+          console.warn('AudioWorklet not available, falling back to ScriptProcessorNode:', workletErr);
+          audioWorkletReady.current = false;
+          useAudioWorklet.current = false;
+        }
       } catch (err) {
         setStatus("Error: Audio library failed to load. See console.");
         console.error("Error awaiting libopenmptReady:", err);
@@ -492,6 +587,9 @@ export function useLibOpenMPT(volume: number = 1.0) {
       console.log("Cleaning up libopenmpt resources.");
       if (scriptNodeRef.current) {
         scriptNodeRef.current.disconnect();
+      }
+      if (audioWorkletNodeRef.current) {
+        audioWorkletNodeRef.current.disconnect();
       }
       if (stereoPannerRef.current) {
         stereoPannerRef.current.disconnect();
