@@ -17,10 +17,7 @@ const availableShaders = Object.keys(shaderModules)
   .map(path => path.replace('./shaders/', ''))
   // Hide non-pattern helper shaders (bezel/chassis/etc)
   .filter(name => name.startsWith('patternv'))
-  // Explicitly restrict online demo to v0.37 and v0.21
-  .filter(name => name.includes('v0.37') || name.includes('v0.21'))
-  .sort()
-  .reverse(); // Ensure v0.37 is first
+  .sort();
 
 // Helpful runtime debug when the shader list doesn't update in the running app
 if (typeof window !== 'undefined' && import.meta.env.MODE !== 'production') {
@@ -240,15 +237,35 @@ export default function App() {
                     </button>
                   </div>
                   {effectivePatternMode === 'webgpu' && (
-                    <select
-                      value={shaderVersion}
-                      onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setShaderVersion(e.target.value)}
-                      className="bg-gray-800 text-white text-sm px-3 py-2 rounded border border-white/10"
-                    >
-                      {availableShaders.map((shader: string) => (
-                        <option key={shader} value={shader}>{shader.replace('.wgsl', '')}</option>
-                      ))}
-                    </select>
+                    <div className="flex gap-2">
+                       {/* Quick Layout Switcher */}
+                       <div className="inline-flex rounded-lg border border-white/10 overflow-hidden">
+                          <button
+                            type="button"
+                            onClick={() => setShaderVersion('patternv0.21.wgsl')}
+                            className={`px-3 py-2 text-xs font-mono uppercase transition ${shaderVersion.includes('v0.21') ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400 hover:text-white'}`}
+                          >
+                            Horizontal
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setShaderVersion('patternv0.37.wgsl')}
+                            className={`px-3 py-2 text-xs font-mono uppercase transition ${shaderVersion.includes('v0.37') ? 'bg-purple-600 text-white' : 'bg-gray-800 text-gray-400 hover:text-white'}`}
+                          >
+                            Circular
+                          </button>
+                       </div>
+
+                       <select
+                        value={shaderVersion}
+                        onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setShaderVersion(e.target.value)}
+                        className="bg-gray-800 text-white text-sm px-3 py-2 rounded border border-white/10 w-40"
+                      >
+                        {availableShaders.map((shader: string) => (
+                          <option key={shader} value={shader}>{shader.replace('.wgsl', '')}</option>
+                        ))}
+                      </select>
+                    </div>
                   )}
                 </div>
               </div>
