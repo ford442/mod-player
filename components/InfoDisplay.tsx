@@ -8,22 +8,22 @@ interface InfoDisplayProps {
 
 export const InfoDisplay: React.FC<InfoDisplayProps> = ({ moduleInfo }) => {
   return (
-    <section className="bg-gray-800 p-4 rounded-lg shadow-lg mb-6 text-sm">
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div>
-          <span className="font-bold text-gray-400">Title:</span>
-          <span id="song-title" className="ml-2 truncate">{moduleInfo.title}</span>
+    <div className="bg-[#111] p-3 rounded mb-4 text-xs font-mono text-green-400 border border-green-900/30 shadow-[inset_0_0_10px_rgba(0,0,0,0.8)]">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+        <div className="overflow-hidden">
+          <span className="text-green-700 uppercase">Title:</span>
+          <span id="song-title" className="ml-2 uppercase tracking-wide">{moduleInfo.title || "NO TITLE"}</span>
         </div>
         <div>
-          <span className="font-bold text-gray-400">Position:</span>
-          <span className="ml-2">Order: <span id="current-order" className="font-semibold text-white">{String(moduleInfo.order).padStart(2, '0')}</span></span>
-          <span className="ml-4">Row: <span id="current-row" className="font-semibold text-white">{String(moduleInfo.row).padStart(2, '0')}</span></span>
+          <span className="text-green-700 uppercase">Pos:</span>
+          <span className="ml-2 text-white">ORD:<span id="current-order">{String(moduleInfo.order).padStart(2, '0')}</span></span>
+          <span className="ml-3 text-white">ROW:<span id="current-row">{String(moduleInfo.row).padStart(2, '0')}</span></span>
         </div>
         <div>
-          <span className="font-bold text-gray-400">Tempo:</span>
-          <span className="ml-2"><span id="current-bpm" className="font-semibold text-white">{moduleInfo.bpm}</span> BPM</span>
+          <span className="text-green-700 uppercase">BPM:</span>
+          <span className="ml-2 text-white"><span id="current-bpm">{moduleInfo.bpm}</span></span>
         </div>
       </div>
-    </section>
+    </div>
   );
 };
