@@ -10,7 +10,7 @@ const DEFAULT_CHANNELS = 32;
 const alignTo = (value: number, alignment: number) => Math.ceil(value / alignment) * alignment;
 const getLayoutType = (shaderFile: string): LayoutType => {
   if (shaderFile === 'patternShaderv0.12.wgsl') return 'texture';
-  if (shaderFile.includes('v0.13') || shaderFile.includes('v0.14') || shaderFile.includes('v0.15') || shaderFile.includes('v0.16') || shaderFile.includes('v0.17') || shaderFile.includes('v0.18') || shaderFile.includes('v0.19') || shaderFile.includes('v0.20') || shaderFile.includes('v0.21') || shaderFile.includes('v0.23') || shaderFile.includes('v0.24') || shaderFile.includes('v0.25') || shaderFile.includes('v0.26') || shaderFile.includes('v0.27') || shaderFile.includes('v0.28') || shaderFile.includes('v0.29') || shaderFile.includes('v0.30') || shaderFile.includes('v0.31') || shaderFile.includes('v0.32') || shaderFile.includes('v0.33') || shaderFile.includes('v0.34') || shaderFile.includes('v0.35') || shaderFile.includes('v0.36')) return 'extended';
+  if (shaderFile.includes('v0.13') || shaderFile.includes('v0.14') || shaderFile.includes('v0.15') || shaderFile.includes('v0.16') || shaderFile.includes('v0.17') || shaderFile.includes('v0.18') || shaderFile.includes('v0.19') || shaderFile.includes('v0.20') || shaderFile.includes('v0.21') || shaderFile.includes('v0.23') || shaderFile.includes('v0.24') || shaderFile.includes('v0.25') || shaderFile.includes('v0.26') || shaderFile.includes('v0.27') || shaderFile.includes('v0.28') || shaderFile.includes('v0.29') || shaderFile.includes('v0.30') || shaderFile.includes('v0.31') || shaderFile.includes('v0.32') || shaderFile.includes('v0.33') || shaderFile.includes('v0.34') || shaderFile.includes('v0.35') || shaderFile.includes('v0.36') || shaderFile.includes('v0.37')) return 'extended';
   return 'simple';
 };
 
@@ -19,20 +19,23 @@ const isSinglePassCompositeShader = (shaderFile: string) => {
 };
 
 const shouldEnableAlphaBlending = (shaderFile: string) => {
-  return shaderFile.includes('v0.28') || shaderFile.includes('v0.30') || shaderFile.includes('v0.31') || shaderFile.includes('v0.32') || shaderFile.includes('v0.33') || shaderFile.includes('v0.34') || shaderFile.includes('v0.35') || shaderFile.includes('v0.36');
+  return shaderFile.includes('v0.28') || shaderFile.includes('v0.30') || shaderFile.includes('v0.31') || shaderFile.includes('v0.32') || shaderFile.includes('v0.33') || shaderFile.includes('v0.34') || shaderFile.includes('v0.35') || shaderFile.includes('v0.36') || shaderFile.includes('v0.37');
 };
 
 const isCircularLayoutShader = (shaderFile: string) => {
-  // v0.25, v0.26, and v0.35 are considered circular/donut style for bezel rendering.
-  return shaderFile.includes('v0.25') || shaderFile.includes('v0.26') || shaderFile.includes('v0.35');
+  // v0.25, v0.26, v0.35, v0.37 are considered circular/donut style for bezel rendering.
+  return shaderFile.includes('v0.25') || shaderFile.includes('v0.26') || shaderFile.includes('v0.35') || shaderFile.includes('v0.37');
 };
 
 const shouldUseBackgroundPass = (shaderFile: string) => {
   // Some shaders draw their own background in a single pass.
+  // v0.37 draws its own full interface (controls etc) so it might not need the chassis pass, OR it uses it as a base.
+  // Given v0.36 uses chassis, let's let v0.37 use it too for the nice bezel, but the shader itself draws the controls on top.
   return !isSinglePassCompositeShader(shaderFile);
 };
 
 const getBackgroundShaderFile = (shaderFile: string): string => {
+  if (shaderFile.includes('v0.37')) return 'chassisv0.37.wgsl';
   // Only use the chassis pass when explicitly called.
   if (shaderFile.includes('v0.27') || shaderFile.includes('v0.28') || shaderFile.includes('v0.30') || shaderFile.includes('v0.31') || shaderFile.includes('v0.32') || shaderFile.includes('v0.33') || shaderFile.includes('v0.34') || shaderFile.includes('v0.35') || shaderFile.includes('v0.36')) return 'chassisv0.1.wgsl';
   return 'bezel.wgsl';
@@ -156,6 +159,13 @@ interface PatternDisplayProps {
   // Bloom controls (optional)
   bloomIntensity?: number;
   bloomThreshold?: number;
+
+  onPlay?: () => void;
+  onStop?: () => void;
+  onFileSelected?: (file: File) => void;
+  onLoopToggle?: () => void;
+  onSeek?: (row: number) => void;
+  totalRows?: number;
 }
 
 const clampPlayhead = (value: number, numRows: number) => {
@@ -326,8 +336,15 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     bloomIntensity = 1.0,
     bloomThreshold = 0.8,
     externalVideoSource = null,
+    onPlay,
+    onStop,
+    onFileSelected,
+    onLoopToggle,
+    onSeek,
+    totalRows = 64,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const deviceRef = useRef<GPUDevice | null>(null);
   const contextRef = useRef<GPUCanvasContext | null>(null);
   const pipelineRef = useRef<GPURenderPipeline | null>(null);
@@ -400,7 +417,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
         vid.pause();
         vid.src = "";
         videoRef.current = null;
-        // NOTE: We do NOT destroy videoTextureRef here anymore. 
+        // NOTE: We do NOT destroy videoTextureRef here anymore.
         // It is owned by the GPU lifecycle and will be destroyed when the GPU device is cleaned up.
       };
     }
@@ -420,6 +437,9 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   const computeLogicalCanvasMetrics = () => {
     // FIX: Render chassis shaders at HIGH RES (2048x2016) to avoid layout blowups and provide supersampling.
     // This prevents the layout engine from computing massive dimensions and guarantees a consistent aspect.
+    if (shaderFile.includes('v0.37')) {
+       return { width: 1024, height: 1024 }; // Standard square
+    }
     if (shaderFile.includes('v0.26') || shaderFile.includes('v0.27') || shaderFile.includes('v0.28') || shaderFile.includes('v0.29') || shaderFile.includes('v0.30') || shaderFile.includes('v0.31') || shaderFile.includes('v0.32') || shaderFile.includes('v0.33') || shaderFile.includes('v0.34') || shaderFile.includes('v0.35') || shaderFile.includes('v0.36')) {
       return { width: 2048, height: 2016 };
     }
@@ -569,7 +589,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
           textureResourcesRef.current = { sampler, view: texture.createView() };
           refreshBindGroup(device);
         }
-        
+
         try {
           if (videoTextureRef.current) {
             device.queue.copyExternalImageToTexture(
@@ -679,7 +699,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     }
     videoTextureRef.current = texture;
     const sampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear' });
-    textureResourcesRef.current = { sampler, view: texture.createView() }; 
+    textureResourcesRef.current = { sampler, view: texture.createView() };
   };
 
   const ensureButtonTexture = async (device: GPUDevice) => {
@@ -728,7 +748,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     const filterMode: GPUFilterMode = 'nearest';
     const sampler = device.createSampler({ magFilter: filterMode, minFilter: filterMode });
 
-    textureResourcesRef.current = { sampler, view: texture.createView() }; 
+    textureResourcesRef.current = { sampler, view: texture.createView() };
   };
 
   const loadBezelTexture = async (device: GPUDevice) => {
@@ -830,11 +850,11 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
             console.log("Device does not support 'shader-f16'.");
         }
 
-        
+
         const device = await adapter.requestDevice({
             requiredFeatures,
         });
-        
+
         if (!device || cancelled) { setWebgpuAvailable(false); return; }
 
         const context = canvas.getContext('webgpu') as GPUCanvasContext;
@@ -972,10 +992,10 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
             }
 
             bezelUniformBufferRef.current = device.createBuffer({ size: alignTo(64, 256), usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
-            
+
             // Load bezel texture
             await loadBezelTexture(device);
-            
+
             bezelBindGroupRef.current = device.createBindGroup({
               layout: bezelBindLayout,
               entries: [
@@ -1001,7 +1021,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
         uniformBufferRef.current = uniformBuffer;
 
         // Initial buffer creation (handles null matrix now via packPatternMatrix)
-        const isHighPrec = shaderFile.includes('v0.36');
+        const isHighPrec = shaderFile.includes('v0.36') || shaderFile.includes('v0.37');
         const packFunc = isHighPrec ? packPatternMatrixHighPrecision : packPatternMatrix;
         cellsBufferRef.current = createBufferWithData(device, packFunc(matrix, padTopChannel), GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
 
@@ -1045,14 +1065,14 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
       bezelBindGroupRef.current = null;
       bezelPipelineRef.current = null;
       // IMPORTANT: Clear bezel texture refs so next init doesn't reuse old device sampler
-      bezelTextureResourcesRef.current = null; 
+      bezelTextureResourcesRef.current = null;
 
       cellsBufferRef.current = null;
       uniformBufferRef.current = null;
       rowFlagsBufferRef.current = null;
       channelsBufferRef.current = null;
       textureResourcesRef.current = null;
-      
+
       // Cleanup video texture which is owned by this device lifecycle
       if (videoTextureRef.current) {
         const deviceToWait = deviceRef.current;
@@ -1088,7 +1108,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     if (cellsBufferRef.current) {
         cellsBufferRef.current.destroy();
     }
-    const isHighPrec = shaderFile.includes('v0.36');
+    const isHighPrec = shaderFile.includes('v0.36') || shaderFile.includes('v0.37');
     const packFunc = isHighPrec ? packPatternMatrixHighPrecision : packPatternMatrix;
     cellsBufferRef.current = createBufferWithData(device, packFunc(matrix, padTopChannel), GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
 
@@ -1130,6 +1150,88 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
         }
     }
   }, [channels, matrix?.numChannels, gpuReady]);
+
+  // Handle Shader Button Clicks (v0.37 specific)
+  const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (!shaderFile.includes('v0.37')) return;
+
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+
+    // Normalize to UV 0..1 (top-left origin)
+    const u = x / rect.width;
+    const v = y / rect.height;
+
+    // Convert to Shader coordinate system (Center 0,0, Y up?)
+    // In shader: p = uv - 0.5. So center is 0,0. Y axis logic:
+    // shader uses `let p = uv - 0.5;` and `clipY = 1.0 - ...`.
+    // Let's match the Shader's 'p' variable directly.
+    // In Shader: uv is 0..1. p is -0.5..0.5.
+
+    const pX = u - 0.5;
+    const pY = v - 0.5;
+
+    // 1. Check Song Position Bar
+    // Shader: barY = 0.42. abs(p.y - barY) < barAreaH * 0.4.
+    // So bar is at Y = +0.42. Since p goes -0.5 (top) to +0.5 (bottom), this is near the bottom. Correct.
+
+    const barY = 0.42;
+    const barWidth = 0.8;
+    const barHeight = 0.03;
+
+    // Check Seek Bar Click
+    if (Math.abs(pY - barY) < barHeight && Math.abs(pX) < barWidth / 2) {
+       // Calculate progress
+       // Shader: thumbX = (progress - 0.5) * barWidth
+       // Inverse: thumbX / barWidth + 0.5 = progress
+       // pX is ~thumbX (click pos)
+       const progress = (pX / barWidth) + 0.5;
+       const clamped = Math.max(0, Math.min(1, progress));
+
+       if (onSeek) {
+         const targetRow = Math.floor(clamped * (totalRows || 64));
+         onSeek(targetRow);
+       }
+       return;
+    }
+
+    // 2. Check Buttons
+    // Visuals are "above" the bar. In Screen Space (Top-Down), "Above" means smaller Y.
+    // So we subtract the offset.
+
+    const btnY = barY - 0.06;
+    const btnRadius = 0.035;
+
+    const dist = (x1: number, y1: number, x2: number, y2: number) => Math.sqrt((x1-x2)**2 + (y1-y2)**2);
+
+    // Play
+    if (dist(pX, pY, -0.1, btnY) < btnRadius) {
+       onPlay?.();
+       return;
+    }
+    // Stop
+    if (dist(pX, pY, 0.1, btnY) < btnRadius) {
+       onStop?.();
+       return;
+    }
+    // Loop
+    if (dist(pX, pY, -0.25, btnY) < btnRadius) {
+       onLoopToggle?.();
+       return;
+    }
+    // Open
+    if (dist(pX, pY, 0.25, btnY) < btnRadius) {
+       fileInputRef.current?.click();
+       return;
+    }
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+     if (e.target.files && e.target.files.length > 0) {
+        onFileSelected?.(e.target.files[0]);
+     }
+  };
 
   // 3. Render Loop (Uniforms & Draw)
   useEffect(() => {
@@ -1213,6 +1315,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
 
   return (
     <div className={`pattern-display relative ${padTopChannel ? 'p-8 rounded-xl bg-[#18181a] shadow-2xl border border-[#333]' : ''}`}>
+      <input type="file" ref={fileInputRef} onChange={handleFileChange} className="hidden" accept=".mod,.xm,.it,.s3m,.mptm" />
       {padTopChannel && (
           <>
             {/* Rack Ears / Side Panels */}
@@ -1236,7 +1339,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
 
       {/* NEW: Toggle Button for Ring Direction (v0.35) */}
       {shaderFile.includes('v0.35') && (
-        <button 
+        <button
             onClick={() => setInvertChannels(p => !p)}
             className="absolute top-2 left-12 px-2 py-1 bg-[#222] text-xs font-mono text-gray-400 border border-[#444] rounded hover:bg-[#333] hover:text-white transition-colors"
         >
@@ -1244,11 +1347,12 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
         </button>
       )}
 
-      <canvas 
-        ref={canvasRef} 
-        width={canvasMetrics.width} 
-        height={canvasMetrics.height} 
-        className={padTopChannel ? 'rounded bg-black shadow-inner border border-black/50' : ''}
+      <canvas
+        ref={canvasRef}
+        width={canvasMetrics.width}
+        height={canvasMetrics.height}
+        onClick={handleCanvasClick}
+        className={`${padTopChannel ? 'rounded bg-black shadow-inner border border-black/50' : ''} cursor-pointer`}
         style={{
           maxWidth: '100%',
           maxHeight: '100%',

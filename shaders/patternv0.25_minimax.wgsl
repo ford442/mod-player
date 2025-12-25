@@ -1,6 +1,6 @@
-// patternv0.25.wgsl
-// Horizontal Pattern Grid Shader -> Circular Ring Configuration
-// V0.25: "Precision Interface" - Circular Mod, 128 Steps
+// patternv0.25_minimax.wgsl
+// [minimax] Circular Ring Configuration
+// V0.25-minimax: 128-step ring (brighter bevel + cutout gaps)
 
 struct Uniforms {
   numRows: u32,
@@ -239,12 +239,12 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
 
   var finalColor = fs.bgColor;
 
-  // Subtle Gradient for "machined" look
-  finalColor += vec3<f32>(0.03) * (0.5 - uv.y);
+  // Subtle Gradient tuned for lighter hardware (brighter subtle gradient)
+  finalColor += vec3<f32>(0.08, 0.08, 0.09) * (0.5 - uv.y);
 
-  // Bevel Highlight (Top Edge)
+  // Bevel Highlight (Top Edge) - brightened for white hardware
   if (dHousing < 0.0 && dHousing > -0.04) {
-      finalColor += vec3<f32>(0.15) * smoothstep(0.0, -0.1, p.y);
+      finalColor += vec3<f32>(0.8, 0.82, 0.85) * smoothstep(0.0, -0.1, p.y);
   }
 
   // --- BUTTON TEXTURE OVERLAY ---
@@ -335,7 +335,8 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
 
   // --- 1px BORDER GAP ---
   if (housingMask < 0.5) {
-      return vec4<f32>(fs.borderColor, 0.0); // Transparent gap
+      // Use discard so the bezel/background shows through as an opaque cutout
+      discard;
   }
 
   return vec4<f32>(finalColor, 1.0);
