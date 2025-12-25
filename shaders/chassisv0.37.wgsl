@@ -79,9 +79,9 @@ fn fs(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
   let p = uv - 0.5; // -0.5 to 0.5
   let aa = 1.0 / bez.canvasH; // approx pixel width for AA
 
-  // Hardware palette (white case)
-  let colPlastic = vec3<f32>(0.92, 0.92, 0.93);
-  let colRecess = vec3<f32>(0.85, 0.86, 0.88);
+  // Hardware palette (Dark Theme)
+  let colPlastic = vec3<f32>(0.08, 0.08, 0.10);
+  let colRecess = vec3<f32>(0.05, 0.05, 0.06);
 
   // Base Chassis
   var color = colPlastic;
@@ -110,7 +110,7 @@ fn fs(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
   // WebGPU UV (0,0) is usually Bottom-Left in clip-space generation (vs output).
   // So p.y = -0.5 is Bottom.
 
-  let barY = -0.42; // Bottom of screen
+  let barY = -0.45; // Bottom of screen (shifted down from -0.42)
 
   // 1. Song Position Bar
   let barWidth = 0.8;
@@ -118,19 +118,19 @@ fn fs(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
   let dBarRail = sdRoundedBox(p - vec2<f32>(0.0, barY), vec2<f32>(barWidth * 0.5, barHeight * 0.5), 0.005);
 
   if (dBarRail < 0.0) {
-      color = mix(color, vec3<f32>(0.3, 0.3, 0.35), 0.9);
+      color = mix(color, vec3<f32>(0.2, 0.2, 0.25), 0.9);
   }
 
   // 2. Buttons
   // Place buttons slightly above the bar (higher Y value)
-  let btnY = barY + 0.06; // -0.36
+  let btnY = barY + 0.05; // -0.40 (Lower than previous -0.36)
   let btnRadius = 0.035;
 
-  // Play (Triangle)
-  let posPlay = vec2<f32>(-0.1, btnY);
+  // Play (Triangle) - Scooted out to -0.13
+  let posPlay = vec2<f32>(-0.13, btnY);
   let dPlayBg = sdCircle(p - posPlay, btnRadius);
   if (dPlayBg < 0.0) {
-      var btnCol = vec3<f32>(0.2); // Dark grey off
+      var btnCol = vec3<f32>(0.15); // Dark grey off
 
       // Check 'isPlaying' state via dimFactor hack
       // In PatternDisplay: buf[14] = isPlaying ? 0.35 : 1.0;
@@ -139,12 +139,11 @@ fn fs(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
 
       let dIcon = sdTriangle((p - posPlay) * vec2<f32>(1.0, -1.0) * 1.5, btnRadius * 0.4);
       if (dIcon < 0.0) {
-btnCol = select(
-    vec3<f32>(0.2, 0.6, 0.2),
-    vec3<f32>(0.2, 1.0, 0.4),
-    isPlaying
-);
-
+        btnCol = select(
+            vec3<f32>(0.2, 0.6, 0.2),
+            vec3<f32>(0.2, 1.0, 0.4),
+            isPlaying
+        );
       }
 
       let mask = smoothstep(0.0, aa * 2.0, -dPlayBg);
@@ -153,14 +152,14 @@ btnCol = select(
       // Outline ring
       let dRing = abs(dPlayBg) - 0.002;
       let ringMask = 1.0 - smoothstep(0.0, aa * 2.0, dRing);
-      color = mix(color, vec3<f32>(0.1), ringMask * 0.5);
+      color = mix(color, vec3<f32>(0.05), ringMask * 0.5);
   }
 
-  // Stop (Square) - (0.1, 0.48)
-  let posStop = vec2<f32>(0.1, btnY);
+  // Stop (Square) - Scooted out to 0.13
+  let posStop = vec2<f32>(0.13, btnY);
   let dStopBg = sdCircle(p - posStop, btnRadius);
   if (dStopBg < 0.0) {
-      var btnCol = vec3<f32>(0.2);
+      var btnCol = vec3<f32>(0.15);
       let dIcon = sdBox(p - posStop, vec2<f32>(btnRadius * 0.35));
       if (dIcon < 0.0) {
          btnCol = vec3<f32>(0.8, 0.2, 0.2);
@@ -170,14 +169,14 @@ btnCol = select(
 
       let dRing = abs(dStopBg) - 0.002;
       let ringMask = 1.0 - smoothstep(0.0, aa * 2.0, dRing);
-      color = mix(color, vec3<f32>(0.1), ringMask * 0.5);
+      color = mix(color, vec3<f32>(0.05), ringMask * 0.5);
   }
 
-  // Loop (Circle/Ring) - (-0.25, 0.48)
-  let posLoop = vec2<f32>(-0.25, btnY);
+  // Loop (Circle/Ring) - Scooted out to -0.32
+  let posLoop = vec2<f32>(-0.32, btnY);
   let dLoopBg = sdCircle(p - posLoop, btnRadius);
   if (dLoopBg < 0.0) {
-      var btnCol = vec3<f32>(0.2);
+      var btnCol = vec3<f32>(0.15);
       let dIconOuter = sdCircle(p - posLoop, btnRadius * 0.4);
       let dIconInner = sdCircle(p - posLoop, btnRadius * 0.25);
       let ring = max(dIconOuter, -dIconInner);
@@ -189,14 +188,14 @@ btnCol = select(
 
       let dRing = abs(dLoopBg) - 0.002;
       let ringMask = 1.0 - smoothstep(0.0, aa * 2.0, dRing);
-      color = mix(color, vec3<f32>(0.1), ringMask * 0.5);
+      color = mix(color, vec3<f32>(0.05), ringMask * 0.5);
   }
 
-  // Open (Arrow) - (0.25, 0.48)
-  let posOpen = vec2<f32>(0.25, btnY);
+  // Open (Arrow) - Scooted out to 0.32
+  let posOpen = vec2<f32>(0.32, btnY);
   let dOpenBg = sdCircle(p - posOpen, btnRadius);
   if (dOpenBg < 0.0) {
-      var btnCol = vec3<f32>(0.2);
+      var btnCol = vec3<f32>(0.15);
       let iconOff = p - posOpen;
       let tri = sdTriangle((iconOff - vec2<f32>(0.0, -0.01)) * 1.8, btnRadius * 0.3);
       let stem = sdBox(iconOff - vec2<f32>(0.0, 0.015), vec2<f32>(0.006, 0.015));
@@ -209,7 +208,7 @@ btnCol = select(
 
       let dRing = abs(dOpenBg) - 0.002;
       let ringMask = 1.0 - smoothstep(0.0, aa * 2.0, dRing);
-      color = mix(color, vec3<f32>(0.1), ringMask * 0.5);
+      color = mix(color, vec3<f32>(0.05), ringMask * 0.5);
   }
 
   // NIGHT MODE DIMMING
