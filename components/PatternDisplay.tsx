@@ -1197,13 +1197,10 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     }
 
     // 2. Check Buttons
-    // Coords from Shader:
-    // Play: (-0.1, barY + 0.06) -> (-0.1, 0.48)
-    // Stop: (0.1, barY + 0.06) -> (0.1, 0.48)
-    // Loop: (-0.25, barY + 0.06) -> (-0.25, 0.48)
-    // Open: (0.25, barY + 0.06) -> (0.25, 0.48)
+    // Visuals are "above" the bar. In Screen Space (Top-Down), "Above" means smaller Y.
+    // So we subtract the offset.
 
-    const btnY = barY + 0.06;
+    const btnY = barY - 0.06;
     const btnRadius = 0.035;
 
     const dist = (x1: number, y1: number, x2: number, y2: number) => Math.sqrt((x1-x2)**2 + (y1-y2)**2);
