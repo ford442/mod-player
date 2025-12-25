@@ -1,6 +1,6 @@
-// patternv0.25.wgsl
-// Horizontal Pattern Grid Shader -> Circular Ring Configuration
-// V0.25: "Precision Interface" - Circular Mod, 128 Steps
+// patternv0.26.wgsl
+// Combined: Bezel + Circular Pattern Display (single-pass)
+// V0.26: "Hardware Composite" - bezel, screws, vents, surface texture
 
 struct Uniforms {
   numRows: u32,
@@ -38,6 +38,10 @@ struct VertexOut {
   @location(3) @interpolate(flat) packedA: u32,
   @location(4) @interpolate(flat) packedB: u32,
 };
+
+fn hash(p: vec2<f32>) -> f32 {
+    return fract(sin(dot(p, vec2<f32>(12.9898, 78.233))) * 43758.5453);
+}
 
 // --- VERTEX SHADER (CIRCULAR MAPPING) ---
 @vertex
@@ -85,9 +89,6 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
   let localPos = (lp - 0.5) * vec2<f32>(btnW, btnH);
 
   // Rotate sprite to align with tangent
-  // We want sprite Y-axis to point OUT (Radius)
-  // We want sprite X-axis to point TANGENT (Angle)
-  // Rotation angle = theta + PI/2
   let rotAng = theta + 1.570796;
   let cA = cos(rotAng);
   let sA = sin(rotAng);
@@ -121,7 +122,6 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
 // --- FRAGMENT SHADER ---
 
 fn neonPalette(t: f32) -> vec3<f32> {
-    // Precise, colder spectrum
     let a = vec3<f32>(0.5, 0.5, 0.5);
     let b = vec3<f32>(0.5, 0.5, 0.5);
     let c = vec3<f32>(1.0, 1.0, 1.0);
@@ -184,11 +184,12 @@ struct FragmentConstants {
 
 fn getFragmentConstants() -> FragmentConstants {
     var c: FragmentConstants;
-    c.bgColor = vec3<f32>(0.10, 0.11, 0.13); // Deep technical grey
-    c.ledOnColor = vec3<f32>(0.0, 0.85, 0.95); // Precision Cyan
-    c.ledOffColor = vec3<f32>(0.08, 0.12, 0.15); // Dark blue-grey
-    c.borderColor = vec3<f32>(0.0, 0.0, 0.0); // Pure black gap
-    c.housingSize = vec2<f32>(0.96, 0.96); // Maximized cell usage
+    // For white hardware bezel, keep body darker so LEDs pop
+    c.bgColor = vec3<f32>(0.05, 0.06, 0.08); // Deep contrast background
+    c.ledOnColor = vec3<f32>(0.0, 0.95, 1.0); // Brighter cyan
+    c.ledOffColor = vec3<f32>(0.02, 0.05, 0.08); // Nearly black
+    c.borderColor = vec3<f32>(0.0, 0.0, 0.0);
+    c.housingSize = vec2<f32>(0.96, 0.96);
     return c;
 }
 
@@ -198,34 +199,55 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   let uv = in.uv;
   let p = uv - 0.5;
 
+  // --- Bezel / Hardware Surface (composited behind cells) ---
+  let center = vec2<f32>(0.5, 0.5);
+  let minDim = min(uniforms.canvasW, uniforms.canvasH);
+  let bezelWidth = minDim * 0.05;
+  let pd = uv - center;
+  let dist = length(pd);
+
+  // Surface base (off-white)
+  var bezelCol = vec3<f32>(0.98, 0.98, 0.98);
+  let bevel = smoothstep(0.4, 0.5, dist);
+  bezelCol *= 1.0 - bevel * 0.15;
+  let noise = hash(uv * vec2<f32>(uniforms.canvasW, uniforms.canvasH)) * 0.02;
+  bezelCol += vec3<f32>(noise);
+
+  // Screws (4 corners)
+  let screwPos = vec2<f32>(0.08, 0.08);
+  let s0 = distance(uv, center + screwPos * vec2<f32>( 1.0,  1.0));
+  let s1 = distance(uv, center + screwPos * vec2<f32>( 1.0, -1.0));
+  let s2 = distance(uv, center + screwPos * vec2<f32>(-1.0,  1.0));
+  let s3 = distance(uv, center + screwPos * vec2<f32>(-1.0, -1.0));
+  let screwMask = 1.0 - smoothstep(vec4<f32>(0.02), vec4<f32>(0.04), vec4<f32>(s0, s1, s2, s3));
+  let screwSum = screwMask.x + screwMask.y + screwMask.z + screwMask.w;
+  bezelCol = mix(bezelCol, vec3<f32>(0.85, 0.85, 0.85), clamp(screwSum, 0.0, 1.0));
+
+  // Vents
+  let ventY = step(0.02, abs(pd.y - center.y)) * step(dist, 0.48);
+  let ventX = step(0.01, fract(uv.x * 50.0)) * 0.1;
+  bezelCol *= 1.0 - ventY * ventX;
+
   // Calculate Pixel-Perfect AA width based on derivatives
   let aa = fwidth(p.y) * 0.75;
 
   // --- TOP ROW: INDICATORS ---
   if (in.channel == 0u) {
-      // In circular mode, Channel 0 is the innermost ring.
-      // We keep the indicator logic but it renders as a ring of lights.
       var col = fs.bgColor * 0.5;
 
       let onPlayhead = (in.row == uniforms.playheadRow);
       let ledSize = vec2<f32>(0.3, 0.3);
       let dLed = sdRoundedBox(p, ledSize, 0.05);
 
-      // Dark "off" state
       var ledCol = fs.ledOffColor;
-
-      // Sharp LED rendering (Base Plastic)
       let ledMask = 1.0 - smoothstep(-aa, aa, dLed);
       col = mix(col, ledCol, ledMask);
 
-      // BLEND: Additive Glow for "On" state
       if (onPlayhead) {
          let glowIntensity = exp(-dLed * 5.0);
-         // Add bright core + soft bloom
          col += fs.ledOnColor * ledMask * 1.5;
          col += fs.ledOnColor * glowIntensity * 0.8;
       } else if (in.row % 4u == 0u) {
-         // Faint marker for beats
          col += vec3<f32>(0.2, 0.2, 0.25) * ledMask * 0.3;
       }
 
@@ -233,21 +255,17 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   }
 
   // --- PATTERN ROWS ---
-  // Housing (Cell Body)
   let dHousing = sdRoundedBox(p, fs.housingSize * 0.5, 0.04);
   let housingMask = 1.0 - smoothstep(0.0, aa * 2.0, dHousing);
 
   var finalColor = fs.bgColor;
+  finalColor += vec3<f32>(0.08, 0.08, 0.09) * (0.5 - uv.y);
 
-  // Subtle Gradient for "machined" look
-  finalColor += vec3<f32>(0.03) * (0.5 - uv.y);
-
-  // Bevel Highlight (Top Edge)
   if (dHousing < 0.0 && dHousing > -0.04) {
-      finalColor += vec3<f32>(0.15) * smoothstep(0.0, -0.1, p.y);
+      finalColor += vec3<f32>(0.8, 0.82, 0.85) * smoothstep(0.0, -0.1, p.y);
   }
 
-  // --- BUTTON TEXTURE OVERLAY ---
+  // BUTTON TEXTURE
   let btnScale = 1.05;
   let btnUV = (uv - 0.5) * btnScale + 0.5;
   var btnColor = vec3<f32>(0.0);
@@ -258,11 +276,10 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
       inButton = 1.0;
   }
   if (inButton > 0.5) {
-      // Darken texture for "stealth" look
       finalColor = mix(finalColor, btnColor * 0.6, 0.9);
   }
 
-  // --- DATA VISUALIZATION ---
+  // DATA VIS
   let tiledUV = btnUV;
   let x = tiledUV.x;
   let y = tiledUV.y;
@@ -285,17 +302,13 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
       let mainButtonMask = mainButtonYMask * mainButtonXMask;
       let bottomLightMask = (smoothstep(0.90, 0.91, y) - smoothstep(0.95, 0.96, y)) * indicatorXMask;
 
-      if (ch.isMuted == 1u) {
-          finalColor *= 0.3;
-      }
+      if (ch.isMuted == 1u) { finalColor *= 0.3; }
 
-      // TOP LIGHT: Activity
       if (step(0.1, exp(-ch.noteAge * 2.0)) > 0.5) {
           let topGlow = vec3<f32>(0.0, 0.9, 1.0);
           finalColor += topGlow * topLightMask * 1.5;
       }
 
-      // MAIN LIGHT: Note
       if (hasNote) {
           let pitchHue = pitchClassFromPacked(in.packedA);
           let base_note_color = neonPalette(pitchHue);
@@ -312,7 +325,6 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
           finalColor += subsurface;
       }
 
-      // BOTTOM LIGHT: Effect
       if (hasEffect) {
           let effectColor = effectColorFromCode(effCode, vec3<f32>(0.9, 0.8, 0.2));
           let strength = clamp(f32(effParam) / 255.0, 0.2, 1.0);
@@ -320,7 +332,6 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
           finalColor += effectColor * housingMask * strength * 0.05;
       }
 
-      // Row 0 Proximity (Playhead) Blink - Circular Wrap Logic
       let rA = i32(in.row);
       let rB = i32(uniforms.playheadRow);
       let distDirect = abs(rA - rB);
@@ -328,14 +339,13 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
       let rowDist = min(distDirect, distWrap);
 
       if (rowDist == 0 && !hasNote) {
-          // Additive white glance on empty active cell
           finalColor += vec3<f32>(0.15, 0.2, 0.25) * mainButtonMask;
       }
   }
 
-  // --- 1px BORDER GAP ---
+  // If outside housing, show bezel surface instead of transparent/discard
   if (housingMask < 0.5) {
-      return vec4<f32>(fs.borderColor, 0.0); // Transparent gap
+      return vec4<f32>(bezelCol, 1.0);
   }
 
   return vec4<f32>(finalColor, 1.0);

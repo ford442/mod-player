@@ -7,9 +7,9 @@ interface HeaderProps {
 
 export const Header: React.FC<HeaderProps> = ({ status }) => {
   return (
-    <header className="mb-2 flex justify-between items-end border-b border-gray-700 pb-2 px-1">
-      <h1 className="text-xl font-bold text-gray-200 tracking-wider font-mono">XASM-1 PLAYER</h1>
-      <p id="status" className="text-xs text-yellow-400 font-mono">
+    <header className="mb-6">
+      <h1 className="text-3xl font-bold text-white mb-2">libopenmpt Note Viewer</h1>
+      <p id="status" className="text-lg text-yellow-400 min-h-[28px]">
         {status}
       </p>
     </header>
