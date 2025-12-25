@@ -2,6 +2,8 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import type { LibOpenMPT, ModuleInfo, PatternMatrix, PatternCell } from '../types';
 
 const SAMPLE_RATE = 44100;
+// Buffer size of 4096 provides better audio quality and fewer buffer underruns
+// Trade-off: ~93ms latency (4096/44100) vs ~23ms with 1024 samples
 const BUFFER_SIZE = 4096;
 const INITIAL_STATUS = "Loading library...";
 const INITIAL_MODULE_INFO: ModuleInfo = { title: '...', order: 0, row: 0, bpm: 0, numChannels: 0 };

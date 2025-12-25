@@ -11,7 +11,9 @@ class OpenMPTProcessor extends AudioWorkletProcessor {
     super();
     
     // Ring buffer for smooth audio playback
-    this.bufferSize = 8192; // Double buffer for safety
+    // Size: 8192 samples (2x the main buffer size of 4096)
+    // Provides ~185ms of buffering at 44.1kHz to prevent underruns
+    this.bufferSize = 8192;
     this.leftBuffer = new Float32Array(this.bufferSize);
     this.rightBuffer = new Float32Array(this.bufferSize);
     this.readPos = 0;
