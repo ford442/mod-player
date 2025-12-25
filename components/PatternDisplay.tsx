@@ -1173,10 +1173,10 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     const pY = v - 0.5;
 
     // 1. Check Song Position Bar
-    // Shader: barY = 0.42. abs(p.y - barY) < barAreaH * 0.4.
-    // So bar is at Y = +0.42. Since p goes -0.5 (top) to +0.5 (bottom), this is near the bottom. Correct.
+    // Shader: barY = 0.45. abs(p.y - barY) < barAreaH * 0.4.
+    // So bar is at Y = +0.45 (Bottom is 0.5).
 
-    const barY = 0.42;
+    const barY = 0.45;
     const barWidth = 0.8;
     const barHeight = 0.03;
 
@@ -1197,31 +1197,34 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     }
 
     // 2. Check Buttons
-    // Visuals are "above" the bar. In Screen Space (Top-Down), "Above" means smaller Y.
-    // So we subtract the offset.
+    // Visuals are "above" the bar (smaller Y than barY).
+    // Shader: btnY = barY + 0.05. But Shader Y is inverted relative to React pY.
+    // React pY: Bottom is 0.5. Top is -0.5.
+    // React BarY: 0.45.
+    // Buttons should be slightly above (smaller Y). 0.45 - 0.05 = 0.40.
 
-    const btnY = barY - 0.06;
+    const btnY = barY - 0.05;
     const btnRadius = 0.035;
 
     const dist = (x1: number, y1: number, x2: number, y2: number) => Math.sqrt((x1-x2)**2 + (y1-y2)**2);
 
-    // Play
-    if (dist(pX, pY, -0.1, btnY) < btnRadius) {
+    // Play (Scooted to -0.13)
+    if (dist(pX, pY, -0.13, btnY) < btnRadius) {
        onPlay?.();
        return;
     }
-    // Stop
-    if (dist(pX, pY, 0.1, btnY) < btnRadius) {
+    // Stop (Scooted to 0.13)
+    if (dist(pX, pY, 0.13, btnY) < btnRadius) {
        onStop?.();
        return;
     }
-    // Loop
-    if (dist(pX, pY, -0.25, btnY) < btnRadius) {
+    // Loop (Scooted to -0.32)
+    if (dist(pX, pY, -0.32, btnY) < btnRadius) {
        onLoopToggle?.();
        return;
     }
-    // Open
-    if (dist(pX, pY, 0.25, btnY) < btnRadius) {
+    // Open (Scooted to 0.32)
+    if (dist(pX, pY, 0.32, btnY) < btnRadius) {
        fileInputRef.current?.click();
        return;
     }

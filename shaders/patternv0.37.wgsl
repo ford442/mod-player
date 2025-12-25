@@ -219,6 +219,14 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   let aa = fwidth(p.y) * 0.5;
   let bloom = uniforms.bloomIntensity;
 
+  // --- MASK BOTTOM UI AREA (Hardware Layering) ---
+  // If the pixel is in the bottom ~12% of the screen, discard it so the underlying UI is visible.
+  // in.position.y is in window coordinates (0 at top usually, but let's check relative to height).
+  // Standard WebGPU viewport Y is 0 at top-left. So bottom area is high Y values.
+  if (in.position.y > uniforms.canvasH * 0.88) {
+    discard;
+  }
+
   // --- INDICATOR RING ---
   if (in.channel == 0u) {
     let onPlayhead = (in.row == uniforms.playheadRow);
