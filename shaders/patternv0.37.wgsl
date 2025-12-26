@@ -216,7 +216,13 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   let fs = getFragmentConstants();
   let uv = in.uv;
   let p = uv - 0.5;
-  let aa = fwidth(p.y) * 0.5;
+
+  // let aa = fwidth(p.y) * 0.5;
+  // Replace aa calculation with higher quality:
+  let aa = fwidth(p.y) * 0.33; // Thicker AA
+  // Or use supersampling hint:
+  // let aa = length(vec2<f32>(dpdx(p.x), dpdy(p.y))) * 0.5;
+
   let bloom = uniforms.bloomIntensity;
 
   // --- MASK BOTTOM UI AREA (Hardware Layering) ---
@@ -253,7 +259,7 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   let btnUV = (uv - 0.5) * btnScale + 0.5;
   var inButton = 0.0;
   if (btnUV.x > 0.0 && btnUV.x < 1.0 && btnUV.y > 0.0 && btnUV.y < 1.0) {
-    let texColor = textureSampleLevel(buttonsTexture, buttonsSampler, btnUV, 0.0).rgb;
+    let texColor = textureSampleLevel(buttonsTexture, buttonsSampler, btnUV, -0.5).rgb;
     finalColor = mix(finalColor, texColor, 0.7);
     inButton = 1.0;
   }
