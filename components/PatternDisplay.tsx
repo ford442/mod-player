@@ -160,11 +160,18 @@ interface PatternDisplayProps {
   bloomIntensity?: number;
   bloomThreshold?: number;
 
+  // Audio controls
+  volume?: number;
+  pan?: number;
+  isLooping?: boolean;
+
   onPlay?: () => void;
   onStop?: () => void;
   onFileSelected?: (file: File) => void;
   onLoopToggle?: () => void;
   onSeek?: (row: number) => void;
+  onVolumeChange?: (volume: number) => void;
+  onPanChange?: (pan: number) => void;
   totalRows?: number;
 }
 
@@ -336,11 +343,17 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     bloomIntensity = 1.0,
     bloomThreshold = 0.8,
     externalVideoSource = null,
+    // Audio controls
+    volume = 1.0,
+    pan = 0.0,
+    isLooping = false,
     onPlay,
     onStop,
     onFileSelected,
     onLoopToggle,
     onSeek,
+    onVolumeChange,
+    onPanChange,
     totalRows = 64,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -991,7 +1004,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
               console.warn('Failed to create bezel pipeline', be);
             }
 
-            bezelUniformBufferRef.current = device.createBuffer({ size: alignTo(64, 256), usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+            bezelUniformBufferRef.current = device.createBuffer({ size: alignTo(96, 256), usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
 
             // Load bezel texture
             await loadBezelTexture(device);
@@ -1151,7 +1164,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     }
   }, [channels, matrix?.numChannels, gpuReady]);
 
-  // Handle Shader Button Clicks (v0.37 specific)
+  // Handle Shader Button Clicks and Slider Interactions (v0.37 specific)
   const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (!shaderFile.includes('v0.37')) return;
 
@@ -1171,6 +1184,31 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
 
     const pX = u - 0.5;
     const pY = v - 0.5;
+
+    // Check Volume Slider (left side)
+    const sliderLeftX = -0.42;
+    const sliderY = 0.0;
+    const sliderH = 0.3;
+    const sliderClickRadius = 0.03;
+    
+    if (Math.abs(pX - sliderLeftX) < sliderClickRadius && Math.abs(pY - sliderY) < sliderH * 0.5) {
+      // Volume slider clicked
+      const volValue = ((pY - sliderY) / (sliderH * 0.9) + 0.5);
+      const clampedVol = Math.max(0, Math.min(1, volValue));
+      onVolumeChange?.(clampedVol);
+      return;
+    }
+
+    // Check Pan Slider (right side)
+    const sliderRightX = 0.42;
+    
+    if (Math.abs(pX - sliderRightX) < sliderClickRadius && Math.abs(pY - sliderY) < sliderH * 0.5) {
+      // Pan slider clicked
+      const panValue = (pY - sliderY) / (sliderH * 0.45);
+      const clampedPan = Math.max(-1, Math.min(1, panValue));
+      onPanChange?.(clampedPan);
+      return;
+    }
 
     // 1. Check Song Position Bar
     // Shader: barY = 0.45. abs(p.y - barY) < barAreaH * 0.4.
@@ -1279,7 +1317,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
 
     // Update bezel uniforms (canvas size, colors, bezel width, screw radius)
     if (bezelUniformBufferRef.current) {
-      const buf = new Float32Array(16);
+      const buf = new Float32Array(24); // Expanded to 24 floats (96 bytes)
       buf[0] = canvasMetrics.width;
       buf[1] = canvasMetrics.height;
           const minDim = Math.min(canvasMetrics.width, canvasMetrics.height);
@@ -1309,12 +1347,25 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
           // NIGHT MODE DIMMING FOR CHASSIS
           // We send 0.35 if playing, else 1.0. This makes the bezel darker so the UV light "shines"
           buf[14] = isPlaying ? 0.35 : 1.0; // dimFactor
-          buf[15] = 0.0;
+          buf[15] = 0.0; // _pad1
+          
+          // NEW: Audio and playback controls
+          buf[16] = volume; // volume (0.0 to 1.0)
+          buf[17] = pan;    // pan (-1.0 to 1.0)
+          buf[18] = bpm;    // bpm
+          
+          // For u32 values, we need to use Uint32Array view
+          const uint32View = new Uint32Array(buf.buffer);
+          uint32View[19] = isLooping ? 1 : 0;  // isLooping (u32)
+          uint32View[20] = 0; // currentOrder (will be set when we have it)
+          uint32View[21] = playheadRow; // currentRow
+          // buf[22] and buf[23] are pads
+
       device.queue.writeBuffer(bezelUniformBufferRef.current, 0, buf.buffer, buf.byteOffset, buf.byteLength);
     }
 
     render();
-  }, [playheadRow, timeSec, localTime, bpm, tickOffset, grooveAmount, kickTrigger, activeChannels, gpuReady, isPlaying, beatPhase, isModuleLoaded, matrix?.numRows, matrix?.numChannels, cellWidth, cellHeight, canvasMetrics, bloomIntensity, bloomThreshold, invertChannels]);
+  }, [playheadRow, timeSec, localTime, bpm, tickOffset, grooveAmount, kickTrigger, activeChannels, gpuReady, isPlaying, beatPhase, isModuleLoaded, matrix?.numRows, matrix?.numChannels, cellWidth, cellHeight, canvasMetrics, bloomIntensity, bloomThreshold, invertChannels, volume, pan, isLooping]);
 
   return (
     <div className={`pattern-display relative ${padTopChannel ? 'p-8 rounded-xl bg-[#18181a] shadow-2xl border border-[#333]' : ''}`}>
