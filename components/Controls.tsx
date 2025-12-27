@@ -76,7 +76,7 @@ export const Controls: React.FC<ControlsProps> = ({
         />
       </div>
 
-      {/* NEW: Remote Media Dropdown */}
+      {/* Remote Media Dropdown */}
       <div className="flex items-center gap-2">
         <label className="text-sm text-gray-400 flex items-center gap-2">
           <span className="hidden md:inline">Server Media:</span>
@@ -87,7 +87,6 @@ export const Controls: React.FC<ControlsProps> = ({
               const item = remoteMediaList.find(m => m.id === selectedId);
               if (item && onRemoteMediaSelect) {
                 onRemoteMediaSelect(item);
-                // Reset select if desired, or keep selected
                 e.target.value = ""; 
               }
             }}
@@ -100,69 +99,6 @@ export const Controls: React.FC<ControlsProps> = ({
               </option>
             ))}
           </select>
-        </label>
-        {/* Optional: Refresh button */}
-      </div>
-
-      <div className="flex gap-4">
-        <button
-          id="play-button"
-          className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg transition-colors flex items-center gap-2"
-          onClick={onPlay}
-          disabled={!isModuleLoaded || isPlaying}
-          aria-label="Play"
-        >
-          <PlayIcon className="w-5 h-5" />
-          Play
-        </button>
-
-        <button
-          id="stop-button"
-          className="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg transition-colors flex items-center gap-2"
-          onClick={() => onStop()}
-          disabled={!isPlaying}
-          aria-label="Stop"
-        >
-          <StopIcon className="w-5 h-5" />
-          Stop
-        </button>
-
-        <button
-          id="loop-button"
-          className={`font-bold py-2 px-4 rounded-lg transition-colors flex items-center gap-2 ${isLooping ? 'bg-blue-600 hover:bg-blue-700 text-white' : 'bg-gray-600 hover:bg-gray-700 text-gray-300'}`}
-          onClick={onLoopToggle}
-          disabled={!isModuleLoaded}
-          aria-label="Toggle Loop"
-        >
-          <LoopIcon className="w-5 h-5" />
-          Loop
-        </button>
-      </div>
-
-      <div className="flex items-center gap-4 text-gray-300">
-        <label className="flex items-center gap-2 text-sm">
-          Vol
-          <input
-            type="range"
-            min={0}
-            max={1}
-            step={0.01}
-            value={volume ?? 1}
-            onChange={e => setVolume && setVolume(Number(e.target.value))}
-            className="w-20 h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer"
-          />
-        </label>
-        <label className="flex items-center gap-2 text-sm">
-          Pan
-          <input
-            type="range"
-            min={-1}
-            max={1}
-            step={0.05}
-            value={pan ?? 0}
-            onChange={e => setPan && setPan(Number(e.target.value))}
-            className="w-20 h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer"
-          />
         </label>
       </div>
     </section>
