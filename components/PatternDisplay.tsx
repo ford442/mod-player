@@ -1189,7 +1189,6 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     const sliderLeftX = -0.42;
     const sliderY = 0.0;
     const sliderH = 0.3;
-    const sliderW = 0.015;
     const sliderClickRadius = 0.03;
     
     if (Math.abs(pX - sliderLeftX) < sliderClickRadius && Math.abs(pY - sliderY) < sliderH * 0.5) {

@@ -1,5 +1,5 @@
 import React from 'react';
-import { PlayIcon, StopIcon, UploadIcon, LoopIcon } from './icons';
+import { UploadIcon } from './icons';
 import type { MediaItem } from '../types';
 
 interface ControlsProps {
@@ -22,18 +22,8 @@ interface ControlsProps {
 
 export const Controls: React.FC<ControlsProps> = ({
   isReady,
-  isPlaying,
-  isModuleLoaded,
   onFileSelected,
-  onPlay,
-  onStop,
   onMediaAdd,
-  isLooping,
-  onLoopToggle,
-  volume,
-  setVolume,
-  pan,
-  setPan,
   onRemoteMediaSelect,
   remoteMediaList = [],
 }) => {
