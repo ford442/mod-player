@@ -224,9 +224,9 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Right side controls - Shader selector */}
+                {/* Shader selector - positioned based on shader version */}
                 {effectivePatternMode === 'webgpu' && (
-                  <div className="absolute top-4 right-4 z-10">
+                  <div className={`absolute ${shaderVersion.includes('v0.37') ? 'bottom-4 left-4' : 'top-4 right-4'} z-10`}>
                     <div className="flex flex-col gap-2 rounded-lg border border-white/10 bg-gray-900/80 backdrop-blur-sm p-2">
                       {/* Quick Layout Switcher */}
                       <div className="inline-flex rounded-lg border border-white/10 overflow-hidden">
@@ -277,11 +277,16 @@ export default function App() {
                     activeChannels={activeChannels}
                     isModuleLoaded={isModuleLoaded}
                     externalVideoSource={mediaElement}
+                    volume={volume}
+                    pan={panValue}
+                    isLooping={isLooping}
                     onPlay={play}
                     onStop={stopMusic}
                     onFileSelected={loadModule}
                     onLoopToggle={() => setIsLooping(!isLooping)}
                     onSeek={(step) => seekToStep(step)}
+                    onVolumeChange={setVolume}
+                    onPanChange={setPanValue}
                     totalRows={totalPatternRows}
                   />
                 ) : (
