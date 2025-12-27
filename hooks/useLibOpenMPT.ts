@@ -565,7 +565,7 @@ export function useLibOpenMPT(volume: number = 1.0) {
         try {
           const AudioContext = window.AudioContext || window.webkitAudioContext;
           const testCtx = new AudioContext({ sampleRate: SAMPLE_RATE });
-          await testCtx.audioWorklet.addModule('/worklets/openmpt-processor.js');
+          await testCtx.audioWorklet.addModule('./worklets/openmpt-processor.js');
           audioWorkletReady.current = true;
           useAudioWorklet.current = true;
           await testCtx.close();
