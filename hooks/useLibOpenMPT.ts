@@ -11,7 +11,7 @@ const DEFAULT_MODULE_URL = 'https://raw.githubusercontent.com/deskjet/chiptunes/
 
 // Construct the correct path ensuring it respects the Vite base URL
 const BASE_URL = import.meta.env.BASE_URL || '/';
-const WORKLET_URL = `${BASE_URL}worklets/openmpt-processor.js`.replace(/\/\//g, '/');
+const WORKLET_URL = `./worklets/openmpt-processor.js`.replace(/\/\//g, '/');
 
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 const decayTowards = (value: number, target: number, rate: number, dt: number) => lerp(value, target, 1 - Math.exp(-rate * dt));
