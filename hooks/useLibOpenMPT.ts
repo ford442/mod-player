@@ -9,6 +9,9 @@ const INITIAL_STATUS = "Loading library...";
 const INITIAL_MODULE_INFO: ModuleInfo = { title: '...', order: 0, row: 0, bpm: 0, numChannels: 0 };
 const DEFAULT_MODULE_URL = 'https://raw.githubusercontent.com/deskjet/chiptunes/master/mods/4mat/4-mat_-_space_debris.mod';
 
+// Construct the correct path ensuring it respects the Vite base URL
+const BASE_URL = import.meta.env.BASE_URL || '/';
+const WORKLET_URL = `${BASE_URL}worklets/openmpt-processor.js`.replace(/\/\//g, '/');
 
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 const decayTowards = (value: number, target: number, rate: number, dt: number) => lerp(value, target, 1 - Math.exp(-rate * dt));
@@ -383,7 +386,7 @@ export function useLibOpenMPT(volume: number = 1.0) {
         // Initialize AudioWorklet if not already done
         if (useAudioWorklet.current && !audioWorkletReady.current) {
           try {
-            await audioContextRef.current.audioWorklet.addModule('/worklets/openmpt-processor.js');
+            await audioContextRef.current.audioWorklet.addModule(WORKLET_URL);
             audioWorkletReady.current = true;
             console.log('AudioWorklet initialized');
           } catch (err) {
@@ -565,7 +568,7 @@ export function useLibOpenMPT(volume: number = 1.0) {
         try {
           const AudioContext = window.AudioContext || window.webkitAudioContext;
           const testCtx = new AudioContext({ sampleRate: SAMPLE_RATE });
-          await testCtx.audioWorklet.addModule('./worklets/openmpt-processor.js');
+          await testCtx.audioWorklet.addModule(WORKLET_URL);
           audioWorkletReady.current = true;
           useAudioWorklet.current = true;
           await testCtx.close();
