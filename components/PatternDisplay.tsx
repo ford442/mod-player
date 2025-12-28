@@ -1176,19 +1176,17 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     const u = x / rect.width;
     const v = y / rect.height;
 
-    // Convert to Shader coordinate system (Center 0,0, Y up?)
-    // In shader: p = uv - 0.5. So center is 0,0. Y axis logic:
-    // shader uses `let p = uv - 0.5;` and `clipY = 1.0 - ...`.
-    // Let's match the Shader's 'p' variable directly.
-    // In Shader: uv is 0..1. p is -0.5..0.5.
-
+    // React P (0,0 center).
+    // u (0..1) -> pX (-0.5..0.5) (Left..Right)
+    // v (0..1) -> pY (-0.5..0.5) (Top..Bottom)
     const pX = u - 0.5;
     const pY = v - 0.5;
 
     // Check Volume Slider (left side)
+    // Shader Y was -0.2 (Down). React Y is 0.2 (Down).
     const sliderLeftX = -0.42;
-    const sliderY = 0.0;
-    const sliderH = 0.3;
+    const sliderY = 0.2; // Adjusted down
+    const sliderH = 0.2; // Smaller
     const sliderClickRadius = 0.03;
     
     if (Math.abs(pX - sliderLeftX) < sliderClickRadius && Math.abs(pY - sliderY) < sliderH * 0.5) {
@@ -1211,20 +1209,18 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     }
 
     // 1. Check Song Position Bar
-    // Shader: barY = 0.45. abs(p.y - barY) < barAreaH * 0.4.
-    // So bar is at Y = +0.45 (Bottom is 0.5).
-
+    // Shader: barY = -0.45 (Bottom). React Y = 0.45 (Bottom).
+    // Moved slightly right in shader: barCenterX = 0.1, width 0.6
     const barY = 0.45;
-    const barWidth = 0.8;
+    const barWidth = 0.6;
+    const barCenterX = 0.1;
     const barHeight = 0.03;
 
     // Check Seek Bar Click
-    if (Math.abs(pY - barY) < barHeight && Math.abs(pX) < barWidth / 2) {
-       // Calculate progress
-       // Shader: thumbX = (progress - 0.5) * barWidth
-       // Inverse: thumbX / barWidth + 0.5 = progress
-       // pX is ~thumbX (click pos)
-       const progress = (pX / barWidth) + 0.5;
+    if (Math.abs(pY - barY) < barHeight && Math.abs(pX - barCenterX) < barWidth / 2) {
+       // Calculate progress relative to the bar's rect
+       const relX = pX - (barCenterX - barWidth/2);
+       const progress = relX / barWidth;
        const clamped = Math.max(0, Math.min(1, progress));
 
        if (onSeek) {
@@ -1235,35 +1231,31 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     }
 
     // 2. Check Buttons
-    // Visuals are "above" the bar (smaller Y than barY).
-    // Shader: btnY = barY + 0.05. But Shader Y is inverted relative to React pY.
-    // React pY: Bottom is 0.5. Top is -0.5.
-    // React BarY: 0.45.
-    // Buttons should be slightly above (smaller Y). 0.45 - 0.05 = 0.40.
-
-    const btnY = barY - 0.05;
+    // React Y coordinates: Top is -0.5, Bottom is 0.5.
     const btnRadius = 0.035;
-
     const dist = (x1: number, y1: number, x2: number, y2: number) => Math.sqrt((x1-x2)**2 + (y1-y2)**2);
 
-    // Play (Scooted to -0.13)
-    if (dist(pX, pY, -0.13, btnY) < btnRadius) {
-       onPlay?.();
-       return;
-    }
-    // Stop (Scooted to 0.13)
-    if (dist(pX, pY, 0.13, btnY) < btnRadius) {
-       onStop?.();
-       return;
-    }
-    // Loop (Scooted to -0.32)
-    if (dist(pX, pY, -0.32, btnY) < btnRadius) {
+    // Loop: Top Left (-0.44, -0.42)
+    if (dist(pX, pY, -0.44, -0.42) < btnRadius) {
        onLoopToggle?.();
        return;
     }
-    // Open (Scooted to 0.32)
-    if (dist(pX, pY, 0.32, btnY) < btnRadius) {
+
+    // Open: Top Right (0.44, -0.42)
+    if (dist(pX, pY, 0.44, -0.42) < btnRadius) {
        fileInputRef.current?.click();
+       return;
+    }
+
+    // Play: Bottom Left (-0.44, 0.40)
+    if (dist(pX, pY, -0.44, 0.40) < btnRadius) {
+       onPlay?.();
+       return;
+    }
+
+    // Stop: Bottom Left (-0.35, 0.40)
+    if (dist(pX, pY, -0.35, 0.40) < btnRadius) {
+       onStop?.();
        return;
     }
   };
