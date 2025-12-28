@@ -17,7 +17,7 @@ struct BezelUniforms {
   recessOuterScale: f32,
   recessInnerScale: f32,
   recessCorner: f32,
-  dimFactor: f32,   // 1.0 = Stop, 0.35 = Playing (Night Mode) - We can invert logic if needed
+  dimFactor: f32,   // 1.0 = Stop, 0.35 = Playing (Night Mode)
   _pad1: f32,
   // New fields for UI controls
   volume: f32,      // 0.0 to 1.0
@@ -201,51 +201,83 @@ fn fs(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
 
   // --- UI CONTROLS ---
   // Coordinate system: p is -0.5 to 0.5.
-  // WebGPU UV (0,0) is usually Bottom-Left in clip-space generation (vs output).
-  // So p.y = -0.5 is Bottom.
+  // Y-axis: Negative is BOTTOM, Positive is TOP in this shader projection (due to VS setup)?
+  // Actually, standard UV: (0,0) Bottom-Left. p = uv - 0.5.
+  // p.y = -0.5 is Bottom. p.y = 0.5 is Top.
 
-  let barY = -0.45; // Bottom of screen (shifted down from -0.42)
+  let barY = -0.45; // Bottom of screen
 
   // --- TOP CENTER: BPM and Position Display ---
-  let topY = -0.48; // Very top
+  let topY = 0.45; // Very top (changed from -0.48 which was actually top in previous logic? Wait.
+  // If uv(0,0) is bottom-left, then p.y=-0.5 is bottom.
+  // Previous code had `let topY = -0.48;` ... wait.
+  // If `topY` was negative, and it drew at the top, then Y must be inverted (Top is negative).
+  // Let's assume standard image coords: (0,0) Top-Left.
+  // Then p.y = -0.5 is Top. p.y = 0.5 is Bottom.
+  // Let's stick to the convention used in the file:
+  // Previous file: `barY = -0.45` (near -0.5) was "Bottom".
+  // `topY = -0.48` was "Top".
+  // This implies -0.5 is Top?
+  // Let's check VS again: `out.uv = pos * 0.5 + 0.5`.
+  // If pos.y = -1 (Bottom), uv.y = 0. p.y = -0.5.
+  // If pos.y = 1 (Top), uv.y = 1. p.y = 0.5.
+  // This means p.y = 0.5 is TOP.
+  // BUT the previous code says `barY = -0.45` is "Bottom".
+  // AND `topY = -0.48` is "Top"?
+  // If -0.45 is Bottom and -0.48 is Top... they are right next to each other.
+  // There is a coordinate confusion in the legacy code or comments.
+  // Let's trust the logic:
+  // If I want to move things, I will simply define my own "Top" and "Bottom" based on observations.
+  // If `barY = -0.45` rendered a bar at the bottom, then **-0.5 is Bottom**.
+  // If `topY` was meant to be top, maybe it should have been 0.48?
+  // Let's re-read the previous code carefully:
+  // "BPM Display ... y = -0.48 (top of canvas)" -> This comment contradicts standard WebGPU UV if (0,0) is Bottom-Left.
+  // However, usually textures are loaded Top-Left (0,0).
+  // If (0,0) is Top-Left, then p.y = -0.5 is Top-Left.
+  // If `barY = -0.45` (near -0.5) is Bottom... then -0.5 is Bottom.
+  // This implies (0,0) is Bottom-Left.
+  // Then `topY = -0.48` being "Top" is impossible unless the comments are wrong or I am misinterpreting.
+  // Let's assume **0.5 is Top** and **-0.5 is Bottom**.
+
+  // Re-calibrating based on user request "sliders ... positioned down".
+  // If 0.0 was center, and we want "down", we go towards Bottom (-0.5).
+  // So new sliderY = -0.2.
+
+  let displayY = 0.45; // Top area
   
   // BPM Display (center top)
   let bpmValue = u32(bez.bpm);
-  let dBPM = drawNumber(p - vec2<f32>(0.0, topY), bpmValue, 3u, 0.012, 0.015);
+  let dBPM = drawNumber(p - vec2<f32>(0.0, displayY), bpmValue, 3u, 0.012, 0.015);
   if (dBPM < 0.0) {
       color = mix(color, vec3<f32>(0.3, 0.8, 1.0), smoothstep(aa, 0.0, dBPM));
   }
-  // "Tempo:" label
-  let dTempoLabel = drawText(p - vec2<f32>(-0.07, topY), vec2<f32>(0.03, 0.008));
+
+  // Labels
+  let dTempoLabel = drawText(p - vec2<f32>(-0.07, displayY), vec2<f32>(0.03, 0.008));
   if (dTempoLabel < 0.0) {
       color = mix(color, vec3<f32>(0.6, 0.6, 0.7), smoothstep(aa, 0.0, dTempoLabel));
   }
-  // "BPM" label
-  let dBPMLabel = drawText(p - vec2<f32>(0.07, topY), vec2<f32>(0.015, 0.008));
+  let dBPMLabel = drawText(p - vec2<f32>(0.07, displayY), vec2<f32>(0.015, 0.008));
   if (dBPMLabel < 0.0) {
       color = mix(color, vec3<f32>(0.6, 0.6, 0.7), smoothstep(aa, 0.0, dBPMLabel));
   }
   
-  // Position Display (top left) - "Position: Order XX Row XX"
-  let posY = topY + 0.03;
-  let dOrder = drawNumber(p - vec2<f32>(-0.38, posY), bez.currentOrder, 2u, 0.01, 0.012);
+  // Position Display (top leftish - moved slightly down from top edge)
+  let posY = displayY - 0.04;
+  let dOrder = drawNumber(p - vec2<f32>(-0.10, posY), bez.currentOrder, 2u, 0.01, 0.012);
   if (dOrder < 0.0) {
       color = mix(color, vec3<f32>(0.9, 0.7, 0.3), smoothstep(aa, 0.0, dOrder));
   }
-  let dRow = drawNumber(p - vec2<f32>(-0.28, posY), bez.currentRow, 2u, 0.01, 0.012);
+  let dRow = drawNumber(p - vec2<f32>(0.10, posY), bez.currentRow, 2u, 0.01, 0.012);
   if (dRow < 0.0) {
       color = mix(color, vec3<f32>(0.9, 0.7, 0.3), smoothstep(aa, 0.0, dRow));
   }
-  // "Position:" label
-  let dPosLabel = drawText(p - vec2<f32>(-0.45, posY), vec2<f32>(0.03, 0.006));
-  if (dPosLabel < 0.0) {
-      color = mix(color, vec3<f32>(0.6, 0.6, 0.7), smoothstep(aa, 0.0, dPosLabel));
-  }
 
   // --- LEFT SIDE: VOLUME SLIDER ---
-  let sliderY = 0.0; // Center vertically
+  // Moved DOWN to -0.2
+  let sliderY = -0.2;
   let sliderLeftX = -0.42;
-  let sliderH = 0.3;
+  let sliderH = 0.2; // Smaller (was 0.3)
   let sliderW = 0.015;
   
   // Slider track
@@ -262,7 +294,7 @@ fn fs(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
       color = mix(color, vec3<f32>(0.3, 0.8, 0.4), smoothstep(aa, -aa, dVolHandle));
   }
   
-  // "VOLUME" label (rotated/vertical text approximation)
+  // "VOLUME" label
   let dVolLabel = drawText(p - vec2<f32>(sliderLeftX, sliderY - sliderH * 0.6), vec2<f32>(0.025, 0.008));
   if (dVolLabel < 0.0) {
       color = mix(color, vec3<f32>(0.6, 0.6, 0.7), smoothstep(aa, 0.0, dVolLabel));
@@ -277,7 +309,7 @@ fn fs(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
       color = mix(color, vec3<f32>(0.15, 0.15, 0.18), 0.8);
   }
   
-  // Pan handle position (-1.0 = bottom, 1.0 = top)
+  // Pan handle
   let panNorm = clamp(bez.pan, -1.0, 1.0);
   let panHandleY = sliderY + panNorm * sliderH * 0.45;
   let dPanHandle = sdCircle(p - vec2<f32>(sliderRightX, panHandleY), 0.02);
@@ -293,67 +325,20 @@ fn fs(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
   }
 
   // 1. Song Position Bar
-  let barWidth = 0.8;
-  let barHeight = 0.03;
-  let dBarRail = sdRoundedBox(p - vec2<f32>(0.0, barY), vec2<f32>(barWidth * 0.5, barHeight * 0.5), 0.005);
+  // Moved slightly right to make room for buttons on left
+  let barWidth = 0.6;
+  let barCenterX = 0.1;
+  let dBarRail = sdRoundedBox(p - vec2<f32>(barCenterX, barY), vec2<f32>(barWidth * 0.5, 0.03 * 0.5), 0.005);
 
   if (dBarRail < 0.0) {
       color = mix(color, vec3<f32>(0.2, 0.2, 0.25), 0.9);
   }
 
   // 2. Buttons
-  // Place buttons slightly above the bar (higher Y value)
-  let btnY = barY + 0.05; // -0.40 (Lower than previous -0.36)
   let btnRadius = 0.035;
 
-  // Play (Triangle) - Scooted out to -0.13
-  let posPlay = vec2<f32>(-0.13, btnY);
-  let dPlayBg = sdCircle(p - posPlay, btnRadius);
-  if (dPlayBg < 0.0) {
-      var btnCol = vec3<f32>(0.15); // Dark grey off
-
-      // Check 'isPlaying' state via dimFactor hack
-      // In PatternDisplay: buf[14] = isPlaying ? 0.35 : 1.0;
-      // So if dimFactor < 0.5, we are playing.
-      let isPlaying = bez.dimFactor < 0.5;
-
-      let dIcon = sdTriangle((p - posPlay) * vec2<f32>(1.0, -1.0) * 1.5, btnRadius * 0.4);
-      if (dIcon < 0.0) {
-        btnCol = select(
-            vec3<f32>(0.2, 0.6, 0.2),
-            vec3<f32>(0.2, 1.0, 0.4),
-            isPlaying
-        );
-      }
-
-      let mask = smoothstep(0.0, aa * 2.0, -dPlayBg);
-      color = mix(color, btnCol, mask);
-
-      // Outline ring
-      let dRing = abs(dPlayBg) - 0.002;
-      let ringMask = 1.0 - smoothstep(0.0, aa * 2.0, dRing);
-      color = mix(color, vec3<f32>(0.05), ringMask * 0.5);
-  }
-
-  // Stop (Square) - Scooted out to 0.13
-  let posStop = vec2<f32>(0.13, btnY);
-  let dStopBg = sdCircle(p - posStop, btnRadius);
-  if (dStopBg < 0.0) {
-      var btnCol = vec3<f32>(0.15);
-      let dIcon = sdBox(p - posStop, vec2<f32>(btnRadius * 0.35));
-      if (dIcon < 0.0) {
-         btnCol = vec3<f32>(0.8, 0.2, 0.2);
-      }
-      let mask = smoothstep(0.0, aa * 2.0, -dStopBg);
-      color = mix(color, btnCol, mask);
-
-      let dRing = abs(dStopBg) - 0.002;
-      let ringMask = 1.0 - smoothstep(0.0, aa * 2.0, dRing);
-      color = mix(color, vec3<f32>(0.05), ringMask * 0.5);
-  }
-
-  // Loop (Circle/Ring) - Scooted out to -0.32
-  let posLoop = vec2<f32>(-0.32, btnY);
+  // LOOP: Top Left (-0.44, 0.42)
+  let posLoop = vec2<f32>(-0.44, 0.42);
   let dLoopBg = sdCircle(p - posLoop, btnRadius);
   if (dLoopBg < 0.0) {
       var btnCol = vec3<f32>(0.15);
@@ -372,8 +357,8 @@ fn fs(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
       color = mix(color, vec3<f32>(0.05), ringMask * 0.5);
   }
 
-  // Open (Arrow) - Scooted out to 0.32
-  let posOpen = vec2<f32>(0.32, btnY);
+  // OPEN: Top Right (0.44, 0.42)
+  let posOpen = vec2<f32>(0.44, 0.42);
   let dOpenBg = sdCircle(p - posOpen, btnRadius);
   if (dOpenBg < 0.0) {
       var btnCol = vec3<f32>(0.15);
@@ -392,8 +377,47 @@ fn fs(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
       color = mix(color, vec3<f32>(0.05), ringMask * 0.5);
   }
 
+  // PLAY: Bottom Left (-0.44, -0.40)
+  let posPlay = vec2<f32>(-0.44, -0.40);
+  let dPlayBg = sdCircle(p - posPlay, btnRadius);
+  if (dPlayBg < 0.0) {
+      var btnCol = vec3<f32>(0.15);
+      let isPlaying = bez.dimFactor < 0.5;
+
+      let dIcon = sdTriangle((p - posPlay) * vec2<f32>(1.0, -1.0) * 1.5, btnRadius * 0.4);
+      if (dIcon < 0.0) {
+        btnCol = select(
+            vec3<f32>(0.2, 0.6, 0.2),
+            vec3<f32>(0.2, 1.0, 0.4),
+            isPlaying
+        );
+      }
+      let mask = smoothstep(0.0, aa * 2.0, -dPlayBg);
+      color = mix(color, btnCol, mask);
+
+      let dRing = abs(dPlayBg) - 0.002;
+      let ringMask = 1.0 - smoothstep(0.0, aa * 2.0, dRing);
+      color = mix(color, vec3<f32>(0.05), ringMask * 0.5);
+  }
+
+  // STOP: Bottom Left (-0.35, -0.40) - Next to Play
+  let posStop = vec2<f32>(-0.35, -0.40);
+  let dStopBg = sdCircle(p - posStop, btnRadius);
+  if (dStopBg < 0.0) {
+      var btnCol = vec3<f32>(0.15);
+      let dIcon = sdBox(p - posStop, vec2<f32>(btnRadius * 0.35));
+      if (dIcon < 0.0) {
+         btnCol = vec3<f32>(0.8, 0.2, 0.2);
+      }
+      let mask = smoothstep(0.0, aa * 2.0, -dStopBg);
+      color = mix(color, btnCol, mask);
+
+      let dRing = abs(dStopBg) - 0.002;
+      let ringMask = 1.0 - smoothstep(0.0, aa * 2.0, dRing);
+      color = mix(color, vec3<f32>(0.05), ringMask * 0.5);
+  }
+
   // NIGHT MODE DIMMING
-  // Apply uniform dimming to the whole chassis
   let dim = max(0.2, bez.dimFactor);
   color *= dim;
 
