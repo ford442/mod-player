@@ -378,6 +378,9 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   const bezelUniformBufferRef = useRef<GPUBuffer | null>(null);
   const bezelBindGroupRef = useRef<GPUBindGroup | null>(null);
   const bezelTextureResourcesRef = useRef<{ sampler: GPUSampler; view: GPUTextureView } | null>(null);
+  
+  // Track button click feedback timeout
+  const clickTimeoutRef = useRef<number | null>(null);
 
   // Video management
   useEffect(() => {
@@ -1083,6 +1086,12 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
       bezelPipelineRef.current = null;
       // IMPORTANT: Clear bezel texture refs so next init doesn't reuse old device sampler
       bezelTextureResourcesRef.current = null;
+      
+      // Clear button click timeout
+      if (clickTimeoutRef.current !== null) {
+        window.clearTimeout(clickTimeoutRef.current);
+        clickTimeoutRef.current = null;
+      }
 
       cellsBufferRef.current = null;
       uniformBufferRef.current = null;
@@ -1241,8 +1250,15 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
 
     // Helper to flash button feedback
     const flashButton = (buttonId: number) => {
+      // Clear any existing timeout to prevent stale state updates
+      if (clickTimeoutRef.current !== null) {
+        window.clearTimeout(clickTimeoutRef.current);
+      }
       setClickedButton(buttonId);
-      setTimeout(() => setClickedButton(0), 200);
+      clickTimeoutRef.current = window.setTimeout(() => {
+        setClickedButton(0);
+        clickTimeoutRef.current = null;
+      }, 200) as number;
     };
 
     // Loop: Top Left (-0.44, 0.42)
