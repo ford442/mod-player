@@ -442,6 +442,10 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
 
   // NEW: toggle for channel direction (v0.35)
   const [invertChannels, setInvertChannels] = useState(false);
+  
+  // NEW: track clicked button for visual feedback (v0.37)
+  // 0 = none, 1 = loop, 2 = open, 3 = play, 4 = stop
+  const [clickedButton, setClickedButton] = useState(0);
 
   const isHorizontal = shaderFile.includes('v0.12') || shaderFile.includes('v0.13') || shaderFile.includes('v0.14') || shaderFile.includes('v0.16') || shaderFile.includes('v0.17') || shaderFile.includes('v0.21');
   const padTopChannel = shaderFile.includes('v0.16') || shaderFile.includes('v0.17') || shaderFile.includes('v0.21');
@@ -1231,30 +1235,40 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     }
 
     // 2. Check Buttons
-    // React Y coordinates: Top is -0.5, Bottom is 0.5.
-    const btnRadius = 0.035;
+    // Coordinate system matches shader: p.y = 0.5 is Top, p.y = -0.5 is Bottom
+    const btnRadius = 0.045; // Increased for better usability
     const dist = (x1: number, y1: number, x2: number, y2: number) => Math.sqrt((x1-x2)**2 + (y1-y2)**2);
 
-    // Loop: Top Left (-0.44, -0.42)
-    if (dist(pX, pY, -0.44, -0.42) < btnRadius) {
+    // Helper to flash button feedback
+    const flashButton = (buttonId: number) => {
+      setClickedButton(buttonId);
+      setTimeout(() => setClickedButton(0), 200);
+    };
+
+    // Loop: Top Left (-0.44, 0.42)
+    if (dist(pX, pY, -0.44, 0.42) < btnRadius) {
+       flashButton(1);
        onLoopToggle?.();
        return;
     }
 
-    // Open: Top Right (0.44, -0.42)
-    if (dist(pX, pY, 0.44, -0.42) < btnRadius) {
+    // Open: Top Right (0.44, 0.42)
+    if (dist(pX, pY, 0.44, 0.42) < btnRadius) {
+       flashButton(2);
        fileInputRef.current?.click();
        return;
     }
 
-    // Play: Bottom Left (-0.44, 0.40)
-    if (dist(pX, pY, -0.44, 0.40) < btnRadius) {
+    // Play: Bottom Left (-0.44, -0.40)
+    if (dist(pX, pY, -0.44, -0.40) < btnRadius) {
+       flashButton(3);
        onPlay?.();
        return;
     }
 
-    // Stop: Bottom Left (-0.35, 0.40)
-    if (dist(pX, pY, -0.35, 0.40) < btnRadius) {
+    // Stop: Bottom Left (-0.35, -0.40)
+    if (dist(pX, pY, -0.35, -0.40) < btnRadius) {
+       flashButton(4);
        onStop?.();
        return;
     }
@@ -1351,13 +1365,14 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
           uint32View[19] = isLooping ? 1 : 0;  // isLooping (u32)
           uint32View[20] = 0; // currentOrder (will be set when we have it)
           uint32View[21] = playheadRow; // currentRow
-          // buf[22] and buf[23] are pads
+          uint32View[22] = clickedButton; // clickedButton (u32: 0=none, 1=loop, 2=open, 3=play, 4=stop)
+          // buf[23] is pad
 
       device.queue.writeBuffer(bezelUniformBufferRef.current, 0, buf.buffer, buf.byteOffset, buf.byteLength);
     }
 
     render();
-  }, [playheadRow, timeSec, localTime, bpm, tickOffset, grooveAmount, kickTrigger, activeChannels, gpuReady, isPlaying, beatPhase, isModuleLoaded, matrix?.numRows, matrix?.numChannels, cellWidth, cellHeight, canvasMetrics, bloomIntensity, bloomThreshold, invertChannels, volume, pan, isLooping]);
+  }, [playheadRow, timeSec, localTime, bpm, tickOffset, grooveAmount, kickTrigger, activeChannels, gpuReady, isPlaying, beatPhase, isModuleLoaded, matrix?.numRows, matrix?.numChannels, cellWidth, cellHeight, canvasMetrics, bloomIntensity, bloomThreshold, invertChannels, volume, pan, isLooping, clickedButton]);
 
   return (
     <div className={`pattern-display relative ${padTopChannel ? 'p-8 rounded-xl bg-[#18181a] shadow-2xl border border-[#333]' : ''}`}>
