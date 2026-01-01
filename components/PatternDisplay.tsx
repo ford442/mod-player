@@ -378,6 +378,9 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   const bezelUniformBufferRef = useRef<GPUBuffer | null>(null);
   const bezelBindGroupRef = useRef<GPUBindGroup | null>(null);
   const bezelTextureResourcesRef = useRef<{ sampler: GPUSampler; view: GPUTextureView } | null>(null);
+  
+  // Track button click feedback timeout
+  const clickTimeoutRef = useRef<number | null>(null);
 
   // Video management
   useEffect(() => {
@@ -442,6 +445,10 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
 
   // NEW: toggle for channel direction (v0.35)
   const [invertChannels, setInvertChannels] = useState(false);
+  
+  // NEW: track clicked button for visual feedback (v0.37)
+  // 0 = none, 1 = loop, 2 = open, 3 = play, 4 = stop
+  const [clickedButton, setClickedButton] = useState(0);
 
   const isHorizontal = shaderFile.includes('v0.12') || shaderFile.includes('v0.13') || shaderFile.includes('v0.14') || shaderFile.includes('v0.16') || shaderFile.includes('v0.17') || shaderFile.includes('v0.21');
   const padTopChannel = shaderFile.includes('v0.16') || shaderFile.includes('v0.17') || shaderFile.includes('v0.21');
@@ -1079,6 +1086,12 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
       bezelPipelineRef.current = null;
       // IMPORTANT: Clear bezel texture refs so next init doesn't reuse old device sampler
       bezelTextureResourcesRef.current = null;
+      
+      // Clear button click timeout
+      if (clickTimeoutRef.current !== null) {
+        window.clearTimeout(clickTimeoutRef.current);
+        clickTimeoutRef.current = null;
+      }
 
       cellsBufferRef.current = null;
       uniformBufferRef.current = null;
@@ -1176,19 +1189,17 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     const u = x / rect.width;
     const v = y / rect.height;
 
-    // Convert to Shader coordinate system (Center 0,0, Y up?)
-    // In shader: p = uv - 0.5. So center is 0,0. Y axis logic:
-    // shader uses `let p = uv - 0.5;` and `clipY = 1.0 - ...`.
-    // Let's match the Shader's 'p' variable directly.
-    // In Shader: uv is 0..1. p is -0.5..0.5.
-
+    // React P (0,0 center).
+    // u (0..1) -> pX (-0.5..0.5) (Left..Right)
+    // v (0..1) -> pY (-0.5..0.5) (Top..Bottom)
     const pX = u - 0.5;
     const pY = v - 0.5;
 
     // Check Volume Slider (left side)
+    // Shader Y was -0.2 (Down). React Y is 0.2 (Down).
     const sliderLeftX = -0.42;
-    const sliderY = 0.0;
-    const sliderH = 0.3;
+    const sliderY = 0.2; // Adjusted down
+    const sliderH = 0.2; // Smaller
     const sliderClickRadius = 0.03;
     
     if (Math.abs(pX - sliderLeftX) < sliderClickRadius && Math.abs(pY - sliderY) < sliderH * 0.5) {
@@ -1211,20 +1222,18 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     }
 
     // 1. Check Song Position Bar
-    // Shader: barY = 0.45. abs(p.y - barY) < barAreaH * 0.4.
-    // So bar is at Y = +0.45 (Bottom is 0.5).
-
+    // Shader: barY = -0.45 (Bottom). React Y = 0.45 (Bottom).
+    // Moved slightly right in shader: barCenterX = 0.1, width 0.6
     const barY = 0.45;
-    const barWidth = 0.8;
+    const barWidth = 0.6;
+    const barCenterX = 0.1;
     const barHeight = 0.03;
 
     // Check Seek Bar Click
-    if (Math.abs(pY - barY) < barHeight && Math.abs(pX) < barWidth / 2) {
-       // Calculate progress
-       // Shader: thumbX = (progress - 0.5) * barWidth
-       // Inverse: thumbX / barWidth + 0.5 = progress
-       // pX is ~thumbX (click pos)
-       const progress = (pX / barWidth) + 0.5;
+    if (Math.abs(pY - barY) < barHeight && Math.abs(pX - barCenterX) < barWidth / 2) {
+       // Calculate progress relative to the bar's rect
+       const relX = pX - (barCenterX - barWidth/2);
+       const progress = relX / barWidth;
        const clamped = Math.max(0, Math.min(1, progress));
 
        if (onSeek) {
@@ -1235,35 +1244,48 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     }
 
     // 2. Check Buttons
-    // Visuals are "above" the bar (smaller Y than barY).
-    // Shader: btnY = barY + 0.05. But Shader Y is inverted relative to React pY.
-    // React pY: Bottom is 0.5. Top is -0.5.
-    // React BarY: 0.45.
-    // Buttons should be slightly above (smaller Y). 0.45 - 0.05 = 0.40.
-
-    const btnY = barY - 0.05;
-    const btnRadius = 0.035;
-
+    // Coordinate system matches shader: p.y = 0.5 is Top, p.y = -0.5 is Bottom
+    const btnRadius = 0.045; // Increased for better usability
     const dist = (x1: number, y1: number, x2: number, y2: number) => Math.sqrt((x1-x2)**2 + (y1-y2)**2);
 
-    // Play (Scooted to -0.13)
-    if (dist(pX, pY, -0.13, btnY) < btnRadius) {
-       onPlay?.();
-       return;
-    }
-    // Stop (Scooted to 0.13)
-    if (dist(pX, pY, 0.13, btnY) < btnRadius) {
-       onStop?.();
-       return;
-    }
-    // Loop (Scooted to -0.32)
-    if (dist(pX, pY, -0.32, btnY) < btnRadius) {
+    // Helper to flash button feedback
+    const flashButton = (buttonId: number) => {
+      // Clear any existing timeout to prevent stale state updates
+      if (clickTimeoutRef.current !== null) {
+        window.clearTimeout(clickTimeoutRef.current);
+      }
+      setClickedButton(buttonId);
+      clickTimeoutRef.current = window.setTimeout(() => {
+        setClickedButton(0);
+        clickTimeoutRef.current = null;
+      }, 200) as number;
+    };
+
+    // Loop: Top Left (-0.44, 0.42)
+    if (dist(pX, pY, -0.44, 0.42) < btnRadius) {
+       flashButton(1);
        onLoopToggle?.();
        return;
     }
-    // Open (Scooted to 0.32)
-    if (dist(pX, pY, 0.32, btnY) < btnRadius) {
+
+    // Open: Top Right (0.44, 0.42)
+    if (dist(pX, pY, 0.44, 0.42) < btnRadius) {
+       flashButton(2);
        fileInputRef.current?.click();
+       return;
+    }
+
+    // Play: Bottom Left (-0.44, -0.40)
+    if (dist(pX, pY, -0.44, -0.40) < btnRadius) {
+       flashButton(3);
+       onPlay?.();
+       return;
+    }
+
+    // Stop: Bottom Left (-0.35, -0.40)
+    if (dist(pX, pY, -0.35, -0.40) < btnRadius) {
+       flashButton(4);
+       onStop?.();
        return;
     }
   };
@@ -1359,13 +1381,14 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
           uint32View[19] = isLooping ? 1 : 0;  // isLooping (u32)
           uint32View[20] = 0; // currentOrder (will be set when we have it)
           uint32View[21] = playheadRow; // currentRow
-          // buf[22] and buf[23] are pads
+          uint32View[22] = clickedButton; // clickedButton (u32: 0=none, 1=loop, 2=open, 3=play, 4=stop)
+          // buf[23] is pad
 
       device.queue.writeBuffer(bezelUniformBufferRef.current, 0, buf.buffer, buf.byteOffset, buf.byteLength);
     }
 
     render();
-  }, [playheadRow, timeSec, localTime, bpm, tickOffset, grooveAmount, kickTrigger, activeChannels, gpuReady, isPlaying, beatPhase, isModuleLoaded, matrix?.numRows, matrix?.numChannels, cellWidth, cellHeight, canvasMetrics, bloomIntensity, bloomThreshold, invertChannels, volume, pan, isLooping]);
+  }, [playheadRow, timeSec, localTime, bpm, tickOffset, grooveAmount, kickTrigger, activeChannels, gpuReady, isPlaying, beatPhase, isModuleLoaded, matrix?.numRows, matrix?.numChannels, cellWidth, cellHeight, canvasMetrics, bloomIntensity, bloomThreshold, invertChannels, volume, pan, isLooping, clickedButton]);
 
   return (
     <div className={`pattern-display relative ${padTopChannel ? 'p-8 rounded-xl bg-[#18181a] shadow-2xl border border-[#333]' : ''}`}>
