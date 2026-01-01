@@ -114,10 +114,21 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
       let hue = f32(inst) * 0.123;
       let noteColor = neonPalette(hue);
 
+      // Decode Volume from PackedB (Bits 24-31: Type, Bits 16-23: Value)
+      let volType = (in.packedB >> 24u) & 0xFFu;
+      let volVal = (in.packedB >> 16u) & 0xFFu;
+
+      // Determine box width based on volume
+      var boxW = 0.35; // Default width
+      if (volType == 1u) { // 1 = Volume Command
+          // volVal is 0..255. Map to width range [0.15, 0.45]
+          let normVol = f32(volVal) / 255.0;
+          boxW = mix(0.15, 0.45, normVol);
+      }
+
       // Shape: Rounded box centered in UV space (0.5, 0.5)
       let center = in.uv - 0.5;
-      // Make box width vary by note presence? Or just fixed.
-      let boxDist = sdRoundedBox(center, vec2<f32>(0.35, 0.25), 0.1);
+      let boxDist = sdRoundedBox(center, vec2<f32>(boxW, 0.25), 0.1);
 
       // Soft glow edge
       let alpha = 1.0 - smoothstep(0.0, 0.05, boxDist);
