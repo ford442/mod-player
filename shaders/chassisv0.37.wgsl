@@ -26,8 +26,8 @@ struct BezelUniforms {
   isLooping: u32,
   currentOrder: u32,
   currentRow: u32,
+  clickedButton: u32, // 0=none, 1=loop, 2=open, 3=play, 4=stop
   _pad2: f32,
-  _pad3: f32,
 };
 
 @group(0) @binding(0) var<uniform> bez: BezelUniforms;
@@ -335,7 +335,7 @@ fn fs(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
   }
 
   // 2. Buttons
-  let btnRadius = 0.035;
+  let btnRadius = 0.045; // Increased for better usability
 
   // LOOP: Top Left (-0.44, 0.42)
   let posLoop = vec2<f32>(-0.44, 0.42);
@@ -343,11 +343,14 @@ fn fs(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
   if (dLoopBg < 0.0) {
       var btnCol = vec3<f32>(0.15);
       let isLooping = bez.isLooping == 1u;
+      let isClicked = bez.clickedButton == 1u;
       let dIconOuter = sdCircle(p - posLoop, btnRadius * 0.4);
       let dIconInner = sdCircle(p - posLoop, btnRadius * 0.25);
       let ring = max(dIconOuter, -dIconInner);
       if (ring < 0.0) {
          btnCol = select(vec3<f32>(0.5, 0.3, 0.1), vec3<f32>(0.9, 0.6, 0.1), isLooping);
+         // Brighten when clicked
+         btnCol = select(btnCol, btnCol * 1.5, isClicked);
       }
       let mask = smoothstep(0.0, aa * 2.0, -dLoopBg);
       color = mix(color, btnCol, mask);
@@ -355,6 +358,13 @@ fn fs(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
       let dRing = abs(dLoopBg) - 0.002;
       let ringMask = 1.0 - smoothstep(0.0, aa * 2.0, dRing);
       color = mix(color, vec3<f32>(0.05), ringMask * 0.5);
+      
+      // Add glow when clicked
+      if (isClicked) {
+          let glowDist = length(p - posLoop);
+          let glow = exp(-glowDist * 15.0) * 0.3;
+          color += vec3<f32>(0.9, 0.6, 0.1) * glow;
+      }
   }
 
   // OPEN: Top Right (0.44, 0.42)
@@ -362,12 +372,15 @@ fn fs(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
   let dOpenBg = sdCircle(p - posOpen, btnRadius);
   if (dOpenBg < 0.0) {
       var btnCol = vec3<f32>(0.15);
+      let isClicked = bez.clickedButton == 2u;
       let iconOff = p - posOpen;
       let tri = sdTriangle((iconOff - vec2<f32>(0.0, -0.01)) * 1.8, btnRadius * 0.3);
       let stem = sdBox(iconOff - vec2<f32>(0.0, 0.015), vec2<f32>(0.006, 0.015));
       let arrow = min(tri, stem);
       if (arrow < 0.0) {
          btnCol = vec3<f32>(0.2, 0.5, 0.9);
+         // Brighten when clicked
+         btnCol = select(btnCol, btnCol * 1.5, isClicked);
       }
       let mask = smoothstep(0.0, aa * 2.0, -dOpenBg);
       color = mix(color, btnCol, mask);
@@ -375,6 +388,13 @@ fn fs(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
       let dRing = abs(dOpenBg) - 0.002;
       let ringMask = 1.0 - smoothstep(0.0, aa * 2.0, dRing);
       color = mix(color, vec3<f32>(0.05), ringMask * 0.5);
+      
+      // Add glow when clicked
+      if (isClicked) {
+          let glowDist = length(p - posOpen);
+          let glow = exp(-glowDist * 15.0) * 0.3;
+          color += vec3<f32>(0.2, 0.5, 0.9) * glow;
+      }
   }
 
   // PLAY: Bottom Left (-0.44, -0.40)
@@ -383,6 +403,7 @@ fn fs(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
   if (dPlayBg < 0.0) {
       var btnCol = vec3<f32>(0.15);
       let isPlaying = bez.dimFactor < 0.5;
+      let isClicked = bez.clickedButton == 3u;
 
       let dIcon = sdTriangle((p - posPlay) * vec2<f32>(1.0, -1.0) * 1.5, btnRadius * 0.4);
       if (dIcon < 0.0) {
@@ -391,6 +412,8 @@ fn fs(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
             vec3<f32>(0.2, 1.0, 0.4),
             isPlaying
         );
+        // Brighten when clicked
+        btnCol = select(btnCol, btnCol * 1.5, isClicked);
       }
       let mask = smoothstep(0.0, aa * 2.0, -dPlayBg);
       color = mix(color, btnCol, mask);
@@ -398,6 +421,13 @@ fn fs(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
       let dRing = abs(dPlayBg) - 0.002;
       let ringMask = 1.0 - smoothstep(0.0, aa * 2.0, dRing);
       color = mix(color, vec3<f32>(0.05), ringMask * 0.5);
+      
+      // Add glow when clicked
+      if (isClicked) {
+          let glowDist = length(p - posPlay);
+          let glow = exp(-glowDist * 15.0) * 0.3;
+          color += vec3<f32>(0.2, 1.0, 0.4) * glow;
+      }
   }
 
   // STOP: Bottom Left (-0.35, -0.40) - Next to Play
@@ -405,9 +435,12 @@ fn fs(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
   let dStopBg = sdCircle(p - posStop, btnRadius);
   if (dStopBg < 0.0) {
       var btnCol = vec3<f32>(0.15);
+      let isClicked = bez.clickedButton == 4u;
       let dIcon = sdBox(p - posStop, vec2<f32>(btnRadius * 0.35));
       if (dIcon < 0.0) {
          btnCol = vec3<f32>(0.8, 0.2, 0.2);
+         // Brighten when clicked
+         btnCol = select(btnCol, btnCol * 1.5, isClicked);
       }
       let mask = smoothstep(0.0, aa * 2.0, -dStopBg);
       color = mix(color, btnCol, mask);
@@ -415,6 +448,13 @@ fn fs(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
       let dRing = abs(dStopBg) - 0.002;
       let ringMask = 1.0 - smoothstep(0.0, aa * 2.0, dRing);
       color = mix(color, vec3<f32>(0.05), ringMask * 0.5);
+      
+      // Add glow when clicked
+      if (isClicked) {
+          let glowDist = length(p - posStop);
+          let glow = exp(-glowDist * 15.0) * 0.3;
+          color += vec3<f32>(0.8, 0.2, 0.2) * glow;
+      }
   }
 
   // NIGHT MODE DIMMING
