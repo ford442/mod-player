@@ -177,12 +177,11 @@ fn fs(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
   let colPlastic = vec3<f32>(0.08, 0.08, 0.10);
   let colRecess = vec3<f32>(0.05, 0.05, 0.06);
 
-  // Base Chassis
+  // --- PASS 1: PHYSICAL CASE (Dimmed) ---
   var color = colPlastic;
 
   // Use the Bezel Texture if available
   let texSample = textureSampleLevel(bezelTexture, bezelSampler, uv, 0.0);
-  // Simple check to use texture if it's not empty/transparent
   if (texSample.a > 0.1) {
     color = mix(color, texSample.rgb, texSample.a);
   } else {
@@ -199,60 +198,13 @@ fn fs(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
     }
   }
 
-  // --- UI CONTROLS ---
-  // Coordinate system: p is -0.5 to 0.5.
-  // Y-axis: Negative is BOTTOM, Positive is TOP in this shader projection (due to VS setup)?
-  // Actually, standard UV: (0,0) Bottom-Left. p = uv - 0.5.
-  // p.y = -0.5 is Bottom. p.y = 0.5 is Top.
-
-  let barY = -0.45; // Bottom of screen
-
-  // --- TOP CENTER: BPM and Position Display ---
-  let topY = 0.45; // Very top (changed from -0.48 which was actually top in previous logic? Wait.
-  // If uv(0,0) is bottom-left, then p.y=-0.5 is bottom.
-  // Previous code had `let topY = -0.48;` ... wait.
-  // If `topY` was negative, and it drew at the top, then Y must be inverted (Top is negative).
-  // Let's assume standard image coords: (0,0) Top-Left.
-  // Then p.y = -0.5 is Top. p.y = 0.5 is Bottom.
-  // Let's stick to the convention used in the file:
-  // Previous file: `barY = -0.45` (near -0.5) was "Bottom".
-  // `topY = -0.48` was "Top".
-  // This implies -0.5 is Top?
-  // Let's check VS again: `out.uv = pos * 0.5 + 0.5`.
-  // If pos.y = -1 (Bottom), uv.y = 0. p.y = -0.5.
-  // If pos.y = 1 (Top), uv.y = 1. p.y = 0.5.
-  // This means p.y = 0.5 is TOP.
-  // BUT the previous code says `barY = -0.45` is "Bottom".
-  // AND `topY = -0.48` is "Top"?
-  // If -0.45 is Bottom and -0.48 is Top... they are right next to each other.
-  // There is a coordinate confusion in the legacy code or comments.
-  // Let's trust the logic:
-  // If I want to move things, I will simply define my own "Top" and "Bottom" based on observations.
-  // If `barY = -0.45` rendered a bar at the bottom, then **-0.5 is Bottom**.
-  // If `topY` was meant to be top, maybe it should have been 0.48?
-  // Let's re-read the previous code carefully:
-  // "BPM Display ... y = -0.48 (top of canvas)" -> This comment contradicts standard WebGPU UV if (0,0) is Bottom-Left.
-  // However, usually textures are loaded Top-Left (0,0).
-  // If (0,0) is Top-Left, then p.y = -0.5 is Top-Left.
-  // If `barY = -0.45` (near -0.5) is Bottom... then -0.5 is Bottom.
-  // This implies (0,0) is Bottom-Left.
-  // Then `topY = -0.48` being "Top" is impossible unless the comments are wrong or I am misinterpreting.
-  // Let's assume **0.5 is Top** and **-0.5 is Bottom**.
-
-  // Re-calibrating based on user request "sliders ... positioned down".
-  // If 0.0 was center, and we want "down", we go towards Bottom (-0.5).
-  // So new sliderY = -0.2.
-
+  // Common UI Coordinates
   let displayY = 0.45; // Top area
-  
-  // BPM Display (center top)
-  let bpmValue = u32(bez.bpm);
-  let dBPM = drawNumber(p - vec2<f32>(0.0, displayY), bpmValue, 3u, 0.012, 0.015);
-  if (dBPM < 0.0) {
-      color = mix(color, vec3<f32>(0.3, 0.8, 1.0), smoothstep(aa, 0.0, dBPM));
-  }
+  let sliderY = -0.2;  // Left/Right Sliders
+  let barY = -0.45;    // Bottom Bar
 
-  // Labels
+  // 1. Labels (Painted on case, should dim)
+  // Tempo Labels
   let dTempoLabel = drawText(p - vec2<f32>(-0.07, displayY), vec2<f32>(0.03, 0.008));
   if (dTempoLabel < 0.0) {
       color = mix(color, vec3<f32>(0.6, 0.6, 0.7), smoothstep(aa, 0.0, dTempoLabel));
@@ -261,205 +213,210 @@ fn fs(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
   if (dBPMLabel < 0.0) {
       color = mix(color, vec3<f32>(0.6, 0.6, 0.7), smoothstep(aa, 0.0, dBPMLabel));
   }
-  
-  // Position Display (top leftish - moved slightly down from top edge)
-  let posY = displayY - 0.04;
-  let dOrder = drawNumber(p - vec2<f32>(-0.10, posY), bez.currentOrder, 2u, 0.01, 0.012);
-  if (dOrder < 0.0) {
-      color = mix(color, vec3<f32>(0.9, 0.7, 0.3), smoothstep(aa, 0.0, dOrder));
-  }
-  let dRow = drawNumber(p - vec2<f32>(0.10, posY), bez.currentRow, 2u, 0.01, 0.012);
-  if (dRow < 0.0) {
-      color = mix(color, vec3<f32>(0.9, 0.7, 0.3), smoothstep(aa, 0.0, dRow));
-  }
 
-  // --- LEFT SIDE: VOLUME SLIDER ---
-  // Moved DOWN to -0.2
-  let sliderY = -0.2;
+  // Slider Labels
   let sliderLeftX = -0.42;
-  let sliderH = 0.2; // Smaller (was 0.3)
+  let sliderH = 0.2;
   let sliderW = 0.015;
-  
-  // Slider track
-  let dVolTrack = sdRoundedBox(p - vec2<f32>(sliderLeftX, sliderY), vec2<f32>(sliderW * 0.5, sliderH * 0.5), 0.003);
-  if (dVolTrack < 0.0) {
-      color = mix(color, vec3<f32>(0.15, 0.15, 0.18), 0.8);
-  }
-  
-  // Volume handle position (0.0 = bottom, 1.0 = top)
-  let volNorm = clamp(bez.volume, 0.0, 1.0);
-  let volHandleY = sliderY + (volNorm - 0.5) * sliderH * 0.9;
-  let dVolHandle = sdCircle(p - vec2<f32>(sliderLeftX, volHandleY), 0.02);
-  if (dVolHandle < 0.0) {
-      color = mix(color, vec3<f32>(0.3, 0.8, 0.4), smoothstep(aa, -aa, dVolHandle));
-  }
-  
-  // "VOLUME" label
   let dVolLabel = drawText(p - vec2<f32>(sliderLeftX, sliderY - sliderH * 0.6), vec2<f32>(0.025, 0.008));
   if (dVolLabel < 0.0) {
       color = mix(color, vec3<f32>(0.6, 0.6, 0.7), smoothstep(aa, 0.0, dVolLabel));
   }
-  
-  // --- RIGHT SIDE: PANNING SLIDER ---
   let sliderRightX = 0.42;
-  
-  // Slider track
-  let dPanTrack = sdRoundedBox(p - vec2<f32>(sliderRightX, sliderY), vec2<f32>(sliderW * 0.5, sliderH * 0.5), 0.003);
-  if (dPanTrack < 0.0) {
-      color = mix(color, vec3<f32>(0.15, 0.15, 0.18), 0.8);
-  }
-  
-  // Pan handle
-  let panNorm = clamp(bez.pan, -1.0, 1.0);
-  let panHandleY = sliderY + panNorm * sliderH * 0.45;
-  let dPanHandle = sdCircle(p - vec2<f32>(sliderRightX, panHandleY), 0.02);
-  if (dPanHandle < 0.0) {
-      let panColor = mix(vec3<f32>(0.8, 0.3, 0.3), vec3<f32>(0.3, 0.3, 0.8), (panNorm + 1.0) * 0.5);
-      color = mix(color, panColor, smoothstep(aa, -aa, dPanHandle));
-  }
-  
-  // "PANNING" label
   let dPanLabel = drawText(p - vec2<f32>(sliderRightX, sliderY - sliderH * 0.6), vec2<f32>(0.03, 0.008));
   if (dPanLabel < 0.0) {
       color = mix(color, vec3<f32>(0.6, 0.6, 0.7), smoothstep(aa, 0.0, dPanLabel));
   }
 
-  // 1. Song Position Bar
-  // Moved slightly right to make room for buttons on left
+  // 2. Slider Tracks & Handles (Physical)
+  let dVolTrack = sdRoundedBox(p - vec2<f32>(sliderLeftX, sliderY), vec2<f32>(sliderW * 0.5, sliderH * 0.5), 0.003);
+  if (dVolTrack < 0.0) {
+      color = mix(color, vec3<f32>(0.15, 0.15, 0.18), 0.8);
+  }
+  let volNorm = clamp(bez.volume, 0.0, 1.0);
+  let volHandleY = sliderY + (volNorm - 0.5) * sliderH * 0.9;
+  let dVolHandle = sdCircle(p - vec2<f32>(sliderLeftX, volHandleY), 0.02);
+  if (dVolHandle < 0.0) {
+      // Handle is painted plastic
+      color = mix(color, vec3<f32>(0.3, 0.8, 0.4), smoothstep(aa, -aa, dVolHandle));
+  }
+
+  let dPanTrack = sdRoundedBox(p - vec2<f32>(sliderRightX, sliderY), vec2<f32>(sliderW * 0.5, sliderH * 0.5), 0.003);
+  if (dPanTrack < 0.0) {
+      color = mix(color, vec3<f32>(0.15, 0.15, 0.18), 0.8);
+  }
+  let panNorm = clamp(bez.pan, -1.0, 1.0);
+  let panHandleY = sliderY + panNorm * sliderH * 0.45;
+  let dPanHandle = sdCircle(p - vec2<f32>(sliderRightX, panHandleY), 0.02);
+  if (dPanHandle < 0.0) {
+      // Handle is painted plastic
+      let panColor = mix(vec3<f32>(0.8, 0.3, 0.3), vec3<f32>(0.3, 0.3, 0.8), (panNorm + 1.0) * 0.5);
+      color = mix(color, panColor, smoothstep(aa, -aa, dPanHandle));
+  }
+
+  // 3. Song Position Rail
   let barWidth = 0.6;
   let barCenterX = 0.1;
   let dBarRail = sdRoundedBox(p - vec2<f32>(barCenterX, barY), vec2<f32>(barWidth * 0.5, 0.03 * 0.5), 0.005);
-
   if (dBarRail < 0.0) {
       color = mix(color, vec3<f32>(0.2, 0.2, 0.25), 0.9);
   }
+  
+  // --- APPLY NIGHT MODE DIMMING ---
+  // Everything drawn so far gets dimmed when playing
+  let dim = max(0.2, bez.dimFactor);
+  color *= dim;
+  
+  // Calculate UV Intensity (how much "fluorescence" we see)
+  // When dim is low (0.2), uvFactor is high (0.8).
+  // When dim is high (1.0), uvFactor is low (0.0).
+  let uvFactor = (1.0 - dim) * 1.5; 
 
-  // 2. Buttons
-  let btnRadius = 0.045; // Increased for better usability
 
-  // LOOP: Top Left (-0.44, 0.42)
+  // --- PASS 2: EMISSIVE UI (LCDs & UV Buttons) ---
+  // These elements are added ON TOP and glow in the dark
+
+  // 4. LCD Displays (Self-illuminated)
+  let lcdColorBase = vec3<f32>(0.3, 0.8, 1.0); // Cyan LCD
+  let lcdColor = lcdColorBase + (lcdColorBase * uvFactor); // Brighter in dark
+
+  // BPM Digits
+  let bpmValue = u32(bez.bpm);
+  let dBPM = drawNumber(p - vec2<f32>(0.0, displayY), bpmValue, 3u, 0.012, 0.015);
+  if (dBPM < 0.0) {
+      // Additive blend for LCD glow
+      let mask = smoothstep(aa, 0.0, dBPM);
+      color = mix(color, lcdColor, mask); 
+      color += lcdColor * 0.5 * mask; // Glow
+  }
+
+  // Pos Digits
+  let posY = displayY - 0.04;
+  let lcdColorPos = vec3<f32>(1.0, 0.7, 0.2); // Amber LCD
+  let lcdColorPosBright = lcdColorPos + (lcdColorPos * uvFactor);
+  
+  let dOrder = drawNumber(p - vec2<f32>(-0.10, posY), bez.currentOrder, 2u, 0.01, 0.012);
+  if (dOrder < 0.0) {
+      let mask = smoothstep(aa, 0.0, dOrder);
+      color = mix(color, lcdColorPosBright, mask);
+      color += lcdColorPosBright * 0.4 * mask;
+  }
+  let dRow = drawNumber(p - vec2<f32>(0.10, posY), bez.currentRow, 2u, 0.01, 0.012);
+  if (dRow < 0.0) {
+      let mask = smoothstep(aa, 0.0, dRow);
+      color = mix(color, lcdColorPosBright, mask);
+      color += lcdColorPosBright * 0.4 * mask;
+  }
+
+  // 5. UV Buttons (Fluorescent)
+  let btnRadius = 0.045;
+  
+  // LOOP: Top Left (Orange/Amber)
   let posLoop = vec2<f32>(-0.44, 0.42);
   let dLoopBg = sdCircle(p - posLoop, btnRadius);
   if (dLoopBg < 0.0) {
-      var btnCol = vec3<f32>(0.15);
       let isLooping = bez.isLooping == 1u;
       let isClicked = bez.clickedButton == 1u;
+      
+      // Base UV color (Neon Orange)
+      var btnCol = vec3<f32>(1.0, 0.4, 0.0);
+      
+      // State logic
+      if (isLooping) {
+          btnCol = vec3<f32>(1.0, 0.8, 0.2); // Bright Yellow-Orange when active
+          btnCol += vec3<f32>(0.5) * uvFactor; // Extra glow in UV
+      } else {
+          btnCol *= 0.6; // Dimmer when inactive
+          btnCol += vec3<f32>(0.2, 0.1, 0.0) * uvFactor; // Still glows faintly in UV
+      }
+      
+      if (isClicked) { btnCol = vec3<f32>(1.0, 1.0, 1.0); } // Flash white
+
+      let mask = smoothstep(0.0, aa * 2.0, -dLoopBg);
+      // Mix over existing dimmed background
+      color = mix(color, btnCol, mask);
+      
+      // Icon
       let dIconOuter = sdCircle(p - posLoop, btnRadius * 0.4);
       let dIconInner = sdCircle(p - posLoop, btnRadius * 0.25);
       let ring = max(dIconOuter, -dIconInner);
-      if (ring < 0.0) {
-         btnCol = select(vec3<f32>(0.5, 0.3, 0.1), vec3<f32>(0.9, 0.6, 0.1), isLooping);
-         // Brighten when clicked
-         btnCol = select(btnCol, btnCol * 1.5, isClicked);
-      }
-      let mask = smoothstep(0.0, aa * 2.0, -dLoopBg);
-      color = mix(color, btnCol, mask);
-
-      let dRing = abs(dLoopBg) - 0.002;
-      let ringMask = 1.0 - smoothstep(0.0, aa * 2.0, dRing);
-      color = mix(color, vec3<f32>(0.05), ringMask * 0.5);
-      
-      // Add glow when clicked
-      if (isClicked) {
-          let glowDist = length(p - posLoop);
-          let glow = exp(-glowDist * 15.0) * 0.3;
-          color += vec3<f32>(0.9, 0.6, 0.1) * glow;
-      }
+      let ringMask = smoothstep(aa, 0.0, -ring);
+      color = mix(color, vec3<f32>(0.0), ringMask * 0.5); // Darken icon
   }
 
-  // OPEN: Top Right (0.44, 0.42)
+  // OPEN: Top Right (Cyan/Blue)
   let posOpen = vec2<f32>(0.44, 0.42);
   let dOpenBg = sdCircle(p - posOpen, btnRadius);
   if (dOpenBg < 0.0) {
-      var btnCol = vec3<f32>(0.15);
       let isClicked = bez.clickedButton == 2u;
+      
+      // UV Blue
+      var btnCol = vec3<f32>(0.0, 0.6, 1.0);
+      btnCol += vec3<f32>(0.0, 0.2, 0.5) * uvFactor; // Glows blue in UV
+      
+      if (isClicked) { btnCol = vec3<f32>(1.0); }
+
+      let mask = smoothstep(0.0, aa * 2.0, -dOpenBg);
+      color = mix(color, btnCol, mask);
+      
+      // Icon (Eject)
       let iconOff = p - posOpen;
       let tri = sdTriangle((iconOff - vec2<f32>(0.0, -0.01)) * 1.8, btnRadius * 0.3);
       let stem = sdBox(iconOff - vec2<f32>(0.0, 0.015), vec2<f32>(0.006, 0.015));
       let arrow = min(tri, stem);
-      if (arrow < 0.0) {
-         btnCol = vec3<f32>(0.2, 0.5, 0.9);
-         // Brighten when clicked
-         btnCol = select(btnCol, btnCol * 1.5, isClicked);
-      }
-      let mask = smoothstep(0.0, aa * 2.0, -dOpenBg);
-      color = mix(color, btnCol, mask);
-
-      let dRing = abs(dOpenBg) - 0.002;
-      let ringMask = 1.0 - smoothstep(0.0, aa * 2.0, dRing);
-      color = mix(color, vec3<f32>(0.05), ringMask * 0.5);
-      
-      // Add glow when clicked
-      if (isClicked) {
-          let glowDist = length(p - posOpen);
-          let glow = exp(-glowDist * 15.0) * 0.3;
-          color += vec3<f32>(0.2, 0.5, 0.9) * glow;
-      }
+      let iconMask = smoothstep(aa, 0.0, -arrow);
+      color = mix(color, vec3<f32>(0.0), iconMask * 0.5);
   }
 
-  // PLAY: Bottom Left (-0.44, -0.40)
+  // PLAY: Bottom Left (Neon Green)
   let posPlay = vec2<f32>(-0.44, -0.40);
   let dPlayBg = sdCircle(p - posPlay, btnRadius);
   if (dPlayBg < 0.0) {
-      var btnCol = vec3<f32>(0.15);
       let isPlaying = bez.dimFactor < 0.5;
       let isClicked = bez.clickedButton == 3u;
 
-      let dIcon = sdTriangle((p - posPlay) * vec2<f32>(1.0, -1.0) * 1.5, btnRadius * 0.4);
-      if (dIcon < 0.0) {
-        btnCol = select(
-            vec3<f32>(0.2, 0.6, 0.2),
-            vec3<f32>(0.2, 1.0, 0.4),
-            isPlaying
-        );
-        // Brighten when clicked
-        btnCol = select(btnCol, btnCol * 1.5, isClicked);
+      // UV Green
+      var btnCol = vec3<f32>(0.1, 0.9, 0.2);
+      
+      if (isPlaying) {
+          btnCol = vec3<f32>(0.4, 1.0, 0.5); // Super bright green
+          btnCol += vec3<f32>(0.2, 0.5, 0.2) * uvFactor; // Radioactive glow
+      } else {
+          btnCol *= 0.5;
+          btnCol += vec3<f32>(0.0, 0.2, 0.0) * uvFactor;
       }
+      
+      if (isClicked) { btnCol = vec3<f32>(1.0); }
+
       let mask = smoothstep(0.0, aa * 2.0, -dPlayBg);
       color = mix(color, btnCol, mask);
-
-      let dRing = abs(dPlayBg) - 0.002;
-      let ringMask = 1.0 - smoothstep(0.0, aa * 2.0, dRing);
-      color = mix(color, vec3<f32>(0.05), ringMask * 0.5);
       
-      // Add glow when clicked
-      if (isClicked) {
-          let glowDist = length(p - posPlay);
-          let glow = exp(-glowDist * 15.0) * 0.3;
-          color += vec3<f32>(0.2, 1.0, 0.4) * glow;
-      }
+      // Icon
+      let dIcon = sdTriangle((p - posPlay) * vec2<f32>(1.0, -1.0) * 1.5, btnRadius * 0.4);
+      let iconMask = smoothstep(aa, 0.0, -dIcon);
+      color = mix(color, vec3<f32>(0.0), iconMask * 0.5);
   }
 
-  // STOP: Bottom Left (-0.35, -0.40) - Next to Play
+  // STOP: Bottom Left (Neon Red/Pink)
   let posStop = vec2<f32>(-0.35, -0.40);
   let dStopBg = sdCircle(p - posStop, btnRadius);
   if (dStopBg < 0.0) {
-      var btnCol = vec3<f32>(0.15);
       let isClicked = bez.clickedButton == 4u;
-      let dIcon = sdBox(p - posStop, vec2<f32>(btnRadius * 0.35));
-      if (dIcon < 0.0) {
-         btnCol = vec3<f32>(0.8, 0.2, 0.2);
-         // Brighten when clicked
-         btnCol = select(btnCol, btnCol * 1.5, isClicked);
-      }
+      
+      // UV Red
+      var btnCol = vec3<f32>(1.0, 0.1, 0.3);
+      btnCol += vec3<f32>(0.5, 0.0, 0.1) * uvFactor; // Glows pinkish in UV
+      
+      if (isClicked) { btnCol = vec3<f32>(1.0); }
+
       let mask = smoothstep(0.0, aa * 2.0, -dStopBg);
       color = mix(color, btnCol, mask);
-
-      let dRing = abs(dStopBg) - 0.002;
-      let ringMask = 1.0 - smoothstep(0.0, aa * 2.0, dRing);
-      color = mix(color, vec3<f32>(0.05), ringMask * 0.5);
       
-      // Add glow when clicked
-      if (isClicked) {
-          let glowDist = length(p - posStop);
-          let glow = exp(-glowDist * 15.0) * 0.3;
-          color += vec3<f32>(0.8, 0.2, 0.2) * glow;
-      }
+      // Icon
+      let dIcon = sdBox(p - posStop, vec2<f32>(btnRadius * 0.35));
+      let iconMask = smoothstep(aa, 0.0, -dIcon);
+      color = mix(color, vec3<f32>(0.0), iconMask * 0.5);
   }
-
-  // NIGHT MODE DIMMING
-  let dim = max(0.2, bez.dimFactor);
-  color *= dim;
 
   return vec4<f32>(color, 1.0);
 }
