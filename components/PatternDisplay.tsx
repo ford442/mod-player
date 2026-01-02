@@ -1191,14 +1191,14 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
 
     // React P (0,0 center).
     // u (0..1) -> pX (-0.5..0.5) (Left..Right)
-    // v (0..1) -> pY (-0.5..0.5) (Top..Bottom)
+    // v (0..1) -> pY (-0.5..0.5) where positive = TOP to match shader coordinates
     const pX = u - 0.5;
-    const pY = v - 0.5;
+    const pY = 0.5 - v;
 
     // Check Volume Slider (left side)
-    // Shader Y was -0.2 (Down). React Y is 0.2 (Down).
+    // Use shader coordinates: sliderY = -0.2 (Down)
     const sliderLeftX = -0.42;
-    const sliderY = 0.2; // Adjusted down
+    const sliderY = -0.2;
     const sliderH = 0.2; // Smaller
     const sliderClickRadius = 0.03;
     
@@ -1222,9 +1222,9 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     }
 
     // 1. Check Song Position Bar
-    // Shader: barY = -0.45 (Bottom). React Y = 0.45 (Bottom).
+    // Shader: barY = -0.45 (Bottom).
     // Moved slightly right in shader: barCenterX = 0.1, width 0.6
-    const barY = 0.45;
+    const barY = -0.45;
     const barWidth = 0.6;
     const barCenterX = 0.1;
     const barHeight = 0.03;
