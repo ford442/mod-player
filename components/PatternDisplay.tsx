@@ -8,9 +8,11 @@ const DEFAULT_ROWS = 128;
 const DEFAULT_CHANNELS = 32;
 
 const alignTo = (value: number, alignment: number) => Math.ceil(value / alignment) * alignment;
+
 const getLayoutType = (shaderFile: string): LayoutType => {
   if (shaderFile === 'patternShaderv0.12.wgsl') return 'texture';
-  if (shaderFile.includes('v0.13') || shaderFile.includes('v0.14') || shaderFile.includes('v0.15') || shaderFile.includes('v0.16') || shaderFile.includes('v0.17') || shaderFile.includes('v0.18') || shaderFile.includes('v0.19') || shaderFile.includes('v0.20') || shaderFile.includes('v0.21') || shaderFile.includes('v0.23') || shaderFile.includes('v0.24') || shaderFile.includes('v0.25') || shaderFile.includes('v0.26') || shaderFile.includes('v0.27') || shaderFile.includes('v0.28') || shaderFile.includes('v0.29') || shaderFile.includes('v0.30') || shaderFile.includes('v0.31') || shaderFile.includes('v0.32') || shaderFile.includes('v0.33') || shaderFile.includes('v0.34') || shaderFile.includes('v0.35') || shaderFile.includes('v0.36') || shaderFile.includes('v0.37')) return 'extended';
+  // Added v0.38 and v0.39 to extended list
+  if (shaderFile.includes('v0.13') || shaderFile.includes('v0.14') || shaderFile.includes('v0.15') || shaderFile.includes('v0.16') || shaderFile.includes('v0.17') || shaderFile.includes('v0.18') || shaderFile.includes('v0.19') || shaderFile.includes('v0.20') || shaderFile.includes('v0.21') || shaderFile.includes('v0.23') || shaderFile.includes('v0.24') || shaderFile.includes('v0.25') || shaderFile.includes('v0.26') || shaderFile.includes('v0.27') || shaderFile.includes('v0.28') || shaderFile.includes('v0.29') || shaderFile.includes('v0.30') || shaderFile.includes('v0.31') || shaderFile.includes('v0.32') || shaderFile.includes('v0.33') || shaderFile.includes('v0.34') || shaderFile.includes('v0.35') || shaderFile.includes('v0.36') || shaderFile.includes('v0.37') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39')) return 'extended';
   return 'simple';
 };
 
@@ -19,24 +21,21 @@ const isSinglePassCompositeShader = (shaderFile: string) => {
 };
 
 const shouldEnableAlphaBlending = (shaderFile: string) => {
-  return shaderFile.includes('v0.28') || shaderFile.includes('v0.30') || shaderFile.includes('v0.31') || shaderFile.includes('v0.32') || shaderFile.includes('v0.33') || shaderFile.includes('v0.34') || shaderFile.includes('v0.35') || shaderFile.includes('v0.36') || shaderFile.includes('v0.37');
+  return shaderFile.includes('v0.28') || shaderFile.includes('v0.30') || shaderFile.includes('v0.31') || shaderFile.includes('v0.32') || shaderFile.includes('v0.33') || shaderFile.includes('v0.34') || shaderFile.includes('v0.35') || shaderFile.includes('v0.36') || shaderFile.includes('v0.37') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39');
 };
 
 const isCircularLayoutShader = (shaderFile: string) => {
-  // v0.25, v0.26, v0.35, v0.37 are considered circular/donut style for bezel rendering.
-  return shaderFile.includes('v0.25') || shaderFile.includes('v0.26') || shaderFile.includes('v0.35') || shaderFile.includes('v0.37');
+  // v0.39 is NOT circular (it's horizontal linear)
+  return shaderFile.includes('v0.25') || shaderFile.includes('v0.26') || shaderFile.includes('v0.35') || shaderFile.includes('v0.37') || shaderFile.includes('v0.38');
 };
 
 const shouldUseBackgroundPass = (shaderFile: string) => {
-  // Some shaders draw their own background in a single pass.
-  // v0.37 draws its own full interface (controls etc) so it might not need the chassis pass, OR it uses it as a base.
-  // Given v0.36 uses chassis, let's let v0.37 use it too for the nice bezel, but the shader itself draws the controls on top.
   return !isSinglePassCompositeShader(shaderFile);
 };
 
 const getBackgroundShaderFile = (shaderFile: string): string => {
-  if (shaderFile.includes('v0.37')) return 'chassisv0.37.wgsl';
-  // Only use the chassis pass when explicitly called.
+  // v0.39 uses the modern chassis renderer
+  if (shaderFile.includes('v0.37') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39')) return 'chassisv0.37.wgsl';
   if (shaderFile.includes('v0.27') || shaderFile.includes('v0.28') || shaderFile.includes('v0.30') || shaderFile.includes('v0.31') || shaderFile.includes('v0.32') || shaderFile.includes('v0.33') || shaderFile.includes('v0.34') || shaderFile.includes('v0.35') || shaderFile.includes('v0.36')) return 'chassisv0.1.wgsl';
   return 'bezel.wgsl';
 };
@@ -60,13 +59,12 @@ const createUniformPayload = (
     kickTrigger: number;
     activeChannels: number;
     isModuleLoaded: boolean;
-    bloomIntensity?: number;        // optional HDR bloom uniform
-    bloomThreshold?: number;        // optional hint for post-process
-    invertChannels?: boolean;       // NEW: controls ring direction
+    bloomIntensity?: number;
+    bloomThreshold?: number;
+    invertChannels?: boolean;
   }
 ): ArrayBuffer => {
   if (layoutType === 'extended') {
-    // Expanded to 80 bytes to include two extra floats (bloomIntensity, bloomThreshold)
     const buffer = new ArrayBuffer(80);
     const uint = new Uint32Array(buffer);
     const float = new Float32Array(buffer);
@@ -86,10 +84,8 @@ const createUniformPayload = (
     float[13] = params.kickTrigger;
     uint[14] = Math.max(0, params.activeChannels) >>> 0;
     uint[15] = params.isModuleLoaded ? 1 : 0;
-    // Bloom uniforms (defaults)
     float[16] = params.bloomIntensity ?? 1.0;
     float[17] = params.bloomThreshold ?? 0.8;
-    // Invert channels flag (0 = outer low, 1 = inner low)
     uint[18] = params.invertChannels ? 1 : 0;
     return buffer;
   }
@@ -106,12 +102,7 @@ const createUniformPayload = (
   float[6] = params.canvasW;
   float[7] = params.canvasH;
   if (layoutType === 'texture') {
-    float[8] = 1;
-    float[9] = 1;
-    float[10] = 0;
-    float[11] = 0;
-    float[12] = 1;
-    float[13] = 1;
+    float[8] = 1; float[9] = 1; float[10] = 0; float[11] = 0; float[12] = 1; float[13] = 1;
   }
   return buffer;
 };
@@ -143,11 +134,10 @@ interface PatternDisplayProps {
   cellWidth?: number;
   cellHeight?: number;
   shaderFile?: string;
-  // Live playback uniforms
   isPlaying?: boolean;
   bpm?: number;
   timeSec?: number;
-  tickOffset?: number; // 0..1 fractional progress between rows
+  tickOffset?: number;
   channels?: ChannelShadowState[];
   beatPhase?: number;
   grooveAmount?: number;
@@ -155,16 +145,11 @@ interface PatternDisplayProps {
   activeChannels?: number;
   isModuleLoaded?: boolean;
   externalVideoSource?: HTMLVideoElement | HTMLImageElement | null;
-
-  // Bloom controls (optional)
   bloomIntensity?: number;
   bloomThreshold?: number;
-
-  // Audio controls
   volume?: number;
   pan?: number;
   isLooping?: boolean;
-
   onPlay?: () => void;
   onStop?: () => void;
   onFileSelected?: (file: File) => void;
@@ -182,10 +167,8 @@ const clampPlayhead = (value: number, numRows: number) => {
 
 // Parse helpers
 const parsePackedB = (text: string) => {
-  // volType: 1=volume, 2=pan, 0=none
   let volType = 0, volValue = 0;
   let effCode = 0, effParam = 0;
-  // volume: vNN (decimal) 0..64 or 0..127; pan: pNN 0..64
   const volMatch = text.match(/v(\d{1,3})/i);
   if (volMatch) {
     volType = 1;
@@ -198,13 +181,11 @@ const parsePackedB = (text: string) => {
     const p = Math.min(255, Math.round((parseInt(panMatch[1], 10) / 64) * 255));
     volValue = isFinite(p) ? p : 0;
   }
-  // effect like XYY or C80, letter + two hex digits
   const effMatch = text.match(/([A-Za-z])[ ]*([0-9A-Fa-f]{2})/);
   if (effMatch) {
     effCode = effMatch[1].toUpperCase().charCodeAt(0) & 0xff;
     effParam = parseInt(effMatch[2], 16) & 0xff;
   } else {
-    // numeric effect code like 1xx style
     const effNum = text.match(/([0-9])[ ]*([0-9A-Fa-f]{2})/);
     if (effNum) {
       effCode = ('0'.charCodeAt(0) + (parseInt(effNum[1], 10) & 0xf)) & 0xff;
@@ -215,17 +196,12 @@ const parsePackedB = (text: string) => {
 };
 
 const packPatternMatrix = (matrix: PatternMatrix | null, padTopChannel = false): Uint32Array => {
-  // If no matrix, create a dummy grid of zeros
   const rawChannels = matrix?.numChannels ?? DEFAULT_CHANNELS;
   const numRows = matrix?.numRows ?? DEFAULT_ROWS;
   const numChannels = padTopChannel ? rawChannels + 1 : rawChannels;
-
   const packed = new Uint32Array(numRows * numChannels * 2);
 
-  if (!matrix) {
-      // Return zeroed buffer
-      return packed;
-  }
+  if (!matrix) return packed;
 
   const { rows } = matrix;
   const startCol = padTopChannel ? 1 : 0;
@@ -235,18 +211,13 @@ const packPatternMatrix = (matrix: PatternMatrix | null, padTopChannel = false):
     for (let c = 0; c < rawChannels; c++) {
       const offset = (r * numChannels + (c + startCol)) * 2;
       const cell = rowCells[c];
-      if (!cell || !cell.text) {
-        packed[offset] = 0;
-        packed[offset + 1] = 0;
-        continue;
-      }
+      if (!cell || !cell.text) continue;
 
       const text = cell.text.trim();
       const upper = text.toUpperCase();
       const notePart = upper.slice(0, 3).padEnd(3, '\u0000');
       const instMatch = text.match(/(\d{1,3})$/);
       const instByte = instMatch ? Math.min(255, parseInt(instMatch[1], 10)) : 0;
-
       const n0 = notePart.charCodeAt(0) & 0xff;
       const n1 = notePart.charCodeAt(1) & 0xff;
       const n2 = notePart.charCodeAt(2) & 0xff;
@@ -255,7 +226,6 @@ const packPatternMatrix = (matrix: PatternMatrix | null, padTopChannel = false):
       packed[offset + 1] = parsePackedB(text) >>> 0;
     }
   }
-
   return packed;
 };
 
@@ -277,7 +247,6 @@ const packPatternMatrixHighPrecision = (matrix: PatternMatrix | null, padTopChan
       const cell = rowCells[c];
       if (!cell) continue;
 
-      // Use structured data if available, else 0
       const note = cell.note || 0;
       const inst = cell.inst || 0;
       const volCmd = cell.volCmd || 0;
@@ -285,10 +254,7 @@ const packPatternMatrixHighPrecision = (matrix: PatternMatrix | null, padTopChan
       const effCmd = cell.effCmd || 0;
       const effVal = cell.effVal || 0;
 
-      // PackedA: [Note(8) | Instr(8) | VolCmd(8) | VolVal(8)]
       packed[offset] = ((note & 0xFF) << 24) | ((inst & 0xFF) << 16) | ((volCmd & 0xFF) << 8) | (volVal & 0xFF);
-
-      // PackedB: [Unused(16) | EffCmd(8) | EffVal(8)]
       packed[offset + 1] = ((effCmd & 0xFF) << 8) | (effVal & 0xFF);
     }
   }
@@ -316,8 +282,8 @@ const buildRowFlags = (numRows: number): Uint32Array => {
   const flags = new Uint32Array(numRows);
   for (let r = 0; r < numRows; r++) {
     let f = 0;
-    if (r % 4 === 0) f |= 1;      // beat every 4th
-    if (r % 16 === 0) f |= 2;     // measure every 16th
+    if (r % 4 === 0) f |= 1;
+    if (r % 16 === 0) f |= 2;
     flags[r] = f;
   }
   return flags;
@@ -339,11 +305,9 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     isPlaying = false,
     beatPhase = 0,
     isModuleLoaded = false,
-    // Bloom controls
     bloomIntensity = 1.0,
     bloomThreshold = 0.8,
     externalVideoSource = null,
-    // Audio controls
     volume = 1.0,
     pan = 0.0,
     isLooping = false,
@@ -373,25 +337,33 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   const videoRef = useRef<HTMLVideoElement | HTMLImageElement | null>(null);
   const videoTextureRef = useRef<GPUTexture | null>(null);
   const videoLoopRef = useRef<number>(0);
-  // Bezel pass resources
+
   const bezelPipelineRef = useRef<GPURenderPipeline | null>(null);
   const bezelUniformBufferRef = useRef<GPUBuffer | null>(null);
   const bezelBindGroupRef = useRef<GPUBindGroup | null>(null);
   const bezelTextureResourcesRef = useRef<{ sampler: GPUSampler; view: GPUTextureView } | null>(null);
   
-  // Track button click feedback timeout
+  // WebGL2 Overlay Resources
+  const glCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const glContextRef = useRef<WebGL2RenderingContext | null>(null);
+  const glResourcesRef = useRef<{
+    program: WebGLProgram;
+    vao: WebGLVertexArrayObject;
+    texture: WebGLTexture;
+    buffer: WebGLBuffer;
+  } | null>(null);
+
   const clickTimeoutRef = useRef<number | null>(null);
 
   // Video management
   useEffect(() => {
     const isVideoShader = shaderFile.includes('v0.20') || shaderFile.includes('v0.23') || shaderFile.includes('v0.24') || shaderFile.includes('v0.25');
     cancelAnimationFrame(videoLoopRef.current);
-    videoRef.current = null; // Clear previous ref
+    videoRef.current = null;
 
     if (externalVideoSource) {
       videoRef.current = externalVideoSource;
-      // External source playback is managed by App.tsx
-      return; // Don't create a fallback video
+      return;
     }
 
     if (isVideoShader) {
@@ -433,8 +405,6 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
         vid.pause();
         vid.src = "";
         videoRef.current = null;
-        // NOTE: We do NOT destroy videoTextureRef here anymore.
-        // It is owned by the GPU lifecycle and will be destroyed when the GPU device is cleaned up.
       };
     }
   }, [shaderFile, externalVideoSource]);
@@ -442,38 +412,22 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   const [webgpuAvailable, setWebgpuAvailable] = useState(true);
   const [gpuReady, setGpuReady] = useState(false);
   const [localTime, setLocalTime] = useState(0);
-
-  // NEW: toggle for channel direction (v0.35)
   const [invertChannels, setInvertChannels] = useState(false);
-  
-  // NEW: track clicked button for visual feedback (v0.37)
-  // 0 = none, 1 = loop, 2 = open, 3 = play, 4 = stop
   const [clickedButton, setClickedButton] = useState(0);
 
-  const isHorizontal = shaderFile.includes('v0.12') || shaderFile.includes('v0.13') || shaderFile.includes('v0.14') || shaderFile.includes('v0.16') || shaderFile.includes('v0.17') || shaderFile.includes('v0.21');
+  const isHorizontal = shaderFile.includes('v0.12') || shaderFile.includes('v0.13') || shaderFile.includes('v0.14') || shaderFile.includes('v0.16') || shaderFile.includes('v0.17') || shaderFile.includes('v0.21') || shaderFile.includes('v0.39');
   const padTopChannel = shaderFile.includes('v0.16') || shaderFile.includes('v0.17') || shaderFile.includes('v0.21');
 
-  // Compute the "logical" canvas metrics used for layout and for special fixed-size shaders
   const computeLogicalCanvasMetrics = () => {
-    // FIX: Render chassis shaders at HIGH RES (2048x2016) to avoid layout blowups and provide supersampling.
-    // This prevents the layout engine from computing massive dimensions and guarantees a consistent aspect.
-    if (shaderFile.includes('v0.37')) {
-       return { width: 1024, height: 1024 }; // Standard square
-    }
+    // Force Square for v0.37, v0.38, and v0.39 (Square Bezel)
+    if (shaderFile.includes('v0.37') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39')) return { width: 1024, height: 1024 };
     if (shaderFile.includes('v0.26') || shaderFile.includes('v0.27') || shaderFile.includes('v0.28') || shaderFile.includes('v0.29') || shaderFile.includes('v0.30') || shaderFile.includes('v0.31') || shaderFile.includes('v0.32') || shaderFile.includes('v0.33') || shaderFile.includes('v0.34') || shaderFile.includes('v0.35') || shaderFile.includes('v0.36')) {
       return { width: 2048, height: 2016 };
     }
-
-    // Keep a large square canvas for circular ring shaders so the ring fills
-    // the viewport similar to v0.25 (was the source of the visual size mismatch).
-    if (isCircularLayoutShader(shaderFile)) {
-      return { width: 1280, height: 1280 };
-    }
-
+    if (isCircularLayoutShader(shaderFile)) return { width: 1280, height: 1280 };
     if (shaderFile.includes('v0.18') || shaderFile.includes('v0.19') || shaderFile.includes('v0.20') || shaderFile.includes('v0.23') || shaderFile.includes('v0.24') || shaderFile.includes('v0.25')) {
       return { width: 1280, height: 1280 };
     }
-
     const rawChannels = Math.max(1, matrix?.numChannels ?? DEFAULT_CHANNELS);
     const displayChannels = padTopChannel ? rawChannels + 1 : rawChannels;
     const rows = Math.max(1, matrix?.numRows ?? DEFAULT_ROWS);
@@ -482,11 +436,8 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
       : { width: Math.ceil(displayChannels * cellWidth), height: Math.ceil(rows * cellHeight) };
   };
 
-  // Track the actual internal canvas pixel size (may be driven by CSS client size or by fixed logical sizes above).
   const [canvasMetrics, setCanvasMetrics] = React.useState(() => computeLogicalCanvasMetrics());
 
-  // Keep canvas internal resolution in sync with display size (handles browser resizes / DPR).
-  // Use ResizeObserver when available and avoid mutating canvas.width directly to prevent layout feedback loops.
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -494,15 +445,13 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     const computeAndSetSize = () => {
       const logical = computeLogicalCanvasMetrics();
       const dpr = window.devicePixelRatio || 1;
-
       let targetW: number, targetH: number;
-      const isFixed = (logical.width === 2048 && logical.height === 2016) || (logical.width === 1024 && logical.height === 1008) || (logical.width === 1280 && logical.height === 1280);
+      const isFixed = (logical.width === 2048 && logical.height === 2016) || (logical.width === 1024 && logical.height === 1008) || (logical.width === 1280 && logical.height === 1280) || (logical.width === 1024 && logical.height === 1024);
 
       if (isFixed) {
         targetW = logical.width;
         targetH = logical.height;
       } else {
-        // Use the canvas's layout size (bounding rect) multiplied by DPR for accurate fractional widths
         const rect = canvas.getBoundingClientRect();
         targetW = Math.max(1, Math.round(rect.width * dpr));
         targetH = Math.max(1, Math.round(rect.height * dpr));
@@ -514,7 +463,6 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
       });
     };
 
-    // Prefer ResizeObserver for precise element sizing, fall back to window resize
     let ro: ResizeObserver | null = null;
     if ((window as any).ResizeObserver) {
       ro = new (window as any).ResizeObserver(() => computeAndSetSize());
@@ -522,149 +470,400 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     } else {
       window.addEventListener('resize', computeAndSetSize);
     }
-
-    // Run once immediately
     computeAndSetSize();
-
     return () => {
       if (ro) ro.disconnect();
       else window.removeEventListener('resize', computeAndSetSize);
     };
   }, [shaderFile, matrix?.numRows, matrix?.numChannels, cellWidth, cellHeight, isHorizontal, padTopChannel]);
 
-  // Immediately update uniforms when the canvas pixel size changes so the GPU shader gets correct dimensions
+  // Update WebGPU uniforms when canvas size changes
   useEffect(() => {
     const device = deviceRef.current;
     const uniformBuffer = uniformBufferRef.current;
     if (!device || !uniformBuffer) return;
-
-    // Read current uniform payload, update the canvas fields and re-upload.
-    // We assume the uniform layout is stable and that canvasW/canvasH are at float indices 6 and 7 for extended layouts.
-    // Recreate a small float buffer view and write into the uniform buffer directly to reduce latency.
     const floatBuf = new Float32Array([canvasMetrics.width, canvasMetrics.height]);
-    // The uniform buffer layout places canvasW and canvasH at byte offsets 4*6=24 and 4*7=28 respectively for the simple/texture layout,
-    // but for extended layout they are at floats 6 and 7 as well. We'll write into byte offset 6*4 = 24.
     try {
       device.queue.writeBuffer(uniformBuffer, 6 * 4, floatBuf.buffer, floatBuf.byteOffset, floatBuf.byteLength);
     } catch (e) {
-      // Some devices may require a full rewrite; fall back to writing from the start when the small write fails.
       device.queue.writeBuffer(uniformBuffer, 0, floatBuf.buffer, floatBuf.byteOffset, floatBuf.byteLength);
     }
   }, [canvasMetrics]);
 
-  // Local animation loop when not playing or not loaded
+  // === WEBGL2 INITIALIZATION (Overlay for v0.38 & v0.39) ===
   useEffect(() => {
-    if (isModuleLoaded) {
-      cancelAnimationFrame(animationFrameRef.current);
+    // Only enable overlay for 0.38 (Circular) and 0.39 (Horizontal)
+    const isOverlayShader = shaderFile.includes('v0.38') || shaderFile.includes('v0.39');
+
+    if (!isOverlayShader) {
+        // Cleanup if we switch away
+        const gl = glContextRef.current;
+        if (gl) {
+             // Let GC handle it
+        }
+        glContextRef.current = null;
+        glResourcesRef.current = null;
+        return;
+    }
+
+    const canvas = glCanvasRef.current;
+    if (!canvas) return;
+
+    // Transparent context
+    const gl = canvas.getContext('webgl2', { alpha: true, premultipliedAlpha: false, antialias: true });
+    if (!gl) {
+      console.warn("WebGL2 not available for overlay");
+      return;
+    }
+    glContextRef.current = gl;
+
+    // Compile Vertex & Fragment Shaders for the "Glass Cap"
+    // Supports Circular (0.38) and Horizontal (0.39) modes
+    const vsSource = `#version 300 es
+    layout(location=0) in vec2 a_pos; // unit quad -0.5..0.5
+
+    uniform vec2 u_resolution;
+    uniform vec2 u_cellSize;
+    uniform float u_cols;
+    uniform float u_rows;
+    uniform float u_playhead;
+    uniform int u_layoutMode; // 1=Circular, 2=Horizontal
+    uniform int u_invertChannels;
+    uniform mediump usampler2D u_noteData; // R8UI Texture
+
+    out vec2 v_uv;
+    out float v_active;
+
+    #define PI 3.14159265
+
+    void main() {
+        int id = gl_InstanceID;
+        int col = id % int(u_cols);
+        int row = id / int(u_cols);
+
+        // Fetch note from texture: x=col, y=row.
+        uint note = texelFetch(u_noteData, ivec2(col, row), 0).r;
+
+        if (note == 0u) {
+            gl_Position = vec4(0.0);
+            return;
+        }
+
+        if (u_layoutMode == 2) {
+            // --- HORIZONTAL LINEAR LAYOUT (v0.39) ---
+            // Row = X axis (Time), Channel = Y axis
+            // Note: In Data Texture, X=Channel, Y=Row.
+            // But here 'col' is Channel Index, 'row' is Pattern Row Index.
+
+            float xPos = float(row) * u_cellSize.x;
+            float yPos = float(col) * u_cellSize.y;
+
+            // Scroll logic: Move X Left/Right based on playhead
+            float scrollX = u_playhead * u_cellSize.x;
+            float centerX = u_resolution.x * 0.5;
+
+            xPos = xPos - scrollX + centerX;
+
+            // Adjust to cell centers (a_pos is -0.5..0.5)
+            // Shrink caps slightly for gaps
+            vec2 capSize = u_cellSize * 0.9;
+            vec2 center = vec2(xPos, yPos) + u_cellSize * 0.5;
+
+            vec2 pos = center + (a_pos * capSize);
+
+            // NDC conversion
+            vec2 ndc = (pos / u_resolution) * 2.0 - 1.0;
+            ndc.y = -ndc.y; // Flip Y (0 top)
+
+            gl_Position = vec4(ndc, 0.0, 1.0);
+
+        } else {
+            // --- CIRCULAR LAYOUT (v0.38) ---
+            int ringIndex = col;
+            if (u_invertChannels == 0) {
+                ringIndex = int(u_cols) - 1 - col;
+            }
+
+            vec2 center = u_resolution * 0.5;
+            float minDim = min(u_resolution.x, u_resolution.y);
+
+            float maxRadius = minDim * 0.45;
+            float minRadius = minDim * 0.15;
+            float ringDepth = (maxRadius - minRadius) / u_cols;
+
+            float radius = minRadius + float(ringIndex) * ringDepth;
+
+            float totalSteps = 64.0;
+            float anglePerStep = (2.0 * PI) / totalSteps;
+            float theta = -1.570796 + float(row % 64) * anglePerStep;
+
+            float circumference = 2.0 * PI * radius;
+            float arcLength = circumference / totalSteps;
+
+            float btnW = arcLength * 0.75;
+            float btnH = ringDepth * 0.75;
+
+            vec2 localPos = a_pos * vec2(btnW, btnH);
+
+            float rotAng = theta + 1.570796;
+            float cA = cos(rotAng);
+            float sA = sin(rotAng);
+
+            float rotX = localPos.x * cA - localPos.y * sA;
+            float rotY = localPos.x * sA + localPos.y * cA;
+
+            float worldX = center.x + cos(theta) * radius + rotX;
+            float worldY = center.y + sin(theta) * radius + rotY;
+
+            vec2 ndc = vec2((worldX / u_resolution.x) * 2.0 - 1.0, 1.0 - (worldY / u_resolution.y) * 2.0);
+            gl_Position = vec4(ndc, 0.0, 1.0);
+        }
+
+        v_uv = a_pos + 0.5;
+        v_active = 1.0;
+    }`;
+
+    const fsSource = `#version 300 es
+    precision mediump float;
+    in vec2 v_uv;
+    in float v_active;
+    out vec4 fragColor;
+
+    void main() {
+        vec2 p = v_uv - 0.5;
+        float r = length(p) * 2.0;
+
+        vec2 d = abs(p) * 2.0;
+        float box = max(d.x, d.y);
+        float alphaMask = 1.0 - smoothstep(0.85, 1.0, box);
+
+        float spec = 0.0;
+        vec2 specPos = p - vec2(-0.2, -0.2);
+        if (length(specPos) < 0.25) {
+            spec = smoothstep(0.25, 0.0, length(specPos)) * 0.6;
+        }
+
+        vec3 tint = vec3(0.8, 0.9, 1.0);
+        float opacity = 0.2 + (1.0 - r) * 0.1;
+
+        vec3 col = tint + vec3(spec);
+        fragColor = vec4(col, (opacity + spec) * alphaMask);
+    }
+    `;
+
+    const createShader = (type: number, src: string) => {
+      const s = gl.createShader(type)!;
+      gl.shaderSource(s, src);
+      gl.compileShader(s);
+      if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+        console.error("GL Shader Error", gl.getShaderInfoLog(s));
+        gl.deleteShader(s);
+        return null;
+      }
+      return s;
+    };
+
+    const vs = createShader(gl.VERTEX_SHADER, vsSource);
+    const fs = createShader(gl.FRAGMENT_SHADER, fsSource);
+    if(!vs || !fs) return;
+
+    const prog = gl.createProgram()!;
+    gl.attachShader(prog, vs);
+    gl.attachShader(prog, fs);
+    gl.linkProgram(prog);
+    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+      console.error("GL Link Error", gl.getProgramInfoLog(prog));
       return;
     }
 
-    const startTime = performance.now();
-    const loop = () => {
-        const now = performance.now();
-        setLocalTime((now - startTime) / 1000.0);
-        animationFrameRef.current = requestAnimationFrame(loop);
+    // Quad VBO
+    const vao = gl.createVertexArray()!;
+    gl.bindVertexArray(vao);
+    const buf = gl.createBuffer()!;
+    gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
+      -0.5, -0.5, 0.5, -0.5, -0.5, 0.5,
+      -0.5, 0.5, 0.5, -0.5, 0.5, 0.5
+    ]), gl.STATIC_DRAW);
+    gl.enableVertexAttribArray(0);
+    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+
+    // Texture
+    const tex = gl.createTexture()!;
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+
+    glResourcesRef.current = { program: prog, vao, texture: tex, buffer: buf };
+
+    return () => {
+      gl.deleteProgram(prog);
+      gl.deleteVertexArray(vao);
+      gl.deleteBuffer(buf);
+      gl.deleteTexture(tex);
     };
-    loop();
-    return () => cancelAnimationFrame(animationFrameRef.current);
-  }, [isModuleLoaded]);
+  }, [shaderFile]);
 
-  const render = () => {
-    const device = deviceRef.current;
-    const context = contextRef.current;
-    const pipeline = pipelineRef.current;
-    const bindGroup = bindGroupRef.current;
-    if (!device || !context || !pipeline || !bindGroup || !uniformBufferRef.current || !cellsBufferRef.current) return;
+  // === WEBGL2 DATA UPLOAD ===
+  useEffect(() => {
+    // Only upload for supported overlay shaders
+    if (!shaderFile.includes('v0.38') && !shaderFile.includes('v0.39')) return;
 
-    const isVideoShader = shaderFile.includes('v0.20') || shaderFile.includes('v0.23') || shaderFile.includes('v0.24') || shaderFile.includes('v0.25');
-    if (isVideoShader && videoRef.current) {
-      const source = videoRef.current;
-      let sourceWidth = 0;
-      let sourceHeight = 0;
-      let sourceReady = false;
+    const gl = glContextRef.current;
+    const res = glResourcesRef.current;
+    if (!gl || !res || !matrix) return;
 
-      if (source instanceof HTMLVideoElement && source.readyState >= 2) {
-        sourceWidth = source.videoWidth;
-        sourceHeight = source.videoHeight;
-        sourceReady = true;
-      } else if (source instanceof HTMLImageElement && source.complete) {
-        sourceWidth = source.naturalWidth;
-        sourceHeight = source.naturalHeight;
-        sourceReady = true;
-      }
+    const rows = matrix.numRows;
+    const rawCols = matrix.numChannels;
+    const cols = padTopChannel ? rawCols + 1 : rawCols;
+    const startCol = padTopChannel ? 1 : 0;
 
-      // Check validation constraints for copyExternalImageToTexture
-      // Source width/height must be > 0
-      if (sourceReady && sourceWidth > 0 && sourceHeight > 0) {
-        // Recreate texture if size changed or missing
-        if (!videoTextureRef.current || videoTextureRef.current.width !== sourceWidth || videoTextureRef.current.height !== sourceHeight) {
-          videoTextureRef.current?.destroy();
-          const texture = device.createTexture({
-            size: [sourceWidth, sourceHeight, 1],
-            format: preferredImageFormat(device),
-            usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT
-          });
-          videoTextureRef.current = texture;
-          const sampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear' });
-          textureResourcesRef.current = { sampler, view: texture.createView() };
-          refreshBindGroup(device);
-        }
+    const data = new Uint8Array(rows * cols);
 
-        try {
-          if (videoTextureRef.current) {
-            device.queue.copyExternalImageToTexture(
-              { source, flipY: true }, // Flip Y-axis to fix upside-down issue
-              { texture: videoTextureRef.current },
-              [sourceWidth, sourceHeight, 1]
-            );
-          }
-        } catch (e) {
-          // Ignore transient errors when video frame is not yet ready for GPU import
-          // This prevents crashes like "Browser fails extracting valid resource"
-        }
-      }
+    for(let r=0; r<rows; r++) {
+       const rowData = matrix.rows[r] || [];
+       for(let c=0; c<rawCols; c++) {
+           const cell = rowData[c];
+           const hasNote = cell && cell.note !== undefined && cell.note > 0;
+           // X=Col(Channel), Y=Row(Time)
+           const texIndex = r * cols + (c + startCol);
+           data[texIndex] = hasNote ? 255 : 0;
+       }
     }
 
-    const encoder = device.createCommandEncoder();
-    const pass = encoder.beginRenderPass({
-      colorAttachments: [
-        {
-          view: context.getCurrentTexture().createView(),
-          loadOp: 'clear',
-          // Off-white clear to match bezel hardware aesthetic
-          clearValue: { r: 0.98, g: 0.98, b: 0.98, a: 1 },
-          storeOp: 'store',
-        },
-      ],
+    gl.bindTexture(gl.TEXTURE_2D, res.texture);
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8UI, cols, rows, 0, gl.RED_INTEGER, gl.UNSIGNED_BYTE, data);
+  }, [matrix, padTopChannel, shaderFile]);
+
+  // === WEBGL2 RENDER FUNCTION ===
+  const drawWebGL = () => {
+    if (!shaderFile.includes('v0.38') && !shaderFile.includes('v0.39')) return;
+
+    const gl = glContextRef.current;
+    const res = glResourcesRef.current;
+    if (!gl || !res || !matrix) return;
+
+    if (glCanvasRef.current && (glCanvasRef.current.width !== canvasMetrics.width || glCanvasRef.current.height !== canvasMetrics.height)) {
+        glCanvasRef.current.width = canvasMetrics.width;
+        glCanvasRef.current.height = canvasMetrics.height;
+        gl.viewport(0, 0, canvasMetrics.width, canvasMetrics.height);
+    }
+
+    gl.clearColor(0,0,0,0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+
+    gl.useProgram(res.program);
+
+    const rawCols = matrix.numChannels;
+    const cols = padTopChannel ? rawCols + 1 : rawCols;
+    const rows = matrix.numRows;
+
+    const uRes = gl.getUniformLocation(res.program, 'u_resolution');
+    const uCell = gl.getUniformLocation(res.program, 'u_cellSize');
+    const uCols = gl.getUniformLocation(res.program, 'u_cols');
+    const uRows = gl.getUniformLocation(res.program, 'u_rows');
+    const uPlay = gl.getUniformLocation(res.program, 'u_playhead');
+    const uInvert = gl.getUniformLocation(res.program, 'u_invertChannels');
+    const uLayout = gl.getUniformLocation(res.program, 'u_layoutMode');
+    const uTex = gl.getUniformLocation(res.program, 'u_noteData');
+
+    gl.uniform2f(uRes, canvasMetrics.width, canvasMetrics.height);
+    gl.uniform2f(uCell, cellWidth, cellHeight);
+    gl.uniform1f(uCols, cols);
+    gl.uniform1f(uRows, rows);
+
+    // Set Layout Mode: 1=Circular(0.38), 2=Horizontal(0.39)
+    gl.uniform1i(uLayout, shaderFile.includes('v0.39') ? 2 : 1);
+    gl.uniform1i(uInvert, invertChannels ? 1 : 0);
+
+    const totalPlayhead = playheadRow + (tickOffset || 0);
+    gl.uniform1f(uPlay, totalPlayhead);
+
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, res.texture);
+    gl.uniform1i(uTex, 0);
+
+    gl.bindVertexArray(res.vao);
+    gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, rows * cols);
+  };
+
+  const loadBezelTexture = async (device: GPUDevice) => {
+    if (bezelTextureResourcesRef.current) return;
+
+    // Determine texture file based on shader version
+    const textureName = shaderFile.includes('v0.39') ? 'bezel-square.png' : 'bezel.png';
+
+    let bitmap: ImageBitmap;
+    try {
+      const img = new Image();
+      img.src = textureName;
+      await img.decode();
+      bitmap = await createImageBitmap(img);
+    } catch (e) {
+      console.warn(`Failed to load ${textureName}, using fallback.`, e);
+      const canvas = document.createElement('canvas'); canvas.width = 1; canvas.height = 1;
+      const ctx = canvas.getContext('2d'); if (ctx) { ctx.fillStyle = 'rgba(0,0,0,0)'; ctx.fillRect(0, 0, 1, 1); }
+      bitmap = await createImageBitmap(canvas);
+    }
+
+    const texture = device.createTexture({ size: [bitmap.width, bitmap.height, 1], format: preferredImageFormat(device), usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT });
+    device.queue.copyExternalImageToTexture({ source: bitmap, flipY: true }, { texture }, [bitmap.width, bitmap.height, 1]);
+    const sampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear' });
+    bezelTextureResourcesRef.current = { sampler, view: texture.createView() };
+  };
+
+  const ensureButtonTexture = async (device: GPUDevice) => {
+    if (textureResourcesRef.current) return;
+    const textureUrl = shaderFile.includes('v0.30') ? 'unlit-button-2.png' : 'https://test.1ink.us/xm-player/unlit-button.png';
+    let bitmap: ImageBitmap;
+    try {
+      const img = new Image();
+      img.src = textureUrl;
+      img.crossOrigin = 'anonymous';
+      await img.decode();
+      bitmap = await createImageBitmap(img);
+    } catch (e) {
+      console.warn(`Failed to load button texture (${textureUrl}), using fallback.`, e);
+      const canvas = document.createElement('canvas');
+      canvas.width = 128; canvas.height = 128;
+      const ctx = canvas.getContext('2d');
+      if (ctx) { ctx.fillStyle = '#222'; ctx.fillRect(0, 0, 128, 128); ctx.strokeStyle = '#444'; ctx.strokeRect(10, 10, 108, 108); }
+      bitmap = await createImageBitmap(canvas);
+    }
+    const texture = device.createTexture({ size: [bitmap.width, bitmap.height, 1], format: preferredImageFormat(device), usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT });
+    device.queue.copyExternalImageToTexture({ source: bitmap, flipY: true }, { texture }, [bitmap.width, bitmap.height, 1]);
+    const filterMode: GPUFilterMode = 'nearest';
+    const sampler = device.createSampler({ magFilter: filterMode, minFilter: filterMode });
+    textureResourcesRef.current = { sampler, view: texture.createView() };
+  };
+
+  const ensureVideoPlaceholder = (device: GPUDevice) => {
+    if (videoTextureRef.current) return;
+    const fmt = preferredImageFormat(device);
+    const texture = device.createTexture({
+      size: [1, 1, 1],
+      format: fmt,
+      usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT,
     });
-
-    // First pass: draw bezel (full-screen)
-    if (bezelPipelineRef.current && bezelBindGroupRef.current) {
-      pass.setPipeline(bezelPipelineRef.current);
-      pass.setBindGroup(0, bezelBindGroupRef.current);
-      pass.draw(6, 1, 0, 0);
+    if (fmt === 'rgba32float') {
+      const data = new Float32Array([100.0/255.0, 100.0/255.0, 100.0/255.0, 1.0]);
+      device.queue.writeTexture({ texture }, data, { bytesPerRow: 16 }, { width: 1, height: 1 });
+    } else {
+      const data = new Uint8Array([100, 100, 100, 255]);
+      device.queue.writeTexture({ texture }, data, { bytesPerRow: 4 }, { width: 1, height: 1 });
     }
+    videoTextureRef.current = texture;
+    const sampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear' });
+    textureResourcesRef.current = { sampler, view: texture.createView() };
+  };
 
-    // Second pass: pattern display
-    pass.setPipeline(pipeline);
-    pass.setBindGroup(0, bindGroup);
-    const numRows = matrix?.numRows ?? DEFAULT_ROWS;
-    const rawChannels = matrix?.numChannels ?? DEFAULT_CHANNELS;
-    const numChannels = padTopChannel ? rawChannels + 1 : rawChannels;
-    const totalInstances = numRows * numChannels;
-
-    if (totalInstances > 0) {
-      if (isSinglePassCompositeShader(shaderFile)) {
-        // Background instance (firstInstance = totalInstances) then pattern instances.
-        pass.draw(6, 1, 0, totalInstances);
-        pass.draw(6, totalInstances, 0, 0);
-      } else {
-        pass.draw(6, totalInstances, 0, 0);
-      }
-    }
-    pass.end();
-
-    device.queue.submit([encoder.finish()]);
+  const preferredImageFormat = (device: GPUDevice) => {
+    return device.features.has('float32-filterable') ? ('rgba32float' as GPUTextureFormat) : ('rgba8unorm' as GPUTextureFormat);
   };
 
   const refreshBindGroup = (device: GPUDevice) => {
@@ -691,357 +890,91 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
         { binding: 3, resource: textureResourcesRef.current.view },
       );
     }
-
     bindGroupRef.current = device.createBindGroup({ layout, entries });
   };
 
-  const preferredImageFormat = (device: GPUDevice) => {
-    // Prefer float32 images when the device advertises support for float filtering.
-    return device.features.has('float32-filterable') ? ('rgba32float' as GPUTextureFormat) : ('rgba8unorm' as GPUTextureFormat);
-  };
-
-  const ensureVideoPlaceholder = (device: GPUDevice) => {
-    if (videoTextureRef.current) return;
-    const fmt = preferredImageFormat(device);
-    const texture = device.createTexture({
-      size: [1, 1, 1],
-      format: fmt,
-      usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT,
-    });
-    // Fill with gray
-    if (fmt === 'rgba32float') {
-      const data = new Float32Array([100.0/255.0, 100.0/255.0, 100.0/255.0, 1.0]);
-      // bytesPerRow = 4 channels * 4 bytes = 16
-      device.queue.writeTexture({ texture }, data, { bytesPerRow: 16 }, { width: 1, height: 1 });
-    } else {
-      const data = new Uint8Array([100, 100, 100, 255]);
-      device.queue.writeTexture({ texture }, data, { bytesPerRow: 4 }, { width: 1, height: 1 });
-    }
-    videoTextureRef.current = texture;
-    const sampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear' });
-    textureResourcesRef.current = { sampler, view: texture.createView() };
-  };
-
-  const ensureButtonTexture = async (device: GPUDevice) => {
-    // If we have a texture but it matches the current device, keep it.
-    // If it's null, create it.
-    if (textureResourcesRef.current) return;
-
-    // Detect which texture to use based on shader version
-    // If v0.30, use unlit-button-2.png. Otherwise fallback to original.
-    const textureUrl = shaderFile.includes('v0.30')
-      ? 'unlit-button-2.png' // Local public file
-      : 'https://test.1ink.us/xm-player/unlit-button.png'; // Original remote file
-
-    let bitmap: ImageBitmap;
-    try {
-      const img = new Image();
-      img.src = textureUrl;
-      img.crossOrigin = 'anonymous'; // Important for texture loading if remote
-      await img.decode();
-      bitmap = await createImageBitmap(img);
-    } catch (e) {
-      console.warn(`Failed to load button texture (${textureUrl}), using fallback.`, e);
-      const canvas = document.createElement('canvas');
-      canvas.width = 128; // fallback size
-      canvas.height = 128;
-      const ctx = canvas.getContext('2d');
-      if (ctx) {
-        ctx.fillStyle = '#222';
-        ctx.fillRect(0, 0, 128, 128);
-        // Draw a visual placeholder debug box
-        ctx.strokeStyle = '#444';
-        ctx.strokeRect(10, 10, 108, 108);
-      }
-      bitmap = await createImageBitmap(canvas);
-    }
-
-    const texture = device.createTexture({
-      size: [bitmap.width, bitmap.height, 1],
-      format: preferredImageFormat(device),
-      usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT,
-    });
-    // Flip Y-axis to fix upside-down issue
-    device.queue.copyExternalImageToTexture({ source: bitmap, flipY: true }, { texture }, [bitmap.width, bitmap.height, 1]);
-
-// CHANGE: Force 'nearest' to keep pixels defined and crisp
-    const filterMode: GPUFilterMode = 'nearest';
-    const sampler = device.createSampler({ magFilter: filterMode, minFilter: filterMode });
-
-    textureResourcesRef.current = { sampler, view: texture.createView() };
-  };
-
-  const loadBezelTexture = async (device: GPUDevice) => {
-    if (bezelTextureResourcesRef.current) return;
-
-    let bitmap: ImageBitmap;
-    try {
-      const img = new Image();
-      img.src = 'bezel.png';
-      await img.decode();
-      bitmap = await createImageBitmap(img);
-    } catch (e) {
-      console.warn('Failed to load bezel.png, using fallback.', e);
-      const canvas = document.createElement('canvas');
-      canvas.width = 1;
-      canvas.height = 1;
-      const ctx = canvas.getContext('2d');
-      if (ctx) {
-        ctx.fillStyle = 'rgba(0,0,0,0)';
-        ctx.fillRect(0, 0, 1, 1);
-      }
-      bitmap = await createImageBitmap(canvas);
-    }
-
-    const texture = device.createTexture({
-      size: [bitmap.width, bitmap.height, 1],
-      format: preferredImageFormat(device),
-      usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT,
-    });
-    // Flip Y-axis to fix upside-down issue
-    device.queue.copyExternalImageToTexture({ source: bitmap, flipY: true }, { texture }, [bitmap.width, bitmap.height, 1]);
-    const sampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear' });
-    bezelTextureResourcesRef.current = { sampler, view: texture.createView() };
-  };
-
-  // GPU initialization
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-
-    if (!('gpu' in navigator)) {
-      setWebgpuAvailable(false);
-      return;
-    }
-
+    if (!('gpu' in navigator)) { setWebgpuAvailable(false); return; }
     let cancelled = false;
 
     const init = async () => {
       try {
         const adapter = await navigator.gpu.requestAdapter();
         if (!adapter || cancelled) { setWebgpuAvailable(false); return; }
-
-  //  add WebGPU extensions
         const requiredFeatures: GPUFeatureName[] = [];
-        if (adapter.features.has('float32-filterable')) {
-            requiredFeatures.push('float32-filterable');
-        } else {
-            console.log("Device does not support 'float32-filterable', using two-sampler workaround.");
-        }
-        if (adapter.features.has('float32-blendable')) {
-            requiredFeatures.push('float32-blendable');
-        } else {
-            console.log("Device does not support 'float32-blendable'.");
-        }
+        if (adapter.features.has('float32-filterable')) requiredFeatures.push('float32-filterable');
+        if (adapter.features.has('float32-blendable')) requiredFeatures.push('float32-blendable');
+        if (adapter.features.has('clip-distances')) requiredFeatures.push('clip-distances');
+        if (adapter.features.has('depth32float-stencil8')) requiredFeatures.push('depth32float-stencil8');
+        if (adapter.features.has('dual-source-blending')) requiredFeatures.push('dual-source-blending');
+        if (adapter.features.has('subgroups')) requiredFeatures.push('subgroups');
+        if (adapter.features.has('texture-component-swizzle')) requiredFeatures.push('texture-component-swizzle');
+        if (adapter.features.has('shader-f16')) requiredFeatures.push('shader-f16');
 
-                if (adapter.features.has('clip-distances')) {
-            requiredFeatures.push('clip-distances');
-        } else {
-            console.log("Device does not support 'clip-distances'.");
-        }
-
-                if (adapter.features.has('depth32float-stencil8')) {
-            requiredFeatures.push('depth32float-stencil8');
-        } else {
-            console.log("Device does not support 'depth32float-stencil8'.");
-        }
-
-                if (adapter.features.has('dual-source-blending')) {
-            requiredFeatures.push('dual-source-blending');
-        } else {
-            console.log("Device does not support 'dual-source-blending'.");
-        }
-
-                if (adapter.features.has('subgroups')) {
-            requiredFeatures.push('subgroups');
-        } else {
-            console.log("Device does not support 'subgroups'.");
-        }
-
-                if (adapter.features.has('texture-component-swizzle')) {
-            requiredFeatures.push('texture-component-swizzle');
-        } else {
-            console.log("Device does not support 'texture-component-swizzle'.");
-        }
-
-                if (adapter.features.has('shader-f16')) {
-            requiredFeatures.push('shader-f16');
-        } else {
-            console.log("Device does not support 'shader-f16'.");
-        }
-
-
-        const device = await adapter.requestDevice({
-            requiredFeatures,
-        });
-
+        const device = await adapter.requestDevice({ requiredFeatures });
         if (!device || cancelled) { setWebgpuAvailable(false); return; }
 
         const context = canvas.getContext('webgpu') as GPUCanvasContext;
         const format = navigator.gpu.getPreferredCanvasFormat();
         context.configure({ device, format });
 
-        // IMPORTANT: Clear old refs that might hold resources from a previous device
-        // to avoid "Sampler associated with [Device] cannot be used with [Device]" errors.
         textureResourcesRef.current = null;
         bezelTextureResourcesRef.current = null;
 
         const shaderSource = await fetch(`./shaders/${shaderFile}`).then(res => res.text());
         if (cancelled) return;
         const module = device.createShaderModule({ code: shaderSource });
-        if ('getCompilationInfo' in module) {
-          module.getCompilationInfo().then(info => {
-            info.messages.forEach(msg => {
-              const log = msg.type === 'error' ? console.error : console.warn;
-              log(`[WGSL ${msg.type}] ${shaderFile}:${msg.lineNum}:${msg.linePos} ${msg.message}`);
-            });
-          }).catch(() => {});
-        }
+        if ('getCompilationInfo' in module) module.getCompilationInfo().catch(() => {});
 
         const layoutType = getLayoutType(shaderFile);
         layoutTypeRef.current = layoutType;
         useExtendedRef.current = layoutType === 'extended';
         if (layoutType !== 'extended') {
-          rowFlagsBufferRef.current?.destroy();
-          rowFlagsBufferRef.current = null;
-          channelsBufferRef.current?.destroy();
-          channelsBufferRef.current = null;
+          rowFlagsBufferRef.current?.destroy(); rowFlagsBufferRef.current = null;
+          channelsBufferRef.current?.destroy(); channelsBufferRef.current = null;
         }
 
         let bindGroupLayout: GPUBindGroupLayout;
         if (layoutType === 'texture') {
-          bindGroupLayout = device.createBindGroupLayout({
-            entries: [
-              { binding: 0, visibility: GPUShaderStage.FRAGMENT | GPUShaderStage.VERTEX, buffer: { type: 'read-only-storage' } },
-              { binding: 1, visibility: GPUShaderStage.FRAGMENT | GPUShaderStage.VERTEX, buffer: { type: 'uniform' } },
-              { binding: 2, visibility: GPUShaderStage.FRAGMENT, sampler: { type: 'filtering' } },
-              { binding: 3, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float' } },
-            ],
-          });
+          bindGroupLayout = device.createBindGroupLayout({ entries: [{ binding: 0, visibility: GPUShaderStage.FRAGMENT | GPUShaderStage.VERTEX, buffer: { type: 'read-only-storage' } }, { binding: 1, visibility: GPUShaderStage.FRAGMENT | GPUShaderStage.VERTEX, buffer: { type: 'uniform' } }, { binding: 2, visibility: GPUShaderStage.FRAGMENT, sampler: { type: 'filtering' } }, { binding: 3, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float' } }] });
         } else if (layoutType === 'extended') {
-          bindGroupLayout = device.createBindGroupLayout({
-            entries: [
-              { binding: 0, visibility: GPUShaderStage.FRAGMENT | GPUShaderStage.VERTEX, buffer: { type: 'read-only-storage' } },
-              { binding: 1, visibility: GPUShaderStage.FRAGMENT | GPUShaderStage.VERTEX, buffer: { type: 'uniform' } },
-              { binding: 2, visibility: GPUShaderStage.FRAGMENT, buffer: { type: 'read-only-storage' } },
-              { binding: 3, visibility: GPUShaderStage.FRAGMENT, buffer: { type: 'read-only-storage' } },
-              { binding: 4, visibility: GPUShaderStage.FRAGMENT, sampler: { type: 'filtering' } },
-              { binding: 5, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float' } },
-            ],
-          });
+          bindGroupLayout = device.createBindGroupLayout({ entries: [{ binding: 0, visibility: GPUShaderStage.FRAGMENT | GPUShaderStage.VERTEX, buffer: { type: 'read-only-storage' } }, { binding: 1, visibility: GPUShaderStage.FRAGMENT | GPUShaderStage.VERTEX, buffer: { type: 'uniform' } }, { binding: 2, visibility: GPUShaderStage.FRAGMENT, buffer: { type: 'read-only-storage' } }, { binding: 3, visibility: GPUShaderStage.FRAGMENT, buffer: { type: 'read-only-storage' } }, { binding: 4, visibility: GPUShaderStage.FRAGMENT, sampler: { type: 'filtering' } }, { binding: 5, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float' } }] });
         } else {
-          bindGroupLayout = device.createBindGroupLayout({
-            entries: [
-              { binding: 0, visibility: GPUShaderStage.FRAGMENT | GPUShaderStage.VERTEX, buffer: { type: 'read-only-storage' } },
-              { binding: 1, visibility: GPUShaderStage.FRAGMENT | GPUShaderStage.VERTEX, buffer: { type: 'uniform' } },
-            ],
-          });
+          bindGroupLayout = device.createBindGroupLayout({ entries: [{ binding: 0, visibility: GPUShaderStage.FRAGMENT | GPUShaderStage.VERTEX, buffer: { type: 'read-only-storage' } }, { binding: 1, visibility: GPUShaderStage.FRAGMENT | GPUShaderStage.VERTEX, buffer: { type: 'uniform' } }] });
         }
 
-        let entryVert = 'vs';
-        let entryFrag = 'fs';
-
         const enableAlphaBlend = shouldEnableAlphaBlending(shaderFile);
-        const targets: GPUColorTargetState[] = [
-          {
-            format,
-            ...(enableAlphaBlend
-              ? {
-                  blend: {
-                    color: { srcFactor: 'src-alpha', dstFactor: 'one-minus-src-alpha', operation: 'add' },
-                    alpha: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha', operation: 'add' },
-                  },
-                }
-              : {}),
-          },
-        ];
+        const targets: GPUColorTargetState[] = [{ format, ...(enableAlphaBlend ? { blend: { color: { srcFactor: 'src-alpha', dstFactor: 'one-minus-src-alpha', operation: 'add' }, alpha: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha', operation: 'add' } } } : {}) }];
         try {
-          pipelineRef.current = device.createRenderPipeline({
-            layout: device.createPipelineLayout({ bindGroupLayouts: [bindGroupLayout] }),
-            vertex: { module, entryPoint: entryVert },
-            fragment: { module, entryPoint: entryFrag, targets },
-            primitive: { topology: 'triangle-list' },
-          });
+          pipelineRef.current = device.createRenderPipeline({ layout: device.createPipelineLayout({ bindGroupLayouts: [bindGroupLayout] }), vertex: { module, entryPoint: 'vs' }, fragment: { module, entryPoint: 'fs', targets }, primitive: { topology: 'triangle-list' } });
         } catch {
-          pipelineRef.current = device.createRenderPipeline({
-            layout: device.createPipelineLayout({ bindGroupLayouts: [bindGroupLayout] }),
-            vertex: { module, entryPoint: 'vertex_main' },
-            fragment: { module, entryPoint: 'fragment_main', targets },
-            primitive: { topology: 'triangle-list' },
-          });
+          pipelineRef.current = device.createRenderPipeline({ layout: device.createPipelineLayout({ bindGroupLayouts: [bindGroupLayout] }), vertex: { module, entryPoint: 'vertex_main' }, fragment: { module, entryPoint: 'fragment_main', targets }, primitive: { topology: 'triangle-list' } });
         }
 
         const uniformSize = layoutType === 'simple' ? 32 : 64;
         const uniformBuffer = device.createBuffer({ size: alignTo(uniformSize, 256), usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
 
-        // --- Background pass (fullscreen bezel/chassis)
         if (shouldUseBackgroundPass(shaderFile)) {
           try {
             const backgroundShaderFile = getBackgroundShaderFile(shaderFile);
             const backgroundSource = await fetch(`./shaders/${backgroundShaderFile}`).then(res => res.text());
             const bezelModule = device.createShaderModule({ code: backgroundSource });
-            if ('getCompilationInfo' in bezelModule) {
-              bezelModule
-                .getCompilationInfo()
-                .then(info => {
-                  info.messages.forEach(msg => {
-                    const log = msg.type === 'error' ? console.error : console.warn;
-                    log(`[WGSL bg ${backgroundShaderFile} ${msg.type}]: ${msg.lineNum}:${msg.linePos} ${msg.message}`);
-                  });
-                })
-                .catch(() => {});
-            }
-
-            const bezelBindLayout = device.createBindGroupLayout({
-              entries: [
-                { binding: 0, visibility: GPUShaderStage.FRAGMENT, buffer: { type: 'uniform' } },
-                { binding: 1, visibility: GPUShaderStage.FRAGMENT, sampler: { type: 'filtering' } },
-                { binding: 2, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float' } },
-              ],
-            });
-
-            try {
-              bezelPipelineRef.current = device.createRenderPipeline({
-                layout: device.createPipelineLayout({ bindGroupLayouts: [bezelBindLayout] }),
-                vertex: { module: bezelModule, entryPoint: 'vs' },
-                fragment: { module: bezelModule, entryPoint: 'fs', targets: [{ format }] },
-                primitive: { topology: 'triangle-list' },
-              });
-            } catch (be) {
-              console.warn('Failed to create bezel pipeline', be);
-            }
-
+            const bezelBindLayout = device.createBindGroupLayout({ entries: [{ binding: 0, visibility: GPUShaderStage.FRAGMENT, buffer: { type: 'uniform' } }, { binding: 1, visibility: GPUShaderStage.FRAGMENT, sampler: { type: 'filtering' } }, { binding: 2, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float' } }] });
+            bezelPipelineRef.current = device.createRenderPipeline({ layout: device.createPipelineLayout({ bindGroupLayouts: [bezelBindLayout] }), vertex: { module: bezelModule, entryPoint: 'vs' }, fragment: { module: bezelModule, entryPoint: 'fs', targets: [{ format }] }, primitive: { topology: 'triangle-list' } });
             bezelUniformBufferRef.current = device.createBuffer({ size: alignTo(96, 256), usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
-
-            // Load bezel texture
             await loadBezelTexture(device);
-
-            bezelBindGroupRef.current = device.createBindGroup({
-              layout: bezelBindLayout,
-              entries: [
-                { binding: 0, resource: { buffer: bezelUniformBufferRef.current } },
-                { binding: 1, resource: bezelTextureResourcesRef.current!.sampler },
-                { binding: 2, resource: bezelTextureResourcesRef.current!.view },
-              ],
-            });
-          } catch (e) {
-            console.warn('Failed to initialize bezel shader', e);
-          }
+            bezelBindGroupRef.current = device.createBindGroup({ layout: bezelBindLayout, entries: [{ binding: 0, resource: { buffer: bezelUniformBufferRef.current } }, { binding: 1, resource: bezelTextureResourcesRef.current!.sampler }, { binding: 2, resource: bezelTextureResourcesRef.current!.view }] });
+          } catch (e) { console.warn('Failed to initialize bezel shader', e); }
         } else {
-          bezelPipelineRef.current = null;
-          bezelBindGroupRef.current = null;
-          if (bezelUniformBufferRef.current) {
-            bezelUniformBufferRef.current.destroy();
-            bezelUniformBufferRef.current = null;
-          }
+          bezelPipelineRef.current = null; bezelBindGroupRef.current = null;
+          if (bezelUniformBufferRef.current) { bezelUniformBufferRef.current.destroy(); bezelUniformBufferRef.current = null; }
         }
 
-        deviceRef.current = device;
-        contextRef.current = context;
-        uniformBufferRef.current = uniformBuffer;
+        deviceRef.current = device; contextRef.current = context; uniformBufferRef.current = uniformBuffer;
 
-        // Initial buffer creation (handles null matrix now via packPatternMatrix)
-        const isHighPrec = shaderFile.includes('v0.36') || shaderFile.includes('v0.37');
+        const isHighPrec = shaderFile.includes('v0.36') || shaderFile.includes('v0.37') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39');
         const packFunc = isHighPrec ? packPatternMatrixHighPrecision : packPatternMatrix;
         cellsBufferRef.current = createBufferWithData(device, packFunc(matrix, padTopChannel), GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
 
@@ -1056,89 +989,33 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
         const needsTexture = layoutType === 'texture' || layoutType === 'extended';
         if (needsTexture) {
           const isVideoShader = shaderFile.includes('v0.20') || shaderFile.includes('v0.23') || shaderFile.includes('v0.24') || shaderFile.includes('v0.25');
-          if (isVideoShader) {
-            ensureVideoPlaceholder(device);
-          } else {
-            await ensureButtonTexture(device);
-          }
+          if (isVideoShader) ensureVideoPlaceholder(device); else await ensureButtonTexture(device);
         }
 
         refreshBindGroup(device);
-
         setGpuReady(true);
-      } catch (error) {
-        console.error('Failed to initialize WebGPU pattern display', error);
-        if (!cancelled) setWebgpuAvailable(false);
-      }
+      } catch (error) { console.error('Failed to initialize WebGPU pattern display', error); if (!cancelled) setWebgpuAvailable(false); }
     };
-
     init();
-
     return () => {
-      cancelled = true;
-      setWebgpuAvailable(true);
-      setGpuReady(false);
-      bindGroupRef.current = null;
-      pipelineRef.current = null;
-      // Destroy bezel resources if present
+      cancelled = true; setWebgpuAvailable(true); setGpuReady(false);
+      bindGroupRef.current = null; pipelineRef.current = null;
       if (bezelUniformBufferRef.current) { bezelUniformBufferRef.current.destroy(); bezelUniformBufferRef.current = null; }
-      bezelBindGroupRef.current = null;
-      bezelPipelineRef.current = null;
-      // IMPORTANT: Clear bezel texture refs so next init doesn't reuse old device sampler
-      bezelTextureResourcesRef.current = null;
-      
-      // Clear button click timeout
-      if (clickTimeoutRef.current !== null) {
-        window.clearTimeout(clickTimeoutRef.current);
-        clickTimeoutRef.current = null;
-      }
-
-      cellsBufferRef.current = null;
-      uniformBufferRef.current = null;
-      rowFlagsBufferRef.current = null;
-      channelsBufferRef.current = null;
-      textureResourcesRef.current = null;
-
-      // Cleanup video texture which is owned by this device lifecycle
-      if (videoTextureRef.current) {
-        const deviceToWait = deviceRef.current;
-        if (deviceToWait) {
-          // Wait for any submitted work to complete before destroying the texture to avoid
-          // "Destroyed texture used in a submit" errors when the GPU is still using the resource.
-          deviceToWait.queue
-            .onSubmittedWorkDone()
-            .then(() => {
-              try { videoTextureRef.current?.destroy(); } catch (e) {}
-              videoTextureRef.current = null;
-            })
-            .catch(() => {
-              try { videoTextureRef.current?.destroy(); } catch (e) {}
-              videoTextureRef.current = null;
-            });
-        } else {
-          try { videoTextureRef.current.destroy(); } catch (e) {}
-          videoTextureRef.current = null;
-        }
-      }
-
-      deviceRef.current = null;
-      contextRef.current = null;
+      bezelBindGroupRef.current = null; bezelPipelineRef.current = null; bezelTextureResourcesRef.current = null;
+      if (clickTimeoutRef.current !== null) { window.clearTimeout(clickTimeoutRef.current); clickTimeoutRef.current = null; }
+      cellsBufferRef.current = null; uniformBufferRef.current = null; rowFlagsBufferRef.current = null; channelsBufferRef.current = null; textureResourcesRef.current = null;
+      if (videoTextureRef.current) { const deviceToWait = deviceRef.current; if(deviceToWait) deviceToWait.queue.onSubmittedWorkDone().then(() => { try { videoTextureRef.current?.destroy(); } catch (e) {} videoTextureRef.current = null; }).catch(()=>{ try { videoTextureRef.current?.destroy(); } catch (e) {} videoTextureRef.current = null; }); else { try { videoTextureRef.current.destroy(); } catch (e) {} videoTextureRef.current = null; } }
+      deviceRef.current = null; contextRef.current = null;
     };
-  }, [shaderFile]); // REMOVED matrix from dependencies to prevent re-init flash
+  }, [shaderFile]);
 
-  // 1. Matrix & Cell Buffer Management
   useEffect(() => {
     const device = deviceRef.current;
     if (!device || !gpuReady) return;
-
-    if (cellsBufferRef.current) {
-        cellsBufferRef.current.destroy();
-    }
-    const isHighPrec = shaderFile.includes('v0.36') || shaderFile.includes('v0.37');
+    if (cellsBufferRef.current) cellsBufferRef.current.destroy();
+    const isHighPrec = shaderFile.includes('v0.36') || shaderFile.includes('v0.37') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39');
     const packFunc = isHighPrec ? packPatternMatrixHighPrecision : packPatternMatrix;
     cellsBufferRef.current = createBufferWithData(device, packFunc(matrix, padTopChannel), GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
-
-    // Also update row flags if extended
     if (layoutTypeRef.current === 'extended') {
         const numRows = matrix?.numRows ?? DEFAULT_ROWS;
         const flags = buildRowFlags(numRows);
@@ -1149,20 +1026,16 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
             device.queue.writeBuffer(rowFlagsBufferRef.current, 0, flags.buffer, flags.byteOffset, flags.byteLength);
         }
     }
-
     refreshBindGroup(device);
   }, [matrix, gpuReady]);
 
-  // 2. Channels Buffer Management
   useEffect(() => {
     const device = deviceRef.current;
     if (!device || !gpuReady) return;
-
     if (layoutTypeRef.current === 'extended') {
         const count = Math.max(1, matrix?.numChannels ?? DEFAULT_CHANNELS);
         const packedBuffer = packChannelStates(channels, count, padTopChannel);
         let recreated = false;
-
         if (!channelsBufferRef.current || channelsBufferRef.current.size < packedBuffer.byteLength) {
             channelsBufferRef.current?.destroy();
             channelsBufferRef.current = createBufferWithData(device, packedBuffer, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
@@ -1170,147 +1043,71 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
         } else {
             device.queue.writeBuffer(channelsBufferRef.current, 0, packedBuffer);
         }
-
-        if (recreated) {
-            refreshBindGroup(device);
-        }
+        if (recreated) refreshBindGroup(device);
     }
   }, [channels, matrix?.numChannels, gpuReady]);
 
-  // Handle Shader Button Clicks and Slider Interactions (v0.37 specific)
   const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!shaderFile.includes('v0.37')) return;
-
+    if (!shaderFile.includes('v0.37') && !shaderFile.includes('v0.38') && !shaderFile.includes('v0.39')) return;
     const rect = e.currentTarget.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
-
-    // Normalize to UV 0..1 (top-left origin)
     const u = x / rect.width;
     const v = y / rect.height;
-
-    // React P (0,0 center).
-    // u (0..1) -> pX (-0.5..0.5) (Left..Right)
-    // v (0..1) -> pY (-0.5..0.5) where positive = TOP to match shader coordinates
     const pX = u - 0.5;
     const pY = 0.5 - v;
-
-    // Check Volume Slider (left side)
-    // Use shader coordinates: sliderY = -0.2 (Down)
     const sliderLeftX = -0.42;
     const sliderY = -0.2;
-    const sliderH = 0.2; // Smaller
+    const sliderH = 0.2;
     const sliderClickRadius = 0.03;
-    
     if (Math.abs(pX - sliderLeftX) < sliderClickRadius && Math.abs(pY - sliderY) < sliderH * 0.5) {
-      // Volume slider clicked
       const volValue = ((pY - sliderY) / (sliderH * 0.9) + 0.5);
-      const clampedVol = Math.max(0, Math.min(1, volValue));
-      onVolumeChange?.(clampedVol);
+      onVolumeChange?.(Math.max(0, Math.min(1, volValue)));
       return;
     }
-
-    // Check Pan Slider (right side)
     const sliderRightX = 0.42;
-    
     if (Math.abs(pX - sliderRightX) < sliderClickRadius && Math.abs(pY - sliderY) < sliderH * 0.5) {
-      // Pan slider clicked
       const panValue = (pY - sliderY) / (sliderH * 0.45);
-      const clampedPan = Math.max(-1, Math.min(1, panValue));
-      onPanChange?.(clampedPan);
+      onPanChange?.(Math.max(-1, Math.min(1, panValue)));
       return;
     }
-
-    // 1. Check Song Position Bar
-    // Shader: barY = -0.45 (Bottom).
-    // Moved slightly right in shader: barCenterX = 0.1, width 0.6
-    const barY = -0.45;
-    const barWidth = 0.6;
-    const barCenterX = 0.1;
-    const barHeight = 0.03;
-
-    // Check Seek Bar Click
+    const barY = -0.45; const barWidth = 0.6; const barCenterX = 0.1; const barHeight = 0.03;
     if (Math.abs(pY - barY) < barHeight && Math.abs(pX - barCenterX) < barWidth / 2) {
-       // Calculate progress relative to the bar's rect
        const relX = pX - (barCenterX - barWidth/2);
-       const progress = relX / barWidth;
-       const clamped = Math.max(0, Math.min(1, progress));
-
-       if (onSeek) {
-         const targetRow = Math.floor(clamped * (totalRows || 64));
-         onSeek(targetRow);
-       }
+       if (onSeek) onSeek(Math.floor(Math.max(0, Math.min(1, relX / barWidth)) * (totalRows || 64)));
        return;
     }
-
-    // 2. Check Buttons
-    // Coordinate system matches shader: p.y = 0.5 is Top, p.y = -0.5 is Bottom
-    const btnRadius = 0.045; // Increased for better usability
+    const btnRadius = 0.045;
     const dist = (x1: number, y1: number, x2: number, y2: number) => Math.sqrt((x1-x2)**2 + (y1-y2)**2);
-
-    // Helper to flash button feedback
     const flashButton = (buttonId: number) => {
-      // Clear any existing timeout to prevent stale state updates
-      if (clickTimeoutRef.current !== null) {
-        window.clearTimeout(clickTimeoutRef.current);
-      }
+      if (clickTimeoutRef.current !== null) window.clearTimeout(clickTimeoutRef.current);
       setClickedButton(buttonId);
-      clickTimeoutRef.current = window.setTimeout(() => {
-        setClickedButton(0);
-        clickTimeoutRef.current = null;
-      }, 200) as number;
+      clickTimeoutRef.current = window.setTimeout(() => { setClickedButton(0); clickTimeoutRef.current = null; }, 200) as number;
     };
-
-    // Loop: Top Left (-0.44, 0.42)
-    if (dist(pX, pY, -0.44, 0.42) < btnRadius) {
-       flashButton(1);
-       onLoopToggle?.();
-       return;
-    }
-
-    // Open: Top Right (0.44, 0.42)
-    if (dist(pX, pY, 0.44, 0.42) < btnRadius) {
-       flashButton(2);
-       fileInputRef.current?.click();
-       return;
-    }
-
-    // Play: Bottom Left (-0.44, -0.40)
-    if (dist(pX, pY, -0.44, -0.40) < btnRadius) {
-       flashButton(3);
-       onPlay?.();
-       return;
-    }
-
-    // Stop: Bottom Left (-0.35, -0.40)
-    if (dist(pX, pY, -0.35, -0.40) < btnRadius) {
-       flashButton(4);
-       onStop?.();
-       return;
-    }
+    if (dist(pX, pY, -0.44, 0.42) < btnRadius) { flashButton(1); onLoopToggle?.(); return; }
+    if (dist(pX, pY, 0.44, 0.42) < btnRadius) { flashButton(2); fileInputRef.current?.click(); return; }
+    if (dist(pX, pY, -0.44, -0.40) < btnRadius) { flashButton(3); onPlay?.(); return; }
+    if (dist(pX, pY, -0.35, -0.40) < btnRadius) { flashButton(4); onStop?.(); return; }
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-     if (e.target.files && e.target.files.length > 0) {
-        onFileSelected?.(e.target.files[0]);
-     }
+     if (e.target.files && e.target.files.length > 0) onFileSelected?.(e.target.files[0]);
   };
 
-  // 3. Render Loop (Uniforms & Draw)
-  useEffect(() => {
+  const render = () => {
     const device = deviceRef.current;
-    if (!device || !gpuReady) return;
+    const context = contextRef.current;
+    const pipeline = pipelineRef.current;
+    const bindGroup = bindGroupRef.current;
+    if (!device || !context || !pipeline || !bindGroup || !uniformBufferRef.current || !cellsBufferRef.current) return;
 
-    // Update uniform buffer
-    const uniformBuffer = uniformBufferRef.current;
-    if (uniformBuffer) {
+    if (uniformBufferRef.current) {
       const numRows = matrix?.numRows ?? DEFAULT_ROWS;
       const rawChannels = matrix?.numChannels ?? DEFAULT_CHANNELS;
       const numChannels = padTopChannel ? rawChannels + 1 : rawChannels;
       const rowLimit = Math.max(1, numRows);
       const tickRow = clampPlayhead(playheadRow, rowLimit);
       const fractionalTick = Math.min(1, Math.max(0, tickOffset));
-
       const effectiveTime = isModuleLoaded ? timeSec : localTime;
 
       const uniformPayload = createUniformPayload(layoutTypeRef.current, {
@@ -1334,70 +1131,94 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
         bloomThreshold: bloomThreshold ?? 0.8,
         invertChannels: invertChannels,
       });
-      device.queue.writeBuffer(uniformBuffer, 0, uniformPayload);
+      device.queue.writeBuffer(uniformBufferRef.current, 0, uniformPayload);
     }
 
-    // Update bezel uniforms (canvas size, colors, bezel width, screw radius)
     if (bezelUniformBufferRef.current) {
-      const buf = new Float32Array(24); // Expanded to 24 floats (96 bytes)
-      buf[0] = canvasMetrics.width;
-      buf[1] = canvasMetrics.height;
-          const minDim = Math.min(canvasMetrics.width, canvasMetrics.height);
-          const circularLayout = isCircularLayoutShader(shaderFile);
-
-          // bezel width in pixels
-          buf[2] = minDim * (circularLayout ? 0.05 : 0.07);
-      // surface color (off-white)
+      const buf = new Float32Array(24);
+      buf[0] = canvasMetrics.width; buf[1] = canvasMetrics.height;
+      const minDim = Math.min(canvasMetrics.width, canvasMetrics.height);
+      const circularLayout = isCircularLayoutShader(shaderFile);
+      buf[2] = minDim * (circularLayout ? 0.05 : 0.07);
       buf[3] = 0.98; buf[4] = 0.98; buf[5] = 0.98;
-      // bezel color (slightly darker)
       buf[6] = 0.92; buf[7] = 0.92; buf[8] = 0.93;
-      // screw radius (normalized)
       buf[9] = 0.02;
-
-          // Recess shaping: circle for circular shaders, rounded-rect for all non-circular
-          if (shaderFile.includes('v0.35')) {
-            // Donut chassis: circular with a smaller inner cutout to create a white island
-            buf[10] = 0.0; // recessKind = circle
-            buf[11] = 0.95; // recessOuterScale (slightly scaled)
-            buf[12] = 0.32; // recessInnerScale (creates white island in center)
-          } else {
-            buf[10] = circularLayout ? 0.0 : 1.0; // recessKind
-            buf[11] = circularLayout ? 1.0 : 1.25; // recessOuterScale (bigger so it doesn't "cut through" wide grids)
-            buf[12] = circularLayout ? 1.0 : 0.0; // recessInnerScale (no inner hole for grids)
-          }
-          buf[13] = 0.10; // recessCorner (used for rounded-rect)
-          // NIGHT MODE DIMMING FOR CHASSIS
-          // We send 0.35 if playing, else 1.0. This makes the bezel darker so the UV light "shines"
-          buf[14] = isPlaying ? 0.35 : 1.0; // dimFactor
-          buf[15] = 0.0; // _pad1
-          
-          // NEW: Audio and playback controls
-          buf[16] = volume; // volume (0.0 to 1.0)
-          buf[17] = pan;    // pan (-1.0 to 1.0)
-          buf[18] = bpm;    // bpm
-          
-          // For u32 values, we need to use Uint32Array view
-          const uint32View = new Uint32Array(buf.buffer);
-          uint32View[19] = isLooping ? 1 : 0;  // isLooping (u32)
-          uint32View[20] = 0; // currentOrder (will be set when we have it)
-          uint32View[21] = playheadRow; // currentRow
-          uint32View[22] = clickedButton; // clickedButton (u32: 0=none, 1=loop, 2=open, 3=play, 4=stop)
-          // buf[23] is pad
-
+      if (shaderFile.includes('v0.35')) { buf[10] = 0.0; buf[11] = 0.95; buf[12] = 0.32; }
+      else { buf[10] = circularLayout ? 0.0 : 1.0; buf[11] = circularLayout ? 1.0 : 1.25; buf[12] = circularLayout ? 1.0 : 0.0; }
+      buf[13] = 0.10;
+      buf[14] = isPlaying ? 0.35 : 1.0;
+      buf[15] = 0.0;
+      buf[16] = volume;
+      buf[17] = pan;
+      buf[18] = bpm;
+      const uint32View = new Uint32Array(buf.buffer);
+      uint32View[19] = isLooping ? 1 : 0;
+      uint32View[20] = 0;
+      uint32View[21] = playheadRow;
+      uint32View[22] = clickedButton;
       device.queue.writeBuffer(bezelUniformBufferRef.current, 0, buf.buffer, buf.byteOffset, buf.byteLength);
     }
 
-    render();
-  }, [playheadRow, timeSec, localTime, bpm, tickOffset, grooveAmount, kickTrigger, activeChannels, gpuReady, isPlaying, beatPhase, isModuleLoaded, matrix?.numRows, matrix?.numChannels, cellWidth, cellHeight, canvasMetrics, bloomIntensity, bloomThreshold, invertChannels, volume, pan, isLooping, clickedButton]);
+    const isVideoShader = shaderFile.includes('v0.20') || shaderFile.includes('v0.23') || shaderFile.includes('v0.24') || shaderFile.includes('v0.25');
+    if (isVideoShader && videoRef.current) {
+         const source = videoRef.current;
+         let sourceWidth = 0, sourceHeight = 0, sourceReady = false;
+         if (source instanceof HTMLVideoElement && source.readyState >= 2) { sourceWidth = source.videoWidth; sourceHeight = source.videoHeight; sourceReady = true; }
+         else if (source instanceof HTMLImageElement && source.complete) { sourceWidth = source.naturalWidth; sourceHeight = source.naturalHeight; sourceReady = true; }
+         if (sourceReady && sourceWidth > 0 && sourceHeight > 0) {
+            if (!videoTextureRef.current || videoTextureRef.current.width !== sourceWidth || videoTextureRef.current.height !== sourceHeight) {
+                videoTextureRef.current?.destroy();
+                videoTextureRef.current = device.createTexture({ size: [sourceWidth, sourceHeight, 1], format: preferredImageFormat(device), usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT });
+                textureResourcesRef.current = { sampler: device.createSampler({ magFilter: 'linear', minFilter: 'linear' }), view: videoTextureRef.current.createView() };
+                refreshBindGroup(device);
+            }
+            try { if (videoTextureRef.current) device.queue.copyExternalImageToTexture({ source, flipY: true }, { texture: videoTextureRef.current }, [sourceWidth, sourceHeight, 1]); } catch(e) {}
+         }
+    }
+
+    drawWebGL();
+
+    const encoder = device.createCommandEncoder();
+    const pass = encoder.beginRenderPass({
+      colorAttachments: [{
+          view: context.getCurrentTexture().createView(),
+          loadOp: 'clear',
+          clearValue: { r: 0.98, g: 0.98, b: 0.98, a: 1 },
+          storeOp: 'store',
+      }],
+    });
+
+    if (bezelPipelineRef.current && bezelBindGroupRef.current) {
+      pass.setPipeline(bezelPipelineRef.current);
+      pass.setBindGroup(0, bezelBindGroupRef.current);
+      pass.draw(6, 1, 0, 0);
+    }
+
+    pass.setPipeline(pipeline);
+    pass.setBindGroup(0, bindGroup);
+    const numRows = matrix?.numRows ?? DEFAULT_ROWS;
+    const rawChannels = matrix?.numChannels ?? DEFAULT_CHANNELS;
+    const numChannels = padTopChannel ? rawChannels + 1 : rawChannels;
+    const totalInstances = numRows * numChannels;
+
+    if (totalInstances > 0) {
+      if (isSinglePassCompositeShader(shaderFile)) {
+        pass.draw(6, 1, 0, totalInstances);
+        pass.draw(6, totalInstances, 0, 0);
+      } else {
+        pass.draw(6, totalInstances, 0, 0);
+      }
+    }
+    pass.end();
+    device.queue.submit([encoder.finish()]);
+  };
 
   return (
     <div className={`pattern-display relative ${padTopChannel ? 'p-8 rounded-xl bg-[#18181a] shadow-2xl border border-[#333]' : ''}`}>
       <input type="file" ref={fileInputRef} onChange={handleFileChange} className="hidden" accept=".mod,.xm,.it,.s3m,.mptm" />
       {padTopChannel && (
           <>
-            {/* Rack Ears / Side Panels */}
             <div className="absolute top-0 bottom-0 left-0 w-8 bg-[#111] border-r border-[#000] flex flex-col justify-between py-4 items-center rounded-l-xl">
-               {/* Screws */}
                <div className="w-3 h-3 rounded-full bg-[#222] border border-[#444] shadow-inner flex items-center justify-center"><div className="w-2 h-0.5 bg-[#111] rotate-45"></div></div>
                <div className="w-3 h-3 rounded-full bg-[#222] border border-[#444] shadow-inner flex items-center justify-center"><div className="w-2 h-0.5 bg-[#111] rotate-45"></div></div>
             </div>
@@ -1405,8 +1226,6 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
                <div className="w-3 h-3 rounded-full bg-[#222] border border-[#444] shadow-inner flex items-center justify-center"><div className="w-2 h-0.5 bg-[#111] rotate-45"></div></div>
                <div className="w-3 h-3 rounded-full bg-[#222] border border-[#444] shadow-inner flex items-center justify-center"><div className="w-2 h-0.5 bg-[#111] rotate-45"></div></div>
             </div>
-
-            {/* Power LED & Text */}
             <div className="absolute top-2 right-12 flex items-center gap-3">
                 <div className="text-[10px] font-mono font-bold text-gray-500 tracking-widest uppercase opacity-70">Tracker GPU-9000</div>
                 <div className="w-2 h-2 rounded-full bg-red-500 shadow-[0_0_8px_rgba(255,50,50,0.8)]"></div>
@@ -1414,8 +1233,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
           </>
       )}
 
-      {/* NEW: Toggle Button for Ring Direction (v0.35) */}
-      {shaderFile.includes('v0.35') && (
+      {(shaderFile.includes('v0.35') || shaderFile.includes('v0.37') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39')) && (
         <button
             onClick={() => setInvertChannels(p => !p)}
             className="absolute top-2 left-12 px-2 py-1 bg-[#222] text-xs font-mono text-gray-400 border border-[#444] rounded hover:bg-[#333] hover:text-white transition-colors"
@@ -1437,8 +1255,32 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
           height: 'auto',
           objectFit: 'contain',
           aspectRatio: `${canvasMetrics.width} / ${canvasMetrics.height}`,
+          position: 'relative',
+          zIndex: 1
         }}
       />
+
+      {(shaderFile.includes('v0.38') || shaderFile.includes('v0.39')) && (
+        <canvas
+          ref={glCanvasRef}
+          width={canvasMetrics.width}
+          height={canvasMetrics.height}
+          style={{
+            position: 'absolute',
+            top: padTopChannel ? '2rem' : 0,
+            left: padTopChannel ? '2rem' : 0,
+            width: 'auto',
+            height: 'auto',
+            maxWidth: '100%',
+            maxHeight: '100%',
+            aspectRatio: `${canvasMetrics.width} / ${canvasMetrics.height}`,
+            pointerEvents: 'none',
+            zIndex: 2,
+            mixBlendMode: 'normal'
+          }}
+        />
+      )}
+
       {!webgpuAvailable && <div className="error">WebGPU not available in this browser.</div>}
     </div>
   );
