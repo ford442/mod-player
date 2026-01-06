@@ -411,7 +411,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
 
   const [webgpuAvailable, setWebgpuAvailable] = useState(true);
   const [gpuReady, setGpuReady] = useState(false);
-  const [localTime, setLocalTime] = useState(0);
+  const [localTime] = useState(0);
   const [invertChannels, setInvertChannels] = useState(false);
   const [clickedButton, setClickedButton] = useState(0);
 
