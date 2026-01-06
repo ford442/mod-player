@@ -1,5 +1,5 @@
 // patternv0.38.wgsl
-// Features: Circular Layout (v0.36 base) + Integrated UI Controls (Play, Stop, Loop, Open) + Song Position Bar
+// Features: Circular Layout (v0.37 clone) + Prepared for WebGL2 Glass Overlay
 // PackedA: [Note(8) | Instr(8) | VolCmd(8) | VolVal(8)]
 // PackedB: [Unused(16) | EffCmd(8) | EffVal(8)]
 
@@ -73,7 +73,7 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
   let circumference = 2.0 * 3.14159265 * radius;
   let arcLength = circumference / totalSteps;
 
-  // v0.37 enhancement: Reduced button size (0.75 vs original 0.92) creates more spacing between buttons
+  // v0.37/38 size: 0.75 factor
   let btnW = arcLength * 0.75;
   let btnH = ringDepth * 0.75;
 
@@ -120,33 +120,8 @@ fn sdRoundedBox(p: vec2<f32>, b: vec2<f32>, r: f32) -> f32 {
   return length(max(q, vec2<f32>(0.0))) + min(max(q.x, q.y), 0.0) - r;
 }
 
-fn sdCircle(p: vec2<f32>, r: f32) -> f32 {
-  return length(p) - r;
-}
-
-fn sdTriangle(p: vec2<f32>, r: f32) -> f32 {
-    let k = sqrt(3.0);
-    var p2 = p;
-    p2.x = abs(p2.x) - r;
-    p2.y = p2.y + r / k;
-    if (p2.x + k * p2.y > 0.0) {
-        p2 = vec2<f32>(p2.x - k * p2.y, -k * p2.x - p2.y) / 2.0;
-    }
-    p2.x = p2.x - clamp(p2.x, -2.0 * r, 0.0);
-    return -length(p2) * sign(p2.y);
-}
-
-fn sdBox(p: vec2<f32>, b: vec2<f32>) -> f32 {
-    let d = abs(p) - b;
-    return length(max(d, vec2<f32>(0.0))) + min(max(d.x, d.y), 0.0);
-}
-
 fn pitchClassFromIndex(note: u32) -> f32 {
   if (note == 0u) { return 0.0; }
-  // Assuming standard OpenMPT note mapping: C-? is start of octave.
-  // We just want hue.
-  // Note 0 is empty. Note 1.. are notes.
-  // (note - 1) % 12
   let semi = (note - 1u) % 12u;
   return f32(semi) / 12.0;
 }
@@ -216,24 +191,13 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   let fs = getFragmentConstants();
   let uv = in.uv;
   let p = uv - 0.5;
-
-  // let aa = fwidth(p.y) * 0.5;
-  // Replace aa calculation with higher quality:
-  let aa = fwidth(p.y) * 0.33; // Thicker AA
-  // Or use supersampling hint:
-  // let aa = length(vec2<f32>(dpdx(p.x), dpdy(p.y))) * 0.5;
-
+  let aa = fwidth(p.y) * 0.33;
   let bloom = uniforms.bloomIntensity;
 
-  // --- MASK BOTTOM UI AREA (Hardware Layering) ---
-  // If the pixel is in the bottom ~12% of the screen, discard it so the underlying UI is visible.
-  // in.position.y is in window coordinates (0 at top usually, but let's check relative to height).
-  // Standard WebGPU viewport Y is 0 at top-left. So bottom area is high Y values.
   if (in.position.y > uniforms.canvasH * 0.88) {
     discard;
   }
 
-  // --- INDICATOR RING ---
   if (in.channel == 0u) {
     let onPlayhead = (in.row == uniforms.playheadRow);
     let indSize = vec2(0.3, 0.3);
@@ -264,24 +228,18 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     inButton = 1.0;
   }
 
-  // --- DECODE PACKED DATA ---
   if (inButton > 0.5) {
     let note = (in.packedA >> 24) & 255u;
     let inst = (in.packedA >> 16) & 255u;
     let volCmd = (in.packedA >> 8) & 255u;
-    let volVal = in.packedA & 255u;
-
-    let effCmd = (in.packedB >> 8) & 255u; // Assuming we packed it in second byte
+    let effCmd = (in.packedB >> 8) & 255u;
     let effVal = in.packedB & 255u;
 
     let hasNote = (note > 0u);
-    // Has Expression: Volume Command OR Effect Command present
     let hasExpression = (volCmd > 0u) || (effCmd > 0u);
-
     let ch = channels[in.channel];
     let isMuted = (ch.isMuted == 1u);
 
-    // COMPONENT 1: DATA LIGHT (Expression)
     let topUV = btnUV - vec2(0.5, 0.16);
     let topSize = vec2(0.20, 0.20);
     let isDataPresent = hasExpression && !isMuted;
@@ -291,7 +249,6 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     finalColor = mix(finalColor, topLed.rgb, topLed.a);
     if (isDataPresent) { finalColor += topColor * topLed.a * 0.3; }
 
-    // COMPONENT 2: NOTE LIGHT
     let mainUV = btnUV - vec2(0.5, 0.5);
     let mainSize = vec2(0.55, 0.45);
     var noteColor = vec3(0.2);
@@ -327,15 +284,12 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     let mainPad = drawChromeIndicator(mainUV, mainSize, displayColor, isLit, aa);
     finalColor = mix(finalColor, mainPad.rgb, mainPad.a);
 
-    // COMPONENT 3: EFFECT LIGHT
     let botUV = btnUV - vec2(0.5, 0.85);
     let botSize = vec2(0.25, 0.12);
     var effColor = vec3(0.0);
     var isEffOn = false;
 
-    // Visualize Effect Command specifically
     if (effCmd > 0u) {
-      // Use index hash for color
       effColor = neonPalette(f32(effCmd) / 32.0);
       let strength = clamp(f32(effVal) / 255.0, 0.2, 1.0);
       if (!isMuted) {
@@ -343,7 +297,6 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
         isEffOn = true;
       }
     } else if (volCmd > 0u) {
-      // If only volume command, maybe light up simpler
       effColor = vec3(0.9, 0.9, 0.9);
       if (!isMuted) { effColor *= 0.5; isEffOn = true; }
     }
