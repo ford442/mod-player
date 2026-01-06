@@ -290,35 +290,35 @@ const buildRowFlags = (numRows: number): Uint32Array => {
 };
 
 export const PatternDisplay: React.FC<PatternDisplayProps> = ({
-    matrix,
-    playheadRow,
-    cellWidth = 18,
-    cellHeight = 14,
-    shaderFile = 'patternv0.12.wgsl',
-    bpm = 120,
-    timeSec = 0,
-    tickOffset = 0,
-    grooveAmount = 0,
-    kickTrigger = 0,
-    activeChannels = 0,
-    channels = [],
-    isPlaying = false,
-    beatPhase = 0,
-    isModuleLoaded = false,
-    bloomIntensity = 1.0,
-    bloomThreshold = 0.8,
-    externalVideoSource = null,
-    volume = 1.0,
-    pan = 0.0,
-    isLooping = false,
-    onPlay,
-    onStop,
-    onFileSelected,
-    onLoopToggle,
-    onSeek,
-    onVolumeChange,
-    onPanChange,
-    totalRows = 64,
+  matrix,
+  playheadRow,
+  cellWidth = 18,
+  cellHeight = 14,
+  shaderFile = 'patternv0.12.wgsl',
+  bpm = 120,
+  timeSec = 0,
+  tickOffset = 0,
+  grooveAmount = 0,
+  kickTrigger = 0,
+  activeChannels = 0,
+  channels = [],
+  isPlaying = false,
+  beatPhase = 0,
+  isModuleLoaded = false,
+  bloomIntensity = 1.0,
+  bloomThreshold = 0.8,
+  externalVideoSource = null,
+  volume = 1.0,
+  pan = 0.0,
+  isLooping = false,
+  onPlay,
+  onStop,
+  onFileSelected,
+  onLoopToggle,
+  onSeek,
+  onVolumeChange,
+  onPanChange,
+  totalRows = 64,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -333,11 +333,11 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   const layoutTypeRef = useRef<LayoutType>('simple');
   const textureResourcesRef = useRef<{ sampler: GPUSampler; view: GPUTextureView } | null>(null);
   const useExtendedRef = useRef<boolean>(false);
-  const animationFrameRef = useRef<number>(0);
   const videoRef = useRef<HTMLVideoElement | HTMLImageElement | null>(null);
   const videoTextureRef = useRef<GPUTexture | null>(null);
   const videoLoopRef = useRef<number>(0);
 
+  // Bezel pass resources
   const bezelPipelineRef = useRef<GPURenderPipeline | null>(null);
   const bezelUniformBufferRef = useRef<GPUBuffer | null>(null);
   const bezelBindGroupRef = useRef<GPUBindGroup | null>(null);
@@ -813,7 +813,8 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
 
     const texture = device.createTexture({ size: [bitmap.width, bitmap.height, 1], format: preferredImageFormat(device), usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT });
     device.queue.copyExternalImageToTexture({ source: bitmap, flipY: true }, { texture }, [bitmap.width, bitmap.height, 1]);
-    const sampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear' });
+    const filterMode: GPUFilterMode = 'nearest';
+    const sampler = device.createSampler({ magFilter: filterMode, minFilter: filterMode });
     bezelTextureResourcesRef.current = { sampler, view: texture.createView() };
   };
 
@@ -839,26 +840,6 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     device.queue.copyExternalImageToTexture({ source: bitmap, flipY: true }, { texture }, [bitmap.width, bitmap.height, 1]);
     const filterMode: GPUFilterMode = 'nearest';
     const sampler = device.createSampler({ magFilter: filterMode, minFilter: filterMode });
-    textureResourcesRef.current = { sampler, view: texture.createView() };
-  };
-
-  const ensureVideoPlaceholder = (device: GPUDevice) => {
-    if (videoTextureRef.current) return;
-    const fmt = preferredImageFormat(device);
-    const texture = device.createTexture({
-      size: [1, 1, 1],
-      format: fmt,
-      usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT,
-    });
-    if (fmt === 'rgba32float') {
-      const data = new Float32Array([100.0/255.0, 100.0/255.0, 100.0/255.0, 1.0]);
-      device.queue.writeTexture({ texture }, data, { bytesPerRow: 16 }, { width: 1, height: 1 });
-    } else {
-      const data = new Uint8Array([100, 100, 100, 255]);
-      device.queue.writeTexture({ texture }, data, { bytesPerRow: 4 }, { width: 1, height: 1 });
-    }
-    videoTextureRef.current = texture;
-    const sampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear' });
     textureResourcesRef.current = { sampler, view: texture.createView() };
   };
 
@@ -891,6 +872,24 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
       );
     }
     bindGroupRef.current = device.createBindGroup({ layout, entries });
+  };
+
+  const ensureVideoPlaceholder = (device: GPUDevice) => {
+    if (videoTextureRef.current) return;
+    const fmt = preferredImageFormat(device);
+    const texture = device.createTexture({
+      size: [1, 1, 1],
+      format: fmt,
+      usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT,
+    });
+    if (fmt === 'rgba32float') {
+      const data = new Float32Array([100.0/255.0, 100.0/255.0, 100.0/255.0, 1.0]);
+      device.queue.writeTexture({ texture }, data, { bytesPerRow: 16 }, { width: 1, height: 1 });
+    } else {
+      const data = new Uint8Array([100, 100, 100, 255]);
+      device.queue.writeTexture({ texture }, data, { bytesPerRow: 4 }, { width: 1, height: 1 });
+    }
+    videoTextureRef.current = texture;
   };
 
   useEffect(() => {
@@ -1109,27 +1108,8 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
       const tickRow = clampPlayhead(playheadRow, rowLimit);
       const fractionalTick = Math.min(1, Math.max(0, tickOffset));
       const effectiveTime = isModuleLoaded ? timeSec : localTime;
-
       const uniformPayload = createUniformPayload(layoutTypeRef.current, {
-        numRows,
-        numChannels,
-        playheadRow: tickRow,
-        isPlaying,
-        cellW: cellWidth,
-        cellH: cellHeight,
-        canvasW: canvasMetrics.width,
-        canvasH: canvasMetrics.height,
-        tickOffset: fractionalTick,
-        bpm,
-        timeSec: effectiveTime,
-        beatPhase,
-        groove: Math.min(1, Math.max(0, grooveAmount)),
-        kickTrigger,
-        activeChannels,
-        isModuleLoaded,
-        bloomIntensity: bloomIntensity ?? 1.0,
-        bloomThreshold: bloomThreshold ?? 0.8,
-        invertChannels: invertChannels,
+        numRows, numChannels, playheadRow: tickRow, isPlaying, cellW: cellWidth, cellH: cellHeight, canvasW: canvasMetrics.width, canvasH: canvasMetrics.height, tickOffset: fractionalTick, bpm, timeSec: effectiveTime, beatPhase, groove: Math.min(1, Math.max(0, grooveAmount)), kickTrigger, activeChannels, isModuleLoaded, bloomIntensity: bloomIntensity ?? 1.0, bloomThreshold: bloomThreshold ?? 0.8, invertChannels: invertChannels,
       });
       device.queue.writeBuffer(uniformBufferRef.current, 0, uniformPayload);
     }
@@ -1213,6 +1193,12 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     device.queue.submit([encoder.finish()]);
   };
 
+  useEffect(() => {
+    const device = deviceRef.current;
+    if (!device || !gpuReady) return;
+    render();
+  }, [playheadRow, timeSec, localTime, bpm, tickOffset, grooveAmount, kickTrigger, activeChannels, gpuReady, isPlaying, beatPhase, isModuleLoaded, matrix?.numRows, matrix?.numChannels, cellWidth, cellHeight, canvasMetrics, bloomIntensity, bloomThreshold, invertChannels, volume, pan, isLooping, clickedButton]);
+
   return (
     <div className={`pattern-display relative ${padTopChannel ? 'p-8 rounded-xl bg-[#18181a] shadow-2xl border border-[#333]' : ''}`}>
       <input type="file" ref={fileInputRef} onChange={handleFileChange} className="hidden" accept=".mod,.xm,.it,.s3m,.mptm" />
@@ -1242,6 +1228,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
         </button>
       )}
 
+      {/* WebGPU Canvas (Bottom) */}
       <canvas
         ref={canvasRef}
         width={canvasMetrics.width}
