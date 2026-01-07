@@ -138,6 +138,7 @@ declare global {
     libopenmpt: Partial<LibOpenMPT>;
     AudioContext: typeof AudioContext;
     webkitAudioContext: typeof AudioContext;
+    // Promise for robust initialization
     libopenmptReady: Promise<Partial<LibOpenMPT>>;
   }
 }
