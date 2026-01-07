@@ -119,11 +119,13 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
       let volVal = (in.packedB >> 16u) & 0xFFu;
 
       // Determine box width based on volume
-      var boxW = 0.35; // Default width
+      // Default width is 0.4 (standard volume/no command)
+      // Variable range is [0.2, 0.45] for visibility
+      var boxW = 0.4;
       if (volType == 1u) { // 1 = Volume Command
-          // volVal is 0..255. Map to width range [0.15, 0.45]
+          // volVal is 0..255. Map to width range [0.2, 0.45]
           let normVol = f32(volVal) / 255.0;
-          boxW = mix(0.15, 0.45, normVol);
+          boxW = mix(0.2, 0.45, normVol);
       }
 
       // Shape: Rounded box centered in UV space (0.5, 0.5)
