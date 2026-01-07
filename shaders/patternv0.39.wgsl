@@ -1,7 +1,7 @@
 // patternv0.39.wgsl
 // Horizontal Pattern Grid Shader (Time = X, Channels = Y)
 // Base: v0.21 (Precision Interface)
-// Adapted for WebGL2 Glass Overlay + Square Bezel Layout
+// Adapted for WebGL2 Glass Overlay + Square Bezel Layout (1024x1024)
 
 struct Uniforms {
   numRows: u32,
@@ -55,27 +55,15 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
   let channel = instanceIndex % numChannels;
 
   // Horizontal Layout: X = Row (Time), Y = Channel
+  // Static Grid: No scroll offset. The playhead moves across the active window.
   let px = f32(row) * uniforms.cellW;
   let py = f32(channel) * uniforms.cellH;
 
-  // Scrolling Logic: Center the playhead
-  // Playhead is at uniforms.playheadRow
-  let scrollX = (f32(uniforms.playheadRow) + uniforms.tickOffset) * uniforms.cellW;
-  let centerX = uniforms.canvasW * 0.5;
+  // No scroll subtraction!
+  let worldX = px + quad[vertexIndex].x * uniforms.cellW;
+  let worldY = py + quad[vertexIndex].y * uniforms.cellH;
 
-  // Apply scrolling
-  let finalX = px - scrollX + centerX;
-
-  let lp = quad[vertexIndex];
-
-  // Shrink cell slightly to create gaps
-  let gap = 2.0;
-  let cellW = uniforms.cellW - gap;
-  let cellH = uniforms.cellH - gap;
-
-  let worldX = finalX + lp.x * cellW + (gap * 0.5);
-  let worldY = py + lp.y * cellH + (gap * 0.5);
-
+  // Use top-left origin for logic, but clip space is -1..1
   let clipX = (worldX / uniforms.canvasW) * 2.0 - 1.0;
   let clipY = 1.0 - (worldY / uniforms.canvasH) * 2.0;
 
@@ -87,13 +75,13 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
   out.position = vec4<f32>(clipX, clipY, 0.0, 1.0);
   out.row = row;
   out.channel = channel;
-  out.uv = lp;
+  out.uv = quad[vertexIndex];
   out.packedA = a;
   out.packedB = b;
   return out;
 }
 
-// --- FRAGMENT SHADER ---
+// --- FRAGMENT SHADER (Precision Interface) ---
 
 fn neonPalette(t: f32) -> vec3<f32> {
     let a = vec3<f32>(0.5, 0.5, 0.5);
@@ -131,15 +119,15 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   let p = uv - 0.5;
   let aa = fwidth(p.y) * 0.75;
 
-  // Mask Top/Bottom area if using square bezel?
-  // For now we assume the bezel shader handles the outer frame,
-  // we just render the grid.
+  // --- HEADER ROW (Channel 0) ---
+  if (in.channel == 0u) {
+      // Header for channel indices or status
+      var col = fs.bgColor * 0.8;
+      return vec4<f32>(col, 1.0);
+  }
 
-  // --- TOP ROW (Channel Header) ---
-  // In horizontal mode, the "first column" logic is tricky because rows scroll.
-  // But Channel 0 is the top-most row.
-
-  // Render Background Slot (Machine Look)
+  // --- PATTERN GRID ---
+  // Simple machine slots
   let dBox = sdRoundedBox(p, vec2<f32>(0.45, 0.40), 0.05);
   var col = fs.bgColor;
 
@@ -148,22 +136,21 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
 
   let onPlayhead = (in.row == uniforms.playheadRow);
 
-  // If active note
+  // Active Note
   let note = (in.packedA >> 24) & 255u;
-  let inst = (in.packedA >> 16) & 255u;
   let hasNote = note > 0u;
 
   if (hasNote) {
-      // Under-glass LED look
       let noteCol = neonPalette(f32(note % 12u) / 12.0);
       let dist = length(p);
       let glow = exp(-dist * 4.0);
       col += noteCol * glow * 1.5;
   }
 
-  // Playhead Highlight (Vertical Line effect across all channels)
+  // Playhead Highlight (Vertical Line across active column)
   if (onPlayhead) {
-      col += vec3<f32>(0.2, 0.2, 0.25);
+      // Additive highlight
+      col += vec3<f32>(0.2, 0.2, 0.25) * 0.8;
   }
 
   // Border
