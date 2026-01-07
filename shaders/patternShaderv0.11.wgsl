@@ -119,9 +119,11 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
       let volVal = (in.packedB >> 16u) & 0xFFu;
 
       // Determine box width based on volume
-      var boxW = 0.35; // Default width
+      // Default to 0.4 (near max) because notes without volume commands usually play at full volume.
+      var boxW = 0.4;
       if (volType == 1u) { // 1 = Volume Command
           // volVal is 0..255. Map to width range [0.15, 0.45]
+          // range: 0.15 (quiet) to 0.45 (loud/full)
           let normVol = f32(volVal) / 255.0;
           boxW = mix(0.15, 0.45, normVol);
       }
