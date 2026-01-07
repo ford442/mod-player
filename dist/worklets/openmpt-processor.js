@@ -1,7 +1,7 @@
 /**
  * OpenMPT Audio Worklet Processor
  * Provides better performance and lower latency than ScriptProcessorNode
- * 
+ *
  * This processor receives pre-rendered audio buffers from the main thread
  * and outputs them to the audio context with proper buffering.
  */
@@ -9,7 +9,7 @@
 class OpenMPTProcessor extends AudioWorkletProcessor {
   constructor() {
     super();
-    
+
     // Ring buffer for smooth audio playback
     // Size: 8192 samples (2x the main buffer size of 4096)
     // Provides ~185ms of buffering at 44.1kHz to prevent underruns
@@ -19,7 +19,7 @@ class OpenMPTProcessor extends AudioWorkletProcessor {
     this.readPos = 0;
     this.writePos = 0;
     this.available = 0;
-    
+
     // Handle messages from main thread
     this.port.onmessage = (event) => {
       if (event.data.type === 'audioData') {
@@ -32,13 +32,13 @@ class OpenMPTProcessor extends AudioWorkletProcessor {
 
   enqueueAudio(leftData, rightData) {
     const samples = leftData.length;
-    
+
     for (let i = 0; i < samples; i++) {
       this.leftBuffer[this.writePos] = leftData[i];
       this.rightBuffer[this.writePos] = rightData[i];
       this.writePos = (this.writePos + 1) % this.bufferSize;
       this.available++;
-      
+
       // Prevent buffer overflow
       if (this.available >= this.bufferSize) {
         this.readPos = (this.readPos + 1) % this.bufferSize;
@@ -57,7 +57,7 @@ class OpenMPTProcessor extends AudioWorkletProcessor {
 
   process(inputs, outputs, parameters) {
     const output = outputs[0];
-    
+
     if (!output || output.length < 2) {
       return true;
     }

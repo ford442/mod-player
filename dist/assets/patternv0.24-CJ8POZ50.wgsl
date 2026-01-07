@@ -126,7 +126,7 @@ fn sdBracket(p: vec2<f32>, b: vec2<f32>, thickness: f32, len: f32) -> f32 {
     let q = abs(p);
     let maskX = step(q.x, b.x - len);
     let maskY = step(q.y, b.y - len);
-    
+
     if (maskX > 0.5 || maskY > 0.5) {
         return 1.0;
     }
@@ -140,15 +140,15 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   let aa = fwidth(p.y);
 
   // Constants
-  let bgCol = vec3<f32>(0.05, 0.05, 0.06); 
+  let bgCol = vec3<f32>(0.05, 0.05, 0.06);
   let gridCol = vec3<f32>(0.12, 0.13, 0.15);
-  
+
   var col = bgCol;
 
   // 1. BACKGROUND GRID (Sub-pixel mesh)
   let grid = abs(fract(uv * 10.0 - 0.5) - 0.5);
   let gridLine = 1.0 - smoothstep(0.0, aa * 2.0, min(grid.x, grid.y));
-  col = mix(col, gridCol, gridLine * 0.3); 
+  col = mix(col, gridCol, gridLine * 0.3);
 
   // --- DATA DECODE ---
   let noteChar = (in.packedA >> 24) & 255u;
@@ -161,22 +161,22 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
 
   // --- 2. MAIN HOUSING (Brackets) ---
   let boxSize = vec2<f32>(0.45, 0.45);
-  let dBracket = sdBracket(p, boxSize, 0.015, 0.15); 
-  
-  var bracketCol = vec3<f32>(0.25); 
-  
+  let dBracket = sdBracket(p, boxSize, 0.015, 0.15);
+
+  var bracketCol = vec3<f32>(0.25);
+
   // Highlight bracket on playhead row
   let isPlayhead = (in.row == uniforms.playheadRow);
   if (isPlayhead) {
       bracketCol = vec3<f32>(0.8, 0.8, 0.8);
   }
-  
+
   // --- 3. ACTIVE DATA VISUALIZATION ---
   if (hasNote) {
       // Calculate Neon Color
       let pitchHue = pitchClassFromPacked(in.packedA);
       let base_note_color = neonPalette(pitchHue);
-      
+
       // Instrument variation (brightness/saturation tweak)
       let instBand = inst & 15u;
       let instMod = 0.8 + (select(0.0, f32(instBand) / 15.0, instBand > 0u)) * 0.2;
@@ -186,21 +186,21 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
       let vol = clamp(ch.volume, 0.0, 1.0);
       let barHeight = vol * 0.8; // Max height inside box
       let barBottom = -boxSize.y + 0.05;
-      
+
       // Draw bar
       if (p.y > barBottom && p.y < barBottom + barHeight && abs(p.x) < boxSize.x - 0.05) {
           // Scanline effect on the bar
           let scan = step(0.5, fract(uv.y * 40.0));
-          col = mix(col, dataCol, 0.9 * scan); 
+          col = mix(col, dataCol, 0.9 * scan);
       }
-      
+
       // B. Note Indicator (Top Text/Block)
       let noteBox = sdBox(p - vec2<f32>(0.0, 0.25), vec2<f32>(0.1, 0.02));
       if (noteBox < 0.0) {
           // Header matches note color but brighter
-          col = mix(dataCol, vec3<f32>(1.0), 0.5); 
+          col = mix(dataCol, vec3<f32>(1.0), 0.5);
       }
-      
+
       // C. Trigger Flash (Tint the bracket)
       if (ch.trigger > 0u) {
           bracketCol = mix(bracketCol, dataCol, 0.8);
@@ -223,7 +223,7 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   if (isPlayhead) {
       let lineDist = abs(p.y);
       let lineAlpha = 1.0 - smoothstep(0.005, 0.005 + aa, lineDist);
-      let centerMask = smoothstep(0.3, 0.35, abs(p.x)); 
+      let centerMask = smoothstep(0.3, 0.35, abs(p.x));
       col += vec3<f32>(1.0, 1.0, 1.0) * lineAlpha * centerMask * 0.4;
   }
 

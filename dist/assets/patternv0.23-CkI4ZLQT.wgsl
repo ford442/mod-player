@@ -44,7 +44,7 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
     vertexOut.uv = vec2<f32>(0.0);
     return vertexOut;
   }
-  
+
   var quad = array<vec2<f32>, 6>(
     vec2<f32>(-1.0, -1.0), vec2<f32>( 1.0, -1.0), vec2<f32>(-1.0,  1.0),
     vec2<f32>(-1.0,  1.0), vec2<f32>( 1.0, -1.0), vec2<f32>( 1.0,  1.0)
@@ -67,7 +67,7 @@ fn palette(t: f32) -> vec3<f32> {
 }
 
 fn freqToColor(freq: f32) -> vec3<f32> {
-    let logF = log2(max(freq, 50.0)) - 5.0; 
+    let logF = log2(max(freq, 50.0)) - 5.0;
     return palette(fract(logF * 0.12));
 }
 
@@ -111,7 +111,7 @@ fn fs(fragIn: VertexOut) -> @location(0) vec4<f32> {
 
     // --- 1. LASER SHOW (Background) ---
     let numCh = uniforms.numChannels;
-    let width = 3.0; 
+    let width = 3.0;
     let spacing = width / f32(numCh);
     let startX = -width * 0.5 + spacing * 0.5;
 
@@ -119,19 +119,19 @@ fn fs(fragIn: VertexOut) -> @location(0) vec4<f32> {
         let ch = channels[i];
         if (ch.noteAge < 1.0 && ch.isMuted == 0u) {
             let xPos = startX + f32(i) * spacing;
-            
+
             let origin = vec2<f32>(xPos, -1.2);
-            let angle = (xPos) * -0.5; 
+            let angle = (xPos) * -0.5;
             let laserTarget = vec2<f32>(xPos + angle, 1.5);
 
             let d = sdLine(p, origin, laserTarget);
-            
+
             // Use smoothstep for a softer, wider beam falloff
             let intensity = pow(1.0 - ch.noteAge, 2.0) * ch.volume;
             let beam = smoothstep(0.05, 0.0, d) * intensity;
-            
+
             let flash = step(0.95, 1.0 - ch.noteAge) * f32(ch.trigger) * 0.5;
-            
+
             // Add Haze
             let haze = noise(p * 30.0 + uniforms.timeSec) * 0.2;
             let finalBeam = beam + flash + (haze * beam * 2.0);
@@ -143,9 +143,9 @@ fn fs(fragIn: VertexOut) -> @location(0) vec4<f32> {
 
     // --- 2. THE DANCER (Hologram Plane) ---
     let kick = uniforms.kickTrigger;
-    
-    let texScale = 0.8; 
-    var charUV = (fragIn.uv - 0.5) * (1.0/texScale) + 0.5; 
+
+    let texScale = 0.8;
+    var charUV = (fragIn.uv - 0.5) * (1.0/texScale) + 0.5;
     charUV.y = 1.0 - charUV.y; // Flip Y-coordinate
 
     // --- DIGITAL DECAY GLITCH ---
@@ -168,9 +168,9 @@ fn fs(fragIn: VertexOut) -> @location(0) vec4<f32> {
         charColor += vec3<f32>(0.2, 0.5, 1.0) * holoGrid;
 
         let pulse = 0.8 + 0.2 * sin(uniforms.timeSec * 10.0);
-        
+
         let lumaMask = smoothstep(0.1, 0.3, (r+g+b)/3.0);
-        
+
         finalColor += charColor * lumaMask * pulse * (0.8 + kick * 0.5);
     }
 

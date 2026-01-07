@@ -71,7 +71,7 @@ fn drawDigit(p: vec2<f32>, digit: u32, size: f32) -> f32 {
     let segW = size * 0.15;
     let segL = size * 0.45;
     let gap = size * 0.05;
-    
+
     // Segment positions (7 segments: top, top-right, bottom-right, bottom, bottom-left, top-left, middle)
     var segments = array<u32, 10>(
         0x77u, // 0: all except middle
@@ -85,10 +85,10 @@ fn drawDigit(p: vec2<f32>, digit: u32, size: f32) -> f32 {
         0x7fu, // 8: all segments
         0x6fu  // 9: all except bottom-left
     );
-    
+
     let code = select(0u, segments[digit], digit < 10u);
     var minDist = 100.0;
-    
+
     // Top horizontal
     if ((code & 0x01u) != 0u) {
         let d = sdBox(p - vec2<f32>(0.0, -segL), vec2<f32>(segL, segW));
@@ -124,7 +124,7 @@ fn drawDigit(p: vec2<f32>, digit: u32, size: f32) -> f32 {
         let d = sdBox(p, vec2<f32>(segL, segW));
         minDist = min(minDist, d);
     }
-    
+
     return minDist;
 }
 
@@ -132,7 +132,7 @@ fn drawDigit(p: vec2<f32>, digit: u32, size: f32) -> f32 {
 fn drawNumber(p: vec2<f32>, value: u32, numDigits: u32, digitSize: f32, spacing: f32) -> f32 {
     var minDist = 100.0;
     var v = value;
-    
+
     for (var i = 0u; i < numDigits; i = i + 1u) {
         let digit = v % 10u;
         v = v / 10u;
@@ -140,7 +140,7 @@ fn drawNumber(p: vec2<f32>, value: u32, numDigits: u32, digitSize: f32, spacing:
         let d = drawDigit(p - vec2<f32>(-xPos, 0.0), digit, digitSize);
         minDist = min(minDist, d);
     }
-    
+
     return minDist;
 }
 
@@ -208,7 +208,7 @@ fn fs(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
 
   // --- TOP CENTER: BPM and Position Display ---
   let topY = -0.48; // Very top
-  
+
   // BPM Display (center top)
   let bpmValue = u32(bez.bpm);
   let dBPM = drawNumber(p - vec2<f32>(0.0, topY), bpmValue, 3u, 0.012, 0.015);
@@ -225,7 +225,7 @@ fn fs(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
   if (dBPMLabel < 0.0) {
       color = mix(color, vec3<f32>(0.6, 0.6, 0.7), smoothstep(aa, 0.0, dBPMLabel));
   }
-  
+
   // Position Display (top left) - "Position: Order XX Row XX"
   let posY = topY + 0.03;
   let dOrder = drawNumber(p - vec2<f32>(-0.38, posY), bez.currentOrder, 2u, 0.01, 0.012);
@@ -247,13 +247,13 @@ fn fs(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
   let sliderLeftX = -0.42;
   let sliderH = 0.3;
   let sliderW = 0.015;
-  
+
   // Slider track
   let dVolTrack = sdRoundedBox(p - vec2<f32>(sliderLeftX, sliderY), vec2<f32>(sliderW * 0.5, sliderH * 0.5), 0.003);
   if (dVolTrack < 0.0) {
       color = mix(color, vec3<f32>(0.15, 0.15, 0.18), 0.8);
   }
-  
+
   // Volume handle position (0.0 = bottom, 1.0 = top)
   let volNorm = clamp(bez.volume, 0.0, 1.0);
   let volHandleY = sliderY + (volNorm - 0.5) * sliderH * 0.9;
@@ -261,22 +261,22 @@ fn fs(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
   if (dVolHandle < 0.0) {
       color = mix(color, vec3<f32>(0.3, 0.8, 0.4), smoothstep(aa, -aa, dVolHandle));
   }
-  
+
   // "VOLUME" label (rotated/vertical text approximation)
   let dVolLabel = drawText(p - vec2<f32>(sliderLeftX, sliderY - sliderH * 0.6), vec2<f32>(0.025, 0.008));
   if (dVolLabel < 0.0) {
       color = mix(color, vec3<f32>(0.6, 0.6, 0.7), smoothstep(aa, 0.0, dVolLabel));
   }
-  
+
   // --- RIGHT SIDE: PANNING SLIDER ---
   let sliderRightX = 0.42;
-  
+
   // Slider track
   let dPanTrack = sdRoundedBox(p - vec2<f32>(sliderRightX, sliderY), vec2<f32>(sliderW * 0.5, sliderH * 0.5), 0.003);
   if (dPanTrack < 0.0) {
       color = mix(color, vec3<f32>(0.15, 0.15, 0.18), 0.8);
   }
-  
+
   // Pan handle position (-1.0 = bottom, 1.0 = top)
   let panNorm = clamp(bez.pan, -1.0, 1.0);
   let panHandleY = sliderY + panNorm * sliderH * 0.45;
@@ -285,7 +285,7 @@ fn fs(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
       let panColor = mix(vec3<f32>(0.8, 0.3, 0.3), vec3<f32>(0.3, 0.3, 0.8), (panNorm + 1.0) * 0.5);
       color = mix(color, panColor, smoothstep(aa, -aa, dPanHandle));
   }
-  
+
   // "PANNING" label
   let dPanLabel = drawText(p - vec2<f32>(sliderRightX, sliderY - sliderH * 0.6), vec2<f32>(0.03, 0.008));
   if (dPanLabel < 0.0) {
