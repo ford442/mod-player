@@ -533,7 +533,12 @@ export function useLibOpenMPT(volume: number = 1.0) {
         return;
       }
       try {
-        const lib = await window.libopenmptReady as LibOpenMPT;
+        // Implement initialization timeout for robustness
+        const timeoutPromise = new Promise<never>((_, reject) => {
+          setTimeout(() => reject(new Error('Initialization timed out')), 15000);
+        });
+
+        const lib = await Promise.race([window.libopenmptReady, timeoutPromise]) as LibOpenMPT;
 
         if (!lib.UTF8ToString) {
           console.warn('Polyfilling libopenmpt.UTF8ToString...');
@@ -580,8 +585,14 @@ export function useLibOpenMPT(volume: number = 1.0) {
           useAudioWorklet.current = false;
         }
       } catch (err) {
-        setStatus("Error: Audio library failed to load. See console.");
-        console.error("Error awaiting libopenmptReady:", err);
+        const error = err as Error;
+        if (error.message === 'Initialization timed out') {
+            setStatus("Error: libopenmpt initialization timed out.");
+            console.error("libopenmpt initialization timed out (>15s).");
+        } else {
+            setStatus("Error: Audio library failed to load. See console.");
+            console.error("Error awaiting libopenmptReady:", err);
+        }
       }
     };
 
