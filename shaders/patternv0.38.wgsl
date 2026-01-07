@@ -1,7 +1,6 @@
 // patternv0.38.wgsl
-// Features: Circular Layout (v0.37 clone) + Prepared for WebGL2 Glass Overlay
-// PackedA: [Note(8) | Instr(8) | VolCmd(8) | VolVal(8)]
-// PackedB: [Unused(16) | EffCmd(8) | EffVal(8)]
+// Circular Layout + Integrated UI + Glass Cap Ready
+// Note: Requires padTopChannel=true in PatternDisplay to shift music channels 1-32.
 
 struct Uniforms {
   numRows: u32,
@@ -54,6 +53,7 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
   let row = instanceIndex / numChannels;
   let channel = instanceIndex % numChannels;
 
+  // Use inverted channel logic for rings
   let invertedChannel = numChannels - 1u - channel;
   let ringIndex = select(invertedChannel, channel, (uniforms.invertChannels == 1u));
 
@@ -73,9 +73,9 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
   let circumference = 2.0 * 3.14159265 * radius;
   let arcLength = circumference / totalSteps;
 
-  // v0.37/38 size: 0.75 factor
-  let btnW = arcLength * 0.75;
-  let btnH = ringDepth * 0.75;
+  // Sizing: 0.95 factor matches WebGL2 overlay for fuller squares
+  let btnW = arcLength * 0.95;
+  let btnH = ringDepth * 0.95;
 
   let lp = quad[vertexIndex];
   let localPos = (lp - 0.5) * vec2<f32>(btnW, btnH);
@@ -194,10 +194,12 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   let aa = fwidth(p.y) * 0.33;
   let bloom = uniforms.bloomIntensity;
 
+  // Hardware Layering: Discard pixels over UI
   if (in.position.y > uniforms.canvasH * 0.88) {
     discard;
   }
 
+  // CHANNEL 0 is the Indicator Ring (because padTopChannel shifts music to 1-32)
   if (in.channel == 0u) {
     let onPlayhead = (in.row == uniforms.playheadRow);
     let indSize = vec2(0.3, 0.3);
@@ -213,6 +215,7 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     return vec4<f32>(col, clamp(alpha, 0.0, 1.0));
   }
 
+  // --- MUSIC CHANNELS (1-32) ---
   let dHousing = sdRoundedBox(p, fs.housingSize * 0.5, 0.06);
   let housingMask = 1.0 - smoothstep(0.0, aa * 1.5, dHousing);
 

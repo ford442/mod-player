@@ -1,5 +1,5 @@
 // patternv0.39.wgsl
-// Horizontal Pattern Grid Shader (Time = X, Channels = Y)
+// Horizontal Paged Grid Shader (Time = X, Channels = Y)
 // Base: v0.21 (Precision Interface)
 // Adapted for WebGL2 Glass Overlay + Square Bezel Layout (1024x1024)
 
@@ -55,11 +55,26 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
   let channel = instanceIndex % numChannels;
 
   // Horizontal Layout: X = Row (Time), Y = Channel
-  // Static Grid: No scroll offset. The playhead moves across the active window.
-  let px = f32(row) * uniforms.cellW;
+  // Static Paged Grid: We only render active page of 32 steps.
+  
+  let stepsPerPage = 32.0;
+  let pageStart = floor(f32(uniforms.playheadRow) / stepsPerPage) * stepsPerPage;
+  
+  // Calculate row local to current page (0..31)
+  let localRow = f32(row) - pageStart;
+  
+  // X Position based on local row
+  let px = localRow * uniforms.cellW;
   let py = f32(channel) * uniforms.cellH;
-
-  // No scroll subtraction!
+  
+  // If this instance is NOT in the current page, we move it off-screen to clip it
+  var isVisible = 1.0;
+  if (localRow < 0.0 || localRow >= stepsPerPage) {
+      isVisible = 0.0;
+  }
+  
+  // Standard quad expansion
+  // Note: if invisible, we can just collapse quad or move off screen
   let worldX = px + quad[vertexIndex].x * uniforms.cellW;
   let worldY = py + quad[vertexIndex].y * uniforms.cellH;
 
@@ -67,12 +82,15 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
   let clipX = (worldX / uniforms.canvasW) * 2.0 - 1.0;
   let clipY = 1.0 - (worldY / uniforms.canvasH) * 2.0;
 
+  // Collapse if not visible
+  let finalPos = select(vec4<f32>(0.0), vec4<f32>(clipX, clipY, 0.0, 1.0), isVisible > 0.5);
+
   let idx = instanceIndex * 2u;
   let a = cells[idx];
   let b = cells[idx + 1u];
 
   var out: VertexOut;
-  out.position = vec4<f32>(clipX, clipY, 0.0, 1.0);
+  out.position = finalPos;
   out.row = row;
   out.channel = channel;
   out.uv = quad[vertexIndex];
@@ -105,7 +123,7 @@ struct FragmentConstants {
 
 fn getFragmentConstants() -> FragmentConstants {
     var c: FragmentConstants;
-    c.bgColor = vec3<f32>(0.10, 0.11, 0.13);
+    c.bgColor = vec3<f32>(0.10, 0.11, 0.13); 
     c.ledOnColor = vec3<f32>(0.0, 0.85, 0.95);
     c.ledOffColor = vec3<f32>(0.08, 0.12, 0.15);
     c.borderColor = vec3<f32>(0.0, 0.0, 0.0);
@@ -130,23 +148,23 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   // Simple machine slots
   let dBox = sdRoundedBox(p, vec2<f32>(0.45, 0.40), 0.05);
   var col = fs.bgColor;
-
+  
   // Inset shadow
   col *= smoothstep(0.0, 0.1, dBox + 0.5);
 
   let onPlayhead = (in.row == uniforms.playheadRow);
-
+  
   // Active Note
   let note = (in.packedA >> 24) & 255u;
   let hasNote = note > 0u;
-
+  
   if (hasNote) {
       let noteCol = neonPalette(f32(note % 12u) / 12.0);
       let dist = length(p);
       let glow = exp(-dist * 4.0);
       col += noteCol * glow * 1.5;
   }
-
+  
   // Playhead Highlight (Vertical Line across active column)
   if (onPlayhead) {
       // Additive highlight
