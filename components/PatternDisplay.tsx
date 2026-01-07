@@ -11,6 +11,7 @@ const alignTo = (value: number, alignment: number) => Math.ceil(value / alignmen
 
 const getLayoutType = (shaderFile: string): LayoutType => {
   if (shaderFile === 'patternShaderv0.12.wgsl') return 'texture';
+  // Check for extended layout shaders (v0.38 and v0.39 included)
   if (shaderFile.includes('v0.13') || shaderFile.includes('v0.14') || shaderFile.includes('v0.15') || shaderFile.includes('v0.16') || shaderFile.includes('v0.17') || shaderFile.includes('v0.18') || shaderFile.includes('v0.19') || shaderFile.includes('v0.20') || shaderFile.includes('v0.21') || shaderFile.includes('v0.23') || shaderFile.includes('v0.24') || shaderFile.includes('v0.25') || shaderFile.includes('v0.26') || shaderFile.includes('v0.27') || shaderFile.includes('v0.28') || shaderFile.includes('v0.29') || shaderFile.includes('v0.30') || shaderFile.includes('v0.31') || shaderFile.includes('v0.32') || shaderFile.includes('v0.33') || shaderFile.includes('v0.34') || shaderFile.includes('v0.35') || shaderFile.includes('v0.36') || shaderFile.includes('v0.37') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39')) return 'extended';
   return 'simple';
 };
@@ -24,6 +25,7 @@ const shouldEnableAlphaBlending = (shaderFile: string) => {
 };
 
 const isCircularLayoutShader = (shaderFile: string) => {
+  // v0.39 is NOT circular (it's horizontal). v0.38 IS circular.
   return shaderFile.includes('v0.25') || shaderFile.includes('v0.26') || shaderFile.includes('v0.35') || shaderFile.includes('v0.37') || shaderFile.includes('v0.38');
 };
 
@@ -162,6 +164,7 @@ const clampPlayhead = (value: number, numRows: number) => {
   return Math.min(Math.max(Math.floor(value), 0), numRows - 1);
 };
 
+// Parse helpers
 const parsePackedB = (text: string) => {
   let volType = 0, volValue = 0;
   let effCode = 0, effParam = 0;
@@ -333,7 +336,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   const videoRef = useRef<HTMLVideoElement | HTMLImageElement | null>(null);
   const videoTextureRef = useRef<GPUTexture | null>(null);
   const videoLoopRef = useRef<number>(0);
-
+  
   const bezelPipelineRef = useRef<GPURenderPipeline | null>(null);
   const bezelUniformBufferRef = useRef<GPUBuffer | null>(null);
   const bezelBindGroupRef = useRef<GPUBindGroup | null>(null);
@@ -412,7 +415,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   const [clickedButton, setClickedButton] = useState(0);
 
   const isHorizontal = shaderFile.includes('v0.12') || shaderFile.includes('v0.13') || shaderFile.includes('v0.14') || shaderFile.includes('v0.16') || shaderFile.includes('v0.17') || shaderFile.includes('v0.21') || shaderFile.includes('v0.39');
-
+  
   // NOTE: v0.38 and v0.39 added here to pad channel 0, ensuring music is channels 1-32
   const padTopChannel = shaderFile.includes('v0.16') || shaderFile.includes('v0.17') || shaderFile.includes('v0.21') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39');
 
@@ -488,27 +491,10 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     }
   }, [canvasMetrics]);
 
-  // Local animation loop when not playing or not loaded
-  useEffect(() => {
-    if (isModuleLoaded) {
-      cancelAnimationFrame(animationFrameRef.current);
-      return;
-    }
-
-    const startTime = performance.now();
-    const loop = () => {
-        const now = performance.now();
-        setLocalTime((now - startTime) / 1000.0);
-        animationFrameRef.current = requestAnimationFrame(loop);
-    };
-    loop();
-    return () => cancelAnimationFrame(animationFrameRef.current);
-  }, [isModuleLoaded]);
-
   // === WEBGL2 INITIALIZATION (Overlay for v0.38 & v0.39) ===
   useEffect(() => {
     const isOverlayShader = shaderFile.includes('v0.38') || shaderFile.includes('v0.39');
-
+    
     if (!isOverlayShader) {
         const gl = glContextRef.current;
         if (gl) { /* gl cleanup implicitly handled by browser */ }
@@ -519,7 +505,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
 
     const canvas = glCanvasRef.current;
     if (!canvas) return;
-
+    
     const gl = canvas.getContext('webgl2', { alpha: true, premultipliedAlpha: false, antialias: true });
     if (!gl) {
       console.warn("WebGL2 not available for overlay");
@@ -530,14 +516,14 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     // Compile Vertex & Fragment Shaders for the "Glass Cap"
     const vsSource = `#version 300 es
     layout(location=0) in vec2 a_pos; // unit quad -0.5..0.5
-
+    
     uniform vec2 u_resolution;
     uniform vec2 u_cellSize;
     uniform float u_cols;
     uniform float u_rows;
     uniform float u_playhead;
     uniform int u_layoutMode; // 1=Circular, 2=Horizontal
-    uniform int u_invertChannels;
+    uniform int u_invertChannels; 
     uniform mediump usampler2D u_noteData; // R8UI Texture
 
     out vec2 v_uv;
@@ -549,11 +535,11 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
         int id = gl_InstanceID;
         int col = id % int(u_cols);
         int row = id / int(u_cols);
-
+        
         // Fetch note from texture: x=col (channel), y=row (time).
         // Since padTopChannel is true for v0.38/39, col=0 is header, 1-32 is music.
         uint note = texelFetch(u_noteData, ivec2(col, row), 0).r;
-
+        
         if (note == 0u) {
             gl_Position = vec4(0.0);
             return;
@@ -563,34 +549,34 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
             // --- v0.39: PAGED STATIC HORIZONTAL GRID ---
             // Page Logic: Grid shows a window of 32 steps (e.g. 0-31, 32-63)
             // If the note row is not in the current window, discard.
-
+            
             float stepsPerPage = 32.0;
             float pageStart = floor(u_playhead / stepsPerPage) * stepsPerPage;
-
+            
             float localRow = float(row) - pageStart;
-
+            
             // If active note is outside current page view, clip it
             if (localRow < 0.0 || localRow >= stepsPerPage) {
                 gl_Position = vec4(0.0);
                 return;
             }
-
+            
             // X = Time (localRow), Y = Channel (col)
             float xPos = localRow * u_cellSize.x;
             float yPos = float(col) * u_cellSize.y;
-
+            
             // Adjust to cell centers (a_pos is -0.5..0.5)
             vec2 capSize = u_cellSize * 0.9;
             vec2 center = vec2(xPos, yPos) + u_cellSize * 0.5;
-
+            
             vec2 pos = center + (a_pos * capSize);
-
+            
             // NDC conversion (0..W -> -1..1, 0..H -> 1..-1)
             vec2 ndc = (pos / u_resolution) * 2.0 - 1.0;
             ndc.y = -ndc.y; // Flip Y (0 top)
-
+            
             gl_Position = vec4(ndc, 0.0, 1.0);
-
+            
         } else {
             // --- v0.38: CIRCULAR LAYOUT ---
             int ringIndex = col;
@@ -600,36 +586,36 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
 
             vec2 center = u_resolution * 0.5;
             float minDim = min(u_resolution.x, u_resolution.y);
-
+            
             float maxRadius = minDim * 0.45;
             float minRadius = minDim * 0.15;
             float ringDepth = (maxRadius - minRadius) / u_cols;
-
+            
             float radius = minRadius + float(ringIndex) * ringDepth;
-
+            
             float totalSteps = 64.0;
             float anglePerStep = (2.0 * PI) / totalSteps;
             float theta = -1.570796 + float(row % 64) * anglePerStep;
-
+            
             float circumference = 2.0 * PI * radius;
             float arcLength = circumference / totalSteps;
-
+            
             // Fuller Square Size (0.95)
-            float btnW = arcLength * 0.95;
+            float btnW = arcLength * 0.95; 
             float btnH = ringDepth * 0.95;
-
+            
             vec2 localPos = a_pos * vec2(btnW, btnH);
-
+            
             float rotAng = theta + 1.570796;
             float cA = cos(rotAng);
             float sA = sin(rotAng);
-
+            
             float rotX = localPos.x * cA - localPos.y * sA;
             float rotY = localPos.x * sA + localPos.y * cA;
-
+            
             float worldX = center.x + cos(theta) * radius + rotX;
             float worldY = center.y + sin(theta) * radius + rotY;
-
+            
             vec2 ndc = vec2((worldX / u_resolution.x) * 2.0 - 1.0, 1.0 - (worldY / u_resolution.y) * 2.0);
             gl_Position = vec4(ndc, 0.0, 1.0);
         }
@@ -643,26 +629,26 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     in vec2 v_uv;
     in float v_active;
     out vec4 fragColor;
-
+    
     void main() {
         vec2 p = v_uv - 0.5;
         float r = length(p) * 2.0;
-
+        
         vec2 d = abs(p) * 2.0;
         float box = max(d.x, d.y);
-
+        
         // Rectangular/Square Shape (Sharper edges)
         float alphaMask = 1.0 - smoothstep(0.9, 1.0, box);
-
+        
         float spec = 0.0;
         vec2 specPos = p - vec2(-0.2, -0.2);
         if (length(specPos) < 0.25) {
             spec = smoothstep(0.25, 0.0, length(specPos)) * 0.6;
         }
-
+        
         vec3 tint = vec3(0.8, 0.9, 1.0);
-        float opacity = 0.25 + (1.0 - r) * 0.1;
-
+        float opacity = 0.25 + (1.0 - r) * 0.1; 
+        
         vec3 col = tint + vec3(spec);
         fragColor = vec4(col, (opacity + spec) * alphaMask);
     }
@@ -698,7 +684,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     const buf = gl.createBuffer()!;
     gl.bindBuffer(gl.ARRAY_BUFFER, buf);
     gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
-      -0.5, -0.5, 0.5, -0.5, -0.5, 0.5,
+      -0.5, -0.5, 0.5, -0.5, -0.5, 0.5, 
       -0.5, 0.5, 0.5, -0.5, 0.5, 0.5
     ]), gl.STATIC_DRAW);
     gl.enableVertexAttribArray(0);
@@ -719,7 +705,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
       gl.deleteBuffer(buf);
       gl.deleteTexture(tex);
     };
-  }, [shaderFile]);
+  }, [shaderFile]); 
 
   // === WEBGL2 DATA UPLOAD ===
   useEffect(() => {
@@ -734,8 +720,8 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     const cols = padTopChannel ? rawCols + 1 : rawCols;
     const startCol = padTopChannel ? 1 : 0;
 
-    const data = new Uint8Array(rows * cols);
-
+    const data = new Uint8Array(rows * cols); 
+    
     for(let r=0; r<rows; r++) {
        const rowData = matrix.rows[r] || [];
        for(let c=0; c<rawCols; c++) {
@@ -785,9 +771,9 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     const uInvert = gl.getUniformLocation(res.program, 'u_invertChannels');
     const uLayout = gl.getUniformLocation(res.program, 'u_layoutMode');
     const uTex = gl.getUniformLocation(res.program, 'u_noteData');
-
+    
     gl.uniform2f(uRes, canvasMetrics.width, canvasMetrics.height);
-
+    
     // v0.39 Override: Fit 32 steps exactly into canvas width
     let effectiveCellW = cellWidth;
     let effectiveCellH = cellHeight;
@@ -799,14 +785,14 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
 
     gl.uniform1f(uCols, cols);
     gl.uniform1f(uRows, rows);
-
+    
     // Set Layout Mode: 1=Circular(0.38), 2=Horizontal(0.39)
     gl.uniform1i(uLayout, shaderFile.includes('v0.39') ? 2 : 1);
     gl.uniform1i(uInvert, invertChannels ? 1 : 0);
-
+    
     const totalPlayhead = playheadRow + (tickOffset || 0);
     gl.uniform1f(uPlay, totalPlayhead);
-
+    
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, res.texture);
     gl.uniform1i(uTex, 0);
@@ -817,7 +803,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
 
   const loadBezelTexture = async (device: GPUDevice) => {
     if (bezelTextureResourcesRef.current) return;
-
+    
     // v0.39 uses square bezel, others use round/custom
     const textureName = shaderFile.includes('v0.39') ? 'bezel-square.png' : 'bezel.png';
 
@@ -1174,7 +1160,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
       buf[3] = 0.98; buf[4] = 0.98; buf[5] = 0.98;
       buf[6] = 0.92; buf[7] = 0.92; buf[8] = 0.93;
       buf[9] = 0.02;
-      if (shaderFile.includes('v0.35')) { buf[10] = 0.0; buf[11] = 0.95; buf[12] = 0.32; }
+      if (shaderFile.includes('v0.35')) { buf[10] = 0.0; buf[11] = 0.95; buf[12] = 0.32; } 
       else { buf[10] = circularLayout ? 0.0 : 1.0; buf[11] = circularLayout ? 1.0 : 1.25; buf[12] = circularLayout ? 1.0 : 0.0; }
       buf[13] = 0.10;
       buf[14] = isPlaying ? 0.35 : 1.0;
@@ -1244,84 +1230,6 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     device.queue.submit([encoder.finish()]);
   };
 
-  // 3. Render Loop (Uniforms & Draw)
-  useEffect(() => {
-    const device = deviceRef.current;
-    if (!device || !gpuReady) return;
-
-    // Update uniform buffer
-    const uniformBuffer = uniformBufferRef.current;
-    if (uniformBuffer) {
-      const numRows = matrix?.numRows ?? DEFAULT_ROWS;
-      const rawChannels = matrix?.numChannels ?? DEFAULT_CHANNELS;
-      const numChannels = padTopChannel ? rawChannels + 1 : rawChannels;
-      const rowLimit = Math.max(1, numRows);
-      const tickRow = clampPlayhead(playheadRow, rowLimit);
-      const fractionalTick = Math.min(1, Math.max(0, tickOffset));
-
-      const effectiveTime = isModuleLoaded ? timeSec : localTime;
-
-      // v0.39 Override: Ensure uniform payload reflects the auto-calculated dimensions
-      let effectiveCellW = cellWidth;
-      let effectiveCellH = cellHeight;
-      if (shaderFile.includes('v0.39')) {
-          effectiveCellW = canvasMetrics.width / 32.0;
-          effectiveCellH = canvasMetrics.height / numChannels; // Approx
-      }
-
-      const uniformPayload = createUniformPayload(layoutTypeRef.current, {
-        numRows,
-        numChannels,
-        playheadRow: tickRow,
-        isPlaying,
-        cellW: effectiveCellW,
-        cellH: effectiveCellH,
-        canvasW: canvasMetrics.width,
-        canvasH: canvasMetrics.height,
-        tickOffset: fractionalTick,
-        bpm,
-        timeSec: effectiveTime,
-        beatPhase,
-        groove: Math.min(1, Math.max(0, grooveAmount)),
-        kickTrigger,
-        activeChannels,
-        isModuleLoaded,
-        bloomIntensity: bloomIntensity ?? 1.0,
-        bloomThreshold: bloomThreshold ?? 0.8,
-        invertChannels: invertChannels,
-      });
-      device.queue.writeBuffer(uniformBuffer, 0, uniformPayload);
-    }
-
-    // Update bezel uniforms (canvas size, colors, bezel width, screw radius)
-    if (bezelUniformBufferRef.current) {
-      const buf = new Float32Array(24);
-      buf[0] = canvasMetrics.width; buf[1] = canvasMetrics.height;
-      const minDim = Math.min(canvasMetrics.width, canvasMetrics.height);
-      const circularLayout = isCircularLayoutShader(shaderFile);
-      buf[2] = minDim * (circularLayout ? 0.05 : 0.07);
-      buf[3] = 0.98; buf[4] = 0.98; buf[5] = 0.98;
-      buf[6] = 0.92; buf[7] = 0.92; buf[8] = 0.93;
-      buf[9] = 0.02;
-      if (shaderFile.includes('v0.35')) { buf[10] = 0.0; buf[11] = 0.95; buf[12] = 0.32; }
-      else { buf[10] = circularLayout ? 0.0 : 1.0; buf[11] = circularLayout ? 1.0 : 1.25; buf[12] = circularLayout ? 1.0 : 0.0; }
-      buf[13] = 0.10;
-      buf[14] = isPlaying ? 0.35 : 1.0;
-      buf[15] = 0.0;
-      buf[16] = volume;
-      buf[17] = pan;
-      buf[18] = bpm;
-      const uint32View = new Uint32Array(buf.buffer);
-      uint32View[19] = isLooping ? 1 : 0;
-      uint32View[20] = 0;
-      uint32View[21] = playheadRow;
-      uint32View[22] = clickedButton;
-      device.queue.writeBuffer(bezelUniformBufferRef.current, 0, buf.buffer, buf.byteOffset, buf.byteLength);
-    }
-
-    render();
-  }, [playheadRow, timeSec, localTime, bpm, tickOffset, grooveAmount, kickTrigger, activeChannels, gpuReady, isPlaying, beatPhase, isModuleLoaded, matrix?.numRows, matrix?.numChannels, cellWidth, cellHeight, canvasMetrics, bloomIntensity, bloomThreshold, invertChannels, volume, pan, isLooping, clickedButton]);
-
   return (
     <div className={`pattern-display relative ${padTopChannel ? 'p-8 rounded-xl bg-[#18181a] shadow-2xl border border-[#333]' : ''}`}>
       <input type="file" ref={fileInputRef} onChange={handleFileChange} className="hidden" accept=".mod,.xm,.it,.s3m,.mptm" />
@@ -1368,7 +1276,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
           zIndex: 1
         }}
       />
-
+      
       {(shaderFile.includes('v0.38') || shaderFile.includes('v0.39')) && (
         <canvas
           ref={glCanvasRef}
@@ -1376,8 +1284,8 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
           height={canvasMetrics.height}
           style={{
             position: 'absolute',
-            top: padTopChannel ? '2rem' : 0,
-            left: padTopChannel ? '2rem' : 0,
+            top: padTopChannel ? '2rem' : 0, 
+            left: padTopChannel ? '2rem' : 0, 
             width: 'auto',
             height: 'auto',
             maxWidth: '100%',
