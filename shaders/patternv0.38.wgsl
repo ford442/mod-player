@@ -1,4 +1,3 @@
-
 // patternv0.38.wgsl
 // Circular Layout + Integrated UI + Glass Cap Ready
 // Note: Requires padTopChannel=true in PatternDisplay to shift music channels 1-32.
@@ -195,6 +194,7 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   let aa = fwidth(p.y) * 0.33;
   let bloom = uniforms.bloomIntensity;
 
+  // Hardware Layering: Discard pixels over UI
   if (in.position.y > uniforms.canvasH * 0.88) {
     discard;
   }
@@ -215,6 +215,7 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     return vec4<f32>(col, clamp(alpha, 0.0, 1.0));
   }
 
+  // --- MUSIC CHANNELS (1-32) ---
   let dHousing = sdRoundedBox(p, fs.housingSize * 0.5, 0.06);
   let housingMask = 1.0 - smoothstep(0.0, aa * 1.5, dHousing);
 
