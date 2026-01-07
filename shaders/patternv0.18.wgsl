@@ -154,7 +154,7 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
         if (ch.noteAge < 2.0 && ch.isMuted == 0u) {
 
             // Channel Position: Distributed around the circle
-            var angle = (f32(i) / f32(numCh)) * 6.28318 - 1.57; // Start at top (-PI/2)
+            let angle = (f32(i) / f32(numCh)) * 6.28318 - 1.57; // Start at top (-PI/2)
 
             // Spiral Animation: Splash moves outward from center
             let radius = 0.2 + ch.noteAge * 0.3;
