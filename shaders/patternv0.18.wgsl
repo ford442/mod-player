@@ -156,12 +156,10 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
             // Channel Position: Distributed around the circle
             var angle = (f32(i) / f32(numCh)) * 6.28318 - 1.57; // Start at top (-PI/2)
 
-            // Evolve 0.18: Spiral Out Animation
-            // Distance expands from center (0.2) outwards as note ages
+            // Spiral Animation: Splash moves outward from center
             let radius = 0.2 + ch.noteAge * 0.3;
 
             // Angle rotates with the vortex (swirl effect)
-            // Twist direction matches the background vortex feel
             angle += ch.noteAge * 1.5;
 
             let pos = vec2<f32>(cos(angle), sin(angle)) * radius;
