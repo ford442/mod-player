@@ -66,73 +66,32 @@ fn sdBox(p: vec2<f32>, b: vec2<f32>) -> f32 {
 
 // Simple 7-segment style digit rendering
 fn drawDigit(p: vec2<f32>, digit: u32, size: f32) -> f32 {
-    // Each digit is composed of 7 segments (like a digital clock display)
-    // Returns distance field (negative = inside)
     let segW = size * 0.15;
     let segL = size * 0.45;
     let gap = size * 0.05;
     
-    // Segment positions (7 segments: top, top-right, bottom-right, bottom, bottom-left, top-left, middle)
     var segments = array<u32, 10>(
-        0x77u, // 0: all except middle
-        0x24u, // 1: right side only
-        0x5du, // 2: all except top-left and bottom-right
-        0x6du, // 3: all except top-left and bottom-left
-        0x2eu, // 4: top-left, middle, and right side
-        0x6bu, // 5: all except top-right and bottom-left
-        0x7bu, // 6: all except top-right
-        0x25u, // 7: top and right side
-        0x7fu, // 8: all segments
-        0x6fu  // 9: all except bottom-left
+        0x77u, 0x24u, 0x5du, 0x6du, 0x2eu, 
+        0x6bu, 0x7bu, 0x25u, 0x7fu, 0x6fu
     );
     
     let code = select(0u, segments[digit], digit < 10u);
     var minDist = 100.0;
     
-    // Top horizontal
-    if ((code & 0x01u) != 0u) {
-        let d = sdBox(p - vec2<f32>(0.0, -segL), vec2<f32>(segL, segW));
-        minDist = min(minDist, d);
-    }
-    // Top-right vertical
-    if ((code & 0x02u) != 0u) {
-        let d = sdBox(p - vec2<f32>(segL, -segL * 0.5 - gap * 0.5), vec2<f32>(segW, segL * 0.5));
-        minDist = min(minDist, d);
-    }
-    // Bottom-right vertical
-    if ((code & 0x04u) != 0u) {
-        let d = sdBox(p - vec2<f32>(segL, segL * 0.5 + gap * 0.5), vec2<f32>(segW, segL * 0.5));
-        minDist = min(minDist, d);
-    }
-    // Bottom horizontal
-    if ((code & 0x08u) != 0u) {
-        let d = sdBox(p - vec2<f32>(0.0, segL), vec2<f32>(segL, segW));
-        minDist = min(minDist, d);
-    }
-    // Bottom-left vertical
-    if ((code & 0x10u) != 0u) {
-        let d = sdBox(p - vec2<f32>(-segL, segL * 0.5 + gap * 0.5), vec2<f32>(segW, segL * 0.5));
-        minDist = min(minDist, d);
-    }
-    // Top-left vertical
-    if ((code & 0x20u) != 0u) {
-        let d = sdBox(p - vec2<f32>(-segL, -segL * 0.5 - gap * 0.5), vec2<f32>(segW, segL * 0.5));
-        minDist = min(minDist, d);
-    }
-    // Middle horizontal
-    if ((code & 0x40u) != 0u) {
-        let d = sdBox(p, vec2<f32>(segL, segW));
-        minDist = min(minDist, d);
-    }
+    if ((code & 0x01u) != 0u) { minDist = min(minDist, sdBox(p - vec2<f32>(0.0, -segL), vec2<f32>(segL, segW))); }
+    if ((code & 0x02u) != 0u) { minDist = min(minDist, sdBox(p - vec2<f32>(segL, -segL * 0.5 - gap * 0.5), vec2<f32>(segW, segL * 0.5))); }
+    if ((code & 0x04u) != 0u) { minDist = min(minDist, sdBox(p - vec2<f32>(segL, segL * 0.5 + gap * 0.5), vec2<f32>(segW, segL * 0.5))); }
+    if ((code & 0x08u) != 0u) { minDist = min(minDist, sdBox(p - vec2<f32>(0.0, segL), vec2<f32>(segL, segW))); }
+    if ((code & 0x10u) != 0u) { minDist = min(minDist, sdBox(p - vec2<f32>(-segL, segL * 0.5 + gap * 0.5), vec2<f32>(segW, segL * 0.5))); }
+    if ((code & 0x20u) != 0u) { minDist = min(minDist, sdBox(p - vec2<f32>(-segL, -segL * 0.5 - gap * 0.5), vec2<f32>(segW, segL * 0.5))); }
+    if ((code & 0x40u) != 0u) { minDist = min(minDist, sdBox(p, vec2<f32>(segL, segW))); }
     
     return minDist;
 }
 
-// Draw a number (up to 3 digits)
 fn drawNumber(p: vec2<f32>, value: u32, numDigits: u32, digitSize: f32, spacing: f32) -> f32 {
     var minDist = 100.0;
     var v = value;
-    
     for (var i = 0u; i < numDigits; i = i + 1u) {
         let digit = v % 10u;
         v = v / 10u;
@@ -140,67 +99,45 @@ fn drawNumber(p: vec2<f32>, value: u32, numDigits: u32, digitSize: f32, spacing:
         let d = drawDigit(p - vec2<f32>(-xPos, 0.0), digit, digitSize);
         minDist = min(minDist, d);
     }
-    
     return minDist;
 }
 
-// Simple text rendering (very basic, just rectangles for now)
 fn drawText(p: vec2<f32>, size: vec2<f32>) -> f32 {
     return sdBox(p, size);
 }
 
 // --- NEW FUNCTION: White Square Button Style ---
 fn drawWhiteButton(uv: vec2<f32>, size: vec2<f32>, glowColor: vec3<f32>, isOn: bool, aa: f32) -> vec4<f32> {
-  // uv is centered at (0,0) relative to the button
   let halfSize = size * 0.5;
-  // Square with rounded corners
   let d = sdRoundedBox(uv, halfSize, 0.015); 
 
-  var col = vec3<f32>(0.90, 0.90, 0.92); // Base White Plastic
-  
-  // Subtle gradient on body
+  var col = vec3<f32>(0.90, 0.90, 0.92); 
   col *= (0.95 + 0.05 * cos(uv.y * 8.0));
 
   var alpha = 0.0;
-  
-  // 1. Button Body
   let bodyMask = 1.0 - smoothstep(0.0, aa, d);
   
   if (isOn) {
-      // Active: Bright white center + Tint
       col = vec3<f32>(1.0, 1.0, 1.0); 
-      // Add slight tint of the glow color to the body
       col = mix(col, glowColor, 0.2);
   } else {
-      // Inactive: Dimmer grey/white
       col = vec3<f32>(0.65, 0.65, 0.68);
   }
 
-  if (bodyMask > 0.0) {
-      alpha = 1.0;
-  }
+  if (bodyMask > 0.0) { alpha = 1.0; }
 
-  // 2. Glow (Purple/Custom)
   if (isOn) {
       let glowDist = max(0.0, d);
-      // Exponential falloff for glow
       let glow = exp(-glowDist * 12.0) * glowColor * 1.5;
-      
-      // If we are outside the body, we add glow
       if (d > 0.0) {
         col = glow;
         alpha = smoothstep(0.0, 0.4, length(glow));
       } else {
-        // Inside body, add glow to white
         col += glow * 0.5;
       }
   }
 
-  // Apply body mask if not glowing (to clip transparent areas)
-  if (!isOn) {
-      alpha = bodyMask;
-  }
-  
+  if (!isOn) { alpha = bodyMask; }
   return vec4<f32>(col, alpha);
 }
 
@@ -224,65 +161,50 @@ fn vs(@builtin(vertex_index) vertexIndex: u32) -> VertOut {
 
 @fragment
 fn fs(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
-  // Centered normalized coordinates
-  let p = uv - 0.5; // -0.5 to 0.5
-  let aa = 1.0 / bez.canvasH; // approx pixel width for AA
+  let p = uv - 0.5; 
+  let aa = 1.0 / bez.canvasH; 
 
-  // Hardware palette (Dark Theme)
   let colPlastic = vec3<f32>(0.08, 0.08, 0.10);
   let colRecess = vec3<f32>(0.05, 0.05, 0.06);
 
   // --- PASS 1: PHYSICAL CASE (Dimmed) ---
   var color = colPlastic;
 
-  // Use the Bezel Texture if available
   let texSample = textureSampleLevel(bezelTexture, bezelSampler, uv, 0.0);
   if (texSample.a > 0.1) {
     color = mix(color, texSample.rgb, texSample.a);
   } else {
-    // Procedural fallback (Circular Recess)
     let dist = length(p);
-    let maxRadius = 0.45;
-    let minRadius = 0.15;
-
-    if (dist < maxRadius + 0.02 && dist > minRadius - 0.02) {
+    if (dist < 0.47 && dist > 0.13) {
         color = colRecess;
-        // Subtle tracks
-        let track = sin(dist * 200.0);
-        color -= vec3<f32>(0.01) * track;
+        color -= vec3<f32>(0.01) * sin(dist * 200.0);
     }
   }
 
-  // Common UI Coordinates
-  let displayY = 0.45; // Top area
-  let sliderY = -0.2;  // Left/Right Sliders
-  let barY = -0.45;    // Bottom Bar
-
-  // 1. Labels (Painted on case, should dim)
-  let dTempoLabel = drawText(p - vec2<f32>(-0.07, displayY), vec2<f32>(0.03, 0.008));
-  if (dTempoLabel < 0.0) {
-      color = mix(color, vec3<f32>(0.6, 0.6, 0.7), smoothstep(aa, 0.0, dTempoLabel));
-  }
-  let dBPMLabel = drawText(p - vec2<f32>(0.07, displayY), vec2<f32>(0.015, 0.008));
-  if (dBPMLabel < 0.0) {
-      color = mix(color, vec3<f32>(0.6, 0.6, 0.7), smoothstep(aa, 0.0, dBPMLabel));
-  }
-
-  // Slider Labels
+  // --- DEFINITIONS FOR SLIDERS & UI ---
+  let displayY = 0.45;
+  let sliderY = -0.2;
+  let barY = -0.45;
   let sliderLeftX = -0.42;
+  let sliderRightX = 0.42;
   let sliderH = 0.2;
   let sliderW = 0.015;
-  let dVolLabel = drawText(p - vec2<f32>(sliderLeftX, sliderY - sliderH * 0.6), vec2<f32>(0.025, 0.008));
-  if (dVolLabel < 0.0) {
-      color = mix(color, vec3<f32>(0.6, 0.6, 0.7), smoothstep(aa, 0.0, dVolLabel));
-  }
-  let sliderRightX = 0.42;
-  let dPanLabel = drawText(p - vec2<f32>(sliderRightX, sliderY - sliderH * 0.6), vec2<f32>(0.03, 0.008));
-  if (dPanLabel < 0.0) {
-      color = mix(color, vec3<f32>(0.6, 0.6, 0.7), smoothstep(aa, 0.0, dPanLabel));
-  }
 
-  // 2. Slider Tracks & Handles (Physical)
+  // 1. Labels
+  let dTempoLabel = drawText(p - vec2<f32>(-0.07, displayY), vec2<f32>(0.03, 0.008));
+  if (dTempoLabel < 0.0) { color = mix(color, vec3<f32>(0.6, 0.6, 0.7), smoothstep(aa, 0.0, dTempoLabel)); }
+  
+  let dBPMLabel = drawText(p - vec2<f32>(0.07, displayY), vec2<f32>(0.015, 0.008));
+  if (dBPMLabel < 0.0) { color = mix(color, vec3<f32>(0.6, 0.6, 0.7), smoothstep(aa, 0.0, dBPMLabel)); }
+
+  let dVolLabel = drawText(p - vec2<f32>(sliderLeftX, sliderY - sliderH * 0.6), vec2<f32>(0.025, 0.008));
+  if (dVolLabel < 0.0) { color = mix(color, vec3<f32>(0.6, 0.6, 0.7), smoothstep(aa, 0.0, dVolLabel)); }
+  
+  let dPanLabel = drawText(p - vec2<f32>(sliderRightX, sliderY - sliderH * 0.6), vec2<f32>(0.03, 0.008));
+  if (dPanLabel < 0.0) { color = mix(color, vec3<f32>(0.6, 0.6, 0.7), smoothstep(aa, 0.0, dPanLabel)); }
+
+  // 2. Slider Tracks & Handles
+  // Volume
   let dVolTrack = sdRoundedBox(p - vec2<f32>(sliderLeftX, sliderY), vec2<f32>(sliderW * 0.5, sliderH * 0.5), 0.003);
   if (dVolTrack < 0.0) {
       color = mix(color, vec3<f32>(0.15, 0.15, 0.18), 0.8);
@@ -294,6 +216,7 @@ fn fs(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
       color = mix(color, vec3<f32>(0.3, 0.8, 0.4), smoothstep(aa, -aa, dVolHandle));
   }
 
+  // Pan
   let dPanTrack = sdRoundedBox(p - vec2<f32>(sliderRightX, sliderY), vec2<f32>(sliderW * 0.5, sliderH * 0.5), 0.003);
   if (dPanTrack < 0.0) {
       color = mix(color, vec3<f32>(0.15, 0.15, 0.18), 0.8);
@@ -314,19 +237,17 @@ fn fs(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
       color = mix(color, vec3<f32>(0.2, 0.2, 0.25), 0.9);
   }
   
-  // --- APPLY NIGHT MODE DIMMING ---
+  // --- NIGHT MODE DIMMING ---
   let dim = max(0.2, bez.dimFactor);
   color *= dim;
-  
   let uvFactor = (1.0 - dim) * 1.5; 
 
-  // --- PASS 2: EMISSIVE UI (LCDs & UV Buttons) ---
+  // --- PASS 2: EMISSIVE UI ---
 
-  // 4. LCD Displays (Self-illuminated)
+  // 4. LCD Displays
   let lcdColorBase = vec3<f32>(0.3, 0.8, 1.0); 
   let lcdColor = lcdColorBase + (lcdColorBase * uvFactor); 
 
-  // BPM Digits
   let bpmValue = u32(bez.bpm);
   let dBPM = drawNumber(p - vec2<f32>(0.0, displayY), bpmValue, 3u, 0.012, 0.015);
   if (dBPM < 0.0) {
@@ -335,7 +256,6 @@ fn fs(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
       color += lcdColor * 0.5 * mask;
   }
 
-  // Pos Digits
   let posY = displayY - 0.04;
   let lcdColorPos = vec3<f32>(1.0, 0.7, 0.2); 
   let lcdColorPosBright = lcdColorPos + (lcdColorPos * uvFactor);
@@ -354,37 +274,31 @@ fn fs(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
   }
 
   // 5. BUTTONS (WHITE SQUARE + PURPLE GLOW)
-  // Shared Settings
   let purpleGlow = vec3<f32>(0.7, 0.2, 1.0);
-  let btnSize = vec2<f32>(0.09, 0.09); // Approx square size
-  let iconRadius = 0.045; // For icon sizing relative to old scale
+  let btnSize = vec2<f32>(0.09, 0.09);
+  let iconRadius = 0.045;
 
-  // LOOP: Top Left
+  // LOOP
   let posLoop = vec2<f32>(-0.44, 0.42);
   let isLooping = bez.isLooping == 1u;
   let isLoopClicked = bez.clickedButton == 1u;
-  
-  // State: Glows purple if looping or clicked
   let loopActive = isLooping || isLoopClicked;
   
-  // Draw Button Body
   let loopBtn = drawWhiteButton(p - posLoop, btnSize, purpleGlow, loopActive, aa);
   color = mix(color, loopBtn.rgb, loopBtn.a);
 
-  // Draw Icon (Ring)
   let dIconOuter = sdCircle(p - posLoop, iconRadius * 0.4);
   let dIconInner = sdCircle(p - posLoop, iconRadius * 0.25);
   let ring = max(dIconOuter, -dIconInner);
   let ringMask = smoothstep(aa, 0.0, -ring);
-  color = mix(color, vec3<f32>(0.1), ringMask * 0.6); // Dark Grey Icon
+  color = mix(color, vec3<f32>(0.1), ringMask * 0.6);
 
-  // OPEN: Top Right
+  // OPEN
   let posOpen = vec2<f32>(0.44, 0.42);
   let isOpenClicked = bez.clickedButton == 2u;
   let openBtn = drawWhiteButton(p - posOpen, btnSize, purpleGlow, isOpenClicked, aa);
   color = mix(color, openBtn.rgb, openBtn.a);
 
-  // Draw Icon (Eject/Arrow)
   let iconOff = p - posOpen;
   let tri = sdTriangle((iconOff - vec2<f32>(0.0, -0.01)) * 1.8, iconRadius * 0.3);
   let stem = sdBox(iconOff - vec2<f32>(0.0, 0.015), vec2<f32>(0.006, 0.015));
@@ -392,7 +306,7 @@ fn fs(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
   let openIconMask = smoothstep(aa, 0.0, -arrow);
   color = mix(color, vec3<f32>(0.1), openIconMask * 0.6);
 
-  // PLAY: Bottom Left
+  // PLAY
   let posPlay = vec2<f32>(-0.44, -0.40);
   let isPlaying = bez.dimFactor < 0.5;
   let isPlayClicked = bez.clickedButton == 3u;
@@ -401,24 +315,18 @@ fn fs(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
   let playBtn = drawWhiteButton(p - posPlay, btnSize, purpleGlow, playActive, aa);
   color = mix(color, playBtn.rgb, playBtn.a);
   
-  // Draw Icon (Triangle)
   let dPlayIcon = sdTriangle((p - posPlay) * vec2<f32>(1.0, -1.0) * 1.5, iconRadius * 0.4);
   let playIconMask = smoothstep(aa, 0.0, -dPlayIcon);
   color = mix(color, vec3<f32>(0.1), playIconMask * 0.6);
 
-  // STOP: Bottom Left (Right of Play)
+  // STOP
   let posStop = vec2<f32>(-0.35, -0.40);
   let isStopClicked = bez.clickedButton == 4u;
-  let stopActive = !isPlaying || isStopClicked; // Stop glows when stopped? Or just when clicked? 
-  // User asked for "glow purple". Usually buttons glow when active.
-  // Let's make STOP glow only when clicked or maybe when Stopped to indicate state?
-  // Standard UI: Play glows when playing. Stop usually doesn't glow when stopped unless it's a "Stop Mode".
-  // I will make it glow only when clicked to avoid too much purple, OR if the user wants it to be "interactable" style.
-  // Actually, let's make it glow when stopped to balance the Play button.
+  let stopActive = !isPlaying || isStopClicked;
+  
   let stopBtn = drawWhiteButton(p - posStop, btnSize, purpleGlow, stopActive, aa);
   color = mix(color, stopBtn.rgb, stopBtn.a);
   
-  // Draw Icon (Square)
   let dStopIcon = sdBox(p - posStop, vec2<f32>(iconRadius * 0.35));
   let stopIconMask = smoothstep(aa, 0.0, -dStopIcon);
   color = mix(color, vec3<f32>(0.1), stopIconMask * 0.6);
