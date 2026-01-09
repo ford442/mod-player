@@ -334,6 +334,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   const textureResourcesRef = useRef<{ sampler: GPUSampler; view: GPUTextureView } | null>(null);
   const useExtendedRef = useRef<boolean>(false);
   const animationFrameRef = useRef<number>(0);
+  const renderRef = useRef<(() => void) | null>(null);
   const videoRef = useRef<HTMLVideoElement | HTMLImageElement | null>(null);
   const videoTextureRef = useRef<GPUTexture | null>(null);
   const videoLoopRef = useRef<number>(0);
@@ -1251,6 +1252,32 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     pass.end();
     device.queue.submit([encoder.finish()]);
   };
+
+  // Keep a ref to the latest render function to avoid stale closures in the loop
+  useEffect(() => {
+    renderRef.current = render;
+  });
+
+  useEffect(() => {
+    const loop = (time: number) => {
+      animationFrameRef.current = requestAnimationFrame(loop);
+
+      // Update local time if module is not playing/loaded, for idle animations
+      if (!isModuleLoaded && !isPlaying) {
+        setLocalTime(time / 1000.0);
+      }
+
+      if (renderRef.current) {
+        renderRef.current();
+      }
+    };
+
+    animationFrameRef.current = requestAnimationFrame(loop);
+
+    return () => {
+      cancelAnimationFrame(animationFrameRef.current);
+    };
+  }, [isModuleLoaded, isPlaying]);
 
   return (
     <div className={`pattern-display relative ${padTopChannel ? 'p-8 rounded-xl bg-[#18181a] shadow-2xl border border-[#333]' : ''}`}>
