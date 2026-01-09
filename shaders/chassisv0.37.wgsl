@@ -149,6 +149,61 @@ fn drawText(p: vec2<f32>, size: vec2<f32>) -> f32 {
     return sdBox(p, size);
 }
 
+// --- NEW FUNCTION: White Square Button Style ---
+fn drawWhiteButton(uv: vec2<f32>, size: vec2<f32>, glowColor: vec3<f32>, isOn: bool, aa: f32) -> vec4<f32> {
+  // uv is centered at (0,0) relative to the button
+  let halfSize = size * 0.5;
+  // Square with rounded corners
+  let d = sdRoundedBox(uv, halfSize, 0.015); 
+
+  var col = vec3<f32>(0.90, 0.90, 0.92); // Base White Plastic
+  
+  // Subtle gradient on body
+  col *= (0.95 + 0.05 * cos(uv.y * 8.0));
+
+  var alpha = 0.0;
+  
+  // 1. Button Body
+  let bodyMask = 1.0 - smoothstep(0.0, aa, d);
+  
+  if (isOn) {
+      // Active: Bright white center + Tint
+      col = vec3<f32>(1.0, 1.0, 1.0); 
+      // Add slight tint of the glow color to the body
+      col = mix(col, glowColor, 0.2);
+  } else {
+      // Inactive: Dimmer grey/white
+      col = vec3<f32>(0.65, 0.65, 0.68);
+  }
+
+  if (bodyMask > 0.0) {
+      alpha = 1.0;
+  }
+
+  // 2. Glow (Purple/Custom)
+  if (isOn) {
+      let glowDist = max(0.0, d);
+      // Exponential falloff for glow
+      let glow = exp(-glowDist * 12.0) * glowColor * 1.5;
+      
+      // If we are outside the body, we add glow
+      if (d > 0.0) {
+        col = glow;
+        alpha = smoothstep(0.0, 0.4, length(glow));
+      } else {
+        // Inside body, add glow to white
+        col += glow * 0.5;
+      }
+  }
+
+  // Apply body mask if not glowing (to clip transparent areas)
+  if (!isOn) {
+      alpha = bodyMask;
+  }
+  
+  return vec4<f32>(col, alpha);
+}
+
 struct VertOut {
   @builtin(position) position: vec4<f32>,
   @location(0) uv: vec2<f32>,
@@ -204,7 +259,6 @@ fn fs(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
   let barY = -0.45;    // Bottom Bar
 
   // 1. Labels (Painted on case, should dim)
-  // Tempo Labels
   let dTempoLabel = drawText(p - vec2<f32>(-0.07, displayY), vec2<f32>(0.03, 0.008));
   if (dTempoLabel < 0.0) {
       color = mix(color, vec3<f32>(0.6, 0.6, 0.7), smoothstep(aa, 0.0, dTempoLabel));
@@ -237,7 +291,6 @@ fn fs(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
   let volHandleY = sliderY + (volNorm - 0.5) * sliderH * 0.9;
   let dVolHandle = sdCircle(p - vec2<f32>(sliderLeftX, volHandleY), 0.02);
   if (dVolHandle < 0.0) {
-      // Handle is painted plastic
       color = mix(color, vec3<f32>(0.3, 0.8, 0.4), smoothstep(aa, -aa, dVolHandle));
   }
 
@@ -249,7 +302,6 @@ fn fs(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
   let panHandleY = sliderY + panNorm * sliderH * 0.45;
   let dPanHandle = sdCircle(p - vec2<f32>(sliderRightX, panHandleY), 0.02);
   if (dPanHandle < 0.0) {
-      // Handle is painted plastic
       let panColor = mix(vec3<f32>(0.8, 0.3, 0.3), vec3<f32>(0.3, 0.3, 0.8), (panNorm + 1.0) * 0.5);
       color = mix(color, panColor, smoothstep(aa, -aa, dPanHandle));
   }
@@ -263,36 +315,29 @@ fn fs(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
   }
   
   // --- APPLY NIGHT MODE DIMMING ---
-  // Everything drawn so far gets dimmed when playing
   let dim = max(0.2, bez.dimFactor);
   color *= dim;
   
-  // Calculate UV Intensity (how much "fluorescence" we see)
-  // When dim is low (0.2), uvFactor is high (0.8).
-  // When dim is high (1.0), uvFactor is low (0.0).
   let uvFactor = (1.0 - dim) * 1.5; 
 
-
   // --- PASS 2: EMISSIVE UI (LCDs & UV Buttons) ---
-  // These elements are added ON TOP and glow in the dark
 
   // 4. LCD Displays (Self-illuminated)
-  let lcdColorBase = vec3<f32>(0.3, 0.8, 1.0); // Cyan LCD
-  let lcdColor = lcdColorBase + (lcdColorBase * uvFactor); // Brighter in dark
+  let lcdColorBase = vec3<f32>(0.3, 0.8, 1.0); 
+  let lcdColor = lcdColorBase + (lcdColorBase * uvFactor); 
 
   // BPM Digits
   let bpmValue = u32(bez.bpm);
   let dBPM = drawNumber(p - vec2<f32>(0.0, displayY), bpmValue, 3u, 0.012, 0.015);
   if (dBPM < 0.0) {
-      // Additive blend for LCD glow
       let mask = smoothstep(aa, 0.0, dBPM);
       color = mix(color, lcdColor, mask); 
-      color += lcdColor * 0.5 * mask; // Glow
+      color += lcdColor * 0.5 * mask;
   }
 
   // Pos Digits
   let posY = displayY - 0.04;
-  let lcdColorPos = vec3<f32>(1.0, 0.7, 0.2); // Amber LCD
+  let lcdColorPos = vec3<f32>(1.0, 0.7, 0.2); 
   let lcdColorPosBright = lcdColorPos + (lcdColorPos * uvFactor);
   
   let dOrder = drawNumber(p - vec2<f32>(-0.10, posY), bez.currentOrder, 2u, 0.01, 0.012);
@@ -308,115 +353,75 @@ fn fs(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
       color += lcdColorPosBright * 0.4 * mask;
   }
 
-  // 5. UV Buttons (Fluorescent)
-  let btnRadius = 0.045;
-  
-  // LOOP: Top Left (Orange/Amber)
+  // 5. BUTTONS (WHITE SQUARE + PURPLE GLOW)
+  // Shared Settings
+  let purpleGlow = vec3<f32>(0.7, 0.2, 1.0);
+  let btnSize = vec2<f32>(0.09, 0.09); // Approx square size
+  let iconRadius = 0.045; // For icon sizing relative to old scale
+
+  // LOOP: Top Left
   let posLoop = vec2<f32>(-0.44, 0.42);
-  let dLoopBg = sdCircle(p - posLoop, btnRadius);
-  if (dLoopBg < 0.0) {
-      let isLooping = bez.isLooping == 1u;
-      let isClicked = bez.clickedButton == 1u;
-      
-      // Base UV color (Neon Orange)
-      var btnCol = vec3<f32>(1.0, 0.4, 0.0);
-      
-      // State logic
-      if (isLooping) {
-          btnCol = vec3<f32>(1.0, 0.8, 0.2); // Bright Yellow-Orange when active
-          btnCol += vec3<f32>(0.5) * uvFactor; // Extra glow in UV
-      } else {
-          btnCol *= 0.6; // Dimmer when inactive
-          btnCol += vec3<f32>(0.2, 0.1, 0.0) * uvFactor; // Still glows faintly in UV
-      }
-      
-      if (isClicked) { btnCol = vec3<f32>(1.0, 1.0, 1.0); } // Flash white
+  let isLooping = bez.isLooping == 1u;
+  let isLoopClicked = bez.clickedButton == 1u;
+  
+  // State: Glows purple if looping or clicked
+  let loopActive = isLooping || isLoopClicked;
+  
+  // Draw Button Body
+  let loopBtn = drawWhiteButton(p - posLoop, btnSize, purpleGlow, loopActive, aa);
+  color = mix(color, loopBtn.rgb, loopBtn.a);
 
-      let mask = smoothstep(0.0, aa * 2.0, -dLoopBg);
-      // Mix over existing dimmed background
-      color = mix(color, btnCol, mask);
-      
-      // Icon
-      let dIconOuter = sdCircle(p - posLoop, btnRadius * 0.4);
-      let dIconInner = sdCircle(p - posLoop, btnRadius * 0.25);
-      let ring = max(dIconOuter, -dIconInner);
-      let ringMask = smoothstep(aa, 0.0, -ring);
-      color = mix(color, vec3<f32>(0.0), ringMask * 0.5); // Darken icon
-  }
+  // Draw Icon (Ring)
+  let dIconOuter = sdCircle(p - posLoop, iconRadius * 0.4);
+  let dIconInner = sdCircle(p - posLoop, iconRadius * 0.25);
+  let ring = max(dIconOuter, -dIconInner);
+  let ringMask = smoothstep(aa, 0.0, -ring);
+  color = mix(color, vec3<f32>(0.1), ringMask * 0.6); // Dark Grey Icon
 
-  // OPEN: Top Right (Cyan/Blue)
+  // OPEN: Top Right
   let posOpen = vec2<f32>(0.44, 0.42);
-  let dOpenBg = sdCircle(p - posOpen, btnRadius);
-  if (dOpenBg < 0.0) {
-      let isClicked = bez.clickedButton == 2u;
-      
-      // UV Blue
-      var btnCol = vec3<f32>(0.0, 0.6, 1.0);
-      btnCol += vec3<f32>(0.0, 0.2, 0.5) * uvFactor; // Glows blue in UV
-      
-      if (isClicked) { btnCol = vec3<f32>(1.0); }
+  let isOpenClicked = bez.clickedButton == 2u;
+  let openBtn = drawWhiteButton(p - posOpen, btnSize, purpleGlow, isOpenClicked, aa);
+  color = mix(color, openBtn.rgb, openBtn.a);
 
-      let mask = smoothstep(0.0, aa * 2.0, -dOpenBg);
-      color = mix(color, btnCol, mask);
-      
-      // Icon (Eject)
-      let iconOff = p - posOpen;
-      let tri = sdTriangle((iconOff - vec2<f32>(0.0, -0.01)) * 1.8, btnRadius * 0.3);
-      let stem = sdBox(iconOff - vec2<f32>(0.0, 0.015), vec2<f32>(0.006, 0.015));
-      let arrow = min(tri, stem);
-      let iconMask = smoothstep(aa, 0.0, -arrow);
-      color = mix(color, vec3<f32>(0.0), iconMask * 0.5);
-  }
+  // Draw Icon (Eject/Arrow)
+  let iconOff = p - posOpen;
+  let tri = sdTriangle((iconOff - vec2<f32>(0.0, -0.01)) * 1.8, iconRadius * 0.3);
+  let stem = sdBox(iconOff - vec2<f32>(0.0, 0.015), vec2<f32>(0.006, 0.015));
+  let arrow = min(tri, stem);
+  let openIconMask = smoothstep(aa, 0.0, -arrow);
+  color = mix(color, vec3<f32>(0.1), openIconMask * 0.6);
 
-  // PLAY: Bottom Left (Neon Green)
+  // PLAY: Bottom Left
   let posPlay = vec2<f32>(-0.44, -0.40);
-  let dPlayBg = sdCircle(p - posPlay, btnRadius);
-  if (dPlayBg < 0.0) {
-      let isPlaying = bez.dimFactor < 0.5;
-      let isClicked = bez.clickedButton == 3u;
+  let isPlaying = bez.dimFactor < 0.5;
+  let isPlayClicked = bez.clickedButton == 3u;
+  let playActive = isPlaying || isPlayClicked;
+  
+  let playBtn = drawWhiteButton(p - posPlay, btnSize, purpleGlow, playActive, aa);
+  color = mix(color, playBtn.rgb, playBtn.a);
+  
+  // Draw Icon (Triangle)
+  let dPlayIcon = sdTriangle((p - posPlay) * vec2<f32>(1.0, -1.0) * 1.5, iconRadius * 0.4);
+  let playIconMask = smoothstep(aa, 0.0, -dPlayIcon);
+  color = mix(color, vec3<f32>(0.1), playIconMask * 0.6);
 
-      // UV Green
-      var btnCol = vec3<f32>(0.1, 0.9, 0.2);
-      
-      if (isPlaying) {
-          btnCol = vec3<f32>(0.4, 1.0, 0.5); // Super bright green
-          btnCol += vec3<f32>(0.2, 0.5, 0.2) * uvFactor; // Radioactive glow
-      } else {
-          btnCol *= 0.5;
-          btnCol += vec3<f32>(0.0, 0.2, 0.0) * uvFactor;
-      }
-      
-      if (isClicked) { btnCol = vec3<f32>(1.0); }
-
-      let mask = smoothstep(0.0, aa * 2.0, -dPlayBg);
-      color = mix(color, btnCol, mask);
-      
-      // Icon
-      let dIcon = sdTriangle((p - posPlay) * vec2<f32>(1.0, -1.0) * 1.5, btnRadius * 0.4);
-      let iconMask = smoothstep(aa, 0.0, -dIcon);
-      color = mix(color, vec3<f32>(0.0), iconMask * 0.5);
-  }
-
-  // STOP: Bottom Left (Neon Red/Pink)
+  // STOP: Bottom Left (Right of Play)
   let posStop = vec2<f32>(-0.35, -0.40);
-  let dStopBg = sdCircle(p - posStop, btnRadius);
-  if (dStopBg < 0.0) {
-      let isClicked = bez.clickedButton == 4u;
-      
-      // UV Red
-      var btnCol = vec3<f32>(1.0, 0.1, 0.3);
-      btnCol += vec3<f32>(0.5, 0.0, 0.1) * uvFactor; // Glows pinkish in UV
-      
-      if (isClicked) { btnCol = vec3<f32>(1.0); }
-
-      let mask = smoothstep(0.0, aa * 2.0, -dStopBg);
-      color = mix(color, btnCol, mask);
-      
-      // Icon
-      let dIcon = sdBox(p - posStop, vec2<f32>(btnRadius * 0.35));
-      let iconMask = smoothstep(aa, 0.0, -dIcon);
-      color = mix(color, vec3<f32>(0.0), iconMask * 0.5);
-  }
+  let isStopClicked = bez.clickedButton == 4u;
+  let stopActive = !isPlaying || isStopClicked; // Stop glows when stopped? Or just when clicked? 
+  // User asked for "glow purple". Usually buttons glow when active.
+  // Let's make STOP glow only when clicked or maybe when Stopped to indicate state?
+  // Standard UI: Play glows when playing. Stop usually doesn't glow when stopped unless it's a "Stop Mode".
+  // I will make it glow only when clicked to avoid too much purple, OR if the user wants it to be "interactable" style.
+  // Actually, let's make it glow when stopped to balance the Play button.
+  let stopBtn = drawWhiteButton(p - posStop, btnSize, purpleGlow, stopActive, aa);
+  color = mix(color, stopBtn.rgb, stopBtn.a);
+  
+  // Draw Icon (Square)
+  let dStopIcon = sdBox(p - posStop, vec2<f32>(iconRadius * 0.35));
+  let stopIconMask = smoothstep(aa, 0.0, -dStopIcon);
+  color = mix(color, vec3<f32>(0.1), stopIconMask * 0.6);
 
   return vec4<f32>(color, 1.0);
 }
