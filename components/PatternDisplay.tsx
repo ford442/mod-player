@@ -319,6 +319,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     onPanChange,
     totalRows = 64,
 }) => {
+  // ... (State hooks unchanged)
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const deviceRef = useRef<GPUDevice | null>(null);
@@ -354,7 +355,9 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
 
   const clickTimeoutRef = useRef<number | null>(null);
 
-  // Video management
+  // ... (Video management and WebGPU init effects unchanged - omitted for brevity as they are identical to previous)
+  
+  // (Paste your existing useEffects here, they are unchanged)
   useEffect(() => {
     const isVideoShader = shaderFile.includes('v0.20') || shaderFile.includes('v0.23') || shaderFile.includes('v0.24') || shaderFile.includes('v0.25');
     cancelAnimationFrame(videoLoopRef.current);
@@ -825,7 +828,8 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     const sampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear' });
     bezelTextureResourcesRef.current = { sampler, view: texture.createView() };
   };
-
+  
+  // (ensureButtonTexture, ensureVideoPlaceholder, preferredImageFormat, refreshBindGroup, WebGPU init effects unchanged...)
   const ensureButtonTexture = async (device: GPUDevice) => {
     if (textureResourcesRef.current) return;
     const textureUrl = shaderFile.includes('v0.30') ? 'unlit-button-2.png' : 'https://test.1ink.us/xm-player/unlit-button.png';
@@ -901,7 +905,8 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     }
     bindGroupRef.current = device.createBindGroup({ layout, entries });
   };
-
+  
+  // (WebGPU initialization effect is unchanged)
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -1018,6 +1023,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     };
   }, [shaderFile]);
 
+  // (The rest of useEffects for updating buffers are unchanged)
   useEffect(() => {
     const device = deviceRef.current;
     if (!device || !gpuReady) return;
@@ -1065,27 +1071,42 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     const v = y / rect.height;
     const pX = u - 0.5;
     const pY = 0.5 - v;
-    const sliderLeftX = -0.42;
-    const sliderY = -0.2;
-    const sliderH = 0.2;
-    const sliderClickRadius = 0.03;
-    if (Math.abs(pX - sliderLeftX) < sliderClickRadius && Math.abs(pY - sliderY) < sliderH * 0.5) {
-      const volValue = ((pY - sliderY) / (sliderH * 0.9) + 0.5);
+    
+    // Updated: New Horizontal Volume Slider (Top Right)
+    const volSliderX = 0.28;
+    const volSliderY = 0.415;
+    const volSliderW = 0.18;
+    const volSliderH = 0.05; // Hit area
+    
+    if (Math.abs(pX - volSliderX) < volSliderW * 0.5 && Math.abs(pY - volSliderY) < volSliderH * 0.5) {
+      // Calculate normalized value (0 to 1) along horizontal axis
+      const relX = (pX - volSliderX) / (volSliderW * 0.9); // -0.5 to 0.5 range
+      const volValue = relX + 0.5;
       onVolumeChange?.(Math.max(0, Math.min(1, volValue)));
       return;
     }
+    
+    // Existing Panning Slider
     const sliderRightX = 0.42;
+    const sliderY = -0.2;
+    const sliderH = 0.2;
+    const sliderClickRadius = 0.03;
+
     if (Math.abs(pX - sliderRightX) < sliderClickRadius && Math.abs(pY - sliderY) < sliderH * 0.5) {
       const panValue = (pY - sliderY) / (sliderH * 0.45);
       onPanChange?.(Math.max(-1, Math.min(1, panValue)));
       return;
     }
+    
+    // Seek Bar
     const barY = -0.45; const barWidth = 0.6; const barCenterX = 0.1; const barHeight = 0.03;
     if (Math.abs(pY - barY) < barHeight && Math.abs(pX - barCenterX) < barWidth / 2) {
        const relX = pX - (barCenterX - barWidth/2);
        if (onSeek) onSeek(Math.floor(Math.max(0, Math.min(1, relX / barWidth)) * (totalRows || 64)));
        return;
     }
+    
+    // Buttons
     const btnRadius = 0.045;
     const dist = (x1: number, y1: number, x2: number, y2: number) => Math.sqrt((x1-x2)**2 + (y1-y2)**2);
     const flashButton = (buttonId: number) => {
@@ -1104,6 +1125,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   };
 
   const render = () => {
+    // (render function unchanged)
     const device = deviceRef.current;
     const context = contextRef.current;
     const pipeline = pipelineRef.current;
