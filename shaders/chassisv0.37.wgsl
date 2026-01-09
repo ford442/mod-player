@@ -106,7 +106,7 @@ fn drawText(p: vec2<f32>, size: vec2<f32>) -> f32 {
     return sdBox(p, size);
 }
 
-// --- NEW FUNCTION: White Square Button Style ---
+// White Square Button Style
 fn drawWhiteButton(uv: vec2<f32>, size: vec2<f32>, glowColor: vec3<f32>, isOn: bool, aa: f32) -> vec4<f32> {
   let halfSize = size * 0.5;
   let d = sdRoundedBox(uv, halfSize, 0.015); 
@@ -181,42 +181,59 @@ fn fs(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
     }
   }
 
-  // --- DEFINITIONS FOR SLIDERS & UI ---
   let displayY = 0.45;
-  let sliderY = -0.2;
-  let barY = -0.45;
-  let sliderLeftX = -0.42;
+  
+  // --- 1. SLIDER DEFINITIONS ---
+  
+  // Panning (Right Vertical) - kept as is
   let sliderRightX = 0.42;
+  let sliderY = -0.2;
   let sliderH = 0.2;
   let sliderW = 0.015;
 
-  // 1. Labels
+  // Volume (NEW: Top Right Horizontal)
+  // Situated between Position (center) and Open Button (far right)
+  let volPos = vec2<f32>(0.28, 0.415);
+  let volDim = vec2<f32>(0.09, 0.006); // Half-extents (0.18 width)
+
+  // --- 2. LABELS ---
+  
+  // Tempo/BPM
   let dTempoLabel = drawText(p - vec2<f32>(-0.07, displayY), vec2<f32>(0.03, 0.008));
   if (dTempoLabel < 0.0) { color = mix(color, vec3<f32>(0.6, 0.6, 0.7), smoothstep(aa, 0.0, dTempoLabel)); }
   
   let dBPMLabel = drawText(p - vec2<f32>(0.07, displayY), vec2<f32>(0.015, 0.008));
   if (dBPMLabel < 0.0) { color = mix(color, vec3<f32>(0.6, 0.6, 0.7), smoothstep(aa, 0.0, dBPMLabel)); }
 
-  let dVolLabel = drawText(p - vec2<f32>(sliderLeftX, sliderY - sliderH * 0.6), vec2<f32>(0.025, 0.008));
-  if (dVolLabel < 0.0) { color = mix(color, vec3<f32>(0.6, 0.6, 0.7), smoothstep(aa, 0.0, dVolLabel)); }
-  
+  // Pan Label
   let dPanLabel = drawText(p - vec2<f32>(sliderRightX, sliderY - sliderH * 0.6), vec2<f32>(0.03, 0.008));
   if (dPanLabel < 0.0) { color = mix(color, vec3<f32>(0.6, 0.6, 0.7), smoothstep(aa, 0.0, dPanLabel)); }
 
-  // 2. Slider Tracks & Handles
-  // Volume
-  let dVolTrack = sdRoundedBox(p - vec2<f32>(sliderLeftX, sliderY), vec2<f32>(sliderW * 0.5, sliderH * 0.5), 0.003);
+  // Volume Label (New Position: Left of slider)
+  // "VOL" box
+  let dVolLabel = drawText(p - vec2<f32>(0.16, 0.415), vec2<f32>(0.02, 0.008));
+  if (dVolLabel < 0.0) { color = mix(color, vec3<f32>(0.6, 0.6, 0.7), smoothstep(aa, 0.0, dVolLabel)); }
+
+  // --- 3. SLIDERS ---
+
+  // Volume Track (Horizontal)
+  let dVolTrack = sdRoundedBox(p - volPos, volDim, 0.003);
   if (dVolTrack < 0.0) {
       color = mix(color, vec3<f32>(0.15, 0.15, 0.18), 0.8);
   }
+  
+  // Volume Handle (Horizontal Movement)
   let volNorm = clamp(bez.volume, 0.0, 1.0);
-  let volHandleY = sliderY + (volNorm - 0.5) * sliderH * 0.9;
-  let dVolHandle = sdCircle(p - vec2<f32>(sliderLeftX, volHandleY), 0.02);
+  // Full width is 0.18. Handle travel approx 0.16.
+  // Left edge: 0.28 - 0.08 = 0.20. Right edge: 0.28 + 0.08 = 0.36.
+  let volHandleX = volPos.x + (volNorm - 0.5) * (volDim.x * 2.0 * 0.9);
+  let dVolHandle = sdCircle(p - vec2<f32>(volHandleX, volPos.y), 0.02);
+  
   if (dVolHandle < 0.0) {
       color = mix(color, vec3<f32>(0.3, 0.8, 0.4), smoothstep(aa, -aa, dVolHandle));
   }
 
-  // Pan
+  // Pan Track (Vertical)
   let dPanTrack = sdRoundedBox(p - vec2<f32>(sliderRightX, sliderY), vec2<f32>(sliderW * 0.5, sliderH * 0.5), 0.003);
   if (dPanTrack < 0.0) {
       color = mix(color, vec3<f32>(0.15, 0.15, 0.18), 0.8);
@@ -229,7 +246,8 @@ fn fs(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
       color = mix(color, panColor, smoothstep(aa, -aa, dPanHandle));
   }
 
-  // 3. Song Position Rail
+  // 4. Song Position Rail
+  let barY = -0.45;
   let barWidth = 0.6;
   let barCenterX = 0.1;
   let dBarRail = sdRoundedBox(p - vec2<f32>(barCenterX, barY), vec2<f32>(barWidth * 0.5, 0.03 * 0.5), 0.005);
@@ -244,7 +262,7 @@ fn fs(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
 
   // --- PASS 2: EMISSIVE UI ---
 
-  // 4. LCD Displays
+  // 5. LCD Displays
   let lcdColorBase = vec3<f32>(0.3, 0.8, 1.0); 
   let lcdColor = lcdColorBase + (lcdColorBase * uvFactor); 
 
@@ -273,7 +291,7 @@ fn fs(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
       color += lcdColorPosBright * 0.4 * mask;
   }
 
-  // 5. BUTTONS (WHITE SQUARE + PURPLE GLOW)
+  // 6. BUTTONS (WHITE SQUARE + PURPLE GLOW)
   let purpleGlow = vec3<f32>(0.7, 0.2, 1.0);
   let btnSize = vec2<f32>(0.09, 0.09);
   let iconRadius = 0.045;
