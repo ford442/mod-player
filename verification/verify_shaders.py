@@ -72,8 +72,13 @@ def run():
         else:
             print("ERROR: patternv0.39 missing")
 
-        # Select v0.39
-        select.select_option(label="patternv0.39")
+        if "patternv0.40" in texts:
+            print("Verified patternv0.40 is present")
+        else:
+            print("ERROR: patternv0.40 missing")
+
+        # Select v0.40
+        select.select_option(label="patternv0.40")
 
         # Allow some time for state update
         time.sleep(1)
