@@ -11,8 +11,8 @@ const alignTo = (value: number, alignment: number) => Math.ceil(value / alignmen
 
 const getLayoutType = (shaderFile: string): LayoutType => {
   if (shaderFile === 'patternShaderv0.12.wgsl') return 'texture';
-  // Check for extended layout shaders (v0.38 and v0.39 included)
-  if (shaderFile.includes('v0.13') || shaderFile.includes('v0.14') || shaderFile.includes('v0.15') || shaderFile.includes('v0.16') || shaderFile.includes('v0.17') || shaderFile.includes('v0.18') || shaderFile.includes('v0.19') || shaderFile.includes('v0.20') || shaderFile.includes('v0.21') || shaderFile.includes('v0.23') || shaderFile.includes('v0.24') || shaderFile.includes('v0.25') || shaderFile.includes('v0.26') || shaderFile.includes('v0.27') || shaderFile.includes('v0.28') || shaderFile.includes('v0.29') || shaderFile.includes('v0.30') || shaderFile.includes('v0.31') || shaderFile.includes('v0.32') || shaderFile.includes('v0.33') || shaderFile.includes('v0.34') || shaderFile.includes('v0.35') || shaderFile.includes('v0.36') || shaderFile.includes('v0.37') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39')) return 'extended';
+  // Check for extended layout shaders (v0.38, v0.39, and v0.40 included)
+  if (shaderFile.includes('v0.13') || shaderFile.includes('v0.14') || shaderFile.includes('v0.15') || shaderFile.includes('v0.16') || shaderFile.includes('v0.17') || shaderFile.includes('v0.18') || shaderFile.includes('v0.19') || shaderFile.includes('v0.20') || shaderFile.includes('v0.21') || shaderFile.includes('v0.23') || shaderFile.includes('v0.24') || shaderFile.includes('v0.25') || shaderFile.includes('v0.26') || shaderFile.includes('v0.27') || shaderFile.includes('v0.28') || shaderFile.includes('v0.29') || shaderFile.includes('v0.30') || shaderFile.includes('v0.31') || shaderFile.includes('v0.32') || shaderFile.includes('v0.33') || shaderFile.includes('v0.34') || shaderFile.includes('v0.35') || shaderFile.includes('v0.36') || shaderFile.includes('v0.37') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40')) return 'extended';
   return 'simple';
 };
 
@@ -21,11 +21,11 @@ const isSinglePassCompositeShader = (shaderFile: string) => {
 };
 
 const shouldEnableAlphaBlending = (shaderFile: string) => {
-  return shaderFile.includes('v0.28') || shaderFile.includes('v0.30') || shaderFile.includes('v0.31') || shaderFile.includes('v0.32') || shaderFile.includes('v0.33') || shaderFile.includes('v0.34') || shaderFile.includes('v0.35') || shaderFile.includes('v0.36') || shaderFile.includes('v0.37') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39');
+  return shaderFile.includes('v0.28') || shaderFile.includes('v0.30') || shaderFile.includes('v0.31') || shaderFile.includes('v0.32') || shaderFile.includes('v0.33') || shaderFile.includes('v0.34') || shaderFile.includes('v0.35') || shaderFile.includes('v0.36') || shaderFile.includes('v0.37') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40');
 };
 
 const isCircularLayoutShader = (shaderFile: string) => {
-  // v0.39 is NOT circular (it's horizontal). v0.38 IS circular.
+  // v0.39 and v0.40 are NOT circular (they're horizontal). v0.38 IS circular.
   return shaderFile.includes('v0.25') || shaderFile.includes('v0.26') || shaderFile.includes('v0.35') || shaderFile.includes('v0.37') || shaderFile.includes('v0.38');
 };
 
@@ -34,7 +34,7 @@ const shouldUseBackgroundPass = (shaderFile: string) => {
 };
 
 const getBackgroundShaderFile = (shaderFile: string): string => {
-  if (shaderFile.includes('v0.37') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39')) return 'chassisv0.37.wgsl';
+  if (shaderFile.includes('v0.37') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40')) return 'chassisv0.37.wgsl';
   if (shaderFile.includes('v0.27') || shaderFile.includes('v0.28') || shaderFile.includes('v0.30') || shaderFile.includes('v0.31') || shaderFile.includes('v0.32') || shaderFile.includes('v0.33') || shaderFile.includes('v0.34') || shaderFile.includes('v0.35') || shaderFile.includes('v0.36')) return 'chassisv0.1.wgsl';
   return 'bezel.wgsl';
 };
@@ -418,14 +418,14 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   const [invertChannels, setInvertChannels] = useState(false);
   const [clickedButton, setClickedButton] = useState(0);
 
-  const isHorizontal = shaderFile.includes('v0.12') || shaderFile.includes('v0.13') || shaderFile.includes('v0.14') || shaderFile.includes('v0.16') || shaderFile.includes('v0.17') || shaderFile.includes('v0.21') || shaderFile.includes('v0.39');
+  const isHorizontal = shaderFile.includes('v0.12') || shaderFile.includes('v0.13') || shaderFile.includes('v0.14') || shaderFile.includes('v0.16') || shaderFile.includes('v0.17') || shaderFile.includes('v0.21') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40');
   
-  // NOTE: v0.38 and v0.39 added here to pad channel 0, ensuring music is channels 1-32
-  const padTopChannel = shaderFile.includes('v0.16') || shaderFile.includes('v0.17') || shaderFile.includes('v0.21') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39');
+  // NOTE: v0.38, v0.39, and v0.40 added here to pad channel 0, ensuring music is channels 1-32
+  const padTopChannel = shaderFile.includes('v0.16') || shaderFile.includes('v0.17') || shaderFile.includes('v0.21') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40');
 
   const computeLogicalCanvasMetrics = () => {
-    // Force Square for v0.37, v0.38, and v0.39 (Square Bezel)
-    if (shaderFile.includes('v0.37') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39')) return { width: 1024, height: 1024 };
+    // Force Square for v0.37, v0.38, v0.39, and v0.40 (Square Bezel)
+    if (shaderFile.includes('v0.37') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40')) return { width: 1024, height: 1024 };
     if (shaderFile.includes('v0.26') || shaderFile.includes('v0.27') || shaderFile.includes('v0.28') || shaderFile.includes('v0.29') || shaderFile.includes('v0.30') || shaderFile.includes('v0.31') || shaderFile.includes('v0.32') || shaderFile.includes('v0.33') || shaderFile.includes('v0.34') || shaderFile.includes('v0.35') || shaderFile.includes('v0.36')) {
       return { width: 2048, height: 2016 };
     }
@@ -495,9 +495,9 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     }
   }, [canvasMetrics]);
 
-  // === WEBGL2 INITIALIZATION (Overlay for v0.38 & v0.39) ===
+  // === WEBGL2 INITIALIZATION (Overlay for v0.38, v0.39, & v0.40) ===
   useEffect(() => {
-    const isOverlayShader = shaderFile.includes('v0.38') || shaderFile.includes('v0.39');
+    const isOverlayShader = shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40');
     
     if (!isOverlayShader) {
         const gl = glContextRef.current;
@@ -713,7 +713,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
 
   // === WEBGL2 DATA UPLOAD ===
   useEffect(() => {
-    if (!shaderFile.includes('v0.38') && !shaderFile.includes('v0.39')) return;
+    if (!shaderFile.includes('v0.38') && !shaderFile.includes('v0.39') && !shaderFile.includes('v0.40')) return;
 
     const gl = glContextRef.current;
     const res = glResourcesRef.current;
@@ -744,7 +744,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
 
   // === WEBGL2 RENDER FUNCTION ===
   const drawWebGL = () => {
-    if (!shaderFile.includes('v0.38') && !shaderFile.includes('v0.39')) return;
+    if (!shaderFile.includes('v0.38') && !shaderFile.includes('v0.39') && !shaderFile.includes('v0.40')) return;
 
     const gl = glContextRef.current;
     const res = glResourcesRef.current;
@@ -778,10 +778,10 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     
     gl.uniform2f(uRes, canvasMetrics.width, canvasMetrics.height);
     
-    // v0.39 Override: Fit 32 steps exactly into canvas width
+    // v0.39 and v0.40 Override: Fit 32 steps exactly into canvas width
     let effectiveCellW = cellWidth;
     let effectiveCellH = cellHeight;
-    if (shaderFile.includes('v0.39')) {
+    if (shaderFile.includes('v0.39') || shaderFile.includes('v0.40')) {
         effectiveCellW = canvasMetrics.width / 32.0;
         effectiveCellH = canvasMetrics.height / cols;
     }
@@ -790,8 +790,8 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     gl.uniform1f(uCols, cols);
     gl.uniform1f(uRows, rows);
     
-    // Set Layout Mode: 1=Circular(0.38), 2=Horizontal(0.39)
-    gl.uniform1i(uLayout, shaderFile.includes('v0.39') ? 2 : 1);
+    // Set Layout Mode: 1=Circular(0.38), 2=Horizontal(0.39, 0.40)
+    gl.uniform1i(uLayout, (shaderFile.includes('v0.39') || shaderFile.includes('v0.40')) ? 2 : 1);
     gl.uniform1i(uInvert, invertChannels ? 1 : 0);
     
     const totalPlayhead = playheadRow + (tickOffset || 0);
@@ -808,8 +808,8 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   const loadBezelTexture = async (device: GPUDevice) => {
     if (bezelTextureResourcesRef.current) return;
     
-    // v0.39 uses square bezel, others use round/custom
-    const textureName = shaderFile.includes('v0.39') ? 'bezel-square.png' : 'bezel.png';
+    // v0.39 and v0.40 use square bezel, others use round/custom
+    const textureName = (shaderFile.includes('v0.39') || shaderFile.includes('v0.40')) ? 'bezel-square.png' : 'bezel.png';
 
     let bitmap: ImageBitmap;
     try {
@@ -989,7 +989,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
 
         deviceRef.current = device; contextRef.current = context; uniformBufferRef.current = uniformBuffer;
 
-        const isHighPrec = shaderFile.includes('v0.36') || shaderFile.includes('v0.37') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39');
+        const isHighPrec = shaderFile.includes('v0.36') || shaderFile.includes('v0.37') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40');
         const packFunc = isHighPrec ? packPatternMatrixHighPrecision : packPatternMatrix;
         cellsBufferRef.current = createBufferWithData(device, packFunc(matrix, padTopChannel), GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
 
@@ -1029,7 +1029,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     const device = deviceRef.current;
     if (!device || !gpuReady) return;
     if (cellsBufferRef.current) cellsBufferRef.current.destroy();
-    const isHighPrec = shaderFile.includes('v0.36') || shaderFile.includes('v0.37') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39');
+    const isHighPrec = shaderFile.includes('v0.36') || shaderFile.includes('v0.37') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40');
     const packFunc = isHighPrec ? packPatternMatrixHighPrecision : packPatternMatrix;
     cellsBufferRef.current = createBufferWithData(device, packFunc(matrix, padTopChannel), GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
     if (layoutTypeRef.current === 'extended') {
@@ -1064,7 +1064,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   }, [channels, matrix?.numChannels, gpuReady]);
 
   const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!shaderFile.includes('v0.37') && !shaderFile.includes('v0.38') && !shaderFile.includes('v0.39')) return;
+    if (!shaderFile.includes('v0.37') && !shaderFile.includes('v0.38') && !shaderFile.includes('v0.39') && !shaderFile.includes('v0.40')) return;
     const rect = e.currentTarget.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
@@ -1142,10 +1142,10 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
       const fractionalTick = Math.min(1, Math.max(0, tickOffset));
       const effectiveTime = isModuleLoaded ? timeSec : localTime;
 
-      // v0.39 Override: Ensure uniform payload reflects the auto-calculated dimensions
+      // v0.39 and v0.40 Override: Ensure uniform payload reflects the auto-calculated dimensions
       let effectiveCellW = cellWidth;
       let effectiveCellH = cellHeight;
-      if (shaderFile.includes('v0.39')) {
+      if (shaderFile.includes('v0.39') || shaderFile.includes('v0.40')) {
           effectiveCellW = canvasMetrics.width / 32.0;
           effectiveCellH = canvasMetrics.height / numChannels; // Approx
       }
@@ -1299,7 +1299,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
           </>
       )}
 
-      {(shaderFile.includes('v0.35') || shaderFile.includes('v0.37') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39')) && (
+      {(shaderFile.includes('v0.35') || shaderFile.includes('v0.37') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40')) && (
         <button
             onClick={() => setInvertChannels(p => !p)}
             className="absolute top-2 left-12 px-2 py-1 bg-[#222] text-xs font-mono text-gray-400 border border-[#444] rounded hover:bg-[#333] hover:text-white transition-colors"
@@ -1326,7 +1326,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
         }}
       />
       
-      {(shaderFile.includes('v0.38') || shaderFile.includes('v0.39')) && (
+      {(shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40')) && (
         <canvas
           ref={glCanvasRef}
           width={canvasMetrics.width}
