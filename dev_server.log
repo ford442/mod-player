@@ -1,0 +1,10 @@
+
+> react-libopenmpt-viewer@0.0.0 dev
+> vite
+
+
+  VITE v5.4.21  ready in 393 ms
+
+  ➜  Local:   http://localhost:5173/
+  ➜  Network: use --host to expose
+The glob option "as" has been deprecated in favour of "query". Please update `as: 'url'` to `query: '?url', import: 'default'`.
