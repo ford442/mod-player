@@ -75,8 +75,13 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
   
   // Standard quad expansion
   // Note: if invisible, we can just collapse quad or move off screen
-  let worldX = px + quad[vertexIndex].x * uniforms.cellW;
-  let worldY = py + quad[vertexIndex].y * uniforms.cellH;
+
+  // Apply global offset for bezel blank area (160, 160)
+  let offsetX = 160.0;
+  let offsetY = 160.0;
+
+  let worldX = px + quad[vertexIndex].x * uniforms.cellW + offsetX;
+  let worldY = py + quad[vertexIndex].y * uniforms.cellH + offsetY;
 
   // Use top-left origin for logic, but clip space is -1..1
   let clipX = (worldX / uniforms.canvasW) * 2.0 - 1.0;
@@ -136,11 +141,6 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   let uv = in.uv;
   let p = uv - 0.5;
   let aa = fwidth(p.y) * 0.75;
-
-  // Hardware Layering: Discard pixels over UI (fit inside bezel-square.png)
-  if (in.position.y > uniforms.canvasH * 0.88) {
-    discard;
-  }
 
   // --- HEADER ROW (Channel 0) ---
   if (in.channel == 0u) {

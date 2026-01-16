@@ -523,6 +523,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     
     uniform vec2 u_resolution;
     uniform vec2 u_cellSize;
+    uniform vec2 u_offset; // Global offset (pixel space)
     uniform float u_cols;
     uniform float u_rows;
     uniform float u_playhead;
@@ -550,7 +551,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
         }
 
         if (u_layoutMode == 2) {
-            // --- v0.39: PAGED STATIC HORIZONTAL GRID ---
+            // --- v0.39 / v0.40: PAGED STATIC HORIZONTAL GRID ---
             // Page Logic: Grid shows a window of 32 steps (e.g. 0-31, 32-63)
             // If the note row is not in the current window, discard.
             
@@ -571,7 +572,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
             
             // Adjust to cell centers (a_pos is -0.5..0.5)
             vec2 capSize = u_cellSize * 0.9;
-            vec2 center = vec2(xPos, yPos) + u_cellSize * 0.5;
+            vec2 center = vec2(xPos, yPos) + u_cellSize * 0.5 + u_offset;
             
             vec2 pos = center + (a_pos * capSize);
             
@@ -769,6 +770,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
 
     const uRes = gl.getUniformLocation(res.program, 'u_resolution');
     const uCell = gl.getUniformLocation(res.program, 'u_cellSize');
+    const uOffset = gl.getUniformLocation(res.program, 'u_offset');
     const uCols = gl.getUniformLocation(res.program, 'u_cols');
     const uRows = gl.getUniformLocation(res.program, 'u_rows');
     const uPlay = gl.getUniformLocation(res.program, 'u_playhead');
@@ -778,12 +780,20 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     
     gl.uniform2f(uRes, canvasMetrics.width, canvasMetrics.height);
     
-    // v0.39 and v0.40 Override: Fit 32 steps exactly into canvas width
+    // v0.39 and v0.40 Override: Fit 32 steps exactly into canvas width (or active area)
     let effectiveCellW = cellWidth;
     let effectiveCellH = cellHeight;
-    if (shaderFile.includes('v0.39') || shaderFile.includes('v0.40')) {
+    if (shaderFile.includes('v0.40')) {
+        // v0.40: Fits in the blank area (705x725)
+        effectiveCellW = 705.0 / 32.0;
+        effectiveCellH = 725.0 / cols;
+        gl.uniform2f(uOffset, 160.0, 160.0);
+    } else if (shaderFile.includes('v0.39')) {
         effectiveCellW = canvasMetrics.width / 32.0;
         effectiveCellH = canvasMetrics.height / cols;
+        gl.uniform2f(uOffset, 0.0, 0.0);
+    } else {
+        gl.uniform2f(uOffset, 0.0, 0.0);
     }
     gl.uniform2f(uCell, effectiveCellW, effectiveCellH);
 
@@ -1145,7 +1155,10 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
       // v0.39 and v0.40 Override: Ensure uniform payload reflects the auto-calculated dimensions
       let effectiveCellW = cellWidth;
       let effectiveCellH = cellHeight;
-      if (shaderFile.includes('v0.39') || shaderFile.includes('v0.40')) {
+      if (shaderFile.includes('v0.40')) {
+          effectiveCellW = 705.0 / 32.0;
+          effectiveCellH = 725.0 / numChannels;
+      } else if (shaderFile.includes('v0.39')) {
           effectiveCellW = canvasMetrics.width / 32.0;
           effectiveCellH = canvasMetrics.height / numChannels; // Approx
       }
