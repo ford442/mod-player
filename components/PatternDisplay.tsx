@@ -34,7 +34,8 @@ const shouldUseBackgroundPass = (shaderFile: string) => {
 };
 
 const getBackgroundShaderFile = (shaderFile: string): string => {
-  if (shaderFile.includes('v0.37') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40')) return 'chassisv0.37.wgsl';
+  if (shaderFile.includes('v0.40')) return 'chassisv0.40.wgsl';
+  if (shaderFile.includes('v0.37') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39')) return 'chassisv0.37.wgsl';
   if (shaderFile.includes('v0.27') || shaderFile.includes('v0.28') || shaderFile.includes('v0.30') || shaderFile.includes('v0.31') || shaderFile.includes('v0.32') || shaderFile.includes('v0.33') || shaderFile.includes('v0.34') || shaderFile.includes('v0.35') || shaderFile.includes('v0.36')) return 'chassisv0.1.wgsl';
   return 'bezel.wgsl';
 };
@@ -1083,8 +1084,10 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     const pX = u - 0.5;
     const pY = 0.5 - v;
     
+    const isV40 = shaderFile.includes('v0.40');
+
     // Updated: New Horizontal Volume Slider (Top Right)
-    const volSliderX = 0.28;
+    const volSliderX = isV40 ? 0.18 : 0.28;
     const volSliderY = 0.415;
     const volSliderW = 0.18;
     const volSliderH = 0.05; // Hit area
@@ -1125,10 +1128,16 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
       setClickedButton(buttonId);
       clickTimeoutRef.current = window.setTimeout(() => { setClickedButton(0); clickTimeoutRef.current = null; }, 200) as number;
     };
-    if (dist(pX, pY, -0.44, 0.42) < btnRadius) { flashButton(1); onLoopToggle?.(); return; }
-    if (dist(pX, pY, 0.44, 0.42) < btnRadius) { flashButton(2); fileInputRef.current?.click(); return; }
-    if (dist(pX, pY, -0.44, -0.40) < btnRadius) { flashButton(3); onPlay?.(); return; }
-    if (dist(pX, pY, -0.35, -0.40) < btnRadius) { flashButton(4); onStop?.(); return; }
+
+    const loopX = isV40 ? -0.34 : -0.44;
+    const openX = isV40 ? 0.34 : 0.44;
+    const playY = isV40 ? -0.425 : -0.40;
+    const stopY = isV40 ? -0.425 : -0.40;
+
+    if (dist(pX, pY, loopX, 0.42) < btnRadius) { flashButton(1); onLoopToggle?.(); return; }
+    if (dist(pX, pY, openX, 0.42) < btnRadius) { flashButton(2); fileInputRef.current?.click(); return; }
+    if (dist(pX, pY, -0.44, playY) < btnRadius) { flashButton(3); onPlay?.(); return; }
+    if (dist(pX, pY, -0.35, stopY) < btnRadius) { flashButton(4); onStop?.(); return; }
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
