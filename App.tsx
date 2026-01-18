@@ -91,7 +91,6 @@ function App() {
         darkMode={darkMode3D}
         onDarkModeToggle={() => setDarkMode3D(!darkMode3D)}
         onExitStudio={() => setIs3DMode(false)}
-        playheadTime={playbackSeconds}
         headerContent={
           <div className="scale-75 origin-top-left">
             <Header status={status} />
@@ -148,8 +147,6 @@ function App() {
               remoteMediaList={[
                 { id: '1', kind: 'video', url: 'clouds.mp4', fileName: 'Clouds Demo (MP4)' }
               ]}
-              isDarkMode={darkMode3D}
-              setIsDarkMode={setDarkMode3D}
             />
           </div>
         }
