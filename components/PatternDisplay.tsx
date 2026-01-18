@@ -1087,7 +1087,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     const isV40 = shaderFile.includes('v0.40');
 
     // Updated: New Horizontal Volume Slider (Top Right)
-    const volSliderX = isV40 ? 0.18 : 0.28;
+    const volSliderX = isV40 ? 0.08 : 0.28; // Moved inward for v0.40
     const volSliderY = 0.415;
     const volSliderW = 0.18;
     const volSliderH = 0.05; // Hit area
@@ -1129,10 +1129,10 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
       clickTimeoutRef.current = window.setTimeout(() => { setClickedButton(0); clickTimeoutRef.current = null; }, 200) as number;
     };
 
-    const loopX = isV40 ? -0.34 : -0.44;
-    const openX = isV40 ? 0.34 : 0.44;
-    const playY = isV40 ? -0.425 : -0.40;
-    const stopY = isV40 ? -0.425 : -0.40;
+    const loopX = isV40 ? -0.24 : -0.44; // Moved inward for v0.40
+    const openX = isV40 ? 0.24 : 0.44;   // Moved inward for v0.40
+    const playY = isV40 ? -0.45 : -0.40; // Moved down for v0.40
+    const stopY = isV40 ? -0.45 : -0.40; // Moved down for v0.40
 
     if (dist(pX, pY, loopX, 0.42) < btnRadius) { flashButton(1); onLoopToggle?.(); return; }
     if (dist(pX, pY, openX, 0.42) < btnRadius) { flashButton(2); fileInputRef.current?.click(); return; }
@@ -1302,7 +1302,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   }, [isModuleLoaded, isPlaying]);
 
   return (
-    <div className={`pattern-display relative ${padTopChannel ? 'p-8 rounded-xl bg-[#18181a] shadow-2xl border border-[#333]' : ''}`}>
+    <div className={`pattern-display relative ${padTopChannel && !shaderFile.includes('v0.40') ? 'p-8 rounded-xl bg-[#18181a] shadow-2xl border border-[#333]' : ''}`}>
       <input type="file" ref={fileInputRef} onChange={handleFileChange} className="hidden" accept=".mod,.xm,.it,.s3m,.mptm" />
       {padTopChannel && (
           <>
@@ -1335,7 +1335,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
         width={canvasMetrics.width}
         height={canvasMetrics.height}
         onClick={handleCanvasClick}
-        className={`${padTopChannel ? 'rounded bg-black shadow-inner border border-black/50' : ''} cursor-pointer`}
+        className={`${padTopChannel && !shaderFile.includes('v0.40') ? 'rounded bg-black shadow-inner border border-black/50' : ''} cursor-pointer`}
         style={{
           maxWidth: '100%',
           maxHeight: '100%',
@@ -1355,8 +1355,8 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
           height={canvasMetrics.height}
           style={{
             position: 'absolute',
-            top: padTopChannel ? '2rem' : 0, 
-            left: padTopChannel ? '2rem' : 0, 
+            top: (padTopChannel && !shaderFile.includes('v0.40')) ? '2rem' : 0,
+            left: (padTopChannel && !shaderFile.includes('v0.40')) ? '2rem' : 0,
             width: 'auto',
             height: 'auto',
             maxWidth: '100%',
