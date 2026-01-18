@@ -15,6 +15,7 @@ const SHADERS = [
     'patternv0.36.wgsl',
     'patternv0.35_bloom.wgsl',
     'patternv0.30.wgsl',
+    'patternv0.23.wgsl',
     'patternv0.21.wgsl',
     'patternv0.12.wgsl'
 ];
@@ -194,6 +195,28 @@ function App() {
                 className={`px-4 py-2 text-sm font-mono rounded-lg shadow-lg transition-colors border ${isDarkMode ? 'bg-gray-800 text-white border-gray-700 hover:bg-gray-700' : 'bg-white text-black border-gray-300 hover:bg-gray-50'}`}
                 >
                 {isDarkMode ? '☀️ Light Mode' : '🌙 Dark Mode'}
+                </button>
+            </div>
+
+            {/* Quick Layout Switcher */}
+            <div className={`flex items-center p-1 rounded-lg border ${isDarkMode ? 'bg-black border-gray-700' : 'bg-gray-200 border-gray-300'}`}>
+                <button
+                    onClick={() => setShaderFile('patternv0.40.wgsl')}
+                    className={`px-3 py-1 text-xs font-mono rounded-md transition-all ${shaderFile === 'patternv0.40.wgsl' ? (isDarkMode ? 'bg-gray-700 text-white shadow-sm' : 'bg-white text-black shadow-sm') : 'opacity-50 hover:opacity-100'}`}
+                >
+                    HORIZ
+                </button>
+                <button
+                    onClick={() => setShaderFile('patternv0.38.wgsl')}
+                    className={`px-3 py-1 text-xs font-mono rounded-md transition-all ${shaderFile === 'patternv0.38.wgsl' ? (isDarkMode ? 'bg-gray-700 text-white shadow-sm' : 'bg-white text-black shadow-sm') : 'opacity-50 hover:opacity-100'}`}
+                >
+                    CIRC
+                </button>
+                <button
+                    onClick={() => setShaderFile('patternv0.23.wgsl')}
+                    className={`px-3 py-1 text-xs font-mono rounded-md transition-all ${shaderFile === 'patternv0.23.wgsl' ? (isDarkMode ? 'bg-gray-700 text-white shadow-sm' : 'bg-white text-black shadow-sm') : 'opacity-50 hover:opacity-100'}`}
+                >
+                    VIDEO
                 </button>
             </div>
 
