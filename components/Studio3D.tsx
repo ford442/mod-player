@@ -68,7 +68,7 @@ const Panel3D: React.FC<{
   );
 };
 
-const BackgroundShaderPlane: React.FC<{ dimFactor: number }> = ({ dimFactor }) => {
+const BackgroundShaderPlane: React.FC<{ dimFactor: number, playheadX: number }> = ({ dimFactor, playheadX }) => {
   const materialRef = useRef<any>(null);
   const { camera } = useThree();
 
@@ -82,7 +82,7 @@ const BackgroundShaderPlane: React.FC<{ dimFactor: number }> = ({ dimFactor }) =
   });
 
   return (
-    <mesh position={[0, 0, -20]} scale={[100, 100, 1]}>
+    <mesh position={[playheadX, 0, -20]} scale={[200, 200, 1]}>
       <planeGeometry args={[1, 1]} />
       <shader021_3DMaterial ref={materialRef} transparent side={THREE.DoubleSide} />
     </mesh>
@@ -137,10 +137,10 @@ export const Studio3D: React.FC<Studio3DProps> = ({
       <Canvas shadows>
         <CameraRig isPlaying={true} playheadX={playheadX} controlsRef={controlsRef} />
 
-        <PerspectiveCamera makeDefault position={[0, 2, 12]} fov={60}>
-            {/* Attach background to camera so it follows us */}
-            <BackgroundShaderPlane dimFactor={dimFactor} />
-        </PerspectiveCamera>
+        <PerspectiveCamera makeDefault position={[0, 2, 12]} fov={60} />
+
+        {/* Background Plane using the new Shader */}
+        <BackgroundShaderPlane dimFactor={dimFactor} playheadX={playheadX} />
 
         <OrbitControls
           ref={controlsRef}

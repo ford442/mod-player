@@ -2,15 +2,15 @@ import * as THREE from 'three';
 import { extend, ReactThreeFiber } from '@react-three/fiber';
 import { shaderMaterial } from '@react-three/drei';
 
-// This shader creates a high-fidelity raymarching environment
-// optimized for 3D mode with 128 stepping iterations.
+// V0.21 3D: "Precision Interface" - Infinite Data Grid
 const Shader021_3DMaterial = shaderMaterial(
   {
     iTime: 0,
-    iResolution: new THREE.Vector2(),
-    dimFactor: 1.0, // 1.0 = Bright (Light Mode), 0.3 = Dark (Dark Mode)
+    dimFactor: 1.0,
     cameraPos: new THREE.Vector3(),
-    iColor: new THREE.Color(0.1, 0.8, 0.9), // Base cyan color
+    // Colors from patternv0.21.wgsl
+    bgColor: new THREE.Color(0.10, 0.11, 0.13),
+    ledColor: new THREE.Color(0.0, 0.85, 0.95),
   },
   // Vertex Shader
   `
@@ -23,41 +23,45 @@ const Shader021_3DMaterial = shaderMaterial(
   // Fragment Shader
   `
     uniform float iTime;
-    uniform vec2 iResolution;
     uniform float dimFactor;
     uniform vec3 cameraPos;
-    uniform vec3 iColor;
+    uniform vec3 bgColor;
+    uniform vec3 ledColor;
 
     varying vec2 vUv;
 
     // --- Configuration ---
-    #define MAX_STEPS 128       // High quality steps
+    #define MAX_STEPS 128
     #define MAX_DIST 100.0
     #define SURFACE_DIST 0.001
 
-    // --- SDF Functions (The "0.21" Aesthetic) ---
-    // Simple noise function for texture
-    float random(vec2 st) {
-        return fract(sin(dot(st.xy, vec2(12.9898,78.233))) * 43758.5453123);
+    // --- SDF: Rounded Box (Matches 2D design) ---
+    float sdRoundedBox(vec3 p, vec3 b, float r) {
+        vec3 q = abs(p) - b;
+        return length(max(q, 0.0)) + min(max(q.x, max(q.y, q.z)), 0.0) - r;
     }
 
-    // Signed Distance Function
+    // --- Scene Description ---
     float GetDist(vec3 p) {
-        // Create a repeating grid of spheres or visual elements
-        vec3 s = vec3(4.0); // Spacing
-        vec3 q = mod(p, s) - s * 0.5;
+        // 1. Grid Repetition (Infinite fields)
+        // Spacing: X=4.0 (Time), Y=Vertical layers, Z=Channels
+        vec3 spacing = vec3(4.0, 3.0, 4.0);
 
-        // Base sphere
-        float d = length(q) - 0.5;
+        // pMod is the local coordinate within each cell
+        vec3 pMod = mod(p, spacing) - spacing * 0.5;
 
-        // Add some geometric variation based on time
-        float wave = sin(p.z * 0.5 + iTime) * 0.2;
-        d += wave;
+        // 2. Geometry: Flat rectangular data plates
+        // Similar aspect ratio to the 2D cells
+        float dBox = sdRoundedBox(pMod, vec3(1.8, 0.1, 1.5), 0.05);
 
-        return d;
+        // Optional: Add a central "data line" or variation
+        // float wave = sin(p.x * 0.5 + iTime) * 0.1;
+        // dBox += wave;
+
+        return dBox;
     }
 
-    // --- Raymarching Engine ---
+    // --- Raymarching ---
     float RayMarch(vec3 ro, vec3 rd) {
         float dO = 0.0;
         for(int i = 0; i < MAX_STEPS; i++) {
@@ -69,10 +73,10 @@ const Shader021_3DMaterial = shaderMaterial(
         return dO;
     }
 
-    // Calculate Normal
+    // Normal calculation for edges
     vec3 GetNormal(vec3 p) {
         float d = GetDist(p);
-        vec2 e = vec2(0.01, 0);
+        vec2 e = vec2(0.001, 0);
         vec3 n = d - vec3(
             GetDist(p - e.xyy),
             GetDist(p - e.yxy),
@@ -82,43 +86,46 @@ const Shader021_3DMaterial = shaderMaterial(
     }
 
     void main() {
-        // Pixel coordinates centered
+        // Standard UV setup for full-screen quad
         vec2 uv = (vUv - 0.5) * 2.0;
 
-        // Ray Origin (use actual camera or fixed relative)
+        // Ray Origin & Direction
         vec3 ro = cameraPos;
+        // Adjust RD based on camera orientation if this is a plane in front of camera
+        // For a simple background plane, we simulate perspective:
+        vec3 rd = normalize(vec3(uv.x, uv.y, 1.5));
 
-        // Ray Direction
-        // Simple perspective approximation for shader plane
-        // Adjust for aspect ratio if needed, but here we assume square UVs on plane or handle in geometry
-        vec3 rd = normalize(vec3(uv.x, uv.y, 1.0));
+        // Rotate RD to match camera rotation (Approximation)
+        // Ideally, we'd pass the camera view matrix, but for a background pattern:
+        // We will just march relative to the camera position to create parallax.
 
-        // Perform Raymarching
         float d = RayMarch(ro, rd);
 
-        vec3 col = vec3(0.0);
+        vec3 col = bgColor; // Default background
 
         if(d < MAX_DIST) {
             vec3 p = ro + rd * d;
             vec3 n = GetNormal(p);
 
-            // Simple lighting
-            vec3 lightPos = vec3(2.0, 5.0, -3.0);
-            vec3 l = normalize(lightPos - p);
-            float dif = clamp(dot(n, l), 0.0, 1.0);
+            // Lighting (Cyber-Punk style)
+            // 1. Diffuse from top
+            float dif = clamp(dot(n, vec3(0.0, 1.0, 0.0)), 0.0, 1.0);
 
-            // "0.21" Color Palette (Cyan/Purple/Dark)
-            // Use iColor uniform for base
-            col = iColor * dif;
+            // 2. Rim/Edge lighting (Neon Cyan)
+            // Fresnel effect: bright at glancing angles
+            float fresnel = pow(1.0 - abs(dot(n, rd)), 3.0);
 
-            // Ambient glow
-            col += vec3(0.2, 0.1, 0.4) * 0.2;
-        } else {
-            // Background color
-            col = vec3(0.05, 0.05, 0.1);
+            vec3 bodyColor = bgColor * 1.5; // Slightly lighter than void
+            vec3 edgeColor = ledColor;
+
+            col = mix(bodyColor, edgeColor, fresnel);
+
+            // Distance fog to fade out far objects
+            float fog = 1.0 - exp(-d * 0.02);
+            col = mix(col, bgColor, fog);
         }
 
-        // --- Apply Dark Mode ---
+        // --- Dark Mode / Dimming ---
         col *= dimFactor;
 
         gl_FragColor = vec4(col, 1.0);
@@ -128,16 +135,15 @@ const Shader021_3DMaterial = shaderMaterial(
 
 extend({ Shader021_3DMaterial });
 
-// Add type definition for the new material
 declare global {
   namespace JSX {
     interface IntrinsicElements {
       shader021_3DMaterial: ReactThreeFiber.Object3DNode<THREE.ShaderMaterial, typeof Shader021_3DMaterial> & {
         iTime?: number;
-        iResolution?: THREE.Vector2;
         dimFactor?: number;
         cameraPos?: THREE.Vector3;
-        iColor?: THREE.Color;
+        bgColor?: THREE.Color;
+        ledColor?: THREE.Color;
       };
     }
   }
