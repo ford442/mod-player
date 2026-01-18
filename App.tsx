@@ -26,7 +26,10 @@ function App() {
 
   // 3D View State
   const [is3DMode, setIs3DMode] = useState<boolean>(false);
-  const [darkMode3D, setDarkMode3D] = useState<boolean>(false);
+  const [isDarkMode, setIsDarkMode] = useState<boolean>(true); // Default to Dark Mode
+
+  // Calculate Dim Factor (1.0 = Bright, 0.3 = Dark)
+  const dimFactor = isDarkMode ? 0.3 : 1.0;
 
   // Media Overlay State
   const [mediaItem, setMediaItem] = useState<MediaItem | null>(null);
@@ -88,9 +91,10 @@ function App() {
   if (is3DMode) {
     return (
       <Studio3D
-        darkMode={darkMode3D}
-        onDarkModeToggle={() => setDarkMode3D(!darkMode3D)}
+        darkMode={isDarkMode}
+        onDarkModeToggle={() => setIsDarkMode(!isDarkMode)}
         onExitStudio={() => setIs3DMode(false)}
+        dimFactor={dimFactor} // Pass to 3D Scene
         headerContent={
           <div className="scale-75 origin-top-left">
             <Header status={status} />
@@ -124,6 +128,7 @@ function App() {
               onVolumeChange={setVolume}
               onPanChange={setPan}
               externalVideoSource={null}
+              dimFactor={dimFactor} // Pass to 2D Component inside 3D
             />
           </div>
         }
@@ -164,30 +169,40 @@ function App() {
             </div>
           ) : undefined
         }
+        playheadX={playbackSeconds * 10.0} // Pass estimated world position for Camera
       />
     );
   }
 
   // Standard 2D mode render
   return (
-    <div className="min-h-screen bg-gray-900 text-white p-4 flex flex-col items-center">
+    <div className={`min-h-screen ${isDarkMode ? 'bg-gray-900 text-white' : 'bg-gray-100 text-black'} p-4 flex flex-col items-center transition-colors duration-300`}>
       <div className="w-full max-w-[1280px]">
         <Header status={status} />
 
         {/* Shader Selector & 3D Toggle */}
         <div className="mb-4 flex items-center justify-between gap-2">
-            <button
-              onClick={() => setIs3DMode(true)}
-              className="px-4 py-2 bg-blue-600 text-white text-sm font-mono rounded-lg shadow-lg hover:bg-blue-700 transition-colors border border-blue-500"
-            >
-              🎬 Enter 3D Studio
-            </button>
+            <div className="flex gap-2">
+                <button
+                onClick={() => setIs3DMode(true)}
+                className="px-4 py-2 bg-blue-600 text-white text-sm font-mono rounded-lg shadow-lg hover:bg-blue-700 transition-colors border border-blue-500"
+                >
+                🎬 Enter 3D Studio
+                </button>
+                <button
+                onClick={() => setIsDarkMode(!isDarkMode)}
+                className={`px-4 py-2 text-sm font-mono rounded-lg shadow-lg transition-colors border ${isDarkMode ? 'bg-gray-800 text-white border-gray-700 hover:bg-gray-700' : 'bg-white text-black border-gray-300 hover:bg-gray-50'}`}
+                >
+                {isDarkMode ? '☀️ Light Mode' : '🌙 Dark Mode'}
+                </button>
+            </div>
+
             <div className="flex items-center gap-2">
-              <label className="text-sm font-mono text-gray-400">VISUALIZER CORE:</label>
+              <label className="text-sm font-mono opacity-70">VISUALIZER CORE:</label>
               <select
                   value={shaderFile}
                   onChange={(e) => setShaderFile(e.target.value)}
-                  className="bg-gray-800 text-white text-xs font-mono p-1 rounded border border-gray-700 focus:border-blue-500 outline-none"
+                  className={`text-xs font-mono p-1 rounded border focus:border-blue-500 outline-none ${isDarkMode ? 'bg-gray-800 text-white border-gray-700' : 'bg-white text-black border-gray-300'}`}
               >
                   {SHADERS.map(s => <option key={s} value={s}>{s}</option>)}
               </select>
@@ -195,7 +210,7 @@ function App() {
         </div>
 
         {/* Main Display Area */}
-        <div className="relative bg-black rounded-xl overflow-hidden shadow-2xl mb-6 border border-gray-800">
+        <div className={`relative rounded-xl overflow-hidden shadow-2xl mb-6 border ${isDarkMode ? 'bg-black border-gray-800' : 'bg-white border-gray-300'}`}>
            {/* WebGPU Pattern Display */}
            <PatternDisplay
              matrix={sequencerMatrix}
@@ -226,6 +241,7 @@ function App() {
              // Pass media item URL to pattern display if it supports video textures?
              // (PatternDisplay handles externalVideoSource prop)
              externalVideoSource={null}
+             dimFactor={dimFactor} // Pass to 2D Component
            />
 
            {/* Overlay for Images/Videos on top of the visualizer */}
@@ -262,7 +278,7 @@ function App() {
         />
 
         {/* Footer / Instructions */}
-        <div className="mt-8 text-center text-xs text-gray-500">
+        <div className="mt-8 text-center text-xs opacity-50">
              <p>Supports .mod, .xm, .s3m, .it files.</p>
              <p>WebGPU required for visualization.</p>
         </div>
