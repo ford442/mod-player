@@ -23,6 +23,7 @@ struct Uniforms {
   bloomIntensity: f32,
   bloomThreshold: f32,
   invertChannels: u32,
+  dimFactor: f32,
 };
 
 @group(0) @binding(0) var<storage, read> cells: array<u32>;
@@ -178,6 +179,9 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
 
   // Border
   col = mix(col, fs.borderColor, smoothstep(0.0, aa, dBox));
+
+  // Apply Dim Factor (Dark Mode)
+  col *= uniforms.dimFactor;
 
   return vec4<f32>(col, 1.0);
 }

@@ -62,6 +62,7 @@ const createUniformPayload = (
     bloomIntensity?: number;
     bloomThreshold?: number;
     invertChannels?: boolean;
+    dimFactor?: number;
   }
 ): ArrayBuffer => {
   if (layoutType === 'extended') {
@@ -87,6 +88,7 @@ const createUniformPayload = (
     float[16] = params.bloomIntensity ?? 1.0;
     float[17] = params.bloomThreshold ?? 0.8;
     uint[18] = params.invertChannels ? 1 : 0;
+    float[19] = params.dimFactor ?? 1.0;
     return buffer;
   }
 
@@ -158,6 +160,7 @@ interface PatternDisplayProps {
   onVolumeChange?: (volume: number) => void;
   onPanChange?: (pan: number) => void;
   totalRows?: number;
+  dimFactor?: number;
 }
 
 const clampPlayhead = (value: number, numRows: number) => {
@@ -319,6 +322,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     onVolumeChange,
     onPanChange,
     totalRows = 64,
+    dimFactor = 1.0,
 }) => {
   // ... (State hooks unchanged)
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -1192,6 +1196,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
         bloomIntensity: bloomIntensity ?? 1.0,
         bloomThreshold: bloomThreshold ?? 0.8,
         invertChannels: invertChannels,
+        dimFactor: dimFactor,
       });
       device.queue.writeBuffer(uniformBufferRef.current, 0, uniformPayload);
     }
