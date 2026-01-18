@@ -156,11 +156,8 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
             // Channel Position: Distributed around the circle
             let angle = (f32(i) / f32(numCh)) * 6.28318 - 1.57; // Start at top (-PI/2)
 
-            // Spiral Animation: Splash moves outward from center
-            let radius = 0.2 + ch.noteAge * 0.3;
-
-            // Angle rotates with the vortex (swirl effect)
-            angle += ch.noteAge * 1.5;
+            // "Splash at one point". Let's put it at a fixed radius, e.g., 0.6
+            let radius = 0.6;
 
             let pos = vec2<f32>(cos(angle), sin(angle)) * radius;
 
