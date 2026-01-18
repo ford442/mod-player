@@ -1,43 +1,48 @@
-import React from 'react';
+import React, { useRef } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 
 interface CameraRigProps {
   isPlaying: boolean;
   playheadX: number;
-  controlsRef: React.MutableRefObject<any>; // Using any for OrbitControls ref as types can be tricky with drei refs
+  controlsRef: React.MutableRefObject<any>;
 }
 
 const CameraRig: React.FC<CameraRigProps> = ({ playheadX, controlsRef }) => {
   const { camera } = useThree();
 
+  // Keep track of previous playhead to calculate delta if needed
+  const prevPlayhead = useRef(playheadX);
+
   useFrame(() => {
-    // Only follow if playing (or always, depending on preference)
-    // We assume playheadX corresponds to the actual world X coordinate of the music
+    if (!controlsRef.current) return;
 
-    if (controlsRef.current) {
-        // 1. Move the ORBIT TARGET to the playhead
-        // We lerp (smoothly interpolate) for a less jittery feel
-        const currentTarget = controlsRef.current.target;
+    const controls = controlsRef.current;
 
-        // Desired X is the playhead position
-        // We keep Y and Z the same as where the user left them
-        const targetX = THREE.MathUtils.lerp(currentTarget.x, playheadX, 0.1);
+    // We want the camera to focus on the current playhead X
+    const targetX = playheadX;
 
-        controlsRef.current.target.set(targetX, currentTarget.y, currentTarget.z);
+    // 1. Calculate the offset of the camera relative to the *old* target
+    //    This preserves the user's zoom level and rotation angle.
+    const currentTarget = controls.target;
+    const offset = new THREE.Vector3().subVectors(camera.position, currentTarget);
 
-        // 2. Move the CAMERA along with the target
-        // We calculate the offset (distance from camera to target) and maintain it
-        // This effectively "drags" the camera along
-        const offset = camera.position.x - currentTarget.x;
+    // 2. Move the target to the new playhead position
+    //    Using a small lerp makes it smooth, 1.0 makes it locked.
+    //    If playhead moves fast, we want to keep up.
 
-        // If the camera is lagging too far behind or pushing too far ahead, correct it
-        // Ideally, we just add the delta movement of the target to the camera
-        // Note: We use the *new* targetX to calculate the new camera X
-        camera.position.x = targetX + offset;
+    // Smoothly interpolate the Target X
+    const smoothTargetX = THREE.MathUtils.lerp(currentTarget.x, targetX, 0.1);
 
-        controlsRef.current.update();
-    }
+    controls.target.set(smoothTargetX, 0, 0); // Assuming center is Y=0, Z=0
+
+    // 3. Move the Camera to maintain the offset
+    //    This effectively "drags" the camera along with the target
+    camera.position.copy(controls.target).add(offset);
+
+    controls.update();
+
+    prevPlayhead.current = playheadX;
   });
 
   return null;
