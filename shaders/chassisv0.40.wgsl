@@ -109,10 +109,12 @@ fn drawText(p: vec2<f32>, size: vec2<f32>) -> f32 {
 // White Square Button Style
 fn drawWhiteButton(uv: vec2<f32>, size: vec2<f32>, glowColor: vec3<f32>, isOn: bool, aa: f32) -> vec4<f32> {
   let halfSize = size * 0.5;
-  let d = sdRoundedBox(uv, halfSize, 0.015);
+  // Use radius 0.0 for perfectly square buttons
+  let d = sdRoundedBox(uv, halfSize, 0.0);
 
-  var col = vec3<f32>(0.90, 0.90, 0.92);
-  col *= (0.95 + 0.05 * cos(uv.y * 8.0));
+  // Pure white base color
+  var col = vec3<f32>(1.0, 1.0, 1.0);
+  // Removed texture cosine modulation for cleaner look
 
   var alpha = 0.0;
   let bodyMask = 1.0 - smoothstep(0.0, aa, d);
@@ -191,9 +193,8 @@ fn fs(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
   let sliderH = 0.2;
   let sliderW = 0.015;
 
-  // Volume (NEW: Top Right Horizontal)
-  // Situated between Position (center) and Open Button (far right)
-  let volPos = vec2<f32>(0.18, 0.415);
+  // Volume (Top Right Horizontal) - Moved inward from 0.18 to 0.08
+  let volPos = vec2<f32>(0.08, 0.415);
   let volDim = vec2<f32>(0.09, 0.006); // Half-extents (0.18 width)
 
   // --- 2. LABELS ---
@@ -296,8 +297,8 @@ fn fs(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
   let btnSize = vec2<f32>(0.09, 0.09);
   let iconRadius = 0.045;
 
-  // LOOP
-  let posLoop = vec2<f32>(-0.34, 0.42);
+  // LOOP - Moved inward from -0.34 to -0.24
+  let posLoop = vec2<f32>(-0.24, 0.42);
   let isLooping = bez.isLooping == 1u;
   let isLoopClicked = bez.clickedButton == 1u;
   let loopActive = isLooping || isLoopClicked;
@@ -311,8 +312,8 @@ fn fs(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
   let ringMask = smoothstep(aa, 0.0, -ring);
   color = mix(color, vec3<f32>(0.1), ringMask * 0.6);
 
-  // OPEN
-  let posOpen = vec2<f32>(0.34, 0.42);
+  // OPEN - Moved inward from 0.34 to 0.24
+  let posOpen = vec2<f32>(0.24, 0.42);
   let isOpenClicked = bez.clickedButton == 2u;
   let openBtn = drawWhiteButton(p - posOpen, btnSize, purpleGlow, isOpenClicked, aa);
   color = mix(color, openBtn.rgb, openBtn.a);
@@ -324,8 +325,8 @@ fn fs(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
   let openIconMask = smoothstep(aa, 0.0, -arrow);
   color = mix(color, vec3<f32>(0.1), openIconMask * 0.6);
 
-  // PLAY
-  let posPlay = vec2<f32>(-0.44, -0.425);
+  // PLAY - Moved down from -0.425 to -0.45
+  let posPlay = vec2<f32>(-0.44, -0.45);
   let isPlaying = bez.dimFactor < 0.5;
   let isPlayClicked = bez.clickedButton == 3u;
   let playActive = isPlaying || isPlayClicked;
@@ -337,8 +338,8 @@ fn fs(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
   let playIconMask = smoothstep(aa, 0.0, -dPlayIcon);
   color = mix(color, vec3<f32>(0.1), playIconMask * 0.6);
 
-  // STOP
-  let posStop = vec2<f32>(-0.35, -0.425);
+  // STOP - Moved down from -0.425 to -0.45
+  let posStop = vec2<f32>(-0.35, -0.45);
   let isStopClicked = bez.clickedButton == 4u;
   let stopActive = !isPlaying || isStopClicked;
 
