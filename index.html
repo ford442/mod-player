@@ -28,7 +28,7 @@
     A promise is used to signal readiness to the React application.
   -->
   <script>
-    window.libopenmptReady = new Promise(resolve => {
+    window.libopenmptReady = new Promise((resolve, reject) => {
       window.libopenmpt = {
         onRuntimeInitialized: function() {
           console.log('libopenmpt runtime initialized via pre-load script.');
@@ -36,9 +36,15 @@
           resolve(this);
         }
       };
+      // Expose reject for script error handling
+      window._libopenmptReject = reject;
     });
   </script>
-  <script charset=utf-8 src="https://wasm.noahcohn.com/libmpt/libopenmptjs.1ijs"></script>
+  <script
+    charset="utf-8"
+    src="https://wasm.noahcohn.com/libmpt/libopenmptjs.1ijs"
+    onerror="window._libopenmptReject && window._libopenmptReject(new Error('Failed to load libopenmpt script from CDN'))"
+  ></script>
 </body>
 </html>
 
