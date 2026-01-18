@@ -1,347 +1,281 @@
-import React, { useCallback, useState, useEffect, useRef } from 'react';
-import { useLibOpenMPT } from './hooks/useLibOpenMPT';
-import { Header } from './components/Header';
-import Controls from './components/Controls';
-import { InfoDisplay } from './components/InfoDisplay';
-import { PatternSequencer } from './components/PatternSequencer';
-import { GithubIcon } from './components/icons';
-import { MediaPanel } from './components/MediaPanel';
-import { MediaOverlay } from './components/MediaOverlay';
-import { PatternDisplay } from './components/PatternDisplay';
-import type { MediaItem } from './types';
-import { fetchRemoteMedia } from './utils/remoteMedia';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import WebGPUCanvas from './components/WebGPUCanvas';
+// import Controls from './components/Controls'; 
+import Chassis0_40 from './components/Chassis0_40'; // Import the new file
+import { Renderer } from './renderer/Renderer';
+import { RenderMode, ShaderEntry, ShaderCategory, InputSource, SlotParams } from './renderer/types';
+import { Alucinate, AIStatus, ImageRecord } from './AutoDJ';
+import { pipeline, env } from '@xenova/transformers';
+import './style.css';
 
-// Dynamically load all WGSL shader files
-const shaderModules = import.meta.glob('./shaders/*.wgsl', { as: 'url' });
-const availableShaders = Object.keys(shaderModules)
-  .map(path => path.replace('./shaders/', ''))
-  // Hide non-pattern helper shaders (bezel/chassis/etc)
-  .filter(name => name.startsWith('patternv'))
-  .sort();
+// ... (Configuration constants - same as before)
+env.allowLocalModels = false;
+env.backends.onnx.logLevel = 'warning';
+const DEPTH_MODEL_ID = 'Xenova/dpt-hybrid-midas';
+const API_BASE_URL = 'https://ford442-storage-manager.hf.space';
+const IMAGE_MANIFEST_URL = `${API_BASE_URL}/api/songs?type=image`;
+const LOCAL_MANIFEST_URL = `/image_manifest.json`;
+const BUCKET_BASE_URL = `https://storage.googleapis.com/ford442-storage-manager`;
+const IMAGE_SUGGESTIONS_URL = `/image_suggestions.md`;
 
-// Helpful runtime debug when the shader list doesn't update in the running app
-if (typeof window !== 'undefined' && import.meta.env.MODE !== 'production') {
-  // eslint-disable-next-line no-console
-  console.log('availableShaders (runtime):', availableShaders);
-}
+const FALLBACK_IMAGES = [
+    "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=2564&auto=format&fit=crop",
+    "https://images.unsplash.com/photo-1518709268805-4e9042af9f23?q=80&w=2568&auto=format&fit=crop",
+    "https://images.unsplash.com/photo-1550684848-fac1c5b4e853?q=80&w=2670&auto=format&fit=crop",
+    "https://images.unsplash.com/photo-1534447677768-be436bb09401?q=80&w=2694&auto=format&fit=crop",
+    "https://images.unsplash.com/photo-1475924156734-496f6cac6ec1?q=80&w=2670&auto=format&fit=crop",
+    "https://images.unsplash.com/photo-1614850523060-8da1d56ae167?q=80&w=2670&auto=format&fit=crop",
+    "https://images.unsplash.com/photo-1605218427306-633ba8546381?q=80&w=2669&auto=format&fit=crop"
+];
 
-export default function App() {
-  const [volume, setVolume] = useState(1.0);
+const defaultSlotParams: SlotParams = {
+    zoomParam1: 0.99,
+    zoomParam2: 1.01,
+    zoomParam3: 0.5,
+    zoomParam4: 0.5,
+    lightStrength: 1.0,
+    ambient: 0.2,
+    normalStrength: 0.1,
+    fogFalloff: 4.0,
+    depthThreshold: 0.5,
+};
 
-  const {
-    status,
-    isReady,
-    isPlaying,
-    isModuleLoaded,
-    moduleInfo,
-    loadModule,
-    play,
-    stopMusic,
-    sequencerMatrix,
-    sequencerCurrentRow,
-    sequencerGlobalRow,
-    totalPatternRows,
-    seekToStep,
-    playbackSeconds,
-    playbackRowFraction,
-    channelStates,
-    beatPhase,
-    grooveAmount,
-    kickTrigger,
-    activeChannels,
-    isLooping,
-    setIsLooping,
-    panValue,
-    setPanValue,
-  } = useLibOpenMPT(volume);
+function MainApp() {
+    // --- State: General & Stacking ---
+    const [shaderCategory, setShaderCategory] = useState<ShaderCategory>('image');
+    const [modes, setModes] = useState<RenderMode[]>(['liquid', 'none', 'none']);
+    const [activeSlot, setActiveSlot] = useState<number>(0);
+    const [slotParams, setSlotParams] = useState<SlotParams[]>([defaultSlotParams, defaultSlotParams, defaultSlotParams]);
 
-  const [media, setMedia] = useState<MediaItem[]>([]);
-  const [remoteFiles, setRemoteFiles] = useState<MediaItem[]>([]);
-  const [activeMediaId, setActiveMediaId] = useState<string | undefined>(undefined);
-  const [overlayVisible, setOverlayVisible] = useState<boolean>(false);
-  const [mediaElement, setMediaElement] = useState<HTMLVideoElement | HTMLImageElement | null>(null);
-  const videoLoopRef = useRef<number>(0);
+    // --- State: Global View ---
+    const [zoom, setZoom] = useState(1.0);
+    const [panX, setPanX] = useState(0.5);
+    const [panY, setPanY] = useState(0.5);
+    
+    // --- State: Automation & Status ---
+    const [autoChangeEnabled, setAutoChangeEnabled] = useState(false);
+    const [autoChangeDelay, setAutoChangeDelay] = useState(10);
+    const [status, setStatus] = useState('Ready.');
+    
+    // --- State: AI Models & VJ ---
+    const [depthEstimator, setDepthEstimator] = useState<any>(null);
+    const [aiVj, setAiVj] = useState<Alucinate | null>(null);
+    const [aiVjStatus, setAiVjStatus] = useState<AIStatus>('idle');
+    const [aiVjMessage, setAiVjMessage] = useState('AI VJ is offline.');
+    const [isAiVjMode, setIsAiVjMode] = useState(false);
 
-  useEffect(() => {
-    fetchRemoteMedia().then(items => setRemoteFiles(items));
-  }, []);
+    // --- State: Content ---
+    const [imageManifest, setImageManifest] = useState<ImageRecord[]>([]);
+    const [currentImageUrl, setCurrentImageUrl] = useState<string | undefined>();
+    const [availableModes, setAvailableModes] = useState<ShaderEntry[]>([]);
+    const [inputSource, setInputSource] = useState<InputSource>('image');
+    const [activeGenerativeShader, setActiveGenerativeShader] = useState<string>('gen-orb');
+    const [videoSourceUrl, setVideoSourceUrl] = useState<string | undefined>(undefined);
+    const [selectedVideo, setSelectedVideo] = useState<string>("");
 
-  const handleRemoteSelect = useCallback((item: MediaItem) => {
-    const newItem = { ...item, id: `remote-${Date.now()}` }; 
-    setMedia(prev => [newItem, ...prev]);
-    setActiveMediaId(newItem.id);
-    setOverlayVisible(true);
-  }, []);
+    // --- State: Media Controls (Chassis 0.40) ---
+    const [isMuted, setIsMuted] = useState(false);
+    const [volume, setVolume] = useState(1.0);
+    const [loop, setLoop] = useState(true);
+    const [isPlaying, setIsPlaying] = useState(true);
 
-  const addMediaFile = useCallback((file: File) => {
-    const url = URL.createObjectURL(file);
-    const kind: MediaItem['kind'] = file.type === 'video/mp4' || file.type.startsWith('video/') ? 'video' : (file.type === 'image/gif' ? 'gif' : 'image');
-    const item: MediaItem = {
-      id: String(Date.now()),
-      url,
-      fileName: file.name,
-      mimeType: file.type,
-      kind,
-      loop: kind === 'gif',
-      muted: true,
-      fit: 'contain',
-      createdAt: Date.now(),
-      isObjectUrl: true,
+    // --- State: Layout ---
+    const [showSidebar, setShowSidebar] = useState(true);
+
+    // --- State: Mouse Interaction ---
+    const [mousePosition, setMousePosition] = useState<{ x: number; y: number }>({ x: -1, y: -1 });
+    const [isMouseDown, setIsMouseDown] = useState(false);
+
+    const rendererRef = useRef<Renderer | null>(null);
+    const fileInputImageRef = useRef<HTMLInputElement>(null);
+    const fileInputVideoRef = useRef<HTMLInputElement>(null);
+
+    // --- Helpers ---
+    const setMode = (index: number, mode: RenderMode) => {
+        setModes(prev => {
+            const next = [...prev];
+            next[index] = mode;
+            return next;
+        });
     };
-    setMedia((prev: MediaItem[]) => [item, ...prev]);
-    setActiveMediaId(item.id);
-    setOverlayVisible(true);
-  }, []);
 
-  const removeMedia = useCallback((id: string) => {
-    setMedia((prev: MediaItem[]) => {
-      const found = prev.find((m: MediaItem) => m.id === id);
-      if (found && found.isObjectUrl) {
-        try { URL.revokeObjectURL(found.url); } catch (e) { /* ignore */ }
-      }
-      return prev.filter((m: MediaItem) => m.id !== id);
-    });
-    if (activeMediaId === id) {
-      setActiveMediaId(undefined);
-      setOverlayVisible(false);
-    }
-  }, [activeMediaId]);
+    const updateSlotParam = useCallback((slotIndex: number, updates: Partial<SlotParams>) => {
+        setSlotParams(prev => {
+            const next = [...prev];
+            next[slotIndex] = { ...next[slotIndex], ...updates };
+            return next;
+        });
+    }, []);
 
-  const activeMedia = media.find((m: MediaItem) => m.id === activeMediaId);
-
-  useEffect(() => {
-    cancelAnimationFrame(videoLoopRef.current);
-    const currentMedia = media.find(m => m.id === activeMediaId);
-
-    if (!currentMedia) {
-      setMediaElement(null);
-      return;
-    }
-
-    let el: HTMLVideoElement | HTMLImageElement | null = null;
-
-    if (currentMedia.kind === 'video') {
-      const vid = document.createElement('video');
-      vid.src = currentMedia.url;
-      vid.crossOrigin = "anonymous";
-      vid.loop = currentMedia.loop ?? false;
-      vid.muted = currentMedia.muted ?? true;
-      vid.playsInline = true;
-
-      vid.onloadedmetadata = () => {
-        vid.play().catch(e => console.warn("Video play error for shader", e));
-      };
-
-      if (!vid.loop) {
-        let direction = 1;
-        const checkLoop = () => {
-          if (!vid) return;
-          const t = vid.currentTime;
-          const d = vid.duration;
-          if (d > 0) {
-            if (direction === 1 && t >= d - 0.2) {
-              direction = -1;
-              try { vid.playbackRate = -1.0; } catch (e) { vid.currentTime = 0; }
-            } else if (direction === -1 && t <= 0.2) {
-              direction = 1;
-              try { vid.playbackRate = 1.0; } catch (e) { /* ignore */ }
+    // --- Effects & Initializers ---
+    useEffect(() => {
+        const fetchImageManifest = async () => {
+            let manifest: ImageRecord[] = [];
+            try {
+                const response = await fetch(IMAGE_MANIFEST_URL);
+                if (response.ok) {
+                    const data = await response.json();
+                    manifest = data.map((item: any) => ({
+                        url: item.url,
+                        tags: item.description ? item.description.toLowerCase().split(/[\s,]+/) : [],
+                        description: item.description || ''
+                    }));
+                }
+            } catch (error) {
+                console.warn("Backend API failed, trying local...", error);
             }
-            if (vid.paused) vid.play().catch(() => {});
-          }
-          videoLoopRef.current = requestAnimationFrame(checkLoop);
+
+            if (manifest.length === 0) {
+                try {
+                    const response = await fetch(LOCAL_MANIFEST_URL);
+                    if (response.ok) {
+                        const data = await response.json();
+                         manifest = (data.images || []).map((item: any) => ({
+                            url: item.url.startsWith('http') ? item.url : `${BUCKET_BASE_URL}/${item.url}`,
+                            tags: item.tags || [],
+                            description: item.tags ? item.tags.join(', ') : ''
+                        }));
+                    }
+                } catch (e) {}
+            }
+
+            if (manifest.length === 0) {
+                manifest = FALLBACK_IMAGES.map(url => ({ url, tags: ['fallback'], description: 'Demo' }));
+            }
+
+            const uniqueManifest = Array.from(new Map(manifest.map(item => [item.url, item])).values());
+            setImageManifest(uniqueManifest);
+
+            if (rendererRef.current) {
+                rendererRef.current.setImageList(uniqueManifest.map(m => m.url));
+            }
         };
-        vid.play().then(checkLoop).catch(() => {});
-      }
+        fetchImageManifest();
+    }, []);
 
-      el = vid;
-    } else if (currentMedia.kind === 'image' || currentMedia.kind === 'gif') {
-      const img = new Image();
-      img.src = currentMedia.url;
-      img.crossOrigin = "anonymous";
-      el = img;
-    }
+    const handleLoadImage = useCallback(async (url: string) => {
+        if (!rendererRef.current) return;
+        const newImageUrl = await rendererRef.current.loadImage(url);
+        if (newImageUrl) {
+            setCurrentImageUrl(newImageUrl);
+        }
+    }, []);
 
-    setMediaElement(el);
+    const handleNewRandomImage = useCallback(async () => {
+        if (imageManifest.length === 0) return;
+        const randomImage = imageManifest[Math.floor(Math.random() * imageManifest.length)];
+        if (randomImage) await handleLoadImage(randomImage.url);
+    }, [imageManifest, handleLoadImage]);
 
-    return () => {
-      cancelAnimationFrame(videoLoopRef.current);
-      if (el && el instanceof HTMLVideoElement) {
-        el.pause();
-        el.src = '';
-      }
-      setMediaElement(null);
-    };
-  }, [activeMediaId, media]);
+    const loadDepthModel = useCallback(async () => {
+        if (depthEstimator) return;
+        try {
+            setStatus('Loading depth model...');
+            const estimator = await pipeline('depth-estimation', DEPTH_MODEL_ID, {
+                progress_callback: (p: any) => setStatus(`Loading depth: ${p.status}...`),
+            });
+            setDepthEstimator(() => estimator);
+            setStatus('Depth model loaded.');
+        } catch (e: any) { setStatus(`Depth error: ${e.message}`); }
+    }, [depthEstimator]);
+    
+    const toggleAiVj = useCallback(async () => {
+        if (!aiVj) {
+             const vj = new Alucinate(handleLoadImage, (ids) => {
+                 setModes(prev => { const n=[...prev]; if(ids[0]) n[0]=ids[0]; if(ids[1]) n[1]=ids[1]; return n; });
+             }, () => ({ currentImage: null, currentShader: null }));
+             vj.onStatusChange = (s, m) => { setAiVjStatus(s); setAiVjMessage(m); };
+             setAiVj(vj); setIsAiVjMode(true);
+             await vj.initialize(imageManifest, availableModes, IMAGE_SUGGESTIONS_URL);
+             vj.start();
+        } else {
+            if (isAiVjMode) { aiVj.stop(); setIsAiVjMode(false); }
+            else { aiVj.start(); setIsAiVjMode(true); }
+        }
+    }, [aiVj, isAiVjMode, availableModes, imageManifest, handleLoadImage]);
+    
+    const onInitCanvas = useCallback(() => {
+        if(rendererRef.current) {
+            setAvailableModes(rendererRef.current.getAvailableModes());
+            handleNewRandomImage();
+        }
+    }, [handleNewRandomImage]);
 
-  const webgpuSupported = typeof navigator !== 'undefined' && 'gpu' in navigator;
-  const [patternMode, setPatternMode] = useState<'html' | 'webgpu'>(webgpuSupported ? 'webgpu' : 'html');
-  const [shaderVersion, setShaderVersion] = useState<string>('patternv0.37.wgsl');
-  const effectivePatternMode = webgpuSupported ? patternMode : 'html';
-
-  const isVideoShaderActive = effectivePatternMode === 'webgpu' && (shaderVersion.includes('v0.20') || shaderVersion.includes('v0.23'));
-  const showOverlay = overlayVisible && !isVideoShaderActive;
-
-  // Dynamic cell sizing based on shader version
-  const getCellMetrics = (shader: string) => {
-    if (shader.includes('v0.21')) return { w: 32, h: 48 }; // Extra Large Precision
-    return { w: 18, h: 26 }; // Standard Default
-  };
-  const { w: cellW, h: cellH } = getCellMetrics(shaderVersion);
-
-  return (
-    <div className="min-h-screen p-4 md:p-8 flex flex-col">
-      <main className="max-w-7xl mx-auto w-full flex-grow">
-        <Header status={status} />
-
-        {isModuleLoaded || effectivePatternMode === 'webgpu' ? (
-          <>
-            <InfoDisplay moduleInfo={moduleInfo} />
-
-            <div className="flex flex-col gap-4">
-              <div className="flex items-center justify-between flex-wrap gap-3">
-                <h2 className="text-sm uppercase tracking-widest text-gray-400">Pattern View</h2>
-              </div>
-
-              <div className="relative">
-                {/* Left side controls - Mode toggle */}
-                <div className="absolute top-4 left-4 z-10">
-                  <div className="inline-flex flex-col gap-2 rounded-lg border border-white/10 overflow-hidden bg-gray-900/80 backdrop-blur-sm p-1">
-                    <button
-                      type="button"
-                      onClick={() => setPatternMode('html')}
-                      className={`px-3 py-2 text-xs font-semibold transition rounded ${effectivePatternMode === 'html' ? 'bg-white/10 text-white' : 'text-gray-400 hover:text-white'}`}
-                    >
-                      HTML
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setPatternMode('webgpu')}
-                      className={`px-3 py-2 text-xs font-semibold transition rounded ${effectivePatternMode === 'webgpu' ? 'bg-white/10 text-white' : 'text-gray-400 hover:text-white'}`}
-                      disabled={!webgpuSupported}
-                    >
-                      WGSL
-                    </button>
-                  </div>
+    return (
+        <div className="App">
+            <header className="header">
+                <div className="logo-section">
+                    <div className="logo-text">Pixelocity</div>
+                    <div className="subtitle-text">Chassis 0.40</div>
                 </div>
-
-                {/* Shader selector - positioned based on shader version */}
-                {effectivePatternMode === 'webgpu' && (
-                  <div className={`absolute ${shaderVersion.includes('v0.37') ? 'bottom-4 left-4' : 'top-4 right-4'} z-10`}>
-                    <div className="flex flex-col gap-2 rounded-lg border border-white/10 bg-gray-900/80 backdrop-blur-sm p-2">
-                      {/* Quick Layout Switcher */}
-                      <div className="inline-flex rounded-lg border border-white/10 overflow-hidden">
-                        <button
-                          type="button"
-                          onClick={() => setShaderVersion('patternv0.21.wgsl')}
-                          className={`px-3 py-2 text-xs font-mono uppercase transition ${shaderVersion.includes('v0.21') ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400 hover:text-white'}`}
-                        >
-                          Horizontal
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setShaderVersion('patternv0.37.wgsl')}
-                          className={`px-3 py-2 text-xs font-mono uppercase transition ${shaderVersion.includes('v0.37') ? 'bg-purple-600 text-white' : 'bg-gray-800 text-gray-400 hover:text-white'}`}
-                        >
-                          Circular
-                        </button>
-                      </div>
-
-                      <select
-                        value={shaderVersion}
-                        onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setShaderVersion(e.target.value)}
-                        className="bg-gray-800 text-white text-xs px-3 py-2 rounded border border-white/10"
-                      >
-                        {availableShaders.map((shader: string) => (
-                          <option key={shader} value={shader}>{shader.replace('.wgsl', '')}</option>
-                        ))}
-                      </select>
+                <div className="header-controls">
+                    <button className="toggle-sidebar-btn" onClick={() => setShowSidebar(!showSidebar)}>
+                        {showSidebar ? 'Hide Controls' : 'Show Controls'}
+                    </button>
+                </div>
+            </header>
+            <div className="main-container">
+                <aside 
+                    className={`sidebar ${!showSidebar ? 'hidden' : ''}`} 
+                    // Inline styles are nice, but Chassis0_40's <style> block does the heavy lifting now
+                    style={{ background: 'transparent' }}
+                > 
+                    <Chassis0_40
+                        modes={modes} setMode={setMode} activeSlot={activeSlot} setActiveSlot={setActiveSlot}
+                        slotParams={slotParams} updateSlotParam={updateSlotParam} shaderCategory={shaderCategory}
+                        setShaderCategory={setShaderCategory} zoom={zoom} setZoom={setZoom} panX={panX}
+                        setPanX={setPanX} panY={panY} setPanY={setPanY} onNewImage={handleNewRandomImage}
+                        autoChangeEnabled={autoChangeEnabled} setAutoChangeEnabled={setAutoChangeEnabled}
+                        autoChangeDelay={autoChangeDelay} setAutoChangeDelay={setAutoChangeDelay}
+                        onLoadModel={loadDepthModel} isModelLoaded={!!depthEstimator} availableModes={availableModes}
+                        inputSource={inputSource} setInputSource={setInputSource} videoList={[]}
+                        selectedVideo={selectedVideo} setSelectedVideo={setSelectedVideo} 
+                        isMuted={isMuted} setIsMuted={setIsMuted}
+                        volume={volume} setVolume={setVolume}
+                        loop={loop} setLoop={setLoop}
+                        isPlaying={isPlaying} setIsPlaying={setIsPlaying}
+                        activeGenerativeShader={activeGenerativeShader} setActiveGenerativeShader={setActiveGenerativeShader}
+                        onUploadImageTrigger={() => fileInputImageRef.current?.click()}
+                        onUploadVideoTrigger={() => fileInputVideoRef.current?.click()}
+                        isAiVjMode={isAiVjMode} onToggleAiVj={toggleAiVj} aiVjStatus={aiVjStatus}
+                    />
+                </aside>
+                <main className="canvas-container">
+                    <WebGPUCanvas
+                        modes={modes} slotParams={slotParams} zoom={zoom} panX={panX} panY={panY}
+                        rendererRef={rendererRef} farthestPoint={{x:0.5, y:0.5}}
+                        mousePosition={mousePosition} setMousePosition={setMousePosition}
+                        isMouseDown={isMouseDown} setIsMouseDown={setIsMouseDown} onInit={onInitCanvas}
+                        inputSource={inputSource} videoSourceUrl={videoSourceUrl}
+                        activeGenerativeShader={activeGenerativeShader}
+                        selectedVideo={selectedVideo}
+                        apiBaseUrl={API_BASE_URL}
+                        loop={loop}
+                        volume={volume}
+                        isPlaying={isPlaying}
+                        isMuted={isMuted}
+                        setInputSource={setInputSource}
+                    />
+                    <div className="status-bar">
+                        {isAiVjMode ? `[AI VJ]: ${aiVjMessage}` : status}
                     </div>
-                  </div>
-                )}
-
-                {effectivePatternMode === 'webgpu' ? (
-                  <PatternDisplay
-                    matrix={sequencerMatrix ?? null}
-                    playheadRow={sequencerCurrentRow}
-                    cellWidth={cellW}
-                    cellHeight={cellH}
-                    shaderFile={shaderVersion}
-                    isPlaying={isPlaying}
-                    bpm={moduleInfo.bpm}
-                    timeSec={playbackSeconds}
-                    tickOffset={Math.max(0, (playbackRowFraction % 1))}
-                    channels={channelStates}
-                    beatPhase={beatPhase}
-                    grooveAmount={grooveAmount}
-                    kickTrigger={kickTrigger}
-                    activeChannels={activeChannels}
-                    isModuleLoaded={isModuleLoaded}
-                    externalVideoSource={mediaElement}
-                    volume={volume}
-                    pan={panValue}
-                    isLooping={isLooping}
-                    onPlay={play}
-                    onStop={stopMusic}
-                    onFileSelected={loadModule}
-                    onLoopToggle={() => setIsLooping(!isLooping)}
-                    onSeek={(step) => seekToStep(step)}
-                    onVolumeChange={setVolume}
-                    onPanChange={setPanValue}
-                    totalRows={totalPatternRows}
-                  />
-                ) : (
-                  <PatternSequencer
-                    matrix={sequencerMatrix ?? null}
-                    currentRow={sequencerCurrentRow}
-                    globalRow={sequencerGlobalRow}
-                    totalRows={totalPatternRows}
-                    onSeek={seekToStep}
-                    bpm={moduleInfo.bpm}
-                  />
-                )}
-              </div>
+                </main>
             </div>
-
-            <div className="mt-6 grid grid-cols-1 md:grid-cols-3 gap-4">
-              <MediaPanel media={media} activeMediaId={activeMediaId} onSelect={(id?: string) => { setActiveMediaId(id); setOverlayVisible(!!id); }} onRemove={removeMedia} />
-            </div>
-
-            <MediaOverlay item={activeMedia} visible={showOverlay} onClose={() => setOverlayVisible(false)} onUpdate={(partial: Partial<MediaItem>) => { if (!activeMedia) return; setMedia((prev: MediaItem[]) => prev.map((m: MediaItem) => m.id === activeMedia.id ? { ...m, ...partial } : m)); }} />
-          </>
-        ) : (
-           <div className="mt-6 bg-gray-800 p-6 rounded-lg shadow-lg text-center text-gray-400">
-             <h2 className="text-xl font-semibold text-white mb-2">Welcome!</h2>
-             <p>Load a tracker module file (e.g., .mod, .it, .s3m, .xm) to begin.</p>
-           </div>
-        )}
-
-        <div className="mt-8">
-          <Controls
-            isReady={isReady}
-            isPlaying={isPlaying}
-            isModuleLoaded={isModuleLoaded}
-            onFileSelected={loadModule}
-            onPlay={play}
-            onStop={stopMusic}
-            onMediaAdd={addMediaFile}
-            isLooping={isLooping}
-            onLoopToggle={() => setIsLooping(!isLooping)}
-            volume={volume}
-            setVolume={setVolume}
-            pan={panValue}
-            setPan={setPanValue}
-            remoteMediaList={remoteFiles}
-            onRemoteMediaSelect={handleRemoteSelect}
-          />
+            <input type="file" ref={fileInputImageRef} accept="image/*" style={{display:'none'}} onChange={(e) => {
+                if(e.target.files?.[0] && rendererRef.current) {
+                    const url = URL.createObjectURL(e.target.files[0]);
+                    handleLoadImage(url);
+                }
+            }} />
+            <input type="file" ref={fileInputVideoRef} accept="video/*" style={{display:'none'}} onChange={(e) => {
+                if(e.target.files?.[0]) {
+                    const url = URL.createObjectURL(e.target.files[0]);
+                    setVideoSourceUrl(url);
+                    setInputSource('video');
+                }
+            }} />
         </div>
-      </main>
-      <footer className="text-center text-gray-500 mt-8 text-sm">
-        <p>Powered by React and libopenmpt.</p>
-        <a href="https://github.com/ford442/react-dom" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 hover:text-white transition-colors">
-          <GithubIcon className="w-4 h-4" />
-          View on GitHub
-        </a>
-      </footer>
-    </div>
-  );
+    );
 }
+
+export default MainApp;
