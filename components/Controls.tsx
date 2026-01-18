@@ -18,8 +18,6 @@ interface ControlsProps {
   setPan?: (p: number) => void;
   onRemoteMediaSelect?: (item: MediaItem) => void;
   remoteMediaList?: MediaItem[];
-  isDarkMode?: boolean;
-  setIsDarkMode?: (value: boolean) => void;
 }
 
 export const Controls: React.FC<ControlsProps> = ({
@@ -28,8 +26,6 @@ export const Controls: React.FC<ControlsProps> = ({
   onMediaAdd,
   onRemoteMediaSelect,
   remoteMediaList = [],
-  isDarkMode,
-  setIsDarkMode,
 }) => {
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -95,20 +91,6 @@ export const Controls: React.FC<ControlsProps> = ({
           </select>
         </label>
       </div>
-
-      {/* Dark Mode Toggle */}
-      {setIsDarkMode && (
-        <button
-          onClick={() => setIsDarkMode(!isDarkMode)}
-          className={`px-3 py-1 text-sm rounded border transition-colors ${
-             isDarkMode
-               ? 'bg-gray-700 text-white border-gray-600 hover:bg-gray-600'
-               : 'bg-gray-200 text-gray-800 border-gray-300 hover:bg-gray-300'
-          }`}
-        >
-          {isDarkMode ? '🌙 Dark' : '☀️ Light'}
-        </button>
-      )}
     </section>
   );
 };
