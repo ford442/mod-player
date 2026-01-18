@@ -18,6 +18,10 @@ struct Uniforms {
   kickTrigger: f32,
   activeChannels: u32,
   isModuleLoaded: u32,
+  bloomIntensity: f32,
+  bloomThreshold: f32,
+  invertChannels: u32,
+  dimFactor: f32,
 };
 
 @group(0) @binding(0) var<storage, read> cells: array<u32>;
@@ -300,8 +304,8 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
 
   // --- 1px BORDER GAP ---
   if (housingMask < 0.5) {
-      return vec4<f32>(fs.borderColor, 1.0);
+      return vec4<f32>(fs.borderColor * uniforms.dimFactor, 1.0);
   }
 
-  return vec4<f32>(finalColor, 1.0);
+  return vec4<f32>(finalColor * uniforms.dimFactor, 1.0);
 }

@@ -1,7 +1,9 @@
-import React from 'react';
-import { Canvas } from '@react-three/fiber';
+import React, { useRef } from 'react';
+import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { OrbitControls, Html, PerspectiveCamera } from '@react-three/drei';
 import * as THREE from 'three';
+import './Shader021_3D';
+import CameraRig from './CameraRig';
 
 interface Studio3DProps {
   headerContent?: React.ReactNode;
@@ -9,6 +11,8 @@ interface Studio3DProps {
   controlsContent?: React.ReactNode;
   mediaOverlayContent?: React.ReactNode;
   darkMode?: boolean;
+  dimFactor?: number;
+  playheadX?: number;
   onDarkModeToggle?: () => void;
   onExitStudio?: () => void;
 }
@@ -64,49 +68,24 @@ const Panel3D: React.FC<{
   );
 };
 
-// Room/Environment component
-const Room: React.FC<{ darkMode: boolean }> = ({ darkMode }) => {
+const BackgroundShaderPlane: React.FC<{ dimFactor: number }> = ({ dimFactor }) => {
+  const materialRef = useRef<any>(null);
+  const { camera } = useThree();
+
+  useFrame((state) => {
+    if (materialRef.current) {
+      materialRef.current.iTime = state.clock.elapsedTime;
+      materialRef.current.dimFactor = dimFactor;
+      // We use the camera's world position as the ray origin
+      materialRef.current.cameraPos = camera.position;
+    }
+  });
+
   return (
-    <>
-      {/* Floor */}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -3, 0]} receiveShadow>
-        <planeGeometry args={[50, 50]} />
-        <meshStandardMaterial
-          color={darkMode ? "#0a0a0a" : "#cccccc"}
-          roughness={0.8}
-          metalness={0.2}
-        />
-      </mesh>
-
-      {/* Back wall */}
-      <mesh position={[0, 2, -10]} receiveShadow>
-        <planeGeometry args={[50, 20]} />
-        <meshStandardMaterial
-          color={darkMode ? "#0f0f0f" : "#dddddd"}
-          roughness={0.9}
-          metalness={0.1}
-        />
-      </mesh>
-
-      {/* Side walls */}
-      <mesh position={[-10, 2, 0]} rotation={[0, Math.PI / 2, 0]} receiveShadow>
-        <planeGeometry args={[50, 20]} />
-        <meshStandardMaterial
-          color={darkMode ? "#0f0f0f" : "#dddddd"}
-          roughness={0.9}
-          metalness={0.1}
-        />
-      </mesh>
-
-      <mesh position={[10, 2, 0]} rotation={[0, -Math.PI / 2, 0]} receiveShadow>
-        <planeGeometry args={[50, 20]} />
-        <meshStandardMaterial
-          color={darkMode ? "#0f0f0f" : "#dddddd"}
-          roughness={0.9}
-          metalness={0.1}
-        />
-      </mesh>
-    </>
+    <mesh position={[0, 0, -20]} scale={[100, 100, 1]}>
+      <planeGeometry args={[1, 1]} />
+      <shader021_3DMaterial ref={materialRef} transparent side={THREE.DoubleSide} />
+    </mesh>
   );
 };
 
@@ -116,9 +95,13 @@ export const Studio3D: React.FC<Studio3DProps> = ({
   controlsContent,
   mediaOverlayContent,
   darkMode = false,
+  dimFactor = 1.0,
+  playheadX = 0,
   onDarkModeToggle,
   onExitStudio,
 }) => {
+  const controlsRef = useRef<any>(null);
+
   return (
     <div style={{ width: '100%', height: '100vh', position: 'relative' }}>
       {/* Exit 3D Studio button */}
@@ -152,8 +135,15 @@ export const Studio3D: React.FC<Studio3DProps> = ({
       </div>
 
       <Canvas shadows>
-        <PerspectiveCamera makeDefault position={[0, 2, 12]} fov={60} />
+        <CameraRig isPlaying={true} playheadX={playheadX} controlsRef={controlsRef} />
+
+        <PerspectiveCamera makeDefault position={[0, 2, 12]} fov={60}>
+            {/* Attach background to camera so it follows us */}
+            <BackgroundShaderPlane dimFactor={dimFactor} />
+        </PerspectiveCamera>
+
         <OrbitControls
+          ref={controlsRef}
           enableDamping
           dampingFactor={0.05}
           minDistance={5}
@@ -173,58 +163,58 @@ export const Studio3D: React.FC<Studio3DProps> = ({
         <pointLight position={[-10, 5, -5]} intensity={darkMode ? 0.2 : 0.5} />
         <pointLight position={[10, 5, 5]} intensity={darkMode ? 0.2 : 0.5} />
 
-        {/* Room environment */}
-        <Room darkMode={darkMode} />
+        {/* UI Panels Group - Moves with Playhead so it stays with camera */}
+        <group position={[playheadX, 0, 0]}>
+            {/* Header Panel - Top center */}
+            {headerContent && (
+              <Panel3D
+                position={[0, 4, -2]}
+                width={8}
+                height={1.5}
+                darkMode={darkMode}
+              >
+                {headerContent}
+              </Panel3D>
+            )}
 
-        {/* Header Panel - Top center */}
-        {headerContent && (
-          <Panel3D
-            position={[0, 4, -2]}
-            width={8}
-            height={1.5}
-            darkMode={darkMode}
-          >
-            {headerContent}
-          </Panel3D>
-        )}
+            {/* Main Pattern Display Panel - Center */}
+            {patternDisplayContent && (
+              <Panel3D
+                position={[0, 0.5, 0]}
+                width={10}
+                height={6}
+                darkMode={darkMode}
+              >
+                {patternDisplayContent}
+              </Panel3D>
+            )}
 
-        {/* Main Pattern Display Panel - Center */}
-        {patternDisplayContent && (
-          <Panel3D
-            position={[0, 0.5, 0]}
-            width={10}
-            height={6}
-            darkMode={darkMode}
-          >
-            {patternDisplayContent}
-          </Panel3D>
-        )}
+            {/* Controls Panel - Bottom */}
+            {controlsContent && (
+              <Panel3D
+                position={[0, -2.5, 1]}
+                rotation={[Math.PI / 12, 0, 0]}
+                width={9}
+                height={1.8}
+                darkMode={darkMode}
+              >
+                {controlsContent}
+              </Panel3D>
+            )}
 
-        {/* Controls Panel - Bottom */}
-        {controlsContent && (
-          <Panel3D
-            position={[0, -2.5, 1]}
-            rotation={[Math.PI / 12, 0, 0]}
-            width={9}
-            height={1.8}
-            darkMode={darkMode}
-          >
-            {controlsContent}
-          </Panel3D>
-        )}
-
-        {/* Media Overlay Panel - Right side (if visible) */}
-        {mediaOverlayContent && (
-          <Panel3D
-            position={[6, 0.5, -1]}
-            rotation={[0, -Math.PI / 6, 0]}
-            width={4}
-            height={3}
-            darkMode={darkMode}
-          >
-            {mediaOverlayContent}
-          </Panel3D>
-        )}
+            {/* Media Overlay Panel - Right side (if visible) */}
+            {mediaOverlayContent && (
+              <Panel3D
+                position={[6, 0.5, -1]}
+                rotation={[0, -Math.PI / 6, 0]}
+                width={4}
+                height={3}
+                darkMode={darkMode}
+              >
+                {mediaOverlayContent}
+              </Panel3D>
+            )}
+        </group>
       </Canvas>
     </div>
   );
