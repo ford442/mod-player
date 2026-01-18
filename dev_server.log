@@ -3,8 +3,7 @@
 > vite
 
 
-  VITE v5.4.21  ready in 393 ms
+  VITE v5.4.21  ready in 357 ms
 
   ➜  Local:   http://localhost:5173/
   ➜  Network: use --host to expose
-The glob option "as" has been deprecated in favour of "query". Please update `as: 'url'` to `query: '?url', import: 'default'`.
