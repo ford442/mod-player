@@ -1,281 +1,176 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
-import WebGPUCanvas from './components/WebGPUCanvas';
-// import Controls from './components/Controls'; 
-import Chassis0_40 from './components/Chassis0_40'; // Import the new file
-import { Renderer } from './renderer/Renderer';
-import { RenderMode, ShaderEntry, ShaderCategory, InputSource, SlotParams } from './renderer/types';
-import { Alucinate, AIStatus, ImageRecord } from './AutoDJ';
-import { pipeline, env } from '@xenova/transformers';
-import './style.css';
+import { useState, useEffect } from 'react';
+import { Header } from './components/Header';
+import { Controls } from './components/Controls';
+import { PatternDisplay } from './components/PatternDisplay';
+import { MediaOverlay } from './components/MediaOverlay';
+import { useLibOpenMPT } from './hooks/useLibOpenMPT';
+import type { MediaItem } from './types';
 
-// ... (Configuration constants - same as before)
-env.allowLocalModels = false;
-env.backends.onnx.logLevel = 'warning';
-const DEPTH_MODEL_ID = 'Xenova/dpt-hybrid-midas';
-const API_BASE_URL = 'https://ford442-storage-manager.hf.space';
-const IMAGE_MANIFEST_URL = `${API_BASE_URL}/api/songs?type=image`;
-const LOCAL_MANIFEST_URL = `/image_manifest.json`;
-const BUCKET_BASE_URL = `https://storage.googleapis.com/ford442-storage-manager`;
-const IMAGE_SUGGESTIONS_URL = `/image_suggestions.md`;
-
-const FALLBACK_IMAGES = [
-    "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=2564&auto=format&fit=crop",
-    "https://images.unsplash.com/photo-1518709268805-4e9042af9f23?q=80&w=2568&auto=format&fit=crop",
-    "https://images.unsplash.com/photo-1550684848-fac1c5b4e853?q=80&w=2670&auto=format&fit=crop",
-    "https://images.unsplash.com/photo-1534447677768-be436bb09401?q=80&w=2694&auto=format&fit=crop",
-    "https://images.unsplash.com/photo-1475924156734-496f6cac6ec1?q=80&w=2670&auto=format&fit=crop",
-    "https://images.unsplash.com/photo-1614850523060-8da1d56ae167?q=80&w=2670&auto=format&fit=crop",
-    "https://images.unsplash.com/photo-1605218427306-633ba8546381?q=80&w=2669&auto=format&fit=crop"
+const SHADERS = [
+    'patternv0.40.wgsl',
+    'patternv0.39.wgsl',
+    'patternv0.38.wgsl',
+    'patternv0.37.wgsl',
+    'patternv0.36.wgsl',
+    'patternv0.35_bloom.wgsl',
+    'patternv0.30.wgsl',
+    'patternv0.21.wgsl',
+    'patternv0.12.wgsl'
 ];
 
-const defaultSlotParams: SlotParams = {
-    zoomParam1: 0.99,
-    zoomParam2: 1.01,
-    zoomParam3: 0.5,
-    zoomParam4: 0.5,
-    lightStrength: 1.0,
-    ambient: 0.2,
-    normalStrength: 0.1,
-    fogFalloff: 4.0,
-    depthThreshold: 0.5,
-};
+function App() {
+  const [shaderFile, setShaderFile] = useState<string>('patternv0.40.wgsl');
+  const [volume, setVolume] = useState<number>(0.5);
+  const [pan, setPan] = useState<number>(0.0);
 
-function MainApp() {
-    // --- State: General & Stacking ---
-    const [shaderCategory, setShaderCategory] = useState<ShaderCategory>('image');
-    const [modes, setModes] = useState<RenderMode[]>(['liquid', 'none', 'none']);
-    const [activeSlot, setActiveSlot] = useState<number>(0);
-    const [slotParams, setSlotParams] = useState<SlotParams[]>([defaultSlotParams, defaultSlotParams, defaultSlotParams]);
+  // Media Overlay State
+  const [mediaItem, setMediaItem] = useState<MediaItem | null>(null);
+  const [mediaVisible, setMediaVisible] = useState(false);
 
-    // --- State: Global View ---
-    const [zoom, setZoom] = useState(1.0);
-    const [panX, setPanX] = useState(0.5);
-    const [panY, setPanY] = useState(0.5);
-    
-    // --- State: Automation & Status ---
-    const [autoChangeEnabled, setAutoChangeEnabled] = useState(false);
-    const [autoChangeDelay, setAutoChangeDelay] = useState(10);
-    const [status, setStatus] = useState('Ready.');
-    
-    // --- State: AI Models & VJ ---
-    const [depthEstimator, setDepthEstimator] = useState<any>(null);
-    const [aiVj, setAiVj] = useState<Alucinate | null>(null);
-    const [aiVjStatus, setAiVjStatus] = useState<AIStatus>('idle');
-    const [aiVjMessage, setAiVjMessage] = useState('AI VJ is offline.');
-    const [isAiVjMode, setIsAiVjMode] = useState(false);
+  // Hook into the Audio Engine
+  const {
+    status,
+    isReady,
+    isPlaying,
+    isModuleLoaded,
+    loadModule,
+    play,
+    stopMusic,
+    sequencerMatrix,
+    playbackSeconds,
+    playbackRowFraction,
+    channelStates,
+    beatPhase,
+    grooveAmount,
+    kickTrigger,
+    activeChannels,
+    isLooping,
+    setIsLooping,
+    seekToStep,
+    totalPatternRows,
+    setPanValue: setHookPan
+  } = useLibOpenMPT(volume);
 
-    // --- State: Content ---
-    const [imageManifest, setImageManifest] = useState<ImageRecord[]>([]);
-    const [currentImageUrl, setCurrentImageUrl] = useState<string | undefined>();
-    const [availableModes, setAvailableModes] = useState<ShaderEntry[]>([]);
-    const [inputSource, setInputSource] = useState<InputSource>('image');
-    const [activeGenerativeShader, setActiveGenerativeShader] = useState<string>('gen-orb');
-    const [videoSourceUrl, setVideoSourceUrl] = useState<string | undefined>(undefined);
-    const [selectedVideo, setSelectedVideo] = useState<string>("");
+  // Sync local pan state with hook
+  useEffect(() => {
+    setHookPan(pan);
+  }, [pan, setHookPan]);
 
-    // --- State: Media Controls (Chassis 0.40) ---
-    const [isMuted, setIsMuted] = useState(false);
-    const [volume, setVolume] = useState(1.0);
-    const [loop, setLoop] = useState(true);
-    const [isPlaying, setIsPlaying] = useState(true);
+  const handleFileSelected = (file: File) => {
+    loadModule(file);
+  };
 
-    // --- State: Layout ---
-    const [showSidebar, setShowSidebar] = useState(true);
+  const handleMediaAdd = (file: File) => {
+    const url = URL.createObjectURL(file);
+    const kind = file.type.startsWith('video') ? 'video' : 'image';
+    setMediaItem({
+      id: crypto.randomUUID(),
+      url,
+      kind,
+      fileName: file.name,
+      mimeType: file.type,
+      loop: kind === 'video'
+    });
+    setMediaVisible(true);
+  };
 
-    // --- State: Mouse Interaction ---
-    const [mousePosition, setMousePosition] = useState<{ x: number; y: number }>({ x: -1, y: -1 });
-    const [isMouseDown, setIsMouseDown] = useState(false);
+  const handleRemoteMediaSelect = (item: MediaItem) => {
+    setMediaItem(item);
+    setMediaVisible(true);
+  };
 
-    const rendererRef = useRef<Renderer | null>(null);
-    const fileInputImageRef = useRef<HTMLInputElement>(null);
-    const fileInputVideoRef = useRef<HTMLInputElement>(null);
+  return (
+    <div className="min-h-screen bg-gray-900 text-white p-4 flex flex-col items-center">
+      <div className="w-full max-w-[1280px]">
+        <Header status={status} />
 
-    // --- Helpers ---
-    const setMode = (index: number, mode: RenderMode) => {
-        setModes(prev => {
-            const next = [...prev];
-            next[index] = mode;
-            return next;
-        });
-    };
-
-    const updateSlotParam = useCallback((slotIndex: number, updates: Partial<SlotParams>) => {
-        setSlotParams(prev => {
-            const next = [...prev];
-            next[slotIndex] = { ...next[slotIndex], ...updates };
-            return next;
-        });
-    }, []);
-
-    // --- Effects & Initializers ---
-    useEffect(() => {
-        const fetchImageManifest = async () => {
-            let manifest: ImageRecord[] = [];
-            try {
-                const response = await fetch(IMAGE_MANIFEST_URL);
-                if (response.ok) {
-                    const data = await response.json();
-                    manifest = data.map((item: any) => ({
-                        url: item.url,
-                        tags: item.description ? item.description.toLowerCase().split(/[\s,]+/) : [],
-                        description: item.description || ''
-                    }));
-                }
-            } catch (error) {
-                console.warn("Backend API failed, trying local...", error);
-            }
-
-            if (manifest.length === 0) {
-                try {
-                    const response = await fetch(LOCAL_MANIFEST_URL);
-                    if (response.ok) {
-                        const data = await response.json();
-                         manifest = (data.images || []).map((item: any) => ({
-                            url: item.url.startsWith('http') ? item.url : `${BUCKET_BASE_URL}/${item.url}`,
-                            tags: item.tags || [],
-                            description: item.tags ? item.tags.join(', ') : ''
-                        }));
-                    }
-                } catch (e) {}
-            }
-
-            if (manifest.length === 0) {
-                manifest = FALLBACK_IMAGES.map(url => ({ url, tags: ['fallback'], description: 'Demo' }));
-            }
-
-            const uniqueManifest = Array.from(new Map(manifest.map(item => [item.url, item])).values());
-            setImageManifest(uniqueManifest);
-
-            if (rendererRef.current) {
-                rendererRef.current.setImageList(uniqueManifest.map(m => m.url));
-            }
-        };
-        fetchImageManifest();
-    }, []);
-
-    const handleLoadImage = useCallback(async (url: string) => {
-        if (!rendererRef.current) return;
-        const newImageUrl = await rendererRef.current.loadImage(url);
-        if (newImageUrl) {
-            setCurrentImageUrl(newImageUrl);
-        }
-    }, []);
-
-    const handleNewRandomImage = useCallback(async () => {
-        if (imageManifest.length === 0) return;
-        const randomImage = imageManifest[Math.floor(Math.random() * imageManifest.length)];
-        if (randomImage) await handleLoadImage(randomImage.url);
-    }, [imageManifest, handleLoadImage]);
-
-    const loadDepthModel = useCallback(async () => {
-        if (depthEstimator) return;
-        try {
-            setStatus('Loading depth model...');
-            const estimator = await pipeline('depth-estimation', DEPTH_MODEL_ID, {
-                progress_callback: (p: any) => setStatus(`Loading depth: ${p.status}...`),
-            });
-            setDepthEstimator(() => estimator);
-            setStatus('Depth model loaded.');
-        } catch (e: any) { setStatus(`Depth error: ${e.message}`); }
-    }, [depthEstimator]);
-    
-    const toggleAiVj = useCallback(async () => {
-        if (!aiVj) {
-             const vj = new Alucinate(handleLoadImage, (ids) => {
-                 setModes(prev => { const n=[...prev]; if(ids[0]) n[0]=ids[0]; if(ids[1]) n[1]=ids[1]; return n; });
-             }, () => ({ currentImage: null, currentShader: null }));
-             vj.onStatusChange = (s, m) => { setAiVjStatus(s); setAiVjMessage(m); };
-             setAiVj(vj); setIsAiVjMode(true);
-             await vj.initialize(imageManifest, availableModes, IMAGE_SUGGESTIONS_URL);
-             vj.start();
-        } else {
-            if (isAiVjMode) { aiVj.stop(); setIsAiVjMode(false); }
-            else { aiVj.start(); setIsAiVjMode(true); }
-        }
-    }, [aiVj, isAiVjMode, availableModes, imageManifest, handleLoadImage]);
-    
-    const onInitCanvas = useCallback(() => {
-        if(rendererRef.current) {
-            setAvailableModes(rendererRef.current.getAvailableModes());
-            handleNewRandomImage();
-        }
-    }, [handleNewRandomImage]);
-
-    return (
-        <div className="App">
-            <header className="header">
-                <div className="logo-section">
-                    <div className="logo-text">Pixelocity</div>
-                    <div className="subtitle-text">Chassis 0.40</div>
-                </div>
-                <div className="header-controls">
-                    <button className="toggle-sidebar-btn" onClick={() => setShowSidebar(!showSidebar)}>
-                        {showSidebar ? 'Hide Controls' : 'Show Controls'}
-                    </button>
-                </div>
-            </header>
-            <div className="main-container">
-                <aside 
-                    className={`sidebar ${!showSidebar ? 'hidden' : ''}`} 
-                    // Inline styles are nice, but Chassis0_40's <style> block does the heavy lifting now
-                    style={{ background: 'transparent' }}
-                > 
-                    <Chassis0_40
-                        modes={modes} setMode={setMode} activeSlot={activeSlot} setActiveSlot={setActiveSlot}
-                        slotParams={slotParams} updateSlotParam={updateSlotParam} shaderCategory={shaderCategory}
-                        setShaderCategory={setShaderCategory} zoom={zoom} setZoom={setZoom} panX={panX}
-                        setPanX={setPanX} panY={panY} setPanY={setPanY} onNewImage={handleNewRandomImage}
-                        autoChangeEnabled={autoChangeEnabled} setAutoChangeEnabled={setAutoChangeEnabled}
-                        autoChangeDelay={autoChangeDelay} setAutoChangeDelay={setAutoChangeDelay}
-                        onLoadModel={loadDepthModel} isModelLoaded={!!depthEstimator} availableModes={availableModes}
-                        inputSource={inputSource} setInputSource={setInputSource} videoList={[]}
-                        selectedVideo={selectedVideo} setSelectedVideo={setSelectedVideo} 
-                        isMuted={isMuted} setIsMuted={setIsMuted}
-                        volume={volume} setVolume={setVolume}
-                        loop={loop} setLoop={setLoop}
-                        isPlaying={isPlaying} setIsPlaying={setIsPlaying}
-                        activeGenerativeShader={activeGenerativeShader} setActiveGenerativeShader={setActiveGenerativeShader}
-                        onUploadImageTrigger={() => fileInputImageRef.current?.click()}
-                        onUploadVideoTrigger={() => fileInputVideoRef.current?.click()}
-                        isAiVjMode={isAiVjMode} onToggleAiVj={toggleAiVj} aiVjStatus={aiVjStatus}
-                    />
-                </aside>
-                <main className="canvas-container">
-                    <WebGPUCanvas
-                        modes={modes} slotParams={slotParams} zoom={zoom} panX={panX} panY={panY}
-                        rendererRef={rendererRef} farthestPoint={{x:0.5, y:0.5}}
-                        mousePosition={mousePosition} setMousePosition={setMousePosition}
-                        isMouseDown={isMouseDown} setIsMouseDown={setIsMouseDown} onInit={onInitCanvas}
-                        inputSource={inputSource} videoSourceUrl={videoSourceUrl}
-                        activeGenerativeShader={activeGenerativeShader}
-                        selectedVideo={selectedVideo}
-                        apiBaseUrl={API_BASE_URL}
-                        loop={loop}
-                        volume={volume}
-                        isPlaying={isPlaying}
-                        isMuted={isMuted}
-                        setInputSource={setInputSource}
-                    />
-                    <div className="status-bar">
-                        {isAiVjMode ? `[AI VJ]: ${aiVjMessage}` : status}
-                    </div>
-                </main>
-            </div>
-            <input type="file" ref={fileInputImageRef} accept="image/*" style={{display:'none'}} onChange={(e) => {
-                if(e.target.files?.[0] && rendererRef.current) {
-                    const url = URL.createObjectURL(e.target.files[0]);
-                    handleLoadImage(url);
-                }
-            }} />
-            <input type="file" ref={fileInputVideoRef} accept="video/*" style={{display:'none'}} onChange={(e) => {
-                if(e.target.files?.[0]) {
-                    const url = URL.createObjectURL(e.target.files[0]);
-                    setVideoSourceUrl(url);
-                    setInputSource('video');
-                }
-            }} />
+        {/* Shader Selector */}
+        <div className="mb-4 flex items-center justify-end gap-2">
+            <label className="text-sm font-mono text-gray-400">VISUALIZER CORE:</label>
+            <select
+                value={shaderFile}
+                onChange={(e) => setShaderFile(e.target.value)}
+                className="bg-gray-800 text-white text-xs font-mono p-1 rounded border border-gray-700 focus:border-blue-500 outline-none"
+            >
+                {SHADERS.map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
         </div>
-    );
+
+        {/* Main Display Area */}
+        <div className="relative bg-black rounded-xl overflow-hidden shadow-2xl mb-6 border border-gray-800">
+           {/* WebGPU Pattern Display */}
+           <PatternDisplay
+             matrix={sequencerMatrix}
+             playheadRow={playbackRowFraction} // Interpolated playhead
+             isPlaying={isPlaying}
+             bpm={120} // Could extract BPM from moduleInfo if available
+             timeSec={playbackSeconds}
+             tickOffset={0}
+             channels={channelStates}
+             beatPhase={beatPhase}
+             grooveAmount={grooveAmount}
+             kickTrigger={kickTrigger}
+             activeChannels={activeChannels}
+             isModuleLoaded={isModuleLoaded}
+             shaderFile={shaderFile}
+             volume={volume}
+             pan={pan}
+             isLooping={isLooping}
+             totalRows={totalPatternRows}
+             // Callbacks for UI interactions (e.g. from Chassis UI)
+             onPlay={play}
+             onStop={() => stopMusic(false)}
+             onFileSelected={handleFileSelected}
+             onLoopToggle={() => setIsLooping(!isLooping)}
+             onSeek={(row) => seekToStep(row)}
+             onVolumeChange={setVolume}
+             onPanChange={setPan}
+             // Pass media item URL to pattern display if it supports video textures?
+             // (PatternDisplay handles externalVideoSource prop)
+             externalVideoSource={null}
+           />
+
+           {/* Overlay for Images/Videos on top of the visualizer */}
+           <MediaOverlay
+             item={mediaItem}
+             visible={mediaVisible}
+             onClose={() => setMediaVisible(false)}
+             onUpdate={(partial) => {
+                 if (mediaItem) setMediaItem({ ...mediaItem, ...partial });
+             }}
+           />
+        </div>
+
+        {/* Controls */}
+        <Controls
+          isReady={isReady}
+          isPlaying={isPlaying}
+          isModuleLoaded={isModuleLoaded}
+          onFileSelected={handleFileSelected}
+          onPlay={play}
+          onStop={() => stopMusic(false)}
+          isLooping={isLooping}
+          onLoopToggle={() => setIsLooping(!isLooping)}
+          volume={volume}
+          setVolume={setVolume}
+          pan={pan}
+          setPan={setPan}
+          onMediaAdd={handleMediaAdd}
+          onRemoteMediaSelect={handleRemoteMediaSelect}
+          remoteMediaList={[
+             // Example remote media, or fetch dynamically
+             { id: '1', kind: 'video', url: 'clouds.mp4', fileName: 'Clouds Demo (MP4)' }
+          ]}
+        />
+
+        {/* Footer / Instructions */}
+        <div className="mt-8 text-center text-xs text-gray-500">
+             <p>Supports .mod, .xm, .s3m, .it files.</p>
+             <p>WebGPU required for visualization.</p>
+        </div>
+      </div>
+    </div>
+  );
 }
 
-export default MainApp;
+export default App;

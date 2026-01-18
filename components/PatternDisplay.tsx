@@ -1208,7 +1208,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
       if (shaderFile.includes('v0.35')) { buf[10] = 0.0; buf[11] = 0.95; buf[12] = 0.32; } 
       else { buf[10] = circularLayout ? 0.0 : 1.0; buf[11] = circularLayout ? 1.0 : 1.25; buf[12] = circularLayout ? 1.0 : 0.0; }
       buf[13] = 0.10;
-      buf[14] = isPlaying ? 0.35 : 1.0;
+      buf[14] = (isPlaying && isCircularLayoutShader(shaderFile)) ? 0.35 : 1.0;
       buf[15] = 0.0;
       buf[16] = volume;
       buf[17] = pan;
