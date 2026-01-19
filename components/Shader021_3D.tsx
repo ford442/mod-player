@@ -33,97 +33,87 @@ const Shader021_3DMaterial = shaderMaterial(
     // --- Configuration ---
     #define MAX_STEPS 128
     #define MAX_DIST 100.0
-    #define SURFACE_DIST 0.001
+    #define NUM_STARS 200
 
-    // --- SDF: Rounded Box (Matches 2D design) ---
-    float sdRoundedBox(vec3 p, vec3 b, float r) {
-        vec3 q = abs(p) - b;
-        return length(max(q, 0.0)) + min(max(q.x, max(q.y, q.z)), 0.0) - r;
+    // Hash function for pseudo-random star positions
+    float hash(vec3 p) {
+        p = fract(p * 0.3183099 + 0.1);
+        p *= 17.0;
+        return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
     }
 
-    // --- Scene Description ---
-    float GetDist(vec3 p) {
-        // 1. Grid Repetition (Infinite fields)
-        // Spacing: X=4.0 (Time), Y=Vertical layers, Z=Channels
-        vec3 spacing = vec3(4.0, 3.0, 4.0);
-
-        // pMod is the local coordinate within each cell
-        vec3 pMod = mod(p, spacing) - spacing * 0.5;
-
-        // 2. Geometry: Flat rectangular data plates
-        // Similar aspect ratio to the 2D cells
-        float dBox = sdRoundedBox(pMod, vec3(1.8, 0.1, 1.5), 0.05);
-
-        // Optional: Add a central "data line" or variation
-        // float wave = sin(p.x * 0.5 + iTime) * 0.1;
-        // dBox += wave;
-
-        return dBox;
-    }
-
-    // --- Raymarching ---
-    float RayMarch(vec3 ro, vec3 rd) {
-        float dO = 0.0;
-        for(int i = 0; i < MAX_STEPS; i++) {
-            vec3 p = ro + rd * dO;
-            float dS = GetDist(p);
-            dO += dS;
-            if(dO > MAX_DIST || dS < SURFACE_DIST) break;
+    // Generate star field
+    vec3 stars(vec3 rd) {
+        vec3 col = vec3(0.0);
+        
+        // Multiple layers of stars at different depths
+        for(float layer = 0.0; layer < 3.0; layer += 1.0) {
+            vec3 starDir = rd * (20.0 + layer * 30.0);
+            vec3 starCell = floor(starDir);
+            
+            for(float dx = -1.0; dx <= 1.0; dx += 1.0) {
+                for(float dy = -1.0; dy <= 1.0; dy += 1.0) {
+                    for(float dz = -1.0; dz <= 1.0; dz += 1.0) {
+                        vec3 cell = starCell + vec3(dx, dy, dz);
+                        float h = hash(cell + vec3(layer * 10.0));
+                        
+                        // Only some cells have stars
+                        if(h > 0.95) {
+                            vec3 starPos = cell + vec3(
+                                hash(cell + vec3(1.0, layer, 0.0)),
+                                hash(cell + vec3(0.0, layer, 1.0)),
+                                hash(cell + vec3(1.0, layer, 1.0))
+                            );
+                            
+                            vec3 toStar = normalize(starPos) - rd;
+                            float dist = length(toStar);
+                            
+                            // Star size and intensity
+                            float size = 0.002 + hash(cell + vec3(2.0, layer, 0.0)) * 0.003;
+                            float intensity = smoothstep(size, 0.0, dist);
+                            
+                            // Star color variation (mostly white/blue/cyan)
+                            float colorVar = hash(cell + vec3(3.0, layer, 0.0));
+                            vec3 starColor = mix(
+                                vec3(0.9, 0.95, 1.0),  // White-blue
+                                ledColor,               // Cyan from uniform
+                                colorVar * 0.5
+                            );
+                            
+                            // Twinkling effect
+                            float twinkle = sin(iTime * 3.0 + h * 100.0) * 0.5 + 0.5;
+                            intensity *= 0.7 + twinkle * 0.3;
+                            
+                            col += starColor * intensity * (1.0 - layer * 0.3);
+                        }
+                    }
+                }
+            }
         }
-        return dO;
-    }
-
-    // Normal calculation for edges
-    vec3 GetNormal(vec3 p) {
-        float d = GetDist(p);
-        vec2 e = vec2(0.001, 0);
-        vec3 n = d - vec3(
-            GetDist(p - e.xyy),
-            GetDist(p - e.yxy),
-            GetDist(p - e.yyx)
-        );
-        return normalize(n);
+        
+        return col;
     }
 
     void main() {
         // Standard UV setup for full-screen quad
         vec2 uv = (vUv - 0.5) * 2.0;
 
-        // Ray Origin & Direction
-        vec3 ro = cameraPos;
-        // Adjust RD based on camera orientation if this is a plane in front of camera
-        // For a simple background plane, we simulate perspective:
+        // Ray Direction
         vec3 rd = normalize(vec3(uv.x, uv.y, 1.5));
 
-        // Rotate RD to match camera rotation (Approximation)
-        // Ideally, we'd pass the camera view matrix, but for a background pattern:
-        // We will just march relative to the camera position to create parallax.
+        // Start with deep space background
+        vec3 col = bgColor * 0.5; // Darker background for night sky
 
-        float d = RayMarch(ro, rd);
+        // Add stars
+        col += stars(rd);
 
-        vec3 col = bgColor; // Default background
-
-        if(d < MAX_DIST) {
-            vec3 p = ro + rd * d;
-            vec3 n = GetNormal(p);
-
-            // Lighting (Cyber-Punk style)
-            // 1. Diffuse from top
-            float dif = clamp(dot(n, vec3(0.0, 1.0, 0.0)), 0.0, 1.0);
-
-            // 2. Rim/Edge lighting (Neon Cyan)
-            // Fresnel effect: bright at glancing angles
-            float fresnel = pow(1.0 - abs(dot(n, rd)), 3.0);
-
-            vec3 bodyColor = bgColor * 1.5; // Slightly lighter than void
-            vec3 edgeColor = ledColor;
-
-            col = mix(bodyColor, edgeColor, fresnel);
-
-            // Distance fog to fade out far objects
-            float fog = 1.0 - exp(-d * 0.02);
-            col = mix(col, bgColor, fog);
-        }
+        // Subtle nebula-like effect in the background
+        float nebula = smoothstep(0.5, 1.0, 
+            sin(rd.x * 2.0 + iTime * 0.1) * 
+            sin(rd.y * 2.0 + iTime * 0.15) * 
+            sin(rd.z * 2.0)
+        );
+        col += ledColor * nebula * 0.03;
 
         // --- Dark Mode / Dimming ---
         col *= dimFactor;
