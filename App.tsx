@@ -28,9 +28,19 @@ function App() {
   // 3D View State
   const [is3DMode, setIs3DMode] = useState<boolean>(false);
   const [isDarkMode, setIsDarkMode] = useState<boolean>(true); // Default to Dark Mode
+  const [viewMode, setViewMode] = useState<'device' | 'wall'>('device'); // New: device or wall view
 
   // Calculate Dim Factor (1.0 = Bright, 0.3 = Dark)
   const dimFactor = isDarkMode ? 0.3 : 1.0;
+
+  // Determine shader based on view mode when in 3D
+  const get3DShader = () => {
+    if (viewMode === 'wall') {
+      return 'patternv0.21.wgsl'; // Square shader for wall mode
+    } else {
+      return 'patternv0.38.wgsl'; // Circular shader for device mode
+    }
+  };
 
   // Media Overlay State
   const [mediaItem, setMediaItem] = useState<MediaItem | null>(null);
@@ -90,10 +100,14 @@ function App() {
 
   // Render in 3D mode
   if (is3DMode) {
+    const shader3D = get3DShader();
+    
     return (
       <Studio3D
         darkMode={isDarkMode}
+        viewMode={viewMode}
         onDarkModeToggle={() => setIsDarkMode(!isDarkMode)}
+        onViewModeToggle={() => setViewMode(viewMode === 'device' ? 'wall' : 'device')}
         onExitStudio={() => setIs3DMode(false)}
         dimFactor={dimFactor} // Pass to 3D Scene
         headerContent={
@@ -116,7 +130,7 @@ function App() {
               kickTrigger={kickTrigger}
               activeChannels={activeChannels}
               isModuleLoaded={isModuleLoaded}
-              shaderFile={shaderFile}
+              shaderFile={shader3D}
               volume={volume}
               pan={pan}
               isLooping={isLooping}
