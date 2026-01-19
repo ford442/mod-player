@@ -13,8 +13,10 @@ interface Studio3DProps {
   darkMode?: boolean;
   dimFactor?: number;
   playheadX?: number;
+  viewMode?: 'device' | 'wall';
   onDarkModeToggle?: () => void;
   onExitStudio?: () => void;
+  onViewModeToggle?: () => void;
 }
 
 // Panel component to display HTML content in 3D space
@@ -97,8 +99,10 @@ export const Studio3D: React.FC<Studio3DProps> = ({
   darkMode = false,
   dimFactor = 1.0,
   playheadX = 0,
+  viewMode = 'device',
   onDarkModeToggle,
   onExitStudio,
+  onViewModeToggle,
 }) => {
   const controlsRef = useRef<any>(null);
 
@@ -119,13 +123,21 @@ export const Studio3D: React.FC<Studio3DProps> = ({
         </button>
       </div>
 
-      {/* Dark mode toggle button */}
+      {/* Dark mode and view mode toggle buttons */}
       <div style={{
         position: 'absolute',
         top: '20px',
         right: '20px',
         zIndex: 1000,
+        display: 'flex',
+        gap: '10px',
       }}>
+        <button
+          onClick={onViewModeToggle}
+          className="px-4 py-2 bg-purple-600 text-white rounded-lg shadow-lg hover:bg-purple-700 transition-colors border border-purple-500 font-mono text-sm"
+        >
+          {viewMode === 'device' ? '📱 Device View' : '🖼️ Wall View'}
+        </button>
         <button
           onClick={onDarkModeToggle}
           className="px-4 py-2 bg-gray-800 text-white rounded-lg shadow-lg hover:bg-gray-700 transition-colors border border-gray-600"
@@ -177,12 +189,19 @@ export const Studio3D: React.FC<Studio3DProps> = ({
               </Panel3D>
             )}
 
-            {/* Main Pattern Display Panel - Center */}
+            {/* Main Pattern Display Panel - Position changes based on view mode */}
             {patternDisplayContent && (
               <Panel3D
-                position={[0, 0.5, 0]}
-                width={10}
-                height={6}
+                position={viewMode === 'wall' 
+                  ? [0, 2, -15]  // Wall mode: far back, centered high like a wall-mounted screen
+                  : [0, -1, 2]   // Device mode: lower, closer (tabletop/device position)
+                }
+                rotation={viewMode === 'wall'
+                  ? [0, 0, 0]          // Wall mode: flat vertical
+                  : [Math.PI / 8, 0, 0] // Device mode: tilted down like a hardware unit
+                }
+                width={viewMode === 'wall' ? 16 : 10}  // Wall mode: larger display
+                height={viewMode === 'wall' ? 12 : 6}
                 darkMode={darkMode}
               >
                 {patternDisplayContent}
