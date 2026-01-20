@@ -247,7 +247,7 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
 
   // STUDIO DARKNESS: Dim everything significantly when playing
   let isPlaying = (uniforms.isPlaying == 1u);
-  let dimFactor = select(1.0, 0.35, isPlaying);
+  let dimFactor = uniforms.dimFactor;
 
   if (in.channel == 0u) {
     let onPlayhead = (in.row == uniforms.playheadRow);

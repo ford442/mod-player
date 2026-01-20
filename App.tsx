@@ -27,7 +27,7 @@ function App() {
 
   // 3D View State
   const [is3DMode, setIs3DMode] = useState<boolean>(false);
-  const [isDarkMode, setIsDarkMode] = useState<boolean>(true); // Default to Dark Mode
+  const [isDarkMode, setIsDarkMode] = useState<boolean>(false); // Default to Light Mode
   const [viewMode, setViewMode] = useState<'device' | 'wall'>('device'); // New: device or wall view
 
   // Calculate Dim Factor (1.0 = Bright, 0.3 = Dark)
