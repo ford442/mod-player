@@ -17,8 +17,8 @@ struct BezelUniforms {
   recessOuterScale: f32,
   recessInnerScale: f32,
   recessCorner: f32,
-  dimFactor: f32,   // 1.0 = Stop, 0.35 = Playing (Night Mode)
-  _pad1: f32,
+  dimFactor: f32,   // Visual Dimming (Controlled by UI)
+  isPlaying: f32,   // 1.0 if playing, 0.0 otherwise
   // New fields for UI controls
   volume: f32,      // 0.0 to 1.0
   pan: f32,         // -1.0 to 1.0
@@ -326,7 +326,7 @@ fn fs(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
 
   // PLAY
   let posPlay = vec2<f32>(-0.44, -0.40);
-  let isPlaying = bez.dimFactor < 0.5;
+  let isPlaying = bez.isPlaying > 0.5;
   let isPlayClicked = bez.clickedButton == 3u;
   let playActive = isPlaying || isPlayClicked;
   
