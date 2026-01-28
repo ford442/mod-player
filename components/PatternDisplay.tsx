@@ -34,7 +34,9 @@ const shouldUseBackgroundPass = (shaderFile: string) => {
 };
 
 const getBackgroundShaderFile = (shaderFile: string): string => {
-  // Use the new frosted shader for the latest layout
+  // New Video Mode Check
+  if (shaderFile.includes('v0.23') || shaderFile.includes('v0.24')) return 'chassis_video.wgsl';
+
   if (shaderFile.includes('v0.40') || shaderFile.includes('v0.41') || shaderFile.includes('v0.42')) return 'chassis_frosted.wgsl';
   
   if (shaderFile.includes('v0.37') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39')) return 'chassisv0.37.wgsl';
