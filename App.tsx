@@ -38,7 +38,7 @@ function App() {
   const [isDarkMode, setIsDarkMode] = useState<boolean>(false);
   const [viewMode, setViewMode] = useState<'device' | 'wall'>('device');
 
-  // Calculate Dim Factor (1.0 = Bright, 0.3 = Dark)
+  // Calculate Dim Factor
   const dimFactor = isDarkMode ? 0.3 : 1.0;
 
   // Determine shader based on view mode when in 3D
@@ -230,19 +230,35 @@ function App() {
                     </select>
                 </div>
 
-            <div className="flex items-center gap-2">
-              <label className="text-sm font-mono opacity-70">VISUALIZER CORE:</label>
-              <select
-                  value={shaderFile}
-                  onChange={(e) => setShaderFile(e.target.value)}
-                  className={`text-xs font-mono p-1 rounded border focus:border-blue-500 outline-none ${isDarkMode ? 'bg-gray-800 text-white border-gray-700' : 'bg-white text-black border-gray-300'}`}
-              >
-                  {Object.entries(SHADER_GROUPS).map(([groupName, shaders]) => (
-                    <optgroup label={groupName} key={groupName}>
-                      {shaders.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
-                    </optgroup>
-                  ))}
-              </select>
+                <div className={`w-px h-6 ${isDarkMode ? 'bg-gray-800' : 'bg-gray-300'}`}></div>
+
+                {/* Circular Group */}
+                <div className="flex items-center gap-1">
+                    <span className="text-[10px] font-bold text-gray-500 uppercase px-1">Circular</span>
+                    <select
+                        className={`text-xs font-mono p-1 rounded border outline-none ${isDarkMode ? 'bg-gray-800 border-gray-600 text-white' : 'bg-white border-gray-300 text-black'}`}
+                        value={SHADER_GROUPS.CIRCULAR.some(s => s.id === shaderFile) ? shaderFile : ''}
+                        onChange={(e) => e.target.value && setShaderFile(e.target.value)}
+                    >
+                        <option value="" disabled>Select...</option>
+                        {SHADER_GROUPS.CIRCULAR.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
+                    </select>
+                </div>
+
+                <div className={`w-px h-6 ${isDarkMode ? 'bg-gray-800' : 'bg-gray-300'}`}></div>
+
+                {/* Video Group */}
+                <div className="flex items-center gap-1">
+                    <span className="text-[10px] font-bold text-gray-500 uppercase px-1">Video</span>
+                    <select
+                        className={`text-xs font-mono p-1 rounded border outline-none ${isDarkMode ? 'bg-gray-800 border-gray-600 text-white' : 'bg-white border-gray-300 text-black'}`}
+                        value={SHADER_GROUPS.VIDEO.some(s => s.id === shaderFile) ? shaderFile : ''}
+                        onChange={(e) => e.target.value && setShaderFile(e.target.value)}
+                    >
+                        <option value="" disabled>Select...</option>
+                        {SHADER_GROUPS.VIDEO.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
+                    </select>
+                </div>
             </div>
         </div>
 
