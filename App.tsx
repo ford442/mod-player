@@ -10,6 +10,8 @@ import type { MediaItem } from './types';
 // Shader Definitions
 const SHADER_GROUPS = {
   SQUARE: [
+    { id: 'patternv0.44.wgsl', label: 'v0.44 (Frosted Wall 64)' }, // New
+    { id: 'patternv0.43.wgsl', label: 'v0.43 (Frosted Wall 32)' }, // New
     { id: 'patternv0.41.wgsl', label: 'v0.41 (Frosted Clean)' },
     { id: 'patternv0.40.wgsl', label: 'v0.40 (Frosted Grid)' },
     { id: 'patternv0.39.wgsl', label: 'v0.39 (Modern)' },
