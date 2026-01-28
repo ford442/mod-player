@@ -384,14 +384,33 @@ export function useLibOpenMPT(volume: number = 1.0) {
         const AudioContext = window.AudioContext || window.webkitAudioContext;
         audioContextRef.current = new AudioContext({ sampleRate: SAMPLE_RATE });
         
-        // Initialize AudioWorklet if not already done
+        // Initialize AudioWorklet if not already done (with preflight HEAD check for better diagnostics)
         if (useAudioWorklet.current && !audioWorkletReady.current) {
           try {
+            try {
+              const pre = await fetch(WORKLET_URL, { method: 'HEAD', cache: 'no-store' });
+              console.log('Worklet HEAD preflight:', pre.status, pre.statusText, pre.headers.get('content-type'));
+            } catch (preErr) {
+              console.warn('Worklet HEAD preflight failed (continuing to module load):', preErr);
+            }
+
             await audioContextRef.current.audioWorklet.addModule(WORKLET_URL);
             audioWorkletReady.current = true;
             console.log('AudioWorklet initialized');
           } catch (err) {
             console.warn('Failed to initialize AudioWorklet, using ScriptProcessor:', err);
+            // Try to fetch the module to provide additional diagnostics
+            try {
+              const resp = await fetch(WORKLET_URL, { method: 'GET', cache: 'no-store' });
+              console.warn('Worklet GET status:', resp.status, resp.statusText, 'content-type:', resp.headers.get('content-type'));
+              if (resp.status !== 200) {
+                const body = await resp.text();
+                console.warn('Worklet GET body preview (first 200 chars):', body.slice(0, 200));
+              }
+            } catch (fetchErr) {
+              console.warn('Worklet GET failed:', fetchErr);
+            }
+
             useAudioWorklet.current = false;
           }
         }
@@ -570,9 +589,27 @@ export function useLibOpenMPT(volume: number = 1.0) {
         libopenmptRef.current = lib;
         setIsReady(true);
 
-        // Try to initialize AudioWorklet support
+        // Try to initialize AudioWorklet support with a HEAD preflight to provide clearer diagnostics
         try {
           const AudioContext = window.AudioContext || window.webkitAudioContext;
+
+          // Preflight: attempt a HEAD request to verify URL and Content-Type (some servers may not support HEAD)
+          try {
+            const preflight = await fetch(WORKLET_URL, { method: 'HEAD', cache: 'no-store' });
+            if (!preflight.ok) {
+              console.warn(`Worklet preflight HEAD returned ${preflight.status} ${preflight.statusText}`);
+            } else {
+              const ct = preflight.headers.get('content-type') || '';
+              console.log(`Worklet preflight: status=${preflight.status}, content-type=${ct}`);
+              if (!/javascript/.test(ct)) {
+                console.warn('Worklet preflight returned unexpected Content-Type:', ct);
+              }
+            }
+          } catch (preErr) {
+            // Non-fatal: proceed to attempt module load and capture error details there
+            console.warn('Worklet preflight HEAD request failed (continuing to module load):', preErr);
+          }
+
           const testCtx = new AudioContext({ sampleRate: SAMPLE_RATE });
           await testCtx.audioWorklet.addModule(WORKLET_URL);
           audioWorkletReady.current = true;
@@ -581,6 +618,19 @@ export function useLibOpenMPT(volume: number = 1.0) {
           console.log('AudioWorklet support enabled');
         } catch (workletErr) {
           console.warn('AudioWorklet not available, falling back to ScriptProcessorNode:', workletErr);
+
+          // Try to fetch the module to provide more information to developers (status, content-type, body preview)
+          try {
+            const resp = await fetch(WORKLET_URL, { method: 'GET', cache: 'no-store' });
+            console.warn('Worklet GET status:', resp.status, resp.statusText, 'content-type:', resp.headers.get('content-type'));
+            if (resp.status !== 200) {
+              const body = await resp.text();
+              console.warn('Worklet GET body preview (first 200 chars):', body.slice(0, 200));
+            }
+          } catch (fetchErr) {
+            console.warn('Worklet GET failed:', fetchErr);
+          }
+
           audioWorkletReady.current = false;
           useAudioWorklet.current = false;
         }
