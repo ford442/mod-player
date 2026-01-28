@@ -12,7 +12,7 @@ const alignTo = (value: number, alignment: number) => Math.ceil(value / alignmen
 const getLayoutType = (shaderFile: string): LayoutType => {
   if (shaderFile === 'patternShaderv0.12.wgsl') return 'texture';
   // Check for extended layout shaders (v0.38, v0.39, and v0.40 included)
-  if (shaderFile.includes('v0.13') || shaderFile.includes('v0.14') || shaderFile.includes('v0.15') || shaderFile.includes('v0.16') || shaderFile.includes('v0.17') || shaderFile.includes('v0.18') || shaderFile.includes('v0.19') || shaderFile.includes('v0.20') || shaderFile.includes('v0.21') || shaderFile.includes('v0.23') || shaderFile.includes('v0.24') || shaderFile.includes('v0.25') || shaderFile.includes('v0.26') || shaderFile.includes('v0.27') || shaderFile.includes('v0.28') || shaderFile.includes('v0.29') || shaderFile.includes('v0.30') || shaderFile.includes('v0.31') || shaderFile.includes('v0.32') || shaderFile.includes('v0.33') || shaderFile.includes('v0.34') || shaderFile.includes('v0.35') || shaderFile.includes('v0.36') || shaderFile.includes('v0.37') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40')) return 'extended';
+  if (shaderFile.includes('v0.13') || shaderFile.includes('v0.14') || shaderFile.includes('v0.15') || shaderFile.includes('v0.16') || shaderFile.includes('v0.17') || shaderFile.includes('v0.18') || shaderFile.includes('v0.19') || shaderFile.includes('v0.20') || shaderFile.includes('v0.21') || shaderFile.includes('v0.23') || shaderFile.includes('v0.24') || shaderFile.includes('v0.25') || shaderFile.includes('v0.26') || shaderFile.includes('v0.27') || shaderFile.includes('v0.28') || shaderFile.includes('v0.29') || shaderFile.includes('v0.30') || shaderFile.includes('v0.31') || shaderFile.includes('v0.32') || shaderFile.includes('v0.33') || shaderFile.includes('v0.34') || shaderFile.includes('v0.35') || shaderFile.includes('v0.36') || shaderFile.includes('v0.37') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.41') || shaderFile.includes('v0.42')) return 'extended';
   return 'simple';
 };
 
@@ -21,7 +21,7 @@ const isSinglePassCompositeShader = (shaderFile: string) => {
 };
 
 const shouldEnableAlphaBlending = (shaderFile: string) => {
-  return shaderFile.includes('v0.28') || shaderFile.includes('v0.30') || shaderFile.includes('v0.31') || shaderFile.includes('v0.32') || shaderFile.includes('v0.33') || shaderFile.includes('v0.34') || shaderFile.includes('v0.35') || shaderFile.includes('v0.36') || shaderFile.includes('v0.37') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40');
+  return shaderFile.includes('v0.28') || shaderFile.includes('v0.30') || shaderFile.includes('v0.31') || shaderFile.includes('v0.32') || shaderFile.includes('v0.33') || shaderFile.includes('v0.34') || shaderFile.includes('v0.35') || shaderFile.includes('v0.36') || shaderFile.includes('v0.37') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.41') || shaderFile.includes('v0.42');
 };
 
 const isCircularLayoutShader = (shaderFile: string) => {
@@ -35,7 +35,7 @@ const shouldUseBackgroundPass = (shaderFile: string) => {
 
 const getBackgroundShaderFile = (shaderFile: string): string => {
   // Use the new frosted shader for the latest layout
-  if (shaderFile.includes('v0.40')) return 'chassis_frosted.wgsl';
+  if (shaderFile.includes('v0.40') || shaderFile.includes('v0.41') || shaderFile.includes('v0.42')) return 'chassis_frosted.wgsl';
   
   if (shaderFile.includes('v0.37') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39')) return 'chassisv0.37.wgsl';
   if (shaderFile.includes('v0.27') || shaderFile.includes('v0.28') || shaderFile.includes('v0.30') || shaderFile.includes('v0.31') || shaderFile.includes('v0.32') || shaderFile.includes('v0.33') || shaderFile.includes('v0.34') || shaderFile.includes('v0.35') || shaderFile.includes('v0.36')) return 'chassisv0.1.wgsl';
@@ -432,7 +432,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
 
   const computeLogicalCanvasMetrics = () => {
     // Force Square for v0.37, v0.38, v0.39, and v0.40 (Square Bezel)
-    if (shaderFile.includes('v0.37') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40')) return { width: 1024, height: 1024 };
+    if (shaderFile.includes('v0.37') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.41') || shaderFile.includes('v0.42')) return { width: 1024, height: 1024 };
     if (shaderFile.includes('v0.26') || shaderFile.includes('v0.27') || shaderFile.includes('v0.28') || shaderFile.includes('v0.29') || shaderFile.includes('v0.30') || shaderFile.includes('v0.31') || shaderFile.includes('v0.32') || shaderFile.includes('v0.33') || shaderFile.includes('v0.34') || shaderFile.includes('v0.35') || shaderFile.includes('v0.36')) {
       return { width: 2048, height: 2016 };
     }
@@ -504,7 +504,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
 
   // === WEBGL2 INITIALIZATION (Overlay for v0.38, v0.39, & v0.40) ===
   useEffect(() => {
-    const isOverlayShader = shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40');
+    const isOverlayShader = shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.41') || shaderFile.includes('v0.42');
     
     if (!isOverlayShader) {
         const gl = glContextRef.current;
@@ -752,7 +752,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
 
   // === WEBGL2 RENDER FUNCTION ===
   const drawWebGL = () => {
-    if (!shaderFile.includes('v0.38') && !shaderFile.includes('v0.39') && !shaderFile.includes('v0.40')) return;
+    if (!shaderFile.includes('v0.38') && !shaderFile.includes('v0.39') && !shaderFile.includes('v0.40') && !shaderFile.includes('v0.41') && !shaderFile.includes('v0.42')) return;
 
     const gl = glContextRef.current;
     const res = glResourcesRef.current;
@@ -790,7 +790,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     // v0.39 and v0.40 Override: Fit 32 steps exactly into canvas width (or active area)
     let effectiveCellW = cellWidth;
     let effectiveCellH = cellHeight;
-    if (shaderFile.includes('v0.40')) {
+    if (shaderFile.includes('v0.40') || shaderFile.includes('v0.41')) {
         // v0.40: Fits in the blank area (705x725)
         effectiveCellW = 705.0 / 32.0;
         effectiveCellH = 725.0 / cols;
@@ -808,7 +808,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     gl.uniform1f(uRows, rows);
     
     // Set Layout Mode: 1=Circular(0.38), 2=Horizontal(0.39, 0.40)
-    gl.uniform1i(uLayout, (shaderFile.includes('v0.39') || shaderFile.includes('v0.40')) ? 2 : 1);
+    gl.uniform1i(uLayout, (shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.41')) ? 2 : 1);
     gl.uniform1i(uInvert, invertChannels ? 1 : 0);
     
     const totalPlayhead = playheadRow + (tickOffset || 0);
