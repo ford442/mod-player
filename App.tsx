@@ -7,18 +7,24 @@ import { Studio3D } from './components/Studio3D';
 import { useLibOpenMPT } from './hooks/useLibOpenMPT';
 import type { MediaItem } from './types';
 
-const SHADERS = [
-    'patternv0.40.wgsl',
-    'patternv0.39.wgsl',
-    'patternv0.38.wgsl',
-    'patternv0.37.wgsl',
-    'patternv0.36.wgsl',
-    'patternv0.35_bloom.wgsl',
-    'patternv0.30.wgsl',
-    'patternv0.23.wgsl',
-    'patternv0.21.wgsl',
-    'patternv0.12.wgsl'
-];
+// Shader Definitions
+const SHADER_GROUPS = {
+  SQUARE: [
+    { id: 'patternv0.40.wgsl', label: 'v0.40 (Frosted)' },
+    { id: 'patternv0.39.wgsl', label: 'v0.39 (Modern)' },
+    { id: 'patternv0.21.wgsl', label: 'v0.21 (Wall)' },
+    { id: 'patternv0.12.wgsl', label: 'v0.12 (Classic)' },
+  ],
+  CIRCULAR: [
+    { id: 'patternv0.38.wgsl', label: 'v0.38 (Glass)' },
+    { id: 'patternv0.35_bloom.wgsl', label: 'v0.35 (Bloom)' },
+    { id: 'patternv0.30.wgsl', label: 'v0.30 (Disc)' },
+  ],
+  VIDEO: [
+    { id: 'patternv0.23.wgsl', label: 'v0.23 (Clouds)' },
+    { id: 'patternv0.24.wgsl', label: 'v0.24 (Tunnel)' }, // Assuming existence based on sequence
+  ]
+};
 
 function App() {
   const [shaderFile, setShaderFile] = useState<string>('patternv0.40.wgsl');
@@ -27,19 +33,16 @@ function App() {
 
   // 3D View State
   const [is3DMode, setIs3DMode] = useState<boolean>(false);
-  const [isDarkMode, setIsDarkMode] = useState<boolean>(false); // Default to Light Mode
-  const [viewMode, setViewMode] = useState<'device' | 'wall'>('device'); // New: device or wall view
+  const [isDarkMode, setIsDarkMode] = useState<boolean>(false);
+  const [viewMode, setViewMode] = useState<'device' | 'wall'>('device');
 
   // Calculate Dim Factor (1.0 = Bright, 0.3 = Dark)
   const dimFactor = isDarkMode ? 0.3 : 1.0;
 
   // Determine shader based on view mode when in 3D
   const get3DShader = () => {
-    if (viewMode === 'wall') {
-      return 'patternv0.21.wgsl'; // Square shader for wall mode
-    } else {
-      return 'patternv0.38.wgsl'; // Circular shader for device mode
-    }
+    if (viewMode === 'wall') return 'patternv0.21.wgsl';
+    return 'patternv0.38.wgsl';
   };
 
   // Media Overlay State
@@ -70,7 +73,6 @@ function App() {
     setPanValue: setHookPan
   } = useLibOpenMPT(volume);
 
-  // Sync local pan state with hook
   useEffect(() => {
     setHookPan(pan);
   }, [pan, setHookPan]);
@@ -101,7 +103,6 @@ function App() {
   // Render in 3D mode
   if (is3DMode) {
     const shader3D = get3DShader();
-    
     return (
       <Studio3D
         darkMode={isDarkMode}
@@ -109,7 +110,7 @@ function App() {
         onDarkModeToggle={() => setIsDarkMode(!isDarkMode)}
         onViewModeToggle={() => setViewMode(viewMode === 'device' ? 'wall' : 'device')}
         onExitStudio={() => setIs3DMode(false)}
-        dimFactor={dimFactor} // Pass to 3D Scene
+        dimFactor={dimFactor}
         headerContent={
           <div className="scale-75 origin-top-left">
             <Header status={status} />
@@ -143,7 +144,7 @@ function App() {
               onVolumeChange={setVolume}
               onPanChange={setPan}
               externalVideoSource={null}
-              dimFactor={dimFactor} // Pass to 2D Component inside 3D
+              dimFactor={dimFactor}
             />
           </div>
         }
@@ -184,76 +185,88 @@ function App() {
             </div>
           ) : undefined
         }
-        playheadX={playbackSeconds * 10.0} // Pass estimated world position for Camera
+        playheadX={playbackSeconds * 10.0}
       />
     );
   }
 
-  // Standard 2D mode render
+  // 2D Mode Render
   return (
     <div className={`min-h-screen ${isDarkMode ? 'bg-gray-900 text-white' : 'bg-gray-100 text-black'} p-4 flex flex-col items-center transition-colors duration-300`}>
       <div className="w-full max-w-[1280px]">
         <Header status={status} />
 
-        {/* Shader Selector & 3D Toggle */}
-        <div className="mb-4 flex items-center justify-between gap-2">
+        {/* Global Controls */}
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-4">
             <div className="flex gap-2">
                 <button
-                onClick={() => setIs3DMode(true)}
-                className="px-4 py-2 bg-blue-600 text-white text-sm font-mono rounded-lg shadow-lg hover:bg-blue-700 transition-colors border border-blue-500"
+                  onClick={() => setIs3DMode(true)}
+                  className="px-4 py-2 bg-blue-600 text-white text-sm font-mono rounded-lg shadow-lg hover:bg-blue-700 transition-colors border border-blue-500"
                 >
-                🎬 Enter 3D Studio
+                  🎬 3D Mode
                 </button>
                 <button
-                onClick={() => setIsDarkMode(!isDarkMode)}
-                className={`px-4 py-2 text-sm font-mono rounded-lg shadow-lg transition-colors border ${isDarkMode ? 'bg-gray-800 text-white border-gray-700 hover:bg-gray-700' : 'bg-white text-black border-gray-300 hover:bg-gray-50'}`}
+                  onClick={() => setIsDarkMode(!isDarkMode)}
+                  className={`px-4 py-2 text-sm font-mono rounded-lg shadow-lg transition-colors border ${isDarkMode ? 'bg-gray-800 text-white border-gray-700 hover:bg-gray-700' : 'bg-white text-black border-gray-300 hover:bg-gray-50'}`}
                 >
-                {isDarkMode ? '☀️ Light Mode' : '🌙 Dark Mode'}
+                  {isDarkMode ? '☀️ Light' : '🌙 Dark'}
                 </button>
             </div>
 
-            {/* Quick Layout Switcher */}
-            <div className={`flex items-center p-1 rounded-lg border ${isDarkMode ? 'bg-black border-gray-700' : 'bg-gray-200 border-gray-300'}`}>
-                <button
-                    onClick={() => setShaderFile('patternv0.40.wgsl')}
-                    className={`px-3 py-1 text-xs font-mono rounded-md transition-all ${shaderFile === 'patternv0.40.wgsl' ? (isDarkMode ? 'bg-gray-700 text-white shadow-sm' : 'bg-white text-black shadow-sm') : 'opacity-50 hover:opacity-100'}`}
-                >
-                    HORIZ
-                </button>
-                <button
-                    onClick={() => setShaderFile('patternv0.38.wgsl')}
-                    className={`px-3 py-1 text-xs font-mono rounded-md transition-all ${shaderFile === 'patternv0.38.wgsl' ? (isDarkMode ? 'bg-gray-700 text-white shadow-sm' : 'bg-white text-black shadow-sm') : 'opacity-50 hover:opacity-100'}`}
-                >
-                    CIRC
-                </button>
-                <button
-                    onClick={() => setShaderFile('patternv0.23.wgsl')}
-                    className={`px-3 py-1 text-xs font-mono rounded-md transition-all ${shaderFile === 'patternv0.23.wgsl' ? (isDarkMode ? 'bg-gray-700 text-white shadow-sm' : 'bg-white text-black shadow-sm') : 'opacity-50 hover:opacity-100'}`}
-                >
-                    VIDEO
-                </button>
-            </div>
+            {/* Categorized Shader Selectors */}
+            <div className={`flex flex-wrap gap-2 p-2 rounded-xl border ${isDarkMode ? 'bg-black border-gray-800' : 'bg-gray-200 border-gray-300'}`}>
+                {/* Square Group */}
+                <div className="flex items-center gap-1">
+                    <span className="text-[10px] font-bold text-gray-500 uppercase px-1">Square</span>
+                    <select
+                        className={`text-xs font-mono p-1 rounded border outline-none ${isDarkMode ? 'bg-gray-800 border-gray-600 text-white' : 'bg-white border-gray-300 text-black'}`}
+                        value={SHADER_GROUPS.SQUARE.some(s => s.id === shaderFile) ? shaderFile : ''}
+                        onChange={(e) => e.target.value && setShaderFile(e.target.value)}
+                    >
+                        <option value="" disabled>Select...</option>
+                        {SHADER_GROUPS.SQUARE.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
+                    </select>
+                </div>
 
-            <div className="flex items-center gap-2">
-              <label className="text-sm font-mono opacity-70">VISUALIZER CORE:</label>
-              <select
-                  value={shaderFile}
-                  onChange={(e) => setShaderFile(e.target.value)}
-                  className={`text-xs font-mono p-1 rounded border focus:border-blue-500 outline-none ${isDarkMode ? 'bg-gray-800 text-white border-gray-700' : 'bg-white text-black border-gray-300'}`}
-              >
-                  {SHADERS.map(s => <option key={s} value={s}>{s}</option>)}
-              </select>
+                <div className={`w-px h-6 ${isDarkMode ? 'bg-gray-800' : 'bg-gray-300'}`}></div>
+
+                {/* Circular Group */}
+                <div className="flex items-center gap-1">
+                    <span className="text-[10px] font-bold text-gray-500 uppercase px-1">Circular</span>
+                    <select
+                        className={`text-xs font-mono p-1 rounded border outline-none ${isDarkMode ? 'bg-gray-800 border-gray-600 text-white' : 'bg-white border-gray-300 text-black'}`}
+                        value={SHADER_GROUPS.CIRCULAR.some(s => s.id === shaderFile) ? shaderFile : ''}
+                        onChange={(e) => e.target.value && setShaderFile(e.target.value)}
+                    >
+                        <option value="" disabled>Select...</option>
+                        {SHADER_GROUPS.CIRCULAR.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
+                    </select>
+                </div>
+
+                <div className={`w-px h-6 ${isDarkMode ? 'bg-gray-800' : 'bg-gray-300'}`}></div>
+
+                {/* Video Group */}
+                <div className="flex items-center gap-1">
+                    <span className="text-[10px] font-bold text-gray-500 uppercase px-1">Video</span>
+                    <select
+                        className={`text-xs font-mono p-1 rounded border outline-none ${isDarkMode ? 'bg-gray-800 border-gray-600 text-white' : 'bg-white border-gray-300 text-black'}`}
+                        value={SHADER_GROUPS.VIDEO.some(s => s.id === shaderFile) ? shaderFile : ''}
+                        onChange={(e) => e.target.value && setShaderFile(e.target.value)}
+                    >
+                        <option value="" disabled>Select...</option>
+                        {SHADER_GROUPS.VIDEO.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
+                    </select>
+                </div>
             </div>
         </div>
 
         {/* Main Display Area */}
         <div className={`relative rounded-xl overflow-hidden shadow-2xl mb-6 border ${isDarkMode ? 'bg-black border-gray-800' : 'bg-white border-gray-300'}`}>
-           {/* WebGPU Pattern Display */}
            <PatternDisplay
              matrix={sequencerMatrix}
-             playheadRow={playbackRowFraction} // Interpolated playhead
+             playheadRow={playbackRowFraction}
              isPlaying={isPlaying}
-             bpm={120} // Could extract BPM from moduleInfo if available
+             bpm={120}
              timeSec={playbackSeconds}
              tickOffset={0}
              channels={channelStates}
@@ -267,7 +280,6 @@ function App() {
              pan={pan}
              isLooping={isLooping}
              totalRows={totalPatternRows}
-             // Callbacks for UI interactions (e.g. from Chassis UI)
              onPlay={play}
              onStop={() => stopMusic(false)}
              onFileSelected={handleFileSelected}
@@ -275,13 +287,10 @@ function App() {
              onSeek={(row) => seekToStep(row)}
              onVolumeChange={setVolume}
              onPanChange={setPan}
-             // Pass media item URL to pattern display if it supports video textures?
-             // (PatternDisplay handles externalVideoSource prop)
              externalVideoSource={null}
-             dimFactor={dimFactor} // Pass to 2D Component
+             dimFactor={dimFactor}
            />
 
-           {/* Overlay for Images/Videos on top of the visualizer */}
            <MediaOverlay
              item={mediaItem}
              visible={mediaVisible}
@@ -309,12 +318,10 @@ function App() {
           onMediaAdd={handleMediaAdd}
           onRemoteMediaSelect={handleRemoteMediaSelect}
           remoteMediaList={[
-             // Example remote media, or fetch dynamically
              { id: '1', kind: 'video', url: 'clouds.mp4', fileName: 'Clouds Demo (MP4)' }
           ]}
         />
 
-        {/* Footer / Instructions */}
         <div className="mt-8 text-center text-xs opacity-50">
              <p>Supports .mod, .xm, .s3m, .it files.</p>
              <p>WebGPU required for visualization.</p>
