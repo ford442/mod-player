@@ -41,35 +41,37 @@ fn vs(@builtin(vertex_index) vertexIndex: u32) -> VertOut {
   return out;
 }
 
-@fragment
-fn fs(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
+@fragment fn fs(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
     let p = uv - 0.5;
-    let r = length(p) * 2.0; // 0 at center, 1 at edge
+    let r = length(p) * 2.0;
     let a = atan2(p.y, p.x);
     
-    // Draw concentric rings for tracks
+    // Ring calculation matching WebGL overlay
     let numTracks = f32(params.numChannels);
-    let trackW = 0.45 / numTracks; // 0.45 radius max
+    let trackW = 0.45 / numTracks;
     
-    let ringIndex = floor((r - 0.15) / (0.45 - 0.15) * numTracks);
+    // Background Rings
+    let ringID = floor((r - 0.15) / (0.45 - 0.15) * numTracks);
+    let ringLocal = fract((r - 0.15) / (0.45 - 0.15) * numTracks);
     
-    // Only draw if inside valid ring area
-    if (r < 0.15 || r > 0.6) {
-        return vec4<f32>(0.0);
-    }
+    // Thin separator lines
+    let ringBorder = 1.0 - smoothstep(0.02, 0.05, abs(ringLocal - 0.5));
     
-    // Radial dividers (Time steps)
+    // Radial spokes (Time divisions)
     let steps = 64.0;
-    let angleSector = fract(a / (6.28318 / steps));
-    let spoke = 1.0 - smoothstep(0.45, 0.5, abs(angleSector - 0.5));
+    let spoke = 1.0 - smoothstep(0.48, 0.5, abs(fract(a / (6.28318 / steps)) - 0.5));
     
-    // Ring borders
-    let localR = fract((r - 0.15) / (0.45 - 0.15) * numTracks);
-    let ringBorder = 1.0 - smoothstep(0.05, 0.1, abs(localR - 0.5));
+    // Color logic
+    var col = vec3<f32>(0.25, 0.28, 0.32);
     
-    let alpha = (spoke * 0.05) + (ringBorder * 0.02);
-    let col = vec3<f32>(0.4, 0.5, 0.6);
-    
-    // Transparent background so chassis shows through
-    return vec4<f32>(col, alpha * params.dimFactor);
+    // Highlight active ring area
+    if (r > 0.15 && r < 0.6) { // 0.6 to cover outer edge
+        col += vec3<f32>(0.1) * ringBorder;
+        col += vec3<f32>(0.05) * spoke;
+    } else {
+        // Center hole or outer void
+        return vec4<f32>(0.0); 
+    }
+
+    return vec4<f32>(col, 0.5 * params.dimFactor);
 }
