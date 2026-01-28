@@ -1085,13 +1085,46 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     const rect = e.currentTarget.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
-    const u = x / rect.width;
-    const v = y / rect.height;
-    const pX = u - 0.5;
-    const pY = 0.5 - v;
     
+    const pX = (x / rect.width) - 0.5;
+    const pY = 0.5 - (y / rect.height); // Invert Y to match shader SDF coord system (up is positive)
+
     const isV40 = shaderFile.includes('v0.40');
 
+    const flashButton = (buttonId: number) => {
+      if (clickTimeoutRef.current !== null) window.clearTimeout(clickTimeoutRef.current);
+      setClickedButton(buttonId);
+      clickTimeoutRef.current = window.setTimeout(() => { setClickedButton(0); clickTimeoutRef.current = null; }, 200) as number;
+    };
+
+    // OPEN Button (Top Right)
+    if (Math.abs(pX - 0.26) < 0.05 && Math.abs(pY - 0.42) < 0.05) {
+        flashButton(2); // ID 2 = Open
+        fileInputRef.current?.click();
+        return;
+    }
+
+    // LOOP Button (Top Left)
+    if (Math.abs(pX + 0.26) < 0.05 && Math.abs(pY - 0.42) < 0.05) {
+        flashButton(1);
+        onLoopToggle?.();
+        return;
+    }
+
+    // PREV/NEXT (Below Display)
+    if (Math.abs(pY - 0.32) < 0.04) {
+        if (Math.abs(pX + 0.12) < 0.04) { // Prev
+             flashButton(5);
+             if (onSeek) onSeek(Math.max(0, playheadRow - 16)); // Jump back small amount
+             return;
+        }
+        if (Math.abs(pX - 0.12) < 0.04) { // Next
+             flashButton(6);
+             if (onSeek) onSeek(playheadRow + 16);
+             return;
+        }
+    }
+    
     // Updated: New Horizontal Volume Slider (Top Right)
     const volSliderX = isV40 ? 0.08 : 0.28; // Moved inward for v0.40
     const volSliderY = 0.415;
@@ -1129,19 +1162,10 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     // Buttons
     const btnRadius = 0.045;
     const dist = (x1: number, y1: number, x2: number, y2: number) => Math.sqrt((x1-x2)**2 + (y1-y2)**2);
-    const flashButton = (buttonId: number) => {
-      if (clickTimeoutRef.current !== null) window.clearTimeout(clickTimeoutRef.current);
-      setClickedButton(buttonId);
-      clickTimeoutRef.current = window.setTimeout(() => { setClickedButton(0); clickTimeoutRef.current = null; }, 200) as number;
-    };
 
-    const loopX = isV40 ? -0.24 : -0.44; // Moved inward for v0.40
-    const openX = isV40 ? 0.24 : 0.44;   // Moved inward for v0.40
     const playY = isV40 ? -0.45 : -0.40; // Moved down for v0.40
     const stopY = isV40 ? -0.45 : -0.40; // Moved down for v0.40
 
-    if (dist(pX, pY, loopX, 0.42) < btnRadius) { flashButton(1); onLoopToggle?.(); return; }
-    if (dist(pX, pY, openX, 0.42) < btnRadius) { flashButton(2); fileInputRef.current?.click(); return; }
     if (dist(pX, pY, -0.44, playY) < btnRadius) { flashButton(3); onPlay?.(); return; }
     if (dist(pX, pY, -0.35, stopY) < btnRadius) { flashButton(4); onStop?.(); return; }
   };
