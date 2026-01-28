@@ -24,6 +24,7 @@ struct Uniforms {
   bloomIntensity: f32,
   bloomThreshold: f32,
   invertChannels: u32,    // 0 = Outer Low, 1 = Inner Low
+  dimFactor: f32,
 };
 
 @group(0) @binding(0) var<storage, read> cells: array<u32>;
@@ -220,7 +221,7 @@ fn drawChromeIndicator(
             let reflectDir = reflect(-lightDir, normal);
             let specular = pow(max(0.0, dot(reflectDir, vec3<f32>(0.0, 0.0, 1.0))), 10.0);
 
-            let baseColor = color * (select(dimFactor, 1.0, isOn));
+            let baseColor = color * dimFactor;
             col = baseColor * (0.5 + 0.8 * diffuse);
             col += vec3<f32>(1.0) * specular * 0.5 * dimFactor;
             let rimGlow = exp(-pow(lensNormR, 2.0) * 6.0);

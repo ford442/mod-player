@@ -41,39 +41,32 @@ fn vs(@builtin(vertex_index) vertexIndex: u32) -> VertOut {
   return out;
 }
 
-@fragment
-fn fs(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
-    // 1. Setup Grid Geometry (Matching v0.40 WebGL overlay)
-    // The WebGL overlay uses specific offsets, we try to match the "active area"
-    // roughly centered.
-    
-    // Convert UV to approximate grid coords
-    let cols = 32.0; // View window size
+@fragment fn fs(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
+    // Frosted Wall: A clean, dense grid that fits the WebGL caps
+    let cols = 32.0; // Viewport width in steps
     let rows = f32(params.numChannels);
     
-    // We want to draw a subtle grid where the notes *will* appear.
-    // The chassis has a dark recess, so we just add very faint slot markers.
-    
-    // Inset to match the WebGL overlay area roughly
-    // Map uv 0..1 to grid - but we want to leave margins.
-    // Let's rely on the chassis for the "container" and just draw faint lines.
-    
+    // Grid Lines
     let gridX = fract(uv.x * cols);
     let gridY = fract(uv.y * rows);
     
-    // Draw simple dots/crosses at intersections
-    let dX = abs(gridX - 0.5);
-    let dY = abs(gridY - 0.5);
+    let lineX = smoothstep(0.45, 0.5, abs(gridX - 0.5));
+    let lineY = smoothstep(0.45, 0.5, abs(gridY - 0.5));
     
-    // Faint slot center dot
-    let dot = 1.0 - smoothstep(0.02, 0.05, length(vec2<f32>(dX, dY)));
+    // Subtle "Tech" background pattern
+    let cellHash = sin(floor(uv.x * cols) * 12.9898 + floor(uv.y * rows) * 78.233);
+    let techNoise = smoothstep(0.8, 1.0, sin(params.timeSec + cellHash * 10.0));
     
-    // Faint horizontal track lines
-    let line = 1.0 - smoothstep(0.48, 0.49, dY);
+    // Base Color (Cool Dark Grey to contrast with White Chassis)
+    var col = vec3<f32>(0.2, 0.22, 0.25);
     
-    var color = vec3<f32>(0.3, 0.35, 0.4);
-    let alpha = (dot * 0.1) + (line * 0.05); // Very subtle
+    // Add grid lines
+    col += vec3<f32>(0.1) * (lineX + lineY);
     
-    // Transparent background so chassis shows through
-    return vec4<f32>(color, alpha * params.dimFactor);
+    // Add active "data" noise
+    if (params.isPlaying > 0u) {
+        col += vec3<f32>(0.05, 0.1, 0.15) * techNoise;
+    }
+
+    return vec4<f32>(col, 0.6 * params.dimFactor); // Semi-transparent
 }
