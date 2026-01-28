@@ -750,77 +750,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8UI, cols, rows, 0, gl.RED_INTEGER, gl.UNSIGNED_BYTE, data);
   }, [matrix, padTopChannel, shaderFile]);
 
-  // === WEBGL2 RENDER FUNCTION ===
-  const drawWebGL = () => {
-    if (!shaderFile.includes('v0.38') && !shaderFile.includes('v0.39') && !shaderFile.includes('v0.40') && !shaderFile.includes('v0.41') && !shaderFile.includes('v0.42')) return;
 
-    const gl = glContextRef.current;
-    const res = glResourcesRef.current;
-    if (!gl || !res || !matrix) return;
-
-    if (glCanvasRef.current && (glCanvasRef.current.width !== canvasMetrics.width || glCanvasRef.current.height !== canvasMetrics.height)) {
-        glCanvasRef.current.width = canvasMetrics.width;
-        glCanvasRef.current.height = canvasMetrics.height;
-        gl.viewport(0, 0, canvasMetrics.width, canvasMetrics.height);
-    }
-
-    gl.clearColor(0,0,0,0);
-    gl.clear(gl.COLOR_BUFFER_BIT);
-    gl.enable(gl.BLEND);
-    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
-
-    gl.useProgram(res.program);
-
-    const rawCols = matrix.numChannels;
-    const cols = padTopChannel ? rawCols + 1 : rawCols;
-    const rows = matrix.numRows;
-
-    const uRes = gl.getUniformLocation(res.program, 'u_resolution');
-    const uCell = gl.getUniformLocation(res.program, 'u_cellSize');
-    const uOffset = gl.getUniformLocation(res.program, 'u_offset');
-    const uCols = gl.getUniformLocation(res.program, 'u_cols');
-    const uRows = gl.getUniformLocation(res.program, 'u_rows');
-    const uPlay = gl.getUniformLocation(res.program, 'u_playhead');
-    const uInvert = gl.getUniformLocation(res.program, 'u_invertChannels');
-    const uLayout = gl.getUniformLocation(res.program, 'u_layoutMode');
-    const uTex = gl.getUniformLocation(res.program, 'u_noteData');
-    
-    gl.uniform2f(uRes, canvasMetrics.width, canvasMetrics.height);
-    
-    // v0.39 and v0.40 Override: Fit 32 steps exactly into canvas width (or active area)
-    let effectiveCellW = cellWidth;
-    let effectiveCellH = cellHeight;
-    if (shaderFile.includes('v0.40') || shaderFile.includes('v0.41')) {
-        // v0.40: Fits in the blank area (705x725)
-        effectiveCellW = 705.0 / 32.0;
-        effectiveCellH = 725.0 / cols;
-        gl.uniform2f(uOffset, 160.0, 160.0);
-    } else if (shaderFile.includes('v0.39')) {
-        effectiveCellW = canvasMetrics.width / 32.0;
-        effectiveCellH = canvasMetrics.height / cols;
-        gl.uniform2f(uOffset, 0.0, 0.0);
-    } else {
-        gl.uniform2f(uOffset, 0.0, 0.0);
-    }
-    gl.uniform2f(uCell, effectiveCellW, effectiveCellH);
-
-    gl.uniform1f(uCols, cols);
-    gl.uniform1f(uRows, rows);
-    
-    // Set Layout Mode: 1=Circular(0.38), 2=Horizontal(0.39, 0.40)
-    gl.uniform1i(uLayout, (shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.41')) ? 2 : 1);
-    gl.uniform1i(uInvert, invertChannels ? 1 : 0);
-    
-    const totalPlayhead = playheadRow + (tickOffset || 0);
-    gl.uniform1f(uPlay, totalPlayhead);
-    
-    gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, res.texture);
-    gl.uniform1i(uTex, 0);
-
-    gl.bindVertexArray(res.vao);
-    gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, rows * cols);
-  };
 
   const loadBezelTexture = async (device: GPUDevice) => {
     if (bezelTextureResourcesRef.current) return;
@@ -1269,7 +1199,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
          }
     }
 
-    drawWebGL();
+
 
     const encoder = device.createCommandEncoder();
     const pass = encoder.beginRenderPass({
@@ -1379,26 +1309,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
         }}
       />
       
-      {(shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40')) && (
-        <canvas
-          ref={glCanvasRef}
-          width={canvasMetrics.width}
-          height={canvasMetrics.height}
-          style={{
-            position: 'absolute',
-            top: (padTopChannel && !shaderFile.includes('v0.40')) ? '2rem' : 0,
-            left: (padTopChannel && !shaderFile.includes('v0.40')) ? '2rem' : 0,
-            width: 'auto',
-            height: 'auto',
-            maxWidth: '100%',
-            maxHeight: '100%',
-            aspectRatio: `${canvasMetrics.width} / ${canvasMetrics.height}`,
-            pointerEvents: 'none',
-            zIndex: 2,
-            mixBlendMode: 'normal'
-          }}
-        />
-      )}
+
 
       {!webgpuAvailable && <div className="error">WebGPU not available in this browser.</div>}
     </div>
