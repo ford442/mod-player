@@ -1,5 +1,3 @@
-// chassis_video.wgsl
-// Slim "Monitor" Bezel for Video Modes
 struct BezelUniforms {
   canvasW: f32, canvasH: f32, bezelWidth: f32, surfaceR: f32, surfaceG: f32, surfaceB: f32,
   bezelR: f32, bezelG: f32, bezelB: f32, screwRadius: f32, recessKind: f32,
@@ -39,17 +37,13 @@ struct VertOut { @builtin(position) pos: vec4<f32>, @location(0) uv: vec2<f32> }
     var col = vec3<f32>(0.92, 0.93, 0.94); // Polar White
     
     // The Screen Window (Large)
-    // Center y=0.1, Height=0.75, Width=0.92
     let screenBox = sdRoundedBox(p - vec2<f32>(0.0, 0.1), vec2<f32>(0.46, 0.375), 0.01);
     let screenMask = smoothstep(aa, -aa, screenBox);
     
-    // Dark inner border
-    let border = smoothstep(0.02, 0.0, abs(screenBox)); // Inner stroke
-    col = mix(col, vec3<f32>(0.1), screenMask); // Fill screen with dark (will be covered by video usually, but acts as background)
+    // Dark inner fill
+    col = mix(col, vec3<f32>(0.1), screenMask);
     
     // --- 2. CONTROLS (Bottom Strip) ---
-    // Simple transport bar at y = -0.4
-    
     // Play (Green)
     let pPlay = p - vec2<f32>(-0.1, -0.4);
     let playBg = sdRoundedBox(pPlay, vec2<f32>(0.04, 0.03), 0.01);
@@ -57,7 +51,7 @@ struct VertOut { @builtin(position) pos: vec4<f32>, @location(0) uv: vec2<f32> }
     var btnCol = vec3<f32>(0.2, 0.2, 0.2);
     if (bez.isPlaying > 0.5) { btnCol = vec3<f32>(0.2, 1.0, 0.4); } // Lit Green
     col = mix(col, btnCol, smoothstep(aa, -aa, playBg));
-    col = mix(col, vec3<f32>(1.0), smoothstep(aa, -aa, playIcon)); // White icon
+    col = mix(col, vec3<f32>(1.0), smoothstep(aa, -aa, playIcon));
 
     // Stop (Red)
     let pStop = p - vec2<f32>(0.1, -0.4);
