@@ -12,21 +12,21 @@ const alignTo = (value: number, alignment: number) => Math.ceil(value / alignmen
 const getLayoutType = (shaderFile: string): LayoutType => {
   if (shaderFile === 'patternShaderv0.12.wgsl') return 'texture';
   // Check for extended layout shaders (v0.38, v0.39, and v0.40 included)
-  if (shaderFile.includes('v0.13') || shaderFile.includes('v0.14') || shaderFile.includes('v0.15') || shaderFile.includes('v0.16') || shaderFile.includes('v0.17') || shaderFile.includes('v0.18') || shaderFile.includes('v0.19') || shaderFile.includes('v0.20') || shaderFile.includes('v0.21') || shaderFile.includes('v0.23') || shaderFile.includes('v0.24') || shaderFile.includes('v0.25') || shaderFile.includes('v0.26') || shaderFile.includes('v0.27') || shaderFile.includes('v0.28') || shaderFile.includes('v0.29') || shaderFile.includes('v0.30') || shaderFile.includes('v0.31') || shaderFile.includes('v0.32') || shaderFile.includes('v0.33') || shaderFile.includes('v0.34') || shaderFile.includes('v0.35') || shaderFile.includes('v0.36') || shaderFile.includes('v0.37') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.41') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44')) return 'extended';
+  if (shaderFile.includes('v0.13') || shaderFile.includes('v0.14') || shaderFile.includes('v0.15') || shaderFile.includes('v0.16') || shaderFile.includes('v0.17') || shaderFile.includes('v0.18') || shaderFile.includes('v0.19') || shaderFile.includes('v0.20') || shaderFile.includes('v0.21') || shaderFile.includes('v0.23') || shaderFile.includes('v0.24') || shaderFile.includes('v0.25') || shaderFile.includes('v0.26') || shaderFile.includes('v0.27') || shaderFile.includes('v0.28') || shaderFile.includes('v0.29') || shaderFile.includes('v0.30') || shaderFile.includes('v0.31') || shaderFile.includes('v0.32') || shaderFile.includes('v0.33') || shaderFile.includes('v0.34') || shaderFile.includes('v0.35') || shaderFile.includes('v0.36') || shaderFile.includes('v0.37') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.41') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45')) return 'extended';
   return 'simple';
 };
 
 const isSinglePassCompositeShader = (shaderFile: string) => {
-  return shaderFile.includes('v0.29') || shaderFile.includes('v0.26');
+  return shaderFile.includes('v0.29') || shaderFile.includes('v0.26') || shaderFile.includes('v0.45');
 };
 
 const shouldEnableAlphaBlending = (shaderFile: string) => {
-  return shaderFile.includes('v0.28') || shaderFile.includes('v0.30') || shaderFile.includes('v0.31') || shaderFile.includes('v0.32') || shaderFile.includes('v0.33') || shaderFile.includes('v0.34') || shaderFile.includes('v0.35') || shaderFile.includes('v0.36') || shaderFile.includes('v0.37') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.41') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44');
+  return shaderFile.includes('v0.28') || shaderFile.includes('v0.30') || shaderFile.includes('v0.31') || shaderFile.includes('v0.32') || shaderFile.includes('v0.33') || shaderFile.includes('v0.34') || shaderFile.includes('v0.35') || shaderFile.includes('v0.36') || shaderFile.includes('v0.37') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.41') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45');
 };
 
 const isCircularLayoutShader = (shaderFile: string) => {
-  // v0.39 and v0.40 are NOT circular (they're horizontal). v0.38 IS circular.
-  return shaderFile.includes('v0.25') || shaderFile.includes('v0.26') || shaderFile.includes('v0.35') || shaderFile.includes('v0.37') || shaderFile.includes('v0.38');
+  // v0.39 and v0.40 are NOT circular (they're horizontal). v0.38 IS circular. v0.45 IS circular.
+  return shaderFile.includes('v0.25') || shaderFile.includes('v0.26') || shaderFile.includes('v0.35') || shaderFile.includes('v0.37') || shaderFile.includes('v0.38') || shaderFile.includes('v0.45');
 };
 
 const shouldUseBackgroundPass = (shaderFile: string) => {
@@ -34,8 +34,9 @@ const shouldUseBackgroundPass = (shaderFile: string) => {
 };
 
 const getBackgroundShaderFile = (shaderFile: string): string => {
+  if (shaderFile.includes('v0.23') || shaderFile.includes('v0.24')) return 'chassis_video.wgsl';
   // Use the new frosted shader for the latest layout
-  if (shaderFile.includes('v0.40') || shaderFile.includes('v0.41') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44')) return 'chassis_frosted.wgsl';
+  if (shaderFile.includes('v0.40') || shaderFile.includes('v0.41') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45')) return 'chassis_frosted.wgsl';
   
   if (shaderFile.includes('v0.37') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39')) return 'chassisv0.37.wgsl';
   if (shaderFile.includes('v0.27') || shaderFile.includes('v0.28') || shaderFile.includes('v0.30') || shaderFile.includes('v0.31') || shaderFile.includes('v0.32') || shaderFile.includes('v0.33') || shaderFile.includes('v0.34') || shaderFile.includes('v0.35') || shaderFile.includes('v0.36')) return 'chassisv0.1.wgsl';
@@ -439,11 +440,11 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   const isHorizontal = shaderFile.includes('v0.12') || shaderFile.includes('v0.13') || shaderFile.includes('v0.14') || shaderFile.includes('v0.16') || shaderFile.includes('v0.17') || shaderFile.includes('v0.21') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40');
   
   // NOTE: v0.38, v0.39, and v0.40 added here to pad channel 0, ensuring music is channels 1-32
-  const padTopChannel = shaderFile.includes('v0.16') || shaderFile.includes('v0.17') || shaderFile.includes('v0.21') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44');
+  const padTopChannel = shaderFile.includes('v0.16') || shaderFile.includes('v0.17') || shaderFile.includes('v0.21') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45');
 
   const computeLogicalCanvasMetrics = () => {
     // Force Square for v0.37, v0.38, v0.39, and v0.40 (Square Bezel)
-    if (shaderFile.includes('v0.37') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.41') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44')) return { width: 1024, height: 1024 };
+    if (shaderFile.includes('v0.37') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.41') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45')) return { width: 1024, height: 1024 };
     if (shaderFile.includes('v0.26') || shaderFile.includes('v0.27') || shaderFile.includes('v0.28') || shaderFile.includes('v0.29') || shaderFile.includes('v0.30') || shaderFile.includes('v0.31') || shaderFile.includes('v0.32') || shaderFile.includes('v0.33') || shaderFile.includes('v0.34') || shaderFile.includes('v0.35') || shaderFile.includes('v0.36')) {
       return { width: 2048, height: 2016 };
     }
@@ -953,7 +954,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
 
         deviceRef.current = device; contextRef.current = context; uniformBufferRef.current = uniformBuffer;
 
-        const isHighPrec = shaderFile.includes('v0.36') || shaderFile.includes('v0.37') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44');
+        const isHighPrec = shaderFile.includes('v0.36') || shaderFile.includes('v0.37') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45');
         const packFunc = isHighPrec ? packPatternMatrixHighPrecision : packPatternMatrix;
         cellsBufferRef.current = createBufferWithData(device, packFunc(matrix, padTopChannel), GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
 
@@ -993,7 +994,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     const device = deviceRef.current;
     if (!device || !gpuReady) return;
     if (cellsBufferRef.current) cellsBufferRef.current.destroy();
-    const isHighPrec = shaderFile.includes('v0.36') || shaderFile.includes('v0.37') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44');
+    const isHighPrec = shaderFile.includes('v0.36') || shaderFile.includes('v0.37') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45');
     const packFunc = isHighPrec ? packPatternMatrixHighPrecision : packPatternMatrix;
     cellsBufferRef.current = createBufferWithData(device, packFunc(matrix, padTopChannel), GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
     if (layoutTypeRef.current === 'extended') {
@@ -1028,7 +1029,8 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   }, [channels, matrix?.numChannels, gpuReady]);
 
   const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!shaderFile.includes('v0.37') && !shaderFile.includes('v0.38') && !shaderFile.includes('v0.39') && !shaderFile.includes('v0.40') && !shaderFile.includes('v0.43') && !shaderFile.includes('v0.44')) return;
+    console.log('handleCanvasClick called');
+    if (!shaderFile.includes('v0.37') && !shaderFile.includes('v0.38') && !shaderFile.includes('v0.39') && !shaderFile.includes('v0.40') && !shaderFile.includes('v0.41') && !shaderFile.includes('v0.42') && !shaderFile.includes('v0.43') && !shaderFile.includes('v0.44') && !shaderFile.includes('v0.45')) return;
     const rect = e.currentTarget.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
@@ -1036,7 +1038,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     const pX = (x / rect.width) - 0.5;
     const pY = 0.5 - (y / rect.height); // Invert Y to match shader SDF coord system (up is positive)
 
-    const isV40 = shaderFile.includes('v0.40') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44');
+    const isV40 = shaderFile.includes('v0.40') || shaderFile.includes('v0.41') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45');
 
     const flashButton = (buttonId: number) => {
       if (clickTimeoutRef.current !== null) window.clearTimeout(clickTimeoutRef.current);
@@ -1217,7 +1219,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
       // v0.39 and v0.40 Override: Ensure uniform payload reflects the auto-calculated dimensions
       let effectiveCellW = cellWidth;
       let effectiveCellH = cellHeight;
-      if (shaderFile.includes('v0.40') || shaderFile.includes('v0.41') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44')) {
+      if (shaderFile.includes('v0.40') || shaderFile.includes('v0.41') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45')) {
           effectiveCellW = 705.0 / 32.0;
           effectiveCellH = 725.0 / numChannels;
       } else if (shaderFile.includes('v0.39')) {
@@ -1315,12 +1317,22 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     const numRows = matrix?.numRows ?? DEFAULT_ROWS;
     const rawChannels = matrix?.numChannels ?? DEFAULT_CHANNELS;
     const numChannels = padTopChannel ? rawChannels + 1 : rawChannels;
-    const totalInstances = numRows * numChannels;
+    let totalInstances = numRows * numChannels;
+
+    // Increment instance count for UI-capable shaders
+    const isUIShader = shaderFile.includes('v0.45');
+    if (isUIShader) {
+      totalInstances += 3; // UI_BUTTON_COUNT in shader
+    }
 
     if (totalInstances > 0) {
       if (isSinglePassCompositeShader(shaderFile)) {
-        pass.draw(6, 1, 0, totalInstances);
-        pass.draw(6, totalInstances, 0, 0);
+        if (shaderFile.includes('v0.45')) {
+             pass.draw(6, totalInstances, 0, 0); // All instances in one draw
+        } else {
+             pass.draw(6, 1, 0, totalInstances);
+             pass.draw(6, totalInstances, 0, 0);
+        }
       } else {
         pass.draw(6, totalInstances, 0, 0);
       }
@@ -1399,14 +1411,14 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
           objectFit: 'contain',
           aspectRatio: `${canvasMetrics.width} / ${canvasMetrics.height}`,
           position: 'relative',
-          zIndex: 1
+          
         }}
       />
       <canvas
           ref={glCanvasRef}
           width={canvasMetrics.width}
           height={canvasMetrics.height}
-          className="absolute top-0 left-0 pointer-events-none"
+          className="absolute top-0 left-0"
           style={{
               width: '100%',
               height: '100%',

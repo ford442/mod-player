@@ -19,6 +19,7 @@ const SHADER_GROUPS = {
     { id: 'patternv0.12.wgsl', label: 'v0.12 (Classic)' },
   ],
   CIRCULAR: [
+    { id: 'patternv0.45.wgsl', label: 'v0.45 (Frosted UI)' },
     { id: 'patternv0.42.wgsl', label: 'v0.42 (Frosted Disc)' },
     { id: 'patternv0.38.wgsl', label: 'v0.38 (Glass)' },
     { id: 'patternv0.35_bloom.wgsl', label: 'v0.35 (Bloom)' },
