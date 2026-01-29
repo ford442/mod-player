@@ -538,76 +538,58 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
 
     // Compile Vertex & Fragment Shaders for the "Glass Cap"
     const vsSource = `#version 300 es
-    layout(location=0) in vec2 a_pos; // unit quad -0.5..0.5
+    precision highp float;
     
-    uniform vec2 u_resolution;
-    uniform vec2 u_cellSize;
-    uniform vec2 u_offset; // Global offset (pixel space)
-    uniform float u_cols;
-    uniform float u_rows;
-    uniform float u_playhead;
-    uniform int u_layoutMode; // 1=Circular, 2=Horizontal
-    uniform int u_invertChannels; 
-    uniform mediump usampler2D u_noteData; // R8UI Texture
+    in vec2 a_pos;
+    in vec2 a_uv;
 
     out vec2 v_uv;
     out float v_active;
 
-    #define PI 3.14159265
+    uniform vec2 u_resolution;
+    uniform vec2 u_cellSize;
+    uniform vec2 u_offset;
+    uniform float u_cols;
+    uniform float u_playhead;
+    uniform int u_invertChannels;
+    uniform int u_layoutMode; // 1=Circ, 2=Horiz32, 3=Horiz64
+    uniform highp usampler2D u_noteData;
+
+    const float PI = 3.14159265359;
 
     void main() {
         int id = gl_InstanceID;
-        int col = id % int(u_cols);
-        int row = id / int(u_cols);
+        int col = id % int(u_cols); // Track Index
+        int row = id / int(u_cols); // Row Index
         
         uint note = texelFetch(u_noteData, ivec2(col, row), 0).r;
         if (note == 0u) { gl_Position = vec4(0.0); return; }
 
-        if (u_layoutMode == 2) {
-            // --- HORIZONTAL (v0.39, v0.40) ---
-            float stepsPerPage = 32.0;
+        if (u_layoutMode == 2 || u_layoutMode == 3) {
+            // --- HORIZONTAL MODES ---
+            float stepsPerPage = (u_layoutMode == 3) ? 64.0 : 32.0;
+
             float pageStart = floor(u_playhead / stepsPerPage) * stepsPerPage;
             float localRow = float(row) - pageStart;
             
-            if (localRow < 0.0 || localRow >= stepsPerPage) { gl_Position = vec4(0.0); return; }
+            // Cull outside active window
+            if (localRow < 0.0 || localRow >= stepsPerPage) {
+                gl_Position = vec4(0.0); return;
+            }
             
             float xPos = localRow * u_cellSize.x;
             float yPos = float(col) * u_cellSize.y;
-            vec2 capSize = u_cellSize * 0.9;
-            vec2 center = vec2(xPos, yPos) + u_cellSize * 0.5 + u_offset;
-            vec2 pos = center + (a_pos * capSize);
-            
-            vec2 ndc = (pos / u_resolution) * 2.0 - 1.0;
-            ndc.y = -ndc.y;
-            gl_Position = vec4(ndc, 0.0, 1.0);
-
-        } else if (u_layoutMode == 0) {
-            // --- VERTICAL SCROLL (v0.43, v0.44) ---
-            // New logic for scrolling wall
-            
-            float viewRows = (u_resolution.y / u_cellSize.y); // e.g. 32 or 64
-            // Center the playhead visually
-            float scrollOffset = u_playhead - (viewRows * 0.5);
-            
-            float localRow = float(row) - scrollOffset;
-            
-            // Cull off-screen
-            if (localRow < -1.0 || localRow > viewRows + 1.0) { gl_Position = vec4(0.0); return; }
-            
-            float xPos = float(col) * u_cellSize.x;
-            float yPos = localRow * u_cellSize.y;
             
             vec2 capSize = u_cellSize * 0.9;
             vec2 center = vec2(xPos, yPos) + u_cellSize * 0.5 + u_offset;
             vec2 pos = center + (a_pos * capSize);
             
             vec2 ndc = (pos / u_resolution) * 2.0 - 1.0;
-            ndc.y = -ndc.y; 
+            ndc.y = -ndc.y; // Flip Y for WebGL
             gl_Position = vec4(ndc, 0.0, 1.0);
 
         } else {
-            // --- CIRCULAR (v0.38, v0.42) ---
-            // ... existing circular logic ...
+            // --- CIRCULAR MODE (1) ---
             int ringIndex = col;
             if (u_invertChannels == 0) { ringIndex = int(u_cols) - 1 - col; }
             
@@ -617,6 +599,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
             float minRadius = minDim * 0.15;
             float ringDepth = (maxRadius - minRadius) / u_cols;
             float radius = minRadius + float(ringIndex) * ringDepth;
+
             float totalSteps = 64.0;
             float anglePerStep = (2.0 * PI) / totalSteps;
             float theta = -1.570796 + float(row % 64) * anglePerStep;
@@ -627,12 +610,15 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
             float btnH = ringDepth * 0.95;
             
             vec2 localPos = a_pos * vec2(btnW, btnH);
+
             float rotAng = theta + 1.570796;
             float cA = cos(rotAng); float sA = sin(rotAng);
             float rotX = localPos.x * cA - localPos.y * sA;
             float rotY = localPos.x * sA + localPos.y * cA;
+
             float worldX = center.x + cos(theta) * radius + rotX;
             float worldY = center.y + sin(theta) * radius + rotY;
+
             vec2 ndc = vec2((worldX / u_resolution.x) * 2.0 - 1.0, 1.0 - (worldY / u_resolution.y) * 2.0);
             gl_Position = vec4(ndc, 0.0, 1.0);
         }
@@ -1154,31 +1140,31 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     let layoutMode = 1; // Default Circular
 
     if (shaderFile.includes('v0.40') || shaderFile.includes('v0.41')) {
-        // Horizontal Paged (Square Fit)
+        // Horizontal 32 (Boxed)
         effectiveCellW = 705.0 / 32.0;
         effectiveCellH = 725.0 / cols;
         gl.uniform2f(uniforms.u_offset, 160.0, 160.0);
         layoutMode = 2;
     } else if (shaderFile.includes('v0.39')) {
-        // Horizontal Paged (Full)
+        // Horizontal 32 (Full)
         effectiveCellW = canvasMetrics.width / 32.0;
         effectiveCellH = canvasMetrics.height / cols;
         gl.uniform2f(uniforms.u_offset, 0.0, 0.0);
         layoutMode = 2;
     } else if (shaderFile.includes('v0.43')) {
-        // Vertical Wall (32 Step)
-        effectiveCellW = 705.0 / cols;
-        effectiveCellH = 725.0 / 32.0;
-        gl.uniform2f(uniforms.u_offset, 160.0, 160.0); // Same offset as v0.40 to align with hole
-        layoutMode = 0;
-    } else if (shaderFile.includes('v0.44')) {
-        // Vertical Wall (64 Step)
-        effectiveCellW = 705.0 / cols;
-        effectiveCellH = 725.0 / 64.0;
+        // Horizontal 32 (Frosted Wall)
+        effectiveCellW = 705.0 / 32.0;
+        effectiveCellH = 725.0 / cols;
         gl.uniform2f(uniforms.u_offset, 160.0, 160.0);
-        layoutMode = 0;
+        layoutMode = 2;
+    } else if (shaderFile.includes('v0.44')) {
+        // Horizontal 64 (Frosted Wall) - MODE 3
+        effectiveCellW = 705.0 / 64.0; // Thinner cells
+        effectiveCellH = 725.0 / cols;
+        gl.uniform2f(uniforms.u_offset, 160.0, 160.0);
+        layoutMode = 3; // Triggers 64-step logic in vertex shader
     } else {
-        // Circular (v0.38, v0.42)
+        // Circular
         gl.uniform2f(uniforms.u_offset, 0.0, 0.0);
         layoutMode = 1;
     }

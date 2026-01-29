@@ -14,31 +14,24 @@ struct VertOut { @builtin(position) pos: vec4<f32>, @location(0) uv: vec2<f32> }
 }
 
 @fragment fn fs(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
-    // 32-STEP VERTICAL WALL
-    // Matches the new Vertical WebGL Overlay
-    let cols = f32(params.numChannels); 
-    let rows = 32.0; // Visible vertical steps
-    
+    // HORIZONTAL WALL (32 Steps)
+    let cols = 32.0;
+    let rows = f32(params.numChannels);
     let gridX = fract(uv.x * cols);
     let gridY = fract(uv.y * rows);
     
-    // Vertical track dividers
+    // Grid Lines
     let divX = smoothstep(0.45, 0.5, abs(gridX - 0.5));
-    // Horizontal row lines (fainter)
     let divY = smoothstep(0.48, 0.5, abs(gridY - 0.5));
     
-    // Dark track background
+    // Dark Tech Background
     var col = vec3<f32>(0.15, 0.16, 0.18);
+    col -= vec3<f32>(0.05) * divY; // Dark horizontal gaps
+    col += vec3<f32>(0.03) * divX; // Light vertical lines
     
-    // Add dividers
-    col -= vec3<f32>(0.05) * divX; // Darken gaps between tracks
-    col += vec3<f32>(0.05) * divY; // Lighten row lines
-    
-    // Highlight every 4th row (Beat)
-    // We need world-space row index to do this perfectly, 
-    // but a static grid relative to screen is fine for the "chassis" feel
-    let rowID = floor(uv.y * rows);
-    if (u32(rowID) % 4u == 0u) { col += vec3<f32>(0.03); }
+    // Beat Highlight (Every 4th)
+    let stepID = floor(uv.x * cols);
+    if (u32(stepID) % 4u == 0u) { col += vec3<f32>(0.03); }
 
     return vec4<f32>(col, 0.8 * params.dimFactor);
 }
