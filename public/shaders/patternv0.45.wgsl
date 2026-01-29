@@ -66,12 +66,12 @@ fn fs(@location(0) uv: vec2<f32>, @location(1) isUI: f32) -> @location(0) vec4<f
     let iconPlay = sdTriangle(pPlay * vec2(1.,-1.) * 1.5, 0.015);
     
     if (dPlay < 0.0) {
-        let active = f32(params.isPlaying > 0u);
+        let isActive = f32(params.isPlaying > 0u);
         let base = vec3<f32>(0.0, 0.4, 0.1);
-        let glow = vec3<f32>(0.2, 1.0, 0.4) * active;
+        let glow = vec3<f32>(0.2, 1.0, 0.4) * isActive;
         // Icon
         let ic = smoothstep(aa, -aa, iconPlay);
-        let fill = mix(base, glow, 0.8) + (vec3(1.) * ic * active);
+        let fill = mix(base, glow, 0.8) + (vec3(1.) * ic * isActive);
         col = vec4(fill, 1.0);
     }
 
@@ -81,11 +81,11 @@ fn fs(@location(0) uv: vec2<f32>, @location(1) isUI: f32) -> @location(0) vec4<f
     let iconStop = sdBox(pStop, vec2(0.012));
     
     if (dStop < 0.0) {
-        let active = 1.0 - f32(params.isPlaying > 0u);
+        let isActive = 1.0 - f32(params.isPlaying > 0u);
         let base = vec3<f32>(0.4, 0.0, 0.0);
-        let glow = vec3<f32>(1.0, 0.2, 0.2) * active;
+        let glow = vec3<f32>(1.0, 0.2, 0.2) * isActive;
         let ic = smoothstep(aa, -aa, iconStop);
-        let fill = mix(base, glow, 0.8) + (vec3(1.) * ic * active);
+        let fill = mix(base, glow, 0.8) + (vec3(1.) * ic * isActive);
         col = vec4(fill, 1.0);
     }
 
