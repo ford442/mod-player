@@ -7,7 +7,7 @@ const SAMPLE_RATE = 44100;
 const BUFFER_SIZE = 4096;
 const INITIAL_STATUS = "Loading library...";
 const INITIAL_MODULE_INFO: ModuleInfo = { title: '...', order: 0, row: 0, bpm: 0, numChannels: 0 };
-const DEFAULT_MODULE_URL = 'https://raw.githubusercontent.com/deskjet/chiptunes/master/mods/4mat/4-mat_-_space_debris.mod';
+const DEFAULT_MODULE_URL = '4-mat_madness.mod';
 
 // Construct the correct path ensuring it respects the Vite base URL
 const BASE_URL = import.meta.env.BASE_URL || '/';

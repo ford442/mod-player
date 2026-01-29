@@ -22,7 +22,16 @@ interface ControlsProps {
 
 export const Controls: React.FC<ControlsProps> = ({
   isReady,
+  isModuleLoaded,
   onFileSelected,
+  onPlay,
+  onStop,
+  onLoopToggle,
+  isLooping,
+  volume,
+  setVolume,
+  pan,
+  setPan,
   onMediaAdd,
   onRemoteMediaSelect,
   remoteMediaList = [],
@@ -91,6 +100,60 @@ export const Controls: React.FC<ControlsProps> = ({
           </select>
         </label>
       </div>
+
+      {/* Playback Controls */}
+      <div className="flex items-center gap-2">
+        <button
+          onClick={onPlay}
+          disabled={!isReady || !isModuleLoaded}
+          className="px-4 py-2 bg-green-600 text-white text-sm font-semibold rounded-lg shadow-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        >
+          ▶️ Play
+        </button>
+        <button
+          onClick={onStop}
+          disabled={!isReady}
+          className="px-4 py-2 bg-red-600 text-white text-sm font-semibold rounded-lg shadow-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        >
+          ⏹️ Stop
+        </button>
+        <button
+          onClick={onLoopToggle}
+          className={`px-4 py-2 text-sm font-semibold rounded-lg shadow-lg transition-colors ${isLooping ? 'bg-blue-600 text-white hover:bg-blue-700' : 'bg-gray-600 text-white hover:bg-gray-700'}`}
+        >
+          🔄 Loop
+        </button>
+      </div>
+
+      {/* Volume and Pan Controls */}
+      {setVolume && volume !== undefined && (
+        <div className="flex items-center gap-2">
+          <label className="text-sm text-gray-400">Vol:</label>
+          <input
+            type="range"
+            min="0"
+            max="1"
+            step="0.01"
+            value={volume}
+            onChange={(e) => setVolume(parseFloat(e.target.value))}
+            className="w-20"
+          />
+        </div>
+      )}
+      {setPan && pan !== undefined && (
+        <div className="flex items-center gap-2">
+          <label className="text-sm text-gray-400">Pan:</label>
+          <input
+            type="range"
+            min="-1"
+            max="1"
+            step="0.01"
+            value={pan}
+            onChange={(e) => setPan(parseFloat(e.target.value))}
+            className="w-20"
+          />
+        </div>
+      )}
     </section>
   );
 };
