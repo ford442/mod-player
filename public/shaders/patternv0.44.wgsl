@@ -14,10 +14,9 @@ struct VertOut { @builtin(position) pos: vec4<f32>, @location(0) uv: vec2<f32> }
 }
 
 @fragment fn fs(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
-    // 64-STEP VERTICAL WALL
-    let cols = f32(params.numChannels); 
-    let rows = 64.0; // Denser!
-    
+    // HORIZONTAL WALL (64 Steps)
+    let cols = 64.0;
+    let rows = f32(params.numChannels);
     let gridX = fract(uv.x * cols);
     let gridY = fract(uv.y * rows);
     
@@ -25,11 +24,11 @@ struct VertOut { @builtin(position) pos: vec4<f32>, @location(0) uv: vec2<f32> }
     let divY = smoothstep(0.45, 0.5, abs(gridY - 0.5));
     
     var col = vec3<f32>(0.15, 0.16, 0.18);
-    col -= vec3<f32>(0.05) * divX;
-    col += vec3<f32>(0.03) * divY; 
+    col -= vec3<f32>(0.05) * divY;
+    col += vec3<f32>(0.02) * divX;
     
-    let rowID = floor(uv.y * rows);
-    if (u32(rowID) % 8u == 0u) { col += vec3<f32>(0.04); } // Highlight every 8th row for density
+    let stepID = floor(uv.x * cols);
+    if (u32(stepID) % 8u == 0u) { col += vec3<f32>(0.04); }
 
     return vec4<f32>(col, 0.8 * params.dimFactor);
 }
