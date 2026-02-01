@@ -218,13 +218,13 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
       col = mix(col, playCol, 1.0 - smoothstep(0.0, 0.05, dPlay));
       
       // Stop
-      let pStop = ctrlUV - vec2<f32>(0.6, btnY);
+      var pStop = ctrlUV - vec2<f32>(0.6, btnY);
       pStop.x *= aspect * (ctrlH / 1.0);
       let dStop = sdBox(pStop * 4.0, vec2<f32>(0.25));
       col = mix(col, vec3<f32>(0.8, 0.1, 0.1), 1.0 - smoothstep(0.0, 0.05, dStop));
       
       // Loop (Circle)
-      let pLoop = ctrlUV - vec2<f32>(0.4, btnY);
+      var pLoop = ctrlUV - vec2<f32>(0.4, btnY);
       pLoop.x *= aspect * (ctrlH / 1.0);
       let dLoop = abs(sdCircle(pLoop * 4.0, 0.25)) - 0.05;
       col = mix(col, vec3<f32>(0.9, 0.6, 0.0), 1.0 - smoothstep(0.0, 0.05, dLoop));
