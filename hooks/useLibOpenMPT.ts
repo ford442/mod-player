@@ -612,7 +612,8 @@ export function useLibOpenMPT(volume: number = 1.0) {
 
           const testCtx = new AudioContext({ sampleRate: SAMPLE_RATE });
           await testCtx.audioWorklet.addModule(WORKLET_URL);
-          audioWorkletReady.current = true;
+          // Do not set audioWorkletReady to true here; it tracks the *current* context state.
+          // We only want to enable the capability flag.
           useAudioWorklet.current = true;
           await testCtx.close();
           console.log('AudioWorklet support enabled');
