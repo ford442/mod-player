@@ -559,37 +559,33 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
 
     void main() {
         int id = gl_InstanceID;
-        int col = id % int(u_cols); // Track Index
-        int row = id / int(u_cols); // Row Index
+        int col = id % int(u_cols);
+        int row = id / int(u_cols);
         
         uint note = texelFetch(u_noteData, ivec2(col, row), 0).r;
         if (note == 0u) { gl_Position = vec4(0.0); return; }
 
         if (u_layoutMode == 2 || u_layoutMode == 3) {
-            // --- HORIZONTAL MODES ---
             float stepsPerPage = (u_layoutMode == 3) ? 64.0 : 32.0;
-
             float pageStart = floor(u_playhead / stepsPerPage) * stepsPerPage;
             float localRow = float(row) - pageStart;
             
-            // Cull outside active window
             if (localRow < 0.0 || localRow >= stepsPerPage) {
                 gl_Position = vec4(0.0); return;
             }
             
             float xPos = localRow * u_cellSize.x;
             float yPos = float(col) * u_cellSize.y;
-            
             vec2 capSize = u_cellSize * 0.9;
             vec2 center = vec2(xPos, yPos) + u_cellSize * 0.5 + u_offset;
             vec2 pos = center + (a_pos * capSize);
             
             vec2 ndc = (pos / u_resolution) * 2.0 - 1.0;
-            ndc.y = -ndc.y; // Flip Y for WebGL
+            ndc.y = -ndc.y;
             gl_Position = vec4(ndc, 0.0, 1.0);
 
         } else {
-            // --- CIRCULAR MODE (1) ---
+            // Circular Logic
             int ringIndex = col;
             if (u_invertChannels == 0) { ringIndex = int(u_cols) - 1 - col; }
             
@@ -610,12 +606,10 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
             float btnH = ringDepth * 0.95;
             
             vec2 localPos = a_pos * vec2(btnW, btnH);
-
             float rotAng = theta + 1.570796;
             float cA = cos(rotAng); float sA = sin(rotAng);
             float rotX = localPos.x * cA - localPos.y * sA;
             float rotY = localPos.x * sA + localPos.y * cA;
-
             float worldX = center.x + cos(theta) * radius + rotX;
             float worldY = center.y + sin(theta) * radius + rotY;
 
@@ -625,7 +619,8 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
         
         v_uv = a_pos + 0.5;
         v_active = 1.0;
-    }`;
+    }
+  `;
 
     const fsSource = `#version 300 es
     precision mediump float;
@@ -1139,32 +1134,30 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     let effectiveCellH = cellHeight;
     let layoutMode = 1; // Default Circular
 
-    if (shaderFile.includes('v0.40') || shaderFile.includes('v0.41')) {
-        // Horizontal 32 (Boxed)
-        effectiveCellW = 705.0 / 32.0;
-        effectiveCellH = 725.0 / cols;
-        gl.uniform2f(uniforms.u_offset, 160.0, 160.0);
-        layoutMode = 2;
-    } else if (shaderFile.includes('v0.39')) {
-        // Horizontal 32 (Full)
-        effectiveCellW = canvasMetrics.width / 32.0;
-        effectiveCellH = canvasMetrics.height / cols;
-        gl.uniform2f(uniforms.u_offset, 0.0, 0.0);
-        layoutMode = 2;
-    } else if (shaderFile.includes('v0.43')) {
-        // Horizontal 32 (Frosted Wall)
+    if (shaderFile.includes('v0.40') || shaderFile.includes('v0.41') || shaderFile.includes('v0.43')) {
+        // Horizontal 32
         effectiveCellW = 705.0 / 32.0;
         effectiveCellH = 725.0 / cols;
         gl.uniform2f(uniforms.u_offset, 160.0, 160.0);
         layoutMode = 2;
     } else if (shaderFile.includes('v0.44')) {
-        // Horizontal 64 (Frosted Wall) - MODE 3
-        effectiveCellW = 705.0 / 64.0; // Thinner cells
+        // Horizontal 64
+        effectiveCellW = 705.0 / 64.0;
         effectiveCellH = 725.0 / cols;
         gl.uniform2f(uniforms.u_offset, 160.0, 160.0);
-        layoutMode = 3; // Triggers 64-step logic in vertex shader
+        layoutMode = 3;
+    } else if (shaderFile.includes('v0.39')) {
+        // Full Screen Horizontal
+        effectiveCellW = canvasMetrics.width / 32.0;
+        effectiveCellH = canvasMetrics.height / cols;
+        gl.uniform2f(uniforms.u_offset, 0.0, 0.0);
+        layoutMode = 2;
+    } else if (shaderFile.includes('v0.45')) {
+        // Circular with UI
+        gl.uniform2f(uniforms.u_offset, 0.0, 0.0);
+        layoutMode = 1;
     } else {
-        // Circular
+        // Default Circular
         gl.uniform2f(uniforms.u_offset, 0.0, 0.0);
         layoutMode = 1;
     }
