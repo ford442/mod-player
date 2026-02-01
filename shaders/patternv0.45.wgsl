@@ -211,7 +211,7 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
       let btnY = 0.5;
       
       // Play
-      let pPlay = ctrlUV - vec2<f32>(0.5, btnY);
+      var pPlay = ctrlUV - vec2<f32>(0.5, btnY);
       pPlay.x *= aspect * (ctrlH / 1.0);
       let dPlay = sdTriangle(pPlay * 4.0, 0.3);
       let playCol = select(vec3<f32>(0.0, 0.4, 0.0), vec3<f32>(0.2, 1.0, 0.2), isPlaying);
