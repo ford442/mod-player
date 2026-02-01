@@ -14,21 +14,32 @@ struct VertOut { @builtin(position) pos: vec4<f32>, @location(0) uv: vec2<f32> }
 }
 
 @fragment fn fs(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
-    // HORIZONTAL WALL (64 Steps)
+    // 64-Step HORIZONTAL Precision
     let cols = 64.0;
     let rows = f32(params.numChannels);
     let gridX = fract(uv.x * cols);
     let gridY = fract(uv.y * rows);
     
-    let divX = smoothstep(0.4, 0.5, abs(gridX - 0.5));
-    let divY = smoothstep(0.45, 0.5, abs(gridY - 0.5));
+    let divX = step(0.92, gridX);
+    let divY = step(0.9, gridY);
     
-    var col = vec3<f32>(0.15, 0.16, 0.18);
-    col -= vec3<f32>(0.05) * divY;
-    col += vec3<f32>(0.02) * divX;
+    var col = vec3<f32>(0.1, 0.11, 0.12);
     
+    // Beat Highlight (Every 8th step = 4 beats in 64 window usually?)
+    // Standard is 4 lines per beat.
     let stepID = floor(uv.x * cols);
-    if (u32(stepID) % 8u == 0u) { col += vec3<f32>(0.04); }
+    if (u32(stepID) % 8u == 0u) {
+        col = vec3<f32>(0.14, 0.15, 0.17);
+    }
 
-    return vec4<f32>(col, 0.8 * params.dimFactor);
+    col += vec3<f32>(0.15) * divX;
+    col += vec3<f32>(0.15) * divY;
+
+    // Playhead (64 step window)
+    let activeCol = params.playheadRow % 64u;
+    if (u32(stepID) == activeCol) {
+        col += vec3<f32>(0.1, 0.3, 0.4);
+    }
+
+    return vec4<f32>(col, 0.85 * params.dimFactor);
 }
