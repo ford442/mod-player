@@ -10,7 +10,7 @@ const INITIAL_MODULE_INFO: ModuleInfo = { title: '...', order: 0, row: 0, bpm: 0
 const DEFAULT_MODULE_URL = '4-mat_madness.mod';
 
 // Construct the correct path ensuring it respects the Vite base URL
-const BASE_URL = import.meta.env.BASE_URL || '/';
+const BASE_URL = import.meta.env.BASE_URL || './';
 // Prepend BASE_URL so the worklet can be loaded from the correct base (Vite may set a sub-path)
 const WORKLET_URL = (BASE_URL + 'worklets/openmpt-processor.js').replace(/\/\//g, '/');
 
