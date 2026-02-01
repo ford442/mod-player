@@ -14,24 +14,34 @@ struct VertOut { @builtin(position) pos: vec4<f32>, @location(0) uv: vec2<f32> }
 }
 
 @fragment fn fs(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
-    // HORIZONTAL WALL (32 Steps)
+    // 32-Step HORIZONTAL (Like v0.21 but Horizontal)
     let cols = 32.0;
     let rows = f32(params.numChannels);
     let gridX = fract(uv.x * cols);
     let gridY = fract(uv.y * rows);
     
-    // Grid Lines
-    let divX = smoothstep(0.45, 0.5, abs(gridX - 0.5));
-    let divY = smoothstep(0.48, 0.5, abs(gridY - 0.5));
+    // Sharp, precision lines (v0.21 style)
+    let divX = step(0.9, gridX); // Sharp vertical line
+    let divY = step(0.9, gridY); // Sharp horizontal line
     
-    // Dark Tech Background
-    var col = vec3<f32>(0.15, 0.16, 0.18);
-    col -= vec3<f32>(0.05) * divY; // Dark horizontal gaps
-    col += vec3<f32>(0.03) * divX; // Light vertical lines
+    // v0.21 "Precision" Colors
+    var col = vec3<f32>(0.1, 0.11, 0.12); // Deep dark grey
     
-    // Beat Highlight (Every 4th)
+    // Highlight Beat (Every 4th)
     let stepID = floor(uv.x * cols);
-    if (u32(stepID) % 4u == 0u) { col += vec3<f32>(0.03); }
+    if (u32(stepID) % 4u == 0u) {
+        col = vec3<f32>(0.13, 0.14, 0.16); // Slightly lighter band
+    }
 
-    return vec4<f32>(col, 0.8 * params.dimFactor);
+    // Add grid
+    col += vec3<f32>(0.2) * divX;
+    col += vec3<f32>(0.2) * divY;
+
+    // Playhead Highlight
+    let activeCol = params.playheadRow % 32u;
+    if (u32(stepID) == activeCol) {
+        col += vec3<f32>(0.1, 0.3, 0.4); // Cyan tint
+    }
+
+    return vec4<f32>(col, 0.85 * params.dimFactor);
 }
