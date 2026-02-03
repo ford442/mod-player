@@ -19,6 +19,7 @@ class OpenMPTProcessor extends AudioWorkletProcessor {
     this.readPos = 0;
     this.writePos = 0;
     this.available = 0;
+    this.isRequesting = false;
     
     // Handle messages from main thread
     this.port.onmessage = (event) => {
@@ -45,12 +46,14 @@ class OpenMPTProcessor extends AudioWorkletProcessor {
         this.available--;
       }
     }
+    this.isRequesting = false;
   }
 
   reset() {
     this.readPos = 0;
     this.writePos = 0;
     this.available = 0;
+    this.isRequesting = false;
     this.leftBuffer.fill(0);
     this.rightBuffer.fill(0);
   }
@@ -80,8 +83,10 @@ class OpenMPTProcessor extends AudioWorkletProcessor {
       }
     }
 
-    // Request more data if buffer is running low (less than 2x quantum)
-    if (this.available < framesToProcess * 2) {
+    // Request more data if buffer has space for another chunk (4096)
+    // We maintain a reserve to prevent underruns while waiting for the main thread
+    if (this.available < 4096 && !this.isRequesting) {
+      this.isRequesting = true;
       this.port.postMessage({ type: 'needData' });
     }
 
