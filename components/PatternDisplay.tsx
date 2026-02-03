@@ -1404,6 +1404,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
               objectFit: 'contain',
               aspectRatio: `${canvasMetrics.width} / ${canvasMetrics.height}`,
               zIndex: 2,
+              pointerEvents: 'none',
           }}
       />
       
