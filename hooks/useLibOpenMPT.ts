@@ -416,6 +416,10 @@ export function useLibOpenMPT(volume: number = 1.0) {
         }
       }
 
+      if (audioContextRef.current.state === 'suspended') {
+        await audioContextRef.current.resume();
+      }
+
       if (!gainNodeRef.current) {
         gainNodeRef.current = audioContextRef.current.createGain();
         gainNodeRef.current.connect(audioContextRef.current.destination);
