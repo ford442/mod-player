@@ -444,6 +444,7 @@ export function useLibOpenMPT(volume: number = 1.0) {
       if (useAudioWorklet.current && audioWorkletReady.current) {
         try {
           audioWorkletNodeRef.current = new AudioWorkletNode(audioContextRef.current, 'openmpt-processor', { outputChannelCount: [2] });
+          
           // Handle data requests from the worklet
           audioWorkletNodeRef.current.port.onmessage = (event) => {
             if (event.data.type === 'needData') {
