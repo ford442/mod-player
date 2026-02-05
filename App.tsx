@@ -12,11 +12,9 @@ const SHADER_GROUPS = {
   SQUARE: [
     { id: 'patternv0.44.wgsl', label: 'v0.44 (Frosted Wall 64)' }, // New
     { id: 'patternv0.43.wgsl', label: 'v0.43 (Frosted Wall 32)' }, // New
-    { id: 'patternv0.41.wgsl', label: 'v0.41 (Frosted Clean)' },
     { id: 'patternv0.40.wgsl', label: 'v0.40 (Frosted Grid)' },
     { id: 'patternv0.39.wgsl', label: 'v0.39 (Modern)' },
     { id: 'patternv0.21.wgsl', label: 'v0.21 (Wall)' },
-    { id: 'patternv0.12.wgsl', label: 'v0.12 (Classic)' },
   ],
   CIRCULAR: [
     { id: 'patternv0.45.wgsl', label: 'v0.45 (Frosted UI)' },
@@ -41,58 +39,53 @@ function App() {
   const [isDarkMode, setIsDarkMode] = useState<boolean>(false);
   const [viewMode, setViewMode] = useState<'device' | 'wall'>('device');
 
-  // Calculate Dim Factor
-  const dimFactor = isDarkMode ? 0.3 : 1.0;
-
-  // Determine shader based on view mode when in 3D
-  const get3DShader = () => {
-    if (viewMode === 'wall') return 'patternv0.21.wgsl';
-    return 'patternv0.38.wgsl';
-  };
-
-  // Media Overlay State
-  const [mediaItem, setMediaItem] = useState<MediaItem | null>(null);
-  const [mediaVisible, setMediaVisible] = useState(false);
-
-  // Hook into the Audio Engine
   const {
-    status,
     isReady,
-    isPlaying,
     isModuleLoaded,
-    loadModule,
-    play,
-    stopMusic,
-    sequencerMatrix,
+    isPlaying,
+    isLooping,
     playbackSeconds,
     playbackRowFraction,
+    totalPatternRows,
+    sequencerMatrix,
     channelStates,
     beatPhase,
     grooveAmount,
     kickTrigger,
     activeChannels,
-    isLooping,
+    play,
+    stopMusic,
+    loadFile,
     setIsLooping,
     seekToStep,
-    totalPatternRows,
-    setPanValue: setHookPan
+    setPanValue: setLibPan,
+    status
   } = useLibOpenMPT(volume);
 
-  useEffect(() => {
-    setHookPan(pan);
-  }, [pan, setHookPan]);
+  // Media Overlay State
+  const [mediaVisible, setMediaVisible] = useState<boolean>(false);
+  const [mediaItem, setMediaItem] = useState<MediaItem | null>(null);
 
-  const handleFileSelected = (file: File) => {
-    loadModule(file);
+  // Sync pan with library
+  useEffect(() => { setLibPan(pan); }, [pan, setLibPan]);
+
+  // Handle File Selection
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+      loadFile(e.target.files[0]);
+    }
   };
 
-  const handleMediaAdd = (file: File) => {
+  const handleFileSelected = (file: File) => {
+    loadFile(file);
+  };
+
+  const handleMediaAdd = (file: File, kind: 'image' | 'video') => {
     const url = URL.createObjectURL(file);
-    const kind = file.type.startsWith('video') ? 'video' : 'image';
     setMediaItem({
       id: crypto.randomUUID(),
-      url,
       kind,
+      url,
       fileName: file.name,
       mimeType: file.type,
       loop: kind === 'video'
@@ -103,6 +96,15 @@ function App() {
   const handleRemoteMediaSelect = (item: MediaItem) => {
     setMediaItem(item);
     setMediaVisible(true);
+  };
+
+  // Calculate Dim Factor
+  const dimFactor = isDarkMode ? 0.3 : 1.0;
+
+  // Determine shader based on view mode when in 3D
+  const get3DShader = () => {
+    if (viewMode === 'wall') return 'patternv0.21.wgsl';
+    return 'patternv0.38.wgsl';
   };
 
   // Render in 3D mode
