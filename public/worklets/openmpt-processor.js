@@ -1,96 +1,76 @@
 /**
- * OpenMPT Audio Worklet Processor
- * Provides better performance and lower latency than ScriptProcessorNode
- * 
- * This processor receives pre-rendered audio buffers from the main thread
- * and outputs them to the audio context with proper buffering.
+ * OpenMPT Audio Worklet Processor with Ring Buffer
+ * Fixes skipping by buffering data ahead of playback.
  */
 
 class OpenMPTProcessor extends AudioWorkletProcessor {
   constructor() {
     super();
     
-    // Ring buffer for smooth audio playback
-    // Size: 8192 samples (2x the main buffer size of 4096)
-    // Provides ~185ms of buffering at 44.1kHz to prevent underruns
-    this.bufferSize = 8192;
-    this.leftBuffer = new Float32Array(this.bufferSize);
-    this.rightBuffer = new Float32Array(this.bufferSize);
-    this.readPos = 0;
-    this.writePos = 0;
-    this.available = 0;
-    this.isRequesting = false;
+    // Buffer Configuration: 5 seconds @ 44.1kHz (Stereo)
+    this.bufferSize = 44100 * 5;
+    this.buffer = new Float32Array(this.bufferSize * 2);
     
-    // Handle messages from main thread
-    this.port.onmessage = (event) => {
-      if (event.data.type === 'audioData') {
-        this.enqueueAudio(event.data.left, event.data.right);
-      } else if (event.data.type === 'reset') {
-        this.reset();
-      }
+    // Pointers (Read/Write heads)
+    this.readIndex = 0;
+    this.writeIndex = 0;
+    this.availableFrames = 0;
+
+    this.port.onmessage = (e) => {
+      const { left, right } = e.data;
+      if (!left || !right) return;
+      this.pushData(left, right);
     };
   }
 
-  enqueueAudio(leftData, rightData) {
-    const samples = leftData.length;
+  // Add incoming data to the Ring Buffer
+  pushData(leftData, rightData) {
+    const inputLen = leftData.length;
     
-    for (let i = 0; i < samples; i++) {
-      this.leftBuffer[this.writePos] = leftData[i];
-      this.rightBuffer[this.writePos] = rightData[i];
-      this.writePos = (this.writePos + 1) % this.bufferSize;
-      this.available++;
+    for (let i = 0; i < inputLen; i++) {
+      // Write Left
+      this.buffer[this.writeIndex * 2] = leftData[i];
+      // Write Right
+      this.buffer[this.writeIndex * 2 + 1] = rightData[i];
       
-      // Prevent buffer overflow
-      if (this.available >= this.bufferSize) {
-        this.readPos = (this.readPos + 1) % this.bufferSize;
-        this.available--;
-      }
+      this.writeIndex = (this.writeIndex + 1) % this.bufferSize;
     }
-    this.isRequesting = false;
-  }
 
-  reset() {
-    this.readPos = 0;
-    this.writePos = 0;
-    this.available = 0;
-    this.isRequesting = false;
-    this.leftBuffer.fill(0);
-    this.rightBuffer.fill(0);
+    this.availableFrames = Math.min(this.availableFrames + inputLen, this.bufferSize);
   }
 
   process(inputs, outputs, parameters) {
     const output = outputs[0];
+    const outputLeft = output[0];
+    const outputRight = output[1];
     
-    if (!output || output.length < 2) {
+    // Guard against empty output channels (can happen during teardown)
+    if (!outputLeft || !outputRight) return true;
+
+    const framesToRead = outputLeft.length; // Usually 128
+
+    // If we are starving (not enough data), output silence but keep alive
+    if (this.availableFrames < framesToRead) {
+      this.port.postMessage({ type: 'starvation' }); // Optional: notify main thread
       return true;
     }
 
-    const leftChannel = output[0];
-    const rightChannel = output[1];
-    const framesToProcess = leftChannel.length;
+    // Read from Ring Buffer
+    for (let i = 0; i < framesToRead; i++) {
+      outputLeft[i] = this.buffer[this.readIndex * 2];
+      outputRight[i] = this.buffer[this.readIndex * 2 + 1];
 
-    // Output buffered samples or silence
-    for (let i = 0; i < framesToProcess; i++) {
-      if (this.available > 0) {
-        leftChannel[i] = this.leftBuffer[this.readPos];
-        rightChannel[i] = this.rightBuffer[this.readPos];
-        this.readPos = (this.readPos + 1) % this.bufferSize;
-        this.available--;
-      } else {
-        // No data available, output silence
-        leftChannel[i] = 0;
-        rightChannel[i] = 0;
-      }
+      this.readIndex = (this.readIndex + 1) % this.bufferSize;
     }
 
-    // Request more data if buffer has space for another chunk (4096)
-    // We maintain a reserve to prevent underruns while waiting for the main thread
-    if (this.available < 4096 && !this.isRequesting) {
-      this.isRequesting = true;
-      this.port.postMessage({ type: 'needData' });
+    this.availableFrames -= framesToRead;
+
+    // Report buffer level occasionally (every ~1024 frames)
+    if (this.readIndex % 1024 === 0) {
+        this.port.postMessage({ type: 'bufferLevel', level: this.availableFrames });
     }
 
-    return true; // Keep processor alive
+    return true;
   }
 }
 
