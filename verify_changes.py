@@ -10,7 +10,7 @@ def verify_changes(page: Page):
 
     print("Checking for Volume control...")
     # Check for volume slider
-    volume_input = page.locator('input[type="range"]')
+    volume_input = page.locator('input[type="range"]').first
     expect(volume_input).to_be_visible()
 
     print("Checking for Controls bar...")
@@ -20,7 +20,7 @@ def verify_changes(page: Page):
 
     print("Checking for Pattern Display...")
     # Check for canvas (WebGPU pattern display)
-    canvas = page.locator('canvas')
+    canvas = page.locator('canvas').first
     expect(canvas).to_be_visible()
 
     # Wait a bit more for animation
