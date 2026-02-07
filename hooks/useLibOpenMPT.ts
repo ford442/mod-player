@@ -557,8 +557,8 @@ export function useLibOpenMPT(volume: number = 1.0) {
           // 1. Initial prefill - fill to target buffer size
           console.log('Prefilling audio buffer...');
           let totalPrefilled = 0;
-          const prefilChunks = Math.ceil(BUFFER_TARGET_FRAMES / CHUNK_SIZE);
-          for (let i = 0; i < prefilChunks; i++) {
+          const prefillChunks = Math.ceil(BUFFER_TARGET_FRAMES / CHUNK_SIZE);
+          for (let i = 0; i < prefillChunks; i++) {
             processAudioChunk(CHUNK_SIZE);
             totalPrefilled += CHUNK_SIZE;
           }
