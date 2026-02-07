@@ -59,6 +59,9 @@ function App() {
     setIsLooping,
     seekToStep,
     setPanValue: setLibPan,
+    activeEngine,
+    isWorkletSupported,
+    toggleAudioEngine,
     status
   } = useLibOpenMPT(volume);
 
@@ -213,6 +216,20 @@ function App() {
                   className={`px-4 py-2 text-sm font-mono rounded-lg shadow-lg transition-colors border ${isDarkMode ? 'bg-gray-800 text-white border-gray-700 hover:bg-gray-700' : 'bg-white text-black border-gray-300 hover:bg-gray-50'}`}
                 >
                   {isDarkMode ? '☀️ Light' : '🌙 Dark'}
+                </button>
+                <button
+                  onClick={toggleAudioEngine}
+                  disabled={!isWorkletSupported}
+                  title={!isWorkletSupported ? "AudioWorklet not supported" : "Toggle Audio Engine (Worklet vs ScriptProcessor)"}
+                  className={`px-4 py-2 text-sm font-mono rounded-lg shadow-lg transition-colors border ${
+                    !isWorkletSupported
+                      ? 'bg-gray-300 text-gray-500 cursor-not-allowed border-gray-400 opacity-50'
+                      : activeEngine === 'worklet'
+                        ? 'bg-green-600 text-white border-green-500 hover:bg-green-700'
+                        : 'bg-yellow-500 text-black border-yellow-400 hover:bg-yellow-600'
+                  }`}
+                >
+                  {activeEngine === 'worklet' ? '⚡ Worklet' : '🐌 Script'}
                 </button>
             </div>
 
