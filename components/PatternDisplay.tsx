@@ -4,7 +4,7 @@ import { ChannelShadowState, PatternMatrix } from '../types';
 const DEFAULT_ROWS = 64;
 const DEFAULT_CHANNELS = 4;
 const EMPTY_CHANNEL: ChannelShadowState = {
-  note: 0, inst: 0, volCmd: 0, volVal: 0, effCmd: 0, effVal: 0,
+  
   volume: 1.0, pan: 0.5, freq: 440, trigger: 0, noteAge: 1000,
   activeEffect: 0, effectValue: 0, isMuted: 0
 };
@@ -20,9 +20,6 @@ const getLayoutType = (shaderFile: string): LayoutType => {
   return 'standard';
 };
 
-const isExtendedLayout = (shaderFile: string) => {
-  return shaderFile.includes('v0.28') || shaderFile.includes('v0.30') || shaderFile.includes('v0.31') || shaderFile.includes('v0.32') || shaderFile.includes('v0.33') || shaderFile.includes('v0.34') || shaderFile.includes('v0.35') || shaderFile.includes('v0.36') || shaderFile.includes('v0.37') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45');
-};
 
 const isSinglePassCompositeShader = (shaderFile: string) => {
   // Shaders that do their own background composition in one pass
@@ -371,12 +368,10 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
 
   // WebGL Overlay Refs
   const glContextRef = useRef<WebGL2RenderingContext | null>(null);
-  const glProgramRef = useRef<WebGLProgram | null>(null);
 
   const renderRef = useRef<() => void>();
 
   // Use effective values if passed, otherwise default
-  const numRows = matrix?.numRows ?? DEFAULT_ROWS;
   const numChannels = matrix?.numChannels ?? DEFAULT_CHANNELS;
 
   // Some older shaders have a reserved header/ring channel (index 0)
@@ -720,7 +715,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
           pipelineRef.current = device.createRenderPipeline({ layout: device.createPipelineLayout({ bindGroupLayouts: [bindGroupLayout] }), vertex: { module, entryPoint: 'vertex_main' }, fragment: { module, entryPoint: 'fragment_main', targets }, primitive: { topology: 'triangle-list' } });
         }
 
-        const uniformSize = layoutType === 'simple' ? 32 : 64;
+        const uniformSize = layoutType === 'extended' ? 80 : (layoutType === 'texture' ? 64 : 32);
         const uniformBuffer = device.createBuffer({ size: alignTo(uniformSize, 256), usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
 
         if (shouldUseBackgroundPass(shaderFile)) {
@@ -1148,7 +1143,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     animationFrameRef.current = requestAnimationFrame(loop);
 
     return () => {
-      cancelAnimationFrame(animationFrameRef.current);
+      if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
     };
   }, [isModuleLoaded, isPlaying]);
 
