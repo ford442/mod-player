@@ -70,17 +70,13 @@ function App() {
   useEffect(() => { setLibPan(pan); }, [pan, setLibPan]);
 
   // Handle File Selection
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files.length > 0) {
-      loadFile(e.target.files[0]);
-    }
-  };
 
   const handleFileSelected = (file: File) => {
     loadFile(file);
   };
 
-  const handleMediaAdd = (file: File, kind: 'image' | 'video') => {
+  const handleMediaAdd = (file: File) => {
+    const kind = file.type.startsWith("video") ? "video" : "image";
     const url = URL.createObjectURL(file);
     setMediaItem({
       id: crypto.randomUUID(),
