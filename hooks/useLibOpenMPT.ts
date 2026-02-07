@@ -71,6 +71,11 @@ export function useLibOpenMPT(volume: number = 1.0) {
   const [sequencerCurrentRow, setSequencerCurrentRow] = useState<number>(0);
   const [sequencerGlobalRow, setSequencerGlobalRow] = useState<number>(0);
   const [totalPatternRows, setTotalPatternRows] = useState<number>(0);
+
+  // Audio Engine State
+  const [isWorkletSupported, setIsWorkletSupported] = useState<boolean>(false);
+  const [activeEngine, setActiveEngine] = useState<'worklet' | 'script'>('script');
+  const [restartPlayback, setRestartPlayback] = useState<boolean>(false);
   const [playbackSeconds, setPlaybackSeconds] = useState<number>(0);
   const [playbackRowFraction, setPlaybackRowFraction] = useState<number>(0);
   const [channelStates, setChannelStates] = useState<ChannelShadowState[]>([]);
@@ -471,7 +476,7 @@ export function useLibOpenMPT(volume: number = 1.0) {
         audioContextRef.current = new AudioContext({ sampleRate: SAMPLE_RATE });
 
         // Initialize AudioWorklet
-        if (useAudioWorklet.current && !audioWorkletReady.current) {
+        if (activeEngine === 'worklet' && !audioWorkletReady.current) {
           try {
              // Preflight HEAD
             try {
@@ -518,7 +523,7 @@ export function useLibOpenMPT(volume: number = 1.0) {
       stereoPannerRef.current.pan.value = panValue;
 
       // --- Worklet Path ---
-      if (useAudioWorklet.current && audioWorkletReady.current) {
+      if (activeEngine === 'worklet' && audioWorkletReady.current) {
         try {
           audioWorkletNodeRef.current = new AudioWorkletNode(audioContextRef.current, 'openmpt-processor', { outputChannelCount: [2] });
 
@@ -589,12 +594,12 @@ export function useLibOpenMPT(volume: number = 1.0) {
 
         } catch (workletErr) {
           console.warn('Failed to create AudioWorkletNode, falling back:', workletErr);
-          useAudioWorklet.current = false;
+          // activeEngine remains 'worklet' but we fall through because audioWorkletNodeRef is null
         }
       }
 
       // --- Legacy ScriptProcessor Path ---
-      if (!useAudioWorklet.current || !audioWorkletNodeRef.current) {
+      if (activeEngine === 'script' || (activeEngine === 'worklet' && !audioWorkletNodeRef.current)) {
         const lib = libopenmptRef.current as LibOpenMPT;
         const modPtr = currentModulePtr.current;
         const leftBufferPtr = lib._malloc(BUFFER_SIZE * 4);
@@ -645,7 +650,31 @@ export function useLibOpenMPT(volume: number = 1.0) {
       console.error("Failed to start music:", e);
       setStatus("Error: Failed to start playback. See console.");
     }
-  }, [isPlaying, stopMusic, updateUI, panValue, volume, processAudioChunk]);
+  }, [isPlaying, stopMusic, updateUI, panValue, volume, processAudioChunk, activeEngine]);
+
+  const toggleAudioEngine = useCallback(() => {
+    // If attempting to switch to worklet but not supported, do nothing
+    if (activeEngine === 'script' && !isWorkletSupported) return;
+
+    const newEngine = activeEngine === 'worklet' ? 'script' : 'worklet';
+
+    // If currently playing, we want to restart
+    if (isPlaying) {
+      stopMusic(false);
+      setRestartPlayback(true);
+    }
+
+    setActiveEngine(newEngine);
+    console.log();
+  }, [activeEngine, isPlaying, isWorkletSupported, stopMusic]);
+
+  // Handle auto-restart after engine switch
+  useEffect(() => {
+    if (restartPlayback) {
+      setRestartPlayback(false);
+      play();
+    }
+  }, [restartPlayback, play]);
 
   useEffect(() => {
     const init = async () => {
@@ -717,7 +746,8 @@ export function useLibOpenMPT(volume: number = 1.0) {
           await testCtx.audioWorklet.addModule(WORKLET_URL);
           // Do not set audioWorkletReady to true here; it tracks the *current* context state.
           // We only want to enable the capability flag.
-          useAudioWorklet.current = true;
+          setIsWorkletSupported(true);
+          setActiveEngine('worklet');
           await testCtx.close();
           console.log('AudioWorklet support enabled');
         } catch (workletErr) {
@@ -736,7 +766,8 @@ export function useLibOpenMPT(volume: number = 1.0) {
           }
 
           audioWorkletReady.current = false;
-          useAudioWorklet.current = false;
+          setIsWorkletSupported(false);
+          setActiveEngine('script');
         }
       } catch (err) {
         const error = err as Error;
@@ -837,5 +868,5 @@ export function useLibOpenMPT(volume: number = 1.0) {
     }
   };
 
-  return { status, isReady, isPlaying, isModuleLoaded, moduleInfo, patternData, loadFile: loadModule, play, stopMusic, sequencerMatrix, sequencerCurrentRow, sequencerGlobalRow, totalPatternRows, playbackSeconds, playbackRowFraction, channelStates, beatPhase, grooveAmount, kickTrigger, activeChannels, isLooping, setIsLooping, seekToStep, panValue, setPanValue };
+  return { status, isReady, isPlaying, isModuleLoaded, moduleInfo, patternData, loadFile: loadModule, play, stopMusic, sequencerMatrix, sequencerCurrentRow, sequencerGlobalRow, totalPatternRows, playbackSeconds, playbackRowFraction, channelStates, beatPhase, grooveAmount, kickTrigger, activeChannels, isLooping, setIsLooping, seekToStep, panValue, setPanValue, activeEngine, isWorkletSupported, toggleAudioEngine };
 }
