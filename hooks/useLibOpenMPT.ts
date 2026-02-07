@@ -99,9 +99,11 @@ export function useLibOpenMPT(volume: number = 1.0) {
 
   // Buffering / Pump Refs
   const bufferTimerRef = useRef<number | null>(null);
-  const generatedTimeRef = useRef<number>(0);
-  const BUFFER_LOOKAHEAD_MS = 500;
-  const CHUNK_SIZE = 2048;
+  const workletBufferLevel = useRef<number>(0); // Track actual worklet buffer level
+  const lastPumpTime = useRef<number>(0);
+  const BUFFER_TARGET_FRAMES = 44100 * 0.5; // Target 500ms of buffered audio
+  const BUFFER_MIN_FRAMES = 44100 * 0.2; // Minimum 200ms before pumping more
+  const CHUNK_SIZE = 4096;
 
   useEffect(() => {
     moduleInfoRef.current = moduleInfo;
@@ -146,6 +148,10 @@ export function useLibOpenMPT(volume: number = 1.0) {
         bufferTimerRef.current = null;
     }
 
+    // Reset buffer tracking
+    workletBufferLevel.current = 0;
+    lastPumpTime.current = 0;
+
     setIsPlaying(false);
     cancelAnimationFrame(animationFrameHandle.current);
 
@@ -156,9 +162,6 @@ export function useLibOpenMPT(volume: number = 1.0) {
         console.error("Error resetting module position:", e);
       }
     }
-
-    // Reset sync
-    generatedTimeRef.current = 0;
 
     setPatternData(ended ? '... Song Ended ...' : '... Stopped ...');
     if (ended) {
@@ -422,6 +425,9 @@ export function useLibOpenMPT(volume: number = 1.0) {
              }
         } else {
              stopMusic(true);
+             lib._free(leftBufferPtr);
+             lib._free(rightBufferPtr);
+             return;
         }
     }
 
@@ -439,10 +445,11 @@ export function useLibOpenMPT(volume: number = 1.0) {
             { left: leftSend, right: rightSend },
             [leftSend.buffer, rightSend.buffer]
         );
+        
+        // Update our tracking of the buffer level
+        // We estimate by adding what we sent
+        workletBufferLevel.current += framesRead;
     }
-
-    // Update Time Tracking
-    generatedTimeRef.current += (framesRead / SAMPLE_RATE);
 
     // Cleanup
     lib._free(leftBufferPtr);
@@ -513,13 +520,17 @@ export function useLibOpenMPT(volume: number = 1.0) {
         try {
           audioWorkletNodeRef.current = new AudioWorkletNode(audioContextRef.current, 'openmpt-processor', { outputChannelCount: [2] });
 
-          // Worklet now handles starvation internally or requests via message.
-          // But our new PUMP logic proactively fills it.
-          // We can still listen for starvation messages to debug or emergency fill.
+          // Listen for buffer level updates and starvation messages
           audioWorkletNodeRef.current.port.onmessage = (event) => {
              if (event.data.type === 'starvation') {
-                 console.warn("Audio Buffer Underrun! Pumping more data.");
-                 processAudioChunk(CHUNK_SIZE);
+                 console.warn("Audio Buffer Underrun! Available frames:", event.data.available);
+                 // Emergency refill
+                 processAudioChunk(CHUNK_SIZE * 4);
+             } else if (event.data.type === 'bufferLevel') {
+                 // Update our tracking of the actual buffer level
+                 workletBufferLevel.current = event.data.level;
+             } else if (event.data.type === 'overflow') {
+                 console.warn("Buffer overflow, lost frames:", event.data.lost);
              }
           };
 
@@ -531,19 +542,43 @@ export function useLibOpenMPT(volume: number = 1.0) {
 
           // START PUMP
           if (bufferTimerRef.current) clearInterval(bufferTimerRef.current);
-          generatedTimeRef.current = audioContextRef.current.currentTime;
+          
+          // Reset buffer tracking
+          workletBufferLevel.current = 0;
+          lastPumpTime.current = audioContextRef.current.currentTime;
 
-          // 1. Prefill (approx 370ms)
-          processAudioChunk(4096 * 4);
+          // 1. Initial prefill - fill to target buffer size
+          console.log('Prefilling audio buffer...');
+          let totalPrefilled = 0;
+          while (totalPrefilled < BUFFER_TARGET_FRAMES) {
+            const chunkSize = Math.min(CHUNK_SIZE, BUFFER_TARGET_FRAMES - totalPrefilled);
+            processAudioChunk(chunkSize);
+            totalPrefilled += chunkSize;
+          }
+          console.log(`Prefilled ${totalPrefilled} frames (${(totalPrefilled / SAMPLE_RATE * 1000).toFixed(0)}ms)`);
 
-          // 2. Interval
+          // 2. Continuous pump - maintain buffer level
           bufferTimerRef.current = window.setInterval(() => {
-              if (!audioContextRef.current) return;
-              const latency = generatedTimeRef.current - audioContextRef.current.currentTime;
-              if (latency < (BUFFER_LOOKAHEAD_MS / 1000)) {
-                  processAudioChunk(CHUNK_SIZE);
+              if (!audioContextRef.current || !isPlayingRef.current) return;
+              
+              // Estimate how much has been consumed since last pump
+              const now = audioContextRef.current.currentTime;
+              const elapsed = now - lastPumpTime.current;
+              const framesConsumed = elapsed * SAMPLE_RATE;
+              
+              // Update our estimate of buffer level
+              workletBufferLevel.current = Math.max(0, workletBufferLevel.current - framesConsumed);
+              lastPumpTime.current = now;
+              
+              // If buffer is below minimum, pump more data
+              if (workletBufferLevel.current < BUFFER_MIN_FRAMES) {
+                  const framesToAdd = BUFFER_TARGET_FRAMES - workletBufferLevel.current;
+                  const chunksNeeded = Math.ceil(framesToAdd / CHUNK_SIZE);
+                  for (let i = 0; i < chunksNeeded && i < 4; i++) {
+                    processAudioChunk(CHUNK_SIZE);
+                  }
               }
-          }, 20);
+          }, 50); // Check every 50ms
 
         } catch (workletErr) {
           console.warn('Failed to create AudioWorkletNode, falling back:', workletErr);

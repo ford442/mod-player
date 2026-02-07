@@ -15,6 +15,7 @@ class OpenMPTProcessor extends AudioWorkletProcessor {
     this.readIndex = 0;
     this.writeIndex = 0;
     this.availableFrames = 0;
+    this.lastStarvationTime = 0;
 
     this.port.onmessage = (e) => {
       const { left, right } = e.data;
@@ -27,7 +28,17 @@ class OpenMPTProcessor extends AudioWorkletProcessor {
   pushData(leftData, rightData) {
     const inputLen = leftData.length;
     
-    for (let i = 0; i < inputLen; i++) {
+    // Check if we have space in the buffer
+    const freeSpace = this.bufferSize - this.availableFrames;
+    const framesToWrite = Math.min(inputLen, freeSpace);
+    
+    if (framesToWrite < inputLen) {
+      // Buffer overflow - we're writing faster than consuming
+      // This shouldn't happen with proper pump management, but log it
+      this.port.postMessage({ type: 'overflow', lost: inputLen - framesToWrite });
+    }
+    
+    for (let i = 0; i < framesToWrite; i++) {
       // Write Left
       this.buffer[this.writeIndex * 2] = leftData[i];
       // Write Right
@@ -36,7 +47,7 @@ class OpenMPTProcessor extends AudioWorkletProcessor {
       this.writeIndex = (this.writeIndex + 1) % this.bufferSize;
     }
 
-    this.availableFrames = Math.min(this.availableFrames + inputLen, this.bufferSize);
+    this.availableFrames = Math.min(this.availableFrames + framesToWrite, this.bufferSize);
   }
 
   process(inputs, outputs, parameters) {
@@ -49,9 +60,18 @@ class OpenMPTProcessor extends AudioWorkletProcessor {
 
     const framesToRead = outputLeft.length; // Usually 128
 
-    // If we are starving (not enough data), output silence but keep alive
+    // If we are starving (not enough data), output silence and notify
     if (this.availableFrames < framesToRead) {
-      this.port.postMessage({ type: 'starvation' }); // Optional: notify main thread
+      // Output zeros to prevent glitches
+      outputLeft.fill(0);
+      outputRight.fill(0);
+      
+      // Throttle starvation messages to once per 100ms
+      const now = currentTime;
+      if (now - this.lastStarvationTime > 0.1) {
+        this.port.postMessage({ type: 'starvation', available: this.availableFrames });
+        this.lastStarvationTime = now;
+      }
       return true;
     }
 
