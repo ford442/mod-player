@@ -101,9 +101,11 @@ export function useLibOpenMPT(volume: number = 1.0) {
   const bufferTimerRef = useRef<number | null>(null);
   const workletBufferLevel = useRef<number>(0); // Track actual worklet buffer level
   const lastPumpTime = useRef<number>(0);
-  const BUFFER_TARGET_FRAMES = 44100 * 0.5; // Target 500ms of buffered audio
-  const BUFFER_MIN_FRAMES = 44100 * 0.2; // Minimum 200ms before pumping more
+  const BUFFER_TARGET_FRAMES = SAMPLE_RATE * 0.5; // Target 500ms of buffered audio
+  const BUFFER_MIN_FRAMES = SAMPLE_RATE * 0.2; // Minimum 200ms before pumping more
   const CHUNK_SIZE = 4096;
+  const EMERGENCY_REFILL_MULTIPLIER = 4; // Multiplier for emergency refill on starvation
+  const MAX_CHUNKS_PER_PUMP = 4; // Maximum chunks to pump per interval
 
   useEffect(() => {
     moduleInfoRef.current = moduleInfo;
@@ -525,7 +527,7 @@ export function useLibOpenMPT(volume: number = 1.0) {
              if (event.data.type === 'starvation') {
                  console.warn("Audio Buffer Underrun! Available frames:", event.data.available);
                  // Emergency refill
-                 processAudioChunk(CHUNK_SIZE * 4);
+                 processAudioChunk(CHUNK_SIZE * EMERGENCY_REFILL_MULTIPLIER);
              } else if (event.data.type === 'bufferLevel') {
                  // Update our tracking of the actual buffer level
                  workletBufferLevel.current = event.data.level;
@@ -574,7 +576,7 @@ export function useLibOpenMPT(volume: number = 1.0) {
               if (workletBufferLevel.current < BUFFER_MIN_FRAMES) {
                   const framesToAdd = BUFFER_TARGET_FRAMES - workletBufferLevel.current;
                   const chunksNeeded = Math.ceil(framesToAdd / CHUNK_SIZE);
-                  for (let i = 0; i < chunksNeeded && i < 4; i++) {
+                  for (let i = 0; i < chunksNeeded && i < MAX_CHUNKS_PER_PUMP; i++) {
                     processAudioChunk(CHUNK_SIZE);
                   }
               }

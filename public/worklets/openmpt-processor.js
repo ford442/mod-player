@@ -16,6 +16,9 @@ class OpenMPTProcessor extends AudioWorkletProcessor {
     this.writeIndex = 0;
     this.availableFrames = 0;
     this.lastStarvationTime = 0;
+    
+    // Constants
+    this.STARVATION_THROTTLE_SECONDS = 0.1; // Throttle starvation messages to 100ms
 
     this.port.onmessage = (e) => {
       const { left, right } = e.data;
@@ -66,9 +69,9 @@ class OpenMPTProcessor extends AudioWorkletProcessor {
       outputLeft.fill(0);
       outputRight.fill(0);
       
-      // Throttle starvation messages to once per 100ms
+      // Throttle starvation messages to once per STARVATION_THROTTLE_SECONDS
       const now = currentTime;
-      if (now - this.lastStarvationTime > 0.1) {
+      if (now - this.lastStarvationTime > this.STARVATION_THROTTLE_SECONDS) {
         this.port.postMessage({ type: 'starvation', available: this.availableFrames });
         this.lastStarvationTime = now;
       }
