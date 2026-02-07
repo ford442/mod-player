@@ -526,8 +526,13 @@ export function useLibOpenMPT(volume: number = 1.0) {
           audioWorkletNodeRef.current.port.onmessage = (event) => {
              if (event.data.type === 'starvation') {
                  console.warn("Audio Buffer Underrun! Available frames:", event.data.available);
-                 // Emergency refill
-                 processAudioChunk(CHUNK_SIZE * EMERGENCY_REFILL_MULTIPLIER);
+                 // Emergency refill - pump enough to reach minimum threshold
+                 const deficit = BUFFER_MIN_FRAMES - event.data.available;
+                 const chunksNeeded = Math.max(1, Math.ceil(deficit / CHUNK_SIZE));
+                 const chunksToRefill = Math.min(chunksNeeded, EMERGENCY_REFILL_MULTIPLIER);
+                 for (let i = 0; i < chunksToRefill; i++) {
+                   processAudioChunk(CHUNK_SIZE);
+                 }
              } else if (event.data.type === 'bufferLevel') {
                  // Update our tracking of the actual buffer level
                  workletBufferLevel.current = event.data.level;
@@ -552,10 +557,10 @@ export function useLibOpenMPT(volume: number = 1.0) {
           // 1. Initial prefill - fill to target buffer size
           console.log('Prefilling audio buffer...');
           let totalPrefilled = 0;
-          while (totalPrefilled < BUFFER_TARGET_FRAMES) {
-            const chunkSize = Math.min(CHUNK_SIZE, BUFFER_TARGET_FRAMES - totalPrefilled);
-            processAudioChunk(chunkSize);
-            totalPrefilled += chunkSize;
+          const prefilChunks = Math.ceil(BUFFER_TARGET_FRAMES / CHUNK_SIZE);
+          for (let i = 0; i < prefilChunks; i++) {
+            processAudioChunk(CHUNK_SIZE);
+            totalPrefilled += CHUNK_SIZE;
           }
           console.log(`Prefilled ${totalPrefilled} frames (${(totalPrefilled / SAMPLE_RATE * 1000).toFixed(0)}ms)`);
 

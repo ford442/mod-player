@@ -88,8 +88,8 @@ class OpenMPTProcessor extends AudioWorkletProcessor {
 
     this.availableFrames -= framesToRead;
 
-    // Report buffer level occasionally (every ~1024 frames)
-    if (this.readIndex % 1024 === 0) {
+    // Report buffer level more frequently for accurate tracking (every 512 frames)
+    if (this.readIndex % 512 === 0) {
         this.port.postMessage({ type: 'bufferLevel', level: this.availableFrames });
     }
 
