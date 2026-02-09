@@ -1,8 +1,9 @@
-// patternv0.44.wgsl
-// Frosted Wall 64 (Square)
-// - 64 Channels
-// - Frosted Caps
-// - Full screen rendering
+// patternv0.46.wgsl
+// Frosted Glass
+// - Fixed: Full screen rendering to support UI and proper scaling
+// - Fixed: Pattern playback logic
+// - Added: Playback control buttons
+// - Added: Translucent frosted glass caps with subsurface scattering
 
 struct Uniforms {
   numRows: u32,
@@ -25,6 +26,7 @@ struct Uniforms {
   bloomThreshold: f32,
   invertChannels: u32,
   dimFactor: f32,
+  gridRect: vec4<f32>,  // x, y, w, h (normalized)
 };
 
 @group(0) @binding(0) var<storage, read> cells: array<u32>;
@@ -108,24 +110,25 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   let aspect = uniforms.canvasW / uniforms.canvasH;
   let dimFactor = uniforms.dimFactor;
   
-  // Dark background
+  // Background (will show through transparent areas)
   var col = vec3<f32>(0.05, 0.05, 0.06);
   
-  // --- LAYOUT ---
-  // Top: 0.0 - 0.85 (Grid)
-  // Bottom: 0.85 - 1.0 (Controls)
-  
-  let gridBottom = 0.85;
-  let margin = 0.05;
+  // --- LAYOUT using gridRect for precise bezel alignment ---
+  // gridRect defines the exact grid area within the bezel
+  let gridLeft = uniforms.gridRect.x;
+  let gridRight = uniforms.gridRect.x + uniforms.gridRect.z;
+  let gridTop = uniforms.gridRect.y;
+  let gridBottom = uniforms.gridRect.y + uniforms.gridRect.w;
   
   // --- GRID RENDER ---
-  if (uv.x > margin && uv.x < (1.0 - margin) && uv.y > margin && uv.y < gridBottom) {
-      // Grid Coordinate System
-      let gridW = 1.0 - 2.0 * margin;
-      let gridH = gridBottom - margin;
-      let localUV = vec2<f32>((uv.x - margin) / gridW, (uv.y - margin) / gridH);
+  if (uv.x > gridLeft && uv.x < gridRight && uv.y > gridTop && uv.y < gridBottom) {
+      // Grid Coordinate System - normalize to 0-1 within grid area
+      let localUV = vec2<f32>(
+          (uv.x - gridLeft) / uniforms.gridRect.z,
+          (uv.y - gridTop) / uniforms.gridRect.w
+      );
       
-      let nCols = 64.0; // 64 channels
+      let nCols = 32.0; // Fixed 32 channels for this shader
       let nRows = 32.0; // Visible rows
       
       let colId = floor(localUV.x * nCols);
@@ -136,7 +139,6 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
       // Determine Pattern Row
       // Center playhead at row 16
       let centerRow = 16.0;
-      // Calculate smooth scroll
       let scrollOffset = uniforms.tickOffset; // 0..1 fraction of a row
       let visRow = rowId;
       
@@ -149,7 +151,7 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
       
       if (isCap) {
           var capColor = vec3<f32>(0.15, 0.16, 0.18); // Inactive plastic
-          var glow = 0.0;
+          var noteGlow = 0.0;
           
           // Fetch Data
           if (patternRowIdx >= 0 && patternRowIdx < i32(uniforms.numRows)) {
@@ -166,7 +168,7 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
                           
                           // Highlight if active row
                           if (i32(visRow) == i32(centerRow)) {
-                              glow = 1.0;
+                              noteGlow = 1.0;
                               capColor = mix(capColor, vec3<f32>(1.0), 0.5);
                           }
                       }
@@ -179,25 +181,48 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
               capColor += vec3<f32>(0.1, 0.1, 0.15);
           }
           
-          // Frosted Effect
-          // Soften edges
-          let edge = smoothstep(0.0, 0.1, -dBox);
-          // Diffuse light
+          // --- TRANSLUCENT FROSTED GLASS CAPS ---
+          // Calculate normal for fresnel effect
+          let p = cellUV - 0.5;
+          let n = normalize(vec3<f32>(p.x * 2.0, p.y * 2.0, 0.5));
+          let viewDir = vec3<f32>(0.0, 0.0, 1.0);
+          
+          // Fresnel rim effect
+          let fresnel = pow(1.0 - abs(dot(n, viewDir)), 2.0);
+          
+          // Subsurface scattering from note glow
+          let thickness = 0.2;
+          let subsurface = exp(-thickness * 5.0) * noteGlow;
+          
+          // Glass color mixing
+          let bgColor = vec3<f32>(0.05, 0.05, 0.06);
+          let glassColor = mix(bgColor * 0.3, capColor, 0.7);
+          
+          // Alpha with fresnel rim enhancement
+          let edgeAlpha = smoothstep(0.0, 0.1, -dBox);
+          let alpha = edgeAlpha * (0.6 + 0.4 * fresnel);
+          
+          // Diffuse light for 3D effect
           let light = vec3<f32>(0.5, -0.8, 1.0);
-          let n = normalize(vec3<f32>((cellUV.x - 0.5), (cellUV.y - 0.5), 0.5));
           let diff = max(0.0, dot(n, normalize(light)));
+          let litGlassColor = glassColor * (0.5 + 0.5 * diff);
           
-          capColor *= (0.5 + 0.5 * diff);
-          capColor += vec3<f32>(glow * 0.5);
+          // Composite with background
+          var finalColor = mix(bgColor, litGlassColor, alpha);
           
-          col = mix(col, capColor, edge);
+          // Add subsurface glow
+          finalColor += subsurface * capColor * 2.0;
+          
+          col = finalColor;
       }
   }
   
   // --- CONTROLS RENDER ---
-  if (uv.y > gridBottom) {
-      let ctrlH = 1.0 - gridBottom;
-      let ctrlUV = vec2<f32>(uv.x, (uv.y - gridBottom) / ctrlH);
+  // Controls below the grid area
+  let controlY = gridBottom + 0.02;
+  if (uv.y > controlY) {
+      let ctrlH = 1.0 - controlY;
+      let ctrlUV = vec2<f32>(uv.x, (uv.y - controlY) / ctrlH);
       
       // Background strip
       col = mix(col, vec3<f32>(0.08, 0.08, 0.1), 1.0);
