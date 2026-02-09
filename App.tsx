@@ -10,7 +10,6 @@ import type { MediaItem } from './types';
 // Shader Definitions
 const SHADER_GROUPS = {
   SQUARE: [
-    { id: 'patternv0.46.wgsl', label: 'v0.46 (Frosted Glass)' },
     { id: 'patternv0.44.wgsl', label: 'v0.44 (Frosted Wall 64)' },
     { id: 'patternv0.43.wgsl', label: 'v0.43 (Frosted Wall 32)' },
     { id: 'patternv0.40.wgsl', label: 'v0.40 (Frosted Grid)' },
@@ -18,6 +17,7 @@ const SHADER_GROUPS = {
     { id: 'patternv0.21.wgsl', label: 'v0.21 (Wall)' },
   ],
   CIRCULAR: [
+    { id: 'patternv0.46.wgsl', label: 'v0.46 (Frosted Glass)' },
     { id: 'patternv0.45.wgsl', label: 'v0.45 (Frosted Bloom)' },
     { id: 'patternv0.42.wgsl', label: 'v0.42 (Frosted Disc)' },
     { id: 'patternv0.38.wgsl', label: 'v0.38 (Glass)' },
