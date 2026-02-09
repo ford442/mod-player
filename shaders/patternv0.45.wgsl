@@ -1,5 +1,5 @@
 // patternv0.45.wgsl
-// Frosted Bloom (Circular)
+// Frosted Bloom
 // - Instanced rings (like v0.35)
 // - Frosted cap material (like v0.43)
 
