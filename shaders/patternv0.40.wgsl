@@ -24,6 +24,7 @@ struct Uniforms {
   bloomThreshold: f32,
   invertChannels: u32,
   dimFactor: f32,
+  gridRect: vec4<f32>,  // x, y, w, h (normalized)
 };
 
 @group(0) @binding(0) var<storage, read> cells: array<u32>;
@@ -74,20 +75,15 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
       isVisible = 0.0;
   }
   
-  // Standard quad expansion
-  // Note: if invisible, we can just collapse quad or move off screen
-
-  // Apply global offset for bezel blank area (160, 160)
-  let offsetX = 160.0;
-  let offsetY = 160.0;
-
-  let worldX = px + quad[vertexIndex].x * uniforms.cellW + offsetX;
-  let worldY = py + quad[vertexIndex].y * uniforms.cellH + offsetY;
-
-  // Use top-left origin for logic, but clip space is -1..1
-  let clipX = (worldX / uniforms.canvasW) * 2.0 - 1.0;
-  let clipY = 1.0 - (worldY / uniforms.canvasH) * 2.0;
-
+  // Use gridRect for precise positioning within bezel area
+  // gridRect is in normalized coordinates (0-1)
+  let gridX = uniforms.gridRect.x + (localRow / stepsPerPage) * uniforms.gridRect.z;
+  let gridY = uniforms.gridRect.y + (f32(channel) / f32(numChannels)) * uniforms.gridRect.w;
+  
+  // Convert to clip space (-1 to 1)
+  let clipX = gridX * 2.0 - 1.0 + quad[vertexIndex].x * (uniforms.gridRect.z / stepsPerPage) * 2.0;
+  let clipY = 1.0 - (gridY * 2.0) - quad[vertexIndex].y * (uniforms.gridRect.w / f32(numChannels)) * 2.0;
+  
   // Collapse if not visible
   let finalPos = select(vec4<f32>(0.0), vec4<f32>(clipX, clipY, 0.0, 1.0), isVisible > 0.5);
 
