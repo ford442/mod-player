@@ -3,6 +3,16 @@ import { ChannelShadowState, PatternMatrix } from '../types';
 
 const DEFAULT_ROWS = 64;
 const DEFAULT_CHANNELS = 4;
+
+// Bezel inset for v0.40/v0.43 shaders - exact square bezel bounds
+const BEZEL_INSET = { x: 160, y: 160, w: 705, h: 725 };
+// Normalized grid rect for shader (x, y, w, h)
+const GRID_RECT = {
+  x: BEZEL_INSET.x / 1024,
+  y: BEZEL_INSET.y / 1024,
+  w: BEZEL_INSET.w / 1024,
+  h: BEZEL_INSET.h / 1024
+};
 const EMPTY_CHANNEL: ChannelShadowState = {
   
   volume: 1.0, pan: 0.5, freq: 440, trigger: 0, noteAge: 1000,
@@ -73,10 +83,11 @@ const createUniformPayload = (
     bloomThreshold?: number;
     invertChannels?: boolean;
     dimFactor?: number;
+    gridRect?: { x: number; y: number; w: number; h: number };
   }
 ): ArrayBuffer => {
   if (layoutType === 'extended') {
-    const buffer = new ArrayBuffer(80);
+    const buffer = new ArrayBuffer(96);
     const uint = new Uint32Array(buffer);
     const float = new Float32Array(buffer);
     uint[0] = Math.max(0, params.numRows) >>> 0;
@@ -99,6 +110,12 @@ const createUniformPayload = (
     float[17] = params.bloomThreshold ?? 0.8;
     uint[18] = params.invertChannels ? 1 : 0;
     float[19] = params.dimFactor ?? 1.0;
+    // gridRect for bezel alignment (v0.40/v0.43+)
+    const gridRect = params.gridRect ?? GRID_RECT;
+    float[20] = gridRect.x;
+    float[21] = gridRect.y;
+    float[22] = gridRect.w;
+    float[23] = gridRect.h;
     return buffer;
   }
 
@@ -715,7 +732,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
           pipelineRef.current = device.createRenderPipeline({ layout: device.createPipelineLayout({ bindGroupLayouts: [bindGroupLayout] }), vertex: { module, entryPoint: 'vertex_main' }, fragment: { module, entryPoint: 'fragment_main', targets }, primitive: { topology: 'triangle-list' } });
         }
 
-        const uniformSize = layoutType === 'extended' ? 80 : (layoutType === 'texture' ? 64 : 32);
+        const uniformSize = layoutType === 'extended' ? 96 : (layoutType === 'texture' ? 64 : 32);
         const uniformBuffer = device.createBuffer({ size: alignTo(uniformSize, 256), usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
 
         if (shouldUseBackgroundPass(shaderFile)) {
@@ -1027,6 +1044,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
         bloomThreshold: bloomThreshold ?? 0.8,
         invertChannels: invertChannels,
         dimFactor: dimFactor,
+        gridRect: GRID_RECT,
       });
       device.queue.writeBuffer(uniformBufferRef.current, 0, uniformPayload);
     }
