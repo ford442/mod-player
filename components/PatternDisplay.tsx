@@ -1103,7 +1103,9 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
       }],
     });
 
-    if (bezelPipelineRef.current && bezelBindGroupRef.current) {
+    // v0.45 and v0.46 need background pass since they only render UI strip
+    const needsBackground = !isSinglePassCompositeShader(shaderFile) || shaderFile.includes('v0.45') || shaderFile.includes('v0.46');
+    if (bezelPipelineRef.current && bezelBindGroupRef.current && needsBackground) {
       pass.setPipeline(bezelPipelineRef.current);
       pass.setBindGroup(0, bezelBindGroupRef.current);
       pass.draw(6, 1, 0, 0);
