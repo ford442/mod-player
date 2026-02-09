@@ -1,5 +1,6 @@
 // Horizontal Pattern Grid Shader (Time = X, Channels = Y)
 // V0.21: "Precision Interface" - Sharpened details, larger cells, fwidth-based AA
+// Updated: Square bezel alignment with gridRect uniform
 
 struct Uniforms {
   numRows: u32,
@@ -22,6 +23,7 @@ struct Uniforms {
   bloomThreshold: f32,
   invertChannels: u32,
   dimFactor: f32,
+  gridRect: vec4<f32>,  // x, y, w, h (normalized)
 };
 
 @group(0) @binding(0) var<storage, read> cells: array<u32>;
@@ -54,25 +56,44 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
   let row = instanceIndex / numChannels;
   let channel = instanceIndex % numChannels;
 
-  let px = f32(row) * uniforms.cellW;
+  // Horizontal Layout: X = Row (Time), Y = Channel
+  // Static Paged Grid: We only render active page of 32 steps.
+  
+  let stepsPerPage = 32.0;
+  let pageStart = floor(f32(uniforms.playheadRow) / stepsPerPage) * stepsPerPage;
+  
+  // Calculate row local to current page (0..31)
+  let localRow = f32(row) - pageStart;
+  
+  // X Position based on local row
+  let px = localRow * uniforms.cellW;
   let py = f32(channel) * uniforms.cellH;
+  
+  // If this instance is NOT in the current page, we move it off-screen to clip it
+  var isVisible = 1.0;
+  if (localRow < 0.0 || localRow >= stepsPerPage) {
+      isVisible = 0.0;
+  }
 
-  let lp = quad[vertexIndex];
-  let worldX = px + lp.x * uniforms.cellW;
-  let worldY = py + lp.y * uniforms.cellH;
-
-  let clipX = (worldX / uniforms.canvasW) * 2.0 - 1.0;
-  let clipY = 1.0 - (worldY / uniforms.canvasH) * 2.0;
+  // Use gridRect for precise positioning within bezel area
+  // gridRect is in normalized coordinates (0-1)
+  let gridX = uniforms.gridRect.x + (localRow / stepsPerPage) * uniforms.gridRect.z;
+  let gridY = uniforms.gridRect.y + (f32(channel) / f32(numChannels)) * uniforms.gridRect.w;
+  
+  // Convert to clip space (-1 to 1)
+  let clipX = gridX * 2.0 - 1.0 + quad[vertexIndex].x * (uniforms.gridRect.z / stepsPerPage) * 2.0;
+  let clipY = 1.0 - (gridY * 2.0) - quad[vertexIndex].y * (uniforms.gridRect.w / f32(numChannels)) * 2.0;
 
   let idx = instanceIndex * 2u;
   let a = cells[idx];
   let b = cells[idx + 1u];
 
   var out: VertexOut;
-  out.position = vec4<f32>(clipX, clipY, 0.0, 1.0);
+  // Collapse if not visible
+  out.position = select(vec4<f32>(0.0), vec4<f32>(clipX, clipY, 0.0, 1.0), isVisible > 0.5);
   out.row = row;
   out.channel = channel;
-  out.uv = lp;
+  out.uv = quad[vertexIndex];
   out.packedA = a;
   out.packedB = b;
   return out;

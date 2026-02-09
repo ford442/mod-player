@@ -33,7 +33,7 @@ const getLayoutType = (shaderFile: string): LayoutType => {
 
 const isSinglePassCompositeShader = (shaderFile: string) => {
   // Shaders that do their own background composition in one pass
-  if (shaderFile.includes('v0.40') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46')) return 'chassis_frosted.wgsl';
+  if (shaderFile.includes('v0.21') || shaderFile.includes('v0.40') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46')) return 'chassis_frosted.wgsl';
   return false;
 };
 
@@ -49,7 +49,7 @@ const shouldUseBackgroundPass = (shaderFile: string) => {
 const getBackgroundShaderFile = (shaderFile: string): string => {
   if (shaderFile.includes('v0.23') || shaderFile.includes('v0.24')) return 'chassis_video.wgsl';
   // Use the new frosted shader for the latest layout
-  if (shaderFile.includes('v0.40') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46')) return 'chassis_frosted.wgsl';
+  if (shaderFile.includes('v0.21') || shaderFile.includes('v0.40') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46')) return 'chassis_frosted.wgsl';
   
   if (shaderFile.includes('v0.37') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39')) return 'chassisv0.37.wgsl';
   if (shaderFile.includes('v0.27') || shaderFile.includes('v0.28') || shaderFile.includes('v0.30') || shaderFile.includes('v0.31') || shaderFile.includes('v0.32') || shaderFile.includes('v0.33') || shaderFile.includes('v0.34') || shaderFile.includes('v0.35') || shaderFile.includes('v0.36')) return 'chassisv0.1.wgsl';
@@ -401,7 +401,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   const canvasMetrics = useMemo(() => {
     // Force specific resolutions for certain chassis to match background images
     if (shaderFile.includes('v0.27') || shaderFile.includes('v0.28')) return { width: 1024, height: 1008 };
-    if (shaderFile.includes('v0.37') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46')) return { width: 1024, height: 1024 };
+    if (shaderFile.includes('v0.21') || shaderFile.includes('v0.37') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46')) return { width: 1024, height: 1024 };
 
     if (isHorizontal) {
        return { width: 1024, height: 1024 }; // Square for horizontal layouts usually
@@ -1015,7 +1015,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
       // v0.39 and v0.40 Override: Ensure uniform payload reflects the auto-calculated dimensions
       let effectiveCellW = cellWidth;
       let effectiveCellH = cellHeight;
-      if (shaderFile.includes('v0.40') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46')) {
+      if (shaderFile.includes('v0.21') || shaderFile.includes('v0.40') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46')) {
           effectiveCellW = 705.0 / 32.0;
           effectiveCellH = 725.0 / numChannels;
       } else if (shaderFile.includes('v0.39')) {
