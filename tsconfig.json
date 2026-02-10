@@ -18,8 +18,7 @@
     "strict": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
-    "noFallthroughCasesInSwitch": true,
-    "types": ["@webgpu/types", "vite/client"]
+    "noFallthroughCasesInSwitch": true
   },
   "include": ["."],
   "exclude": ["vite.config.ts"],
