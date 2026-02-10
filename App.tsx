@@ -131,7 +131,7 @@ function App() {
               isPlaying={isPlaying}
               bpm={120}
               timeSec={playbackSeconds}
-              tickOffset={0}
+              tickOffset={playbackRowFraction % 1}
               channels={channelStates}
               beatPhase={beatPhase}
               grooveAmount={grooveAmount}
@@ -289,7 +289,7 @@ function App() {
              isPlaying={isPlaying}
              bpm={120}
              timeSec={playbackSeconds}
-             tickOffset={0}
+             tickOffset={playbackRowFraction % 1}
              channels={channelStates}
              beatPhase={beatPhase}
              grooveAmount={grooveAmount}
