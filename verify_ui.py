@@ -10,7 +10,7 @@ def verify_xasm1_ui():
 
         # Log content if timeout
         try:
-            page.wait_for_selector("text=XASM-1", timeout=5000)
+            page.wait_for_selector("text=libopenmpt Note Viewer", timeout=5000)
             page.screenshot(path="verification_ui.png", full_page=True)
             print("Screenshot taken: verification_ui.png")
         except Exception as e:
