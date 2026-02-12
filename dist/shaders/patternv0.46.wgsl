@@ -20,19 +20,19 @@ struct VertOut { @builtin(position) pos: vec4<f32>, @location(0) uv: vec2<f32> }
     let rows = f32(params.numChannels);
     let gridX = fract(uv.x * cols);
     let gridY = fract(uv.y * rows);
-    
+
     // Soft lines
     let divX = 1.0 - smoothstep(0.48, 0.5, abs(gridX - 0.5));
     let divY = 1.0 - smoothstep(0.48, 0.5, abs(gridY - 0.5));
-    
+
     var col = vec3<f32>(0.04, 0.05, 0.06); // Very dark
-    
+
     let stepID = floor(uv.x * cols);
     if (u32(stepID) % 4u == 0u) { col += vec3<f32>(0.02); }
-    
+
     col += vec3<f32>(0.1) * divX;
     col += vec3<f32>(0.05) * divY;
-    
+
     let activeCol = params.playheadRow % 32u;
     if (u32(stepID) == activeCol) {
         col = mix(col, vec3<f32>(0.0, 0.1, 0.2), 0.5);

@@ -267,10 +267,10 @@ Error generating stack: `+s.message+`
 #endif`,aI=`#ifdef USE_AOMAP
 	float ambientOcclusion = ( texture2D( aoMap, vAoMapUv ).r - 1.0 ) * aoMapIntensity + 1.0;
 	reflectedLight.indirectDiffuse *= ambientOcclusion;
-	#if defined( USE_CLEARCOAT ) 
+	#if defined( USE_CLEARCOAT )
 		clearcoatSpecularIndirect *= ambientOcclusion;
 	#endif
-	#if defined( USE_SHEEN ) 
+	#if defined( USE_SHEEN )
 		sheenSpecularIndirect *= ambientOcclusion;
 	#endif
 	#if defined( USE_ENVMAP ) && defined( STANDARD )
@@ -723,7 +723,7 @@ vec4 LinearTosRGB( in vec4 value ) {
 	#else
 		uniform sampler2D envMap;
 	#endif
-	
+
 #endif`,UI=`#ifdef USE_ENVMAP
 	uniform float reflectivity;
 	#if defined( USE_BUMPMAP ) || defined( USE_NORMALMAP ) || defined( PHONG ) || defined( LAMBERT )
@@ -740,7 +740,7 @@ vec4 LinearTosRGB( in vec4 value ) {
 		#define ENV_WORLDPOS
 	#endif
 	#ifdef ENV_WORLDPOS
-		
+
 		varying vec3 vWorldPosition;
 	#else
 		varying vec3 vReflect;
@@ -1557,7 +1557,7 @@ IncidentLight directLight;
 	vec4 sampledDiffuseColor = texture2D( map, vMapUv );
 	#ifdef DECODE_VIDEO_TEXTURE
 		sampledDiffuseColor = vec4( mix( pow( sampledDiffuseColor.rgb * 0.9478672986 + vec3( 0.0521327014 ), vec3( 2.4 ) ), sampledDiffuseColor.rgb * 0.0773993808, vec3( lessThanEqual( sampledDiffuseColor.rgb, vec3( 0.04045 ) ) ) ), sampledDiffuseColor.w );
-	
+
 	#endif
 	diffuseColor *= sampledDiffuseColor;
 #endif`,uN=`#ifdef USE_MAP
@@ -3962,18 +3962,18 @@ No matching component was found for:
     // Generate star field
     vec3 stars(vec3 rd) {
         vec3 col = vec3(0.0);
-        
+
         // Multiple layers of stars at different depths
         for(float layer = 0.0; layer < 3.0; layer += 1.0) {
             vec3 starDir = rd * (20.0 + layer * 30.0);
             vec3 starCell = floor(starDir);
-            
+
             for(float dx = -1.0; dx <= 1.0; dx += 1.0) {
                 for(float dy = -1.0; dy <= 1.0; dy += 1.0) {
                     for(float dz = -1.0; dz <= 1.0; dz += 1.0) {
                         vec3 cell = starCell + vec3(dx, dy, dz);
                         float h = hash(cell + vec3(layer * 10.0));
-                        
+
                         // Only some cells have stars
                         if(h > 0.95) {
                             vec3 starPos = cell + vec3(
@@ -3981,14 +3981,14 @@ No matching component was found for:
                                 hash(cell + vec3(0.0, layer, 1.0)),
                                 hash(cell + vec3(1.0, layer, 1.0))
                             );
-                            
+
                             vec3 toStar = normalize(starPos) - rd;
                             float dist = length(toStar);
-                            
+
                             // Star size and intensity
                             float size = 0.002 + hash(cell + vec3(2.0, layer, 0.0)) * 0.003;
                             float intensity = smoothstep(size, 0.0, dist);
-                            
+
                             // Star color variation (mostly white/blue/cyan)
                             float colorVar = hash(cell + vec3(3.0, layer, 0.0));
                             vec3 starColor = mix(
@@ -3996,18 +3996,18 @@ No matching component was found for:
                                 ledColor,               // Cyan from uniform
                                 colorVar * 0.5
                             );
-                            
+
                             // Twinkling effect
                             float twinkle = sin(iTime * 3.0 + h * 100.0) * 0.5 + 0.5;
                             intensity *= 0.7 + twinkle * 0.3;
-                            
+
                             col += starColor * intensity * (1.0 - layer * 0.3);
                         }
                     }
                 }
             }
         }
-        
+
         return col;
     }
 
@@ -4025,9 +4025,9 @@ No matching component was found for:
         col += stars(rd);
 
         // Subtle nebula-like effect in the background
-        float nebula = smoothstep(0.5, 1.0, 
-            sin(rd.x * 2.0 + iTime * 0.1) * 
-            sin(rd.y * 2.0 + iTime * 0.15) * 
+        float nebula = smoothstep(0.5, 1.0,
+            sin(rd.x * 2.0 + iTime * 0.1) *
+            sin(rd.y * 2.0 + iTime * 0.15) *
             sin(rd.z * 2.0)
         );
         col += ledColor * nebula * 0.03;
