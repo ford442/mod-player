@@ -15,12 +15,22 @@ class OpenMPTProcessor extends AudioWorkletProcessor {
     this.readIndex = 0;
     this.writeIndex = 0;
     this.availableFrames = 0;
+    this.totalFramesRendered = 0;
     this.lastStarvationTime = 0;
     
     // Constants
     this.STARVATION_THROTTLE_SECONDS = 0.1; // Throttle starvation messages to 100ms
 
     this.port.onmessage = (e) => {
+      if (e.data?.type === 'flush') {
+        this.readIndex = 0;
+        this.writeIndex = 0;
+        this.availableFrames = 0;
+        this.totalFramesRendered = 0;
+        this.buffer.fill(0);
+        this.port.postMessage({ type: 'bufferLevel', level: 0 });
+        return;
+      }
       const { left, right } = e.data;
       if (!left || !right) return;
       this.pushData(left, right);
@@ -75,6 +85,13 @@ class OpenMPTProcessor extends AudioWorkletProcessor {
         this.port.postMessage({ type: 'starvation', available: this.availableFrames });
         this.lastStarvationTime = now;
       }
+      this.totalFramesRendered += framesToRead;
+      this.port.postMessage({
+        type: 'renderPosition',
+        currentTime,
+        framesRendered: this.totalFramesRendered,
+        bufferLevel: this.availableFrames,
+      });
       return true;
     }
 
@@ -87,11 +104,18 @@ class OpenMPTProcessor extends AudioWorkletProcessor {
     }
 
     this.availableFrames -= framesToRead;
+    this.totalFramesRendered += framesToRead;
 
     // Report buffer level more frequently for accurate tracking (every 512 frames)
     if (this.readIndex % 512 === 0) {
         this.port.postMessage({ type: 'bufferLevel', level: this.availableFrames });
     }
+    this.port.postMessage({
+      type: 'renderPosition',
+      currentTime,
+      framesRendered: this.totalFramesRendered,
+      bufferLevel: this.availableFrames,
+    });
 
     return true;
   }

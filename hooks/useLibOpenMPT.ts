@@ -28,6 +28,14 @@ interface ChannelShadowState {
   isMuted: number;
 }
 
+interface SyncDebugInfo {
+  bufferMs: number;
+  driftMs: number;
+  mode: 'worklet' | 'script';
+  row: number;
+  starvationCount: number;
+}
+
 const decodeEffectCode = (cell?: PatternCell): { activeEffect: number; intensity: number } => {
   if (!cell?.text) return { activeEffect: 0, intensity: 0 };
   const text = cell.text.trim().toUpperCase();
@@ -85,6 +93,13 @@ export function useLibOpenMPT(volume: number = 1.0) {
   const [activeChannels, setActiveChannels] = useState<number>(0);
   const [isLooping, setIsLooping] = useState<boolean>(false);
   const [panValue, setPanValue] = useState<number>(0);
+  const [syncDebug, setSyncDebug] = useState<SyncDebugInfo>({
+    bufferMs: 0,
+    driftMs: 0,
+    mode: 'script',
+    row: 0,
+    starvationCount: 0,
+  });
 
   const libopenmptRef = useRef<LibOpenMPT | null>(null);
   const currentModulePtr = useRef<number>(0);
@@ -96,6 +111,8 @@ export function useLibOpenMPT(volume: number = 1.0) {
   const patternMatricesRef = useRef<Record<number, PatternMatrix>>({});
   const animationFrameHandle = useRef<number>(0);
   const lastUpdateTimeRef = useRef<number>(0);
+  const lastRenderAudioTimeRef = useRef<number>(0);
+  const lastRenderPlaybackFramesRef = useRef<number>(0);
   const moduleInfoRef = useRef(moduleInfo);
   const isPlayingRef = useRef(isPlaying);
   const isLoopingRef = useRef(isLooping);
@@ -106,12 +123,14 @@ export function useLibOpenMPT(volume: number = 1.0) {
   // Buffering / Pump Refs
   const bufferTimerRef = useRef<number | null>(null);
   const workletBufferLevel = useRef<number>(0); // Track actual worklet buffer level
-  const lastPumpTime = useRef<number>(0);
-  const BUFFER_TARGET_FRAMES = SAMPLE_RATE * 0.5; // Target 500ms of buffered audio
-  const BUFFER_MIN_FRAMES = SAMPLE_RATE * 0.2; // Minimum 200ms before pumping more
+  const totalFramesPumpedRef = useRef<number>(0);
+  const starvationCountRef = useRef<number>(0);
+  const starvationRecoveryUntilRef = useRef<number>(0);
+  const BUFFER_TARGET_FRAMES = SAMPLE_RATE * 0.2; // Target 200ms of buffered audio
+  const BUFFER_MIN_FRAMES = SAMPLE_RATE * 0.1; // Minimum 100ms before pumping more
   const CHUNK_SIZE = 4096;
-  const EMERGENCY_REFILL_MULTIPLIER = 4; // Multiplier for emergency refill on starvation
-  const MAX_CHUNKS_PER_PUMP = 4; // Maximum chunks to pump per interval
+  const MAX_CHUNKS_PER_PUMP = 2; // Maximum chunks to pump per interval
+  const STARVATION_RECOVERY_DURATION_SECONDS = 0.25;
 
   useEffect(() => {
     moduleInfoRef.current = moduleInfo;
@@ -158,7 +177,11 @@ export function useLibOpenMPT(volume: number = 1.0) {
 
     // Reset buffer tracking
     workletBufferLevel.current = 0;
-    lastPumpTime.current = 0;
+    totalFramesPumpedRef.current = 0;
+    lastRenderAudioTimeRef.current = 0;
+    lastRenderPlaybackFramesRef.current = 0;
+    starvationCountRef.current = 0;
+    starvationRecoveryUntilRef.current = 0;
 
     setIsPlaying(false);
     cancelAnimationFrame(animationFrameHandle.current);
@@ -351,15 +374,33 @@ export function useLibOpenMPT(volume: number = 1.0) {
       setGrooveAmount((prev) => decayTowards(prev, speed % 2 === 0 ? 0 : 0.1, 3, 1 / 60));
 
       const rowsPerSecond = bpm > 0 ? (bpm / 60) * 4 : 0;
+      const audioSampleRate = audioContextRef.current?.sampleRate ?? SAMPLE_RATE;
+      const framesPerRow = rowsPerSecond > 0 ? audioSampleRate / rowsPerSecond : 0;
       const fractionalRow = rowsPerSecond > 0 ? positionSeconds * rowsPerSecond : row;
+      let predictedRow = fractionalRow;
 
-      // Predict ahead to compensate for AudioWorklet buffering lag
-      const now = performance.now() / 1000;
-      const dt = now - lastUpdateTimeRef.current;
-      const predictedRow = fractionalRow + dt * rowsPerSecond;
-      lastUpdateTimeRef.current = now;
+      if (activeEngine === 'worklet' && audioContextRef.current && framesPerRow > 0) {
+        const dtAudio = Math.max(0, audioContextRef.current.currentTime - lastRenderAudioTimeRef.current);
+        const predictedFrames = Math.min(
+          totalFramesPumpedRef.current,
+          Math.max(0, lastRenderPlaybackFramesRef.current + dtAudio * audioSampleRate)
+        );
+        predictedRow = predictedFrames / framesPerRow;
+      } else {
+        const now = audioContextRef.current?.currentTime ?? (performance.now() / 1000);
+        const dt = now - lastUpdateTimeRef.current;
+        predictedRow = fractionalRow + dt * rowsPerSecond;
+        lastUpdateTimeRef.current = now;
+      }
 
       setPlaybackRowFraction(predictedRow);
+      setSyncDebug({
+        bufferMs: (workletBufferLevel.current / audioSampleRate) * 1000,
+        driftMs: rowsPerSecond > 0 ? ((fractionalRow - predictedRow) / rowsPerSecond) * 1000 : 0,
+        mode: activeEngine,
+        row: predictedRow,
+        starvationCount: starvationCountRef.current,
+      });
 
       // update sequencer state from cached matrices
       const matrix = patternMatricesRef.current[order] ?? null;
@@ -412,7 +453,7 @@ export function useLibOpenMPT(volume: number = 1.0) {
     }
 
     animationFrameHandle.current = requestAnimationFrame(updateUI);
-  }, [channelStates]);
+  }, [channelStates, activeEngine]);
 
   // NEW: Pump Helper
   const processAudioChunk = useCallback((numSamples: number) => {
@@ -462,8 +503,8 @@ export function useLibOpenMPT(volume: number = 1.0) {
         [leftSend.buffer, rightSend.buffer]
       );
 
-      // Update our tracking of the buffer level
-      // We estimate by adding what we sent
+      // Update worklet-fed counters
+      totalFramesPumpedRef.current += framesRead;
       workletBufferLevel.current += framesRead;
     }
 
@@ -540,16 +581,16 @@ export function useLibOpenMPT(volume: number = 1.0) {
           audioWorkletNodeRef.current.port.onmessage = (event) => {
             if (event.data.type === 'starvation') {
               console.warn("Audio Buffer Underrun! Available frames:", event.data.available);
-              // Emergency refill - pump enough to reach minimum threshold
-              const deficit = BUFFER_MIN_FRAMES - event.data.available;
-              const chunksNeeded = Math.max(1, Math.ceil(deficit / CHUNK_SIZE));
-              const chunksToRefill = Math.min(chunksNeeded, EMERGENCY_REFILL_MULTIPLIER);
-              for (let i = 0; i < chunksToRefill; i++) {
-                processAudioChunk(CHUNK_SIZE);
-              }
+              starvationCountRef.current += 1;
+              starvationRecoveryUntilRef.current = (audioContextRef.current?.currentTime ?? 0) + STARVATION_RECOVERY_DURATION_SECONDS;
+              if ((event.data.available ?? 0) <= 0) processAudioChunk(CHUNK_SIZE);
             } else if (event.data.type === 'bufferLevel') {
               // Update our tracking of the actual buffer level
               workletBufferLevel.current = event.data.level;
+            } else if (event.data.type === 'renderPosition') {
+              workletBufferLevel.current = event.data.bufferLevel ?? workletBufferLevel.current;
+              lastRenderAudioTimeRef.current = event.data.currentTime ?? 0;
+              lastRenderPlaybackFramesRef.current = Math.max(0, event.data.framesRendered ?? 0);
             } else if (event.data.type === 'overflow') {
               console.warn("Buffer overflow, lost frames:", event.data.lost);
             }
@@ -566,7 +607,11 @@ export function useLibOpenMPT(volume: number = 1.0) {
 
           // Reset buffer tracking
           workletBufferLevel.current = 0;
-          lastPumpTime.current = audioContextRef.current.currentTime;
+          totalFramesPumpedRef.current = 0;
+          lastRenderAudioTimeRef.current = audioContextRef.current.currentTime;
+          lastRenderPlaybackFramesRef.current = 0;
+          starvationCountRef.current = 0;
+          starvationRecoveryUntilRef.current = 0;
 
           // 1. Initial prefill - fill to target buffer size
           console.log('Prefilling audio buffer...');
@@ -581,19 +626,11 @@ export function useLibOpenMPT(volume: number = 1.0) {
           // 2. Continuous pump - maintain buffer level
           bufferTimerRef.current = window.setInterval(() => {
             if (!audioContextRef.current || !isPlayingRef.current) return;
-
-            // Estimate how much has been consumed since last pump
             const now = audioContextRef.current.currentTime;
-            const elapsed = now - lastPumpTime.current;
-            const framesConsumed = elapsed * SAMPLE_RATE;
-
-            // Update our estimate of buffer level
-            workletBufferLevel.current = Math.max(0, workletBufferLevel.current - framesConsumed);
-            lastPumpTime.current = now;
-
-            // If buffer is below minimum, pump more data
-            if (workletBufferLevel.current < BUFFER_MIN_FRAMES) {
-              const framesToAdd = BUFFER_TARGET_FRAMES - workletBufferLevel.current;
+            const recoveryBoost = now < starvationRecoveryUntilRef.current ? CHUNK_SIZE : 0;
+            const targetFrames = BUFFER_TARGET_FRAMES + recoveryBoost;
+            if (workletBufferLevel.current < BUFFER_MIN_FRAMES || workletBufferLevel.current < targetFrames) {
+              const framesToAdd = targetFrames - workletBufferLevel.current;
               const chunksNeeded = Math.ceil(framesToAdd / CHUNK_SIZE);
               for (let i = 0; i < chunksNeeded && i < MAX_CHUNKS_PER_PUMP; i++) {
                 processAudioChunk(CHUNK_SIZE);
@@ -653,7 +690,7 @@ export function useLibOpenMPT(volume: number = 1.0) {
 
       setIsPlaying(true);
       setStatus(`Playing "${moduleInfoRef.current.title}"...`);
-      lastUpdateTimeRef.current = performance.now() / 1000; // Init prediction time
+      lastUpdateTimeRef.current = audioContextRef.current.currentTime;
       animationFrameHandle.current = requestAnimationFrame(updateUI);
 
     } catch (e) {
@@ -864,6 +901,12 @@ export function useLibOpenMPT(volume: number = 1.0) {
     }
 
     try {
+      if (audioWorkletNodeRef.current) {
+        audioWorkletNodeRef.current.port.postMessage({ type: 'flush' });
+        workletBufferLevel.current = 0;
+        totalFramesPumpedRef.current = 0;
+        lastRenderPlaybackFramesRef.current = 0;
+      }
       lib._openmpt_module_set_position_order_row(modPtr, targetOrder, targetRow);
       // update UI state immediately
       setModuleInfo(prev => ({ ...prev, order: targetOrder, row: targetRow }));
@@ -878,5 +921,5 @@ export function useLibOpenMPT(volume: number = 1.0) {
     }
   };
 
-  return { status, isReady, isPlaying, isModuleLoaded, moduleInfo, patternData, loadFile: loadModule, play, stopMusic, sequencerMatrix, sequencerCurrentRow, sequencerGlobalRow, totalPatternRows, playbackSeconds, playbackRowFraction, channelStates, beatPhase, grooveAmount, kickTrigger, activeChannels, isLooping, setIsLooping, seekToStep, panValue, setPanValue, activeEngine, isWorkletSupported, toggleAudioEngine };
+  return { status, isReady, isPlaying, isModuleLoaded, moduleInfo, patternData, loadFile: loadModule, play, stopMusic, sequencerMatrix, sequencerCurrentRow, sequencerGlobalRow, totalPatternRows, playbackSeconds, playbackRowFraction, channelStates, beatPhase, grooveAmount, kickTrigger, activeChannels, isLooping, setIsLooping, seekToStep, panValue, setPanValue, activeEngine, isWorkletSupported, toggleAudioEngine, syncDebug };
 }
