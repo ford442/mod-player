@@ -1,5 +1,5 @@
 struct Uniforms {
-  numRows: u32, numChannels: u32, playheadRow: u32, isPlaying: u32,
+  numRows: u32, numChannels: u32, playheadRow: f32, isPlaying: u32,
   cellW: f32, cellH: f32, canvasW: f32, canvasH: f32, tickOffset: f32,
   bpm: f32, timeSec: f32, beatPhase: f32, groove: f32, kickTrigger: f32,
   activeChannels: u32, isModuleLoaded: u32, bloomIntensity: f32, bloomThreshold: f32,
@@ -48,18 +48,22 @@ struct VertOut { @builtin(position) pos: vec4<f32>, @location(0) uv: vec2<f32> }
     col += vec3<f32>(0.05) * spokeLine;
 
     // Playhead Highlight (Ring)
-    let activeRow = params.playheadRow % 64u;
-    // Angle for active row starts at -PI/2 (top) and goes clockwise
-    // atan2 returns -PI..PI. Top is -PI/2.
-    // We need to match the WebGL rotation: theta = -1.57 + row * anglePerStep
     let stepAngle = 6.28318 / steps;
-    let currentAngle = -1.570796 + f32(activeRow) * stepAngle;
+    let exactRow = params.playheadRow - floor(params.playheadRow / steps) * steps;
+    let currentAngle = -1.570796 + exactRow * stepAngle;
 
-    // Simple angle distance check
     let diff = abs(atan2(sin(a - currentAngle), cos(a - currentAngle)));
-    if (diff < (stepAngle * 0.5)) {
-        col += vec3<f32>(0.2, 0.4, 0.5); // Blue highlight wedge
+    let highlight = 1.0 - smoothstep(0.0, stepAngle * 1.5, diff);
+    col += vec3<f32>(0.2, 0.4, 0.5) * highlight;
+    col += vec3<f32>(0.0, 0.25, 0.35) * exp(-max(0.0, diff - stepAngle) * 6.0);
+
+    let pageProgress = fract(params.playheadRow / steps);
+    var boundaryFade = 1.0;
+    if (pageProgress < 0.05) {
+      boundaryFade = smoothstep(0.0, 0.05, pageProgress);
+    } else if (pageProgress > 0.95) {
+      boundaryFade = 1.0 - smoothstep(0.95, 1.0, pageProgress);
     }
 
-    return vec4<f32>(col, 0.6 * params.dimFactor);
+    return vec4<f32>(col * boundaryFade, 0.6 * params.dimFactor);
 }

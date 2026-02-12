@@ -5,7 +5,7 @@
 struct Uniforms {
   numRows: u32,
   numChannels: u32,
-  playheadRow: u32,
+  playheadRow: f32,
   isPlaying: u32,
   cellW: f32,
   cellH: f32,
@@ -213,14 +213,18 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
 
   // CHANNEL 0 is the Indicator Ring
   if (in.channel == 0u) {
-    let onPlayhead = (in.row == uniforms.playheadRow);
+    let playheadStep = uniforms.playheadRow - floor(uniforms.playheadRow / 64.0) * 64.0;
+    let rowDistRaw = abs(f32(in.row % 64u) - playheadStep);
+    let rowDist = min(rowDistRaw, 64.0 - rowDistRaw);
+    let playheadActivation = 1.0 - smoothstep(0.0, 1.5, rowDist);
+    let onPlayhead = playheadActivation > 0.5;
     let indSize = vec2(0.3, 0.3);
-    let indColor = select(vec3(0.2), fs.ledOnColor * 1.2, onPlayhead);
-    let indLed = drawFrostedGlassCap(p, indSize, indColor, onPlayhead, aa, select(0.0, 1.5, onPlayhead));
+    let indColor = mix(vec3(0.2), fs.ledOnColor * 1.2, playheadActivation);
+    let indLed = drawFrostedGlassCap(p, indSize, indColor, onPlayhead, aa, playheadActivation * 1.5);
     var col = indLed.rgb;
     var alpha = indLed.a;
-    if (onPlayhead) {
-      let glow = fs.ledOnColor * (bloom * 5.0) * exp(-length(p) * 3.5);
+    if (playheadActivation > 0.0) {
+      let glow = fs.ledOnColor * (bloom * 5.0) * exp(-length(p) * 3.5) * playheadActivation;
       col += glow;
       alpha = max(alpha, smoothstep(0.0, 0.25, length(glow)));
     }
@@ -276,11 +280,14 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
       noteColor = baseColor * instBright;
 
       let linger = exp(-ch.noteAge * 1.2);
-      let onPlayhead = (in.row == uniforms.playheadRow);
-      let strike = select(0.0, 3.5, onPlayhead);
+      let playheadStep = uniforms.playheadRow - floor(uniforms.playheadRow / 64.0) * 64.0;
+      let rowDistRaw = abs(f32(in.row % 64u) - playheadStep);
+      let rowDist = min(rowDistRaw, 64.0 - rowDistRaw);
+      let playheadActivation = 1.0 - smoothstep(0.0, 1.5, rowDist);
+      let strike = playheadActivation * 3.5;
       let flash = f32(ch.trigger) * 1.2;
 
-      var d = f32(in.row) + uniforms.tickOffset - f32(uniforms.playheadRow);
+      var d = f32(in.row % 64u) - playheadStep;
       let totalSteps = 64.0;
       if (d > totalSteps * 0.5) { d = d - totalSteps; }
       if (d < -totalSteps * 0.5) { d = d + totalSteps; }
