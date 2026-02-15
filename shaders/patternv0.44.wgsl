@@ -7,7 +7,7 @@
 struct Uniforms {
   numRows: u32,
   numChannels: u32,
-  playheadRow: u32,
+  playheadRow: f32,
   isPlaying: u32,
   cellW: f32,
   cellH: f32,
@@ -136,12 +136,12 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
       // Determine Pattern Row
       // Center playhead at row 16
       let centerRow = 16.0;
-      // Calculate smooth scroll
-      let scrollOffset = uniforms.tickOffset; // 0..1 fraction of a row
-      let visRow = rowId;
+      let scrollOffset = fract(uniforms.playheadRow);
+      let visRow = rowId + scrollOffset;
       
       // Actual pattern row index
-      let patternRowIdx = i32(uniforms.playheadRow) + i32(visRow) - i32(centerRow);
+      let baseRow = i32(floor(uniforms.playheadRow));
+      let patternRowIdx = baseRow + i32(floor(visRow - centerRow));
       
       // Cell Shape
       let dBox = sdBox(cellUV - 0.5, vec2<f32>(0.42)); // Gap between keys
@@ -165,8 +165,10 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
                           capColor = mix(capColor, baseCol, 0.4);
                           
                           // Highlight if active row
-                          if (i32(visRow) == i32(centerRow)) {
-                              glow = 1.0;
+                          let playheadDist = abs(visRow - centerRow);
+                          let playheadGlow = 1.0 - smoothstep(0.0, 1.2, playheadDist);
+                          if (playheadGlow > 0.0) {
+                              glow = playheadGlow;
                               capColor = mix(capColor, vec3<f32>(1.0), 0.5);
                           }
                       }
@@ -175,9 +177,9 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
           }
           
           // Playhead Highlight Line
-          if (i32(visRow) == i32(centerRow)) {
-              capColor += vec3<f32>(0.1, 0.1, 0.15);
-          }
+          let lineDist = abs(visRow - centerRow);
+          let lineGlow = 1.0 - smoothstep(0.0, 1.0, lineDist);
+          capColor += vec3<f32>(0.1, 0.1, 0.15) * lineGlow;
           
           // Frosted Effect
           // Soften edges
@@ -226,5 +228,12 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
       col = mix(col, vec3<f32>(0.9, 0.6, 0.0), 1.0 - smoothstep(0.0, 0.05, dLoop));
   }
   
-  return vec4<f32>(col * dimFactor, 1.0);
+  let pageProgress = fract(uniforms.playheadRow / 64.0);
+  var boundaryFade = 1.0;
+  if (pageProgress < 0.05) {
+      boundaryFade = smoothstep(0.0, 0.05, pageProgress);
+  } else if (pageProgress > 0.95) {
+      boundaryFade = 1.0 - smoothstep(0.95, 1.0, pageProgress);
+  }
+  return vec4<f32>(col * dimFactor * boundaryFade, 1.0);
 }
