@@ -63,7 +63,8 @@ function App() {
     activeEngine,
     isWorkletSupported,
     toggleAudioEngine,
-    status
+    status,
+    syncDebug
   } = useLibOpenMPT(volume);
 
   // Media Overlay State
@@ -120,7 +121,14 @@ function App() {
         dimFactor={dimFactor}
         headerContent={
           <div className="scale-75 origin-top-left">
-            <Header status={status} />
+         <Header status={status} />
+         <div className={`mb-2 inline-flex flex-col rounded border px-2 py-1 text-[10px] font-mono ${isDarkMode ? 'border-gray-700 bg-black/50 text-gray-300' : 'border-gray-300 bg-white/80 text-gray-700'}`}>
+           <span>sync mode: {syncDebug.mode}</span>
+           <span>buffer: {syncDebug.bufferMs.toFixed(1)}ms</span>
+           <span>drift: {syncDebug.driftMs.toFixed(1)}ms</span>
+           <span>row: {syncDebug.row.toFixed(2)}</span>
+           <span>starvations: {syncDebug.starvationCount}</span>
+         </div>
           </div>
         }
         patternDisplayContent={

@@ -6,7 +6,7 @@
 struct Uniforms {
   numRows: u32,
   numChannels: u32,
-  playheadRow: u32,
+  playheadRow: f32,
   isPlaying: u32,
   cellW: f32,
   cellH: f32,
@@ -245,29 +245,33 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   let noteChar = (in.packedA >> 24) & 255u;
   let hasNote = (noteChar >= 65u && noteChar <= 122u); // Simple check
   
+  let playheadStep = uniforms.playheadRow - floor(uniforms.playheadRow / 64.0) * 64.0;
+  let rowDistRaw = abs(f32(in.row % 64u) - playheadStep);
+  let rowDist = min(rowDistRaw, 64.0 - rowDistRaw);
+  let playheadActivation = 1.0 - smoothstep(0.0, 1.5, rowDist);
   if (hasNote) {
       let pitchHue = pitchClassFromPacked(in.packedA);
       let baseCol = neonPalette(pitchHue);
       capColor = mix(capColor, baseCol, 0.4);
       
       // Highlight if active row
-      if (in.row == uniforms.playheadRow) {
-          glow = 1.0;
+      if (playheadActivation > 0.0) {
+          glow = playheadActivation;
           capColor = mix(capColor, vec3<f32>(1.0), 0.5);
       }
       
       // Trigger flash
       let ch = channels[in.channel];
-      if (ch.trigger > 0u && in.row == uniforms.playheadRow) {
+      if (ch.trigger > 0u && playheadActivation > 0.5) {
           glow += 1.0;
           capColor += vec3<f32>(0.5);
       }
   }
   
   // Playhead Highlight Line
-  if (in.row == uniforms.playheadRow) {
-      capColor += vec3<f32>(0.1, 0.1, 0.15);
-      if (isPlaying) {
+  if (playheadActivation > 0.0) {
+      capColor += vec3<f32>(0.1, 0.1, 0.15) * playheadActivation;
+      if (isPlaying && playheadActivation > 0.5) {
           glow += 0.2;
       }
   }

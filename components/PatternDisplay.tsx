@@ -18,6 +18,7 @@ const EMPTY_CHANNEL: ChannelShadowState = {
   volume: 1.0, pan: 0.5, freq: 440, trigger: 0, noteAge: 1000,
   activeEffect: 0, effectValue: 0, isMuted: 0
 };
+const PLAYHEAD_EPSILON = 0.0001;
 const alignTo = (val: number, align: number) => Math.floor((val + align - 1) / align) * align;
 
 // Shader Helper Functions
@@ -66,6 +67,7 @@ const createUniformPayload = (
     numRows: number;
     numChannels: number;
     playheadRow: number;
+    playheadRowAsFloat?: boolean;
     isPlaying: boolean;
     cellW: number;
     cellH: number;
@@ -92,7 +94,11 @@ const createUniformPayload = (
     const float = new Float32Array(buffer);
     uint[0] = Math.max(0, params.numRows) >>> 0;
     uint[1] = Math.max(0, params.numChannels) >>> 0;
-    uint[2] = Math.max(0, params.playheadRow) >>> 0;
+    if (params.playheadRowAsFloat) {
+      float[2] = Math.max(0, params.playheadRow);
+    } else {
+      uint[2] = Math.max(0, params.playheadRow) >>> 0;
+    }
     uint[3] = params.isPlaying ? 1 : 0;
     float[4] = params.cellW;
     float[5] = params.cellH;
@@ -124,7 +130,11 @@ const createUniformPayload = (
   const float = new Float32Array(buffer);
   uint[0] = Math.max(0, params.numRows) >>> 0;
   uint[1] = Math.max(0, params.numChannels) >>> 0;
-  uint[2] = Math.max(0, params.playheadRow) >>> 0;
+  if (params.playheadRowAsFloat) {
+    float[2] = Math.max(0, params.playheadRow);
+  } else {
+    uint[2] = Math.max(0, params.playheadRow) >>> 0;
+  }
   uint[3] = 0;
   float[4] = params.cellW;
   float[5] = params.cellH;
@@ -192,7 +202,7 @@ interface PatternDisplayProps {
 
 const clampPlayhead = (value: number, numRows: number) => {
   if (numRows <= 0) return 0;
-  return Math.min(Math.max(Math.floor(value), 0), numRows - 1);
+  return Math.min(Math.max(value, 0), Math.max(0, numRows - PLAYHEAD_EPSILON));
 };
 
 // Parse helpers
@@ -474,12 +484,11 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
         float stepsPerPage = (u_layoutMode == 3) ? 64.0 : 32.0;
         float relativePlayhead = mod(u_playhead, stepsPerPage);
 
-        if (abs(float(row) - relativePlayhead) < 0.5) {
-             scale *= 1.15; // Pop effect on hit
-             v_active = 1.0;
-        } else {
-             v_active = 0.0;
-        }
+        float distToPlayhead = abs(float(row) - relativePlayhead);
+        distToPlayhead = min(distToPlayhead, stepsPerPage - distToPlayhead);
+        float activation = 1.0 - smoothstep(0.0, 1.5, distToPlayhead);
+        scale *= 1.0 + (0.15 * activation); // Pop effect with smooth falloff
+        v_active = activation;
 
         // 4. Positioning Logic
         if (u_layoutMode == 2 || u_layoutMode == 3) {
@@ -570,12 +579,10 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
         }
 
         // Active Lighting (Hit)
-        if (v_active > 0.5) {
-            // HIT STATE: Warm Orange Energy
-            // Mix with channel color if desired, or pure orange for contrast
-            lightColor = vec3(1.0, 0.5, 0.1);
-            intensity = 1.5; // Bloom boost
-        }
+        vec3 activeColor = vec3(1.0, 0.5, 0.1);
+        float activeIntensity = 1.5; // Bloom boost
+        lightColor = mix(lightColor, activeColor, v_active);
+        intensity = mix(intensity, activeIntensity, v_active);
 
         // Apply Light to Material
         vec3 finalRGB = cap.rgb * lightColor * intensity;
@@ -1158,7 +1165,11 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
       const numChannels = padTopChannel ? rawChannels + 1 : rawChannels;
       const rowLimit = Math.max(1, numRows);
       const tickRow = clampPlayhead(playheadRow, rowLimit);
-      const fractionalTick = Math.min(1, Math.max(0, tickOffset));
+      const computedTickOffset = tickRow - Math.floor(tickRow);
+      const fractionalTick = Math.min(
+        1,
+        Math.max(0, Number.isFinite(computedTickOffset) ? computedTickOffset : tickOffset)
+      );
       const effectiveTime = isModuleLoaded ? timeSec : localTime;
 
       // v0.39 and v0.40 Override: Ensure uniform payload reflects the auto-calculated dimensions
@@ -1176,6 +1187,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
         numRows,
         numChannels,
         playheadRow: tickRow,
+        playheadRowAsFloat: shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46'),
         isPlaying,
         cellW: effectiveCellW,
         cellH: effectiveCellH,
@@ -1218,7 +1230,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
       const uint32View = new Uint32Array(buf.buffer);
       uint32View[19] = isLooping ? 1 : 0;
       uint32View[20] = 0;
-      uint32View[21] = playheadRow;
+      buf[21] = playheadRow;
       uint32View[22] = clickedButton;
       device.queue.writeBuffer(bezelUniformBufferRef.current, 0, buf.buffer, buf.byteOffset, buf.byteLength);
     }
