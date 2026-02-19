@@ -1,20 +1,28 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { LibOpenMPT, ModuleInfo, PatternMatrix, ChannelShadowState } from '../types';
 
+interface SyncDebugInfo {
+  mode: string;
+  bufferMs: number;
+  driftMs: number;
+  row: number;
+  starvationCount: number;
+}
+
 // Constants
 const DEFAULT_ROWS = 64;
 const DEFAULT_CHANNELS = 4;
 const DEFAULT_MODULE_URL = '4-mat_-_space_debris.mod';
 const WORKLET_URL = 'worklets/openmpt-processor.js';
-const SAMPLE_RATE = 44100; // Kept for ScriptProcessor fallback
+// const SAMPLE_RATE = 44100;
 
-export function useLibOpenMPT() {
+export function useLibOpenMPT(initialVolume: number = 0.4) {
   const [status, setStatus] = useState<string>("Initializing...");
   const [isReady, setIsReady] = useState<boolean>(false);
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [isModuleLoaded, setIsModuleLoaded] = useState<boolean>(false);
   const [moduleInfo, setModuleInfo] = useState<ModuleInfo>({ title: "None", order: 0, row: 0, bpm: 125, numChannels: 0 });
-  const [patternData, setPatternData] = useState<Uint8Array | null>(null);
+  const [patternData, _setPatternData] = useState<Uint8Array | null>(null);
   const [sequencerMatrix, setSequencerMatrix] = useState<PatternMatrix | null>(null);
   const [sequencerCurrentRow, setSequencerCurrentRow] = useState<number>(0);
   const [sequencerGlobalRow, setSequencerGlobalRow] = useState<number>(0);
@@ -23,16 +31,16 @@ export function useLibOpenMPT() {
   const [totalPatternRows, setTotalPatternRows] = useState<number>(0);
   const [channelStates, setChannelStates] = useState<ChannelShadowState[]>([]);
   const [beatPhase, setBeatPhase] = useState<number>(0);
-  const [grooveAmount, setGrooveAmount] = useState<number>(0);
-  const [kickTrigger, setKickTrigger] = useState<number>(0);
+  const [grooveAmount, _setGrooveAmount] = useState<number>(0);
+  const [kickTrigger, _setKickTrigger] = useState<number>(0);
   const [activeChannels, setActiveChannels] = useState<number[]>([]);
   const [isLooping, setIsLooping] = useState<boolean>(true);
   const [panValue, setPanValue] = useState<number>(0); // -1 to 1
-  const [volume, setVolume] = useState<number>(0.4); // 0 to 1
+  const [volume, _setVolume] = useState<number>(initialVolume); // 0 to 1
   const [activeEngine, setActiveEngine] = useState<'script' | 'worklet'>('worklet');
   const [isWorkletSupported, setIsWorkletSupported] = useState<boolean>(false);
   const [restartPlayback, setRestartPlayback] = useState<boolean>(false);
-  const [syncDebug, setSyncDebug] = useState<string>("");
+  const [syncDebug, _setSyncDebug] = useState<SyncDebugInfo>({ mode: "none", bufferMs: 0, driftMs: 0, row: 0, starvationCount: 0 });
 
   const libopenmptRef = useRef<LibOpenMPT | null>(null);
   const currentModulePtr = useRef<number>(0);
@@ -594,7 +602,7 @@ export function useLibOpenMPT() {
   return {
     status, isReady, isPlaying, isModuleLoaded, moduleInfo, patternData,
     loadFile: loadModule, play, stopMusic, sequencerMatrix, sequencerCurrentRow, sequencerGlobalRow,
-    playbackSeconds, playbackRowFraction, channelStates, beatPhase, grooveAmount, kickTrigger, activeChannels,
+    totalPatternRows, playbackSeconds, playbackRowFraction, channelStates, beatPhase, grooveAmount, kickTrigger, activeChannels,
     isLooping, setIsLooping, seekToStep: seekToStepWrapper, panValue, setPanValue,
     activeEngine, isWorkletSupported, toggleAudioEngine, syncDebug,
     analyserNode: analyserRef.current

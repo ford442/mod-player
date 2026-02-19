@@ -79,7 +79,7 @@ const fillUniformPayload = (
     beatPhase: number;
     groove: number;
     kickTrigger: number;
-    activeChannels: number;
+    activeChannels: number[];
     isModuleLoaded: boolean;
     bloomIntensity?: number;
     bloomThreshold?: number;
@@ -110,7 +110,7 @@ const fillUniformPayload = (
     float[11] = params.beatPhase;
     float[12] = params.groove;
     float[13] = params.kickTrigger;
-    uint[14] = Math.max(0, params.activeChannels) >>> 0;
+    uint[14] = params.activeChannels.reduce((mask, ch) => mask | (1 << ch), 0) >>> 0;
     uint[15] = params.isModuleLoaded ? 1 : 0;
     float[16] = params.bloomIntensity ?? 1.0;
     float[17] = params.bloomThreshold ?? 0.8;
@@ -175,7 +175,7 @@ interface PatternDisplayProps {
   beatPhase?: number;
   grooveAmount?: number;
   kickTrigger?: number;
-  activeChannels?: number;
+  activeChannels?: number[];
   isModuleLoaded?: boolean;
   externalVideoSource?: HTMLVideoElement | HTMLImageElement | null;
   bloomIntensity?: number;
@@ -338,7 +338,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     beatPhase = 0.0,
     grooveAmount = 0.5,
     kickTrigger = 0.0,
-    activeChannels = 0,
+    activeChannels = [],
     isModuleLoaded = false,
     externalVideoSource = null,
     bloomIntensity = 1.0,
@@ -354,7 +354,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     onVolumeChange,
     onPanChange,
     totalRows,
-    dimFactor = 1.0,
+    dimFactor = 1.0, analyserNode,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const glCanvasRef = useRef<HTMLCanvasElement>(null);
