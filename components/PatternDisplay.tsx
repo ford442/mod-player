@@ -449,9 +449,6 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     if (!gl) return;
     glContextRef.current = gl;
 
-    // Simple pass-through vertex shader + glass fragment shader
-    // We'll just hardcode a simple shader here that draws the glass caps
-    // --- 1. WEBGL VERTEX SHADER ---
     const vsSource = `#version 300 es
     precision highp float;
 
@@ -497,7 +494,6 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
 
         // 4. Positioning Logic
         if (u_layoutMode == 2 || u_layoutMode == 3) {
-            // --- HORIZONTAL ---
             float xPos = float(row) * u_cellSize.x;
             float yPos = float(col) * u_cellSize.y;
 
@@ -510,7 +506,6 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
             gl_Position = vec4(ndc, 0.0, 1.0);
 
         } else {
-            // --- CIRCULAR (Basic Support) ---
             int ringIndex = col;
             if (u_invertChannels == 0) { ringIndex = int(u_cols) - 1 - col; }
 
@@ -554,9 +549,6 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     const isOverlayShader = shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46');
     if (!isOverlayShader) return;
 
-    // Fragment shader varies slightly by version to match geometry
-    // This is a simplified placeholder for the logic
-        // --- 2. WEBGL FRAGMENT SHADER (Blue/Orange Logic) ---
     const fsSource = `#version 300 es
     precision highp float;
 
@@ -598,10 +590,6 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
         if (fragColor.a < 0.01) discard;
     }
     `;
-
-    // ... (Remainder of WebGL init code assumed preserved, but since I am overwriting I must include it)
-    // Wait, I need to include the actual logic I read in the chunks!
-    // The previous chunks showed the FULL WebGL implementation. I must include it.
 
     const createShader = (type: number, src: string) => {
       const s = gl.createShader(type)!;
@@ -646,7 +634,6 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
 
-    // --- NEW: Load Cap Texture (unlit-button.png) ---
     const capTex = gl.createTexture()!;
     gl.bindTexture(gl.TEXTURE_2D, capTex);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
