@@ -64,7 +64,8 @@ function App() {
     isWorkletSupported,
     toggleAudioEngine,
     status,
-    syncDebug
+    syncDebug,
+    analyserNode
   } = useLibOpenMPT(volume);
 
   // Media Overlay State
@@ -76,8 +77,10 @@ function App() {
 
   // Handle File Selection
 
-  const handleFileSelected = (file: File) => {
-    loadFile(file);
+  const handleFileSelected = async (file: File) => {
+    const arrayBuffer = await file.arrayBuffer();
+    const data = new Uint8Array(arrayBuffer);
+    loadFile(data, file.name);
   };
 
   const handleMediaAdd = (file: File) => {
@@ -119,7 +122,7 @@ function App() {
         onViewModeToggle={() => setViewMode(viewMode === 'device' ? 'wall' : 'device')}
         onExitStudio={() => setIs3DMode(false)}
         dimFactor={dimFactor}
-              analyserNode={analyserNode}
+        analyserNode={analyserNode}
         headerContent={
           <div className="scale-75 origin-top-left">
          <Header status={status} />
