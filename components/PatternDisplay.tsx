@@ -61,7 +61,7 @@ const shouldEnableAlphaBlending = (shaderFile: string) => {
 };
 
 
-const createUniformPayload = (
+const fillUniformPayload = (
   layoutType: LayoutType,
   params: {
     numRows: number;
@@ -86,12 +86,11 @@ const createUniformPayload = (
     invertChannels?: boolean;
     dimFactor?: number;
     gridRect?: { x: number; y: number; w: number; h: number };
-  }
-): ArrayBuffer => {
+  },
+  uint: Uint32Array,
+  float: Float32Array
+): number => {
   if (layoutType === 'extended') {
-    const buffer = new ArrayBuffer(96);
-    const uint = new Uint32Array(buffer);
-    const float = new Float32Array(buffer);
     uint[0] = Math.max(0, params.numRows) >>> 0;
     uint[1] = Math.max(0, params.numChannels) >>> 0;
     if (params.playheadRowAsFloat) {
@@ -122,12 +121,9 @@ const createUniformPayload = (
     float[21] = gridRect.y;
     float[22] = gridRect.w;
     float[23] = gridRect.h;
-    return buffer;
+    return 96;
   }
 
-  const buffer = new ArrayBuffer(layoutType === 'texture' ? 64 : 32);
-  const uint = new Uint32Array(buffer);
-  const float = new Float32Array(buffer);
   uint[0] = Math.max(0, params.numRows) >>> 0;
   uint[1] = Math.max(0, params.numChannels) >>> 0;
   if (params.playheadRowAsFloat) {
@@ -142,14 +138,12 @@ const createUniformPayload = (
   float[7] = params.canvasH;
   if (layoutType === 'texture') {
     float[8] = 1; float[9] = 1; float[10] = 0; float[11] = 0; float[12] = 1; float[13] = 1;
+    return 64;
   }
-  return buffer;
+  return 32;
 };
 
-const packChannelStates = (channels: ChannelShadowState[], count: number, padTopChannel = false): ArrayBuffer => {
-  const totalCount = padTopChannel ? count + 1 : Math.max(1, count);
-  const buffer = new ArrayBuffer(totalCount * 32);
-  const view = new DataView(buffer);
+const fillChannelStates = (channels: ChannelShadowState[], count: number, view: DataView, padTopChannel = false): void => {
   const startIdx = padTopChannel ? 1 : 0;
 
   for (let i = 0; i < count; i++) {
@@ -164,7 +158,6 @@ const packChannelStates = (channels: ChannelShadowState[], count: number, padTop
     view.setFloat32(offset + 24, ch.effectValue ?? 0, true);
     view.setUint32(offset + 28, (ch.isMuted ?? 0) >>> 0, true);
   }
-  return buffer;
 };
 
 interface PatternDisplayProps {
@@ -397,6 +390,18 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   const glContextRef = useRef<WebGL2RenderingContext | null>(null);
 
   const renderRef = useRef<() => void>();
+
+  // Persistent Buffers for Performance
+  const uniformBufferDataRef = useRef(new ArrayBuffer(96));
+  const uniformUintRef = useRef(new Uint32Array(uniformBufferDataRef.current));
+  const uniformFloatRef = useRef(new Float32Array(uniformBufferDataRef.current));
+
+  const bezelBufferDataRef = useRef(new ArrayBuffer(128)); // Enough for the Float32Array(24) and beyond
+  const bezelFloatRef = useRef(new Float32Array(bezelBufferDataRef.current));
+  const bezelUintRef = useRef(new Uint32Array(bezelBufferDataRef.current));
+
+  const channelBufferDataRef = useRef<ArrayBuffer | null>(null);
+  const channelDataViewRef = useRef<DataView | null>(null);
 
   // Use effective values if passed, otherwise default
   const numChannels = matrix?.numChannels ?? DEFAULT_CHANNELS;
@@ -911,8 +916,11 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
           const numRows = matrix?.numRows ?? DEFAULT_ROWS;
           rowFlagsBufferRef.current = createBufferWithData(device, buildRowFlags(numRows), GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
           const channelsCount = Math.max(1, matrix?.numChannels ?? DEFAULT_CHANNELS);
-          const emptyChannels = packChannelStates([], channelsCount, padTopChannel);
-          channelsBufferRef.current = createBufferWithData(device, emptyChannels, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
+          const totalCount = padTopChannel ? channelsCount + 1 : channelsCount;
+          const requiredSize = totalCount * 32;
+          const buffer = new ArrayBuffer(requiredSize);
+          fillChannelStates([], channelsCount, new DataView(buffer), padTopChannel);
+          channelsBufferRef.current = createBufferWithData(device, buffer, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
         }
 
         const needsTexture = layoutType === 'texture' || layoutType === 'extended';
@@ -963,18 +971,27 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     if (!device || !gpuReady) return;
     if (layoutTypeRef.current === 'extended') {
         const count = Math.max(1, matrix?.numChannels ?? DEFAULT_CHANNELS);
-        const packedBuffer = packChannelStates(channels, count, padTopChannel);
+        const totalCount = padTopChannel ? count + 1 : count;
+        const requiredSize = totalCount * 32;
+
+        if (!channelBufferDataRef.current || channelBufferDataRef.current.byteLength < requiredSize) {
+            channelBufferDataRef.current = new ArrayBuffer(requiredSize);
+            channelDataViewRef.current = new DataView(channelBufferDataRef.current);
+        }
+
+        fillChannelStates(channels, count, channelDataViewRef.current!, padTopChannel);
+
         let recreated = false;
-        if (!channelsBufferRef.current || channelsBufferRef.current.size < packedBuffer.byteLength) {
+        if (!channelsBufferRef.current || channelsBufferRef.current.size < requiredSize) {
             channelsBufferRef.current?.destroy();
-            channelsBufferRef.current = createBufferWithData(device, packedBuffer, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
+            channelsBufferRef.current = createBufferWithData(device, channelBufferDataRef.current!, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
             recreated = true;
         } else {
-            device.queue.writeBuffer(channelsBufferRef.current, 0, packedBuffer);
+            device.queue.writeBuffer(channelsBufferRef.current, 0, channelBufferDataRef.current!, 0, requiredSize);
         }
         if (recreated) refreshBindGroup(device);
     }
-  }, [channels, matrix?.numChannels, gpuReady]);
+  }, [channels, matrix?.numChannels, gpuReady, padTopChannel]);
 
   const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
     console.log('handleCanvasClick called');
@@ -1183,7 +1200,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
           effectiveCellH = canvasMetrics.height / numChannels; // Approx
       }
 
-      const uniformPayload = createUniformPayload(layoutTypeRef.current, {
+      const uniformByteLength = fillUniformPayload(layoutTypeRef.current, {
         numRows,
         numChannels,
         playheadRow: tickRow,
@@ -1206,12 +1223,12 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
         invertChannels: invertChannels,
         dimFactor: dimFactor,
         gridRect: GRID_RECT,
-      });
-      device.queue.writeBuffer(uniformBufferRef.current, 0, uniformPayload);
+      }, uniformUintRef.current, uniformFloatRef.current);
+      device.queue.writeBuffer(uniformBufferRef.current, 0, uniformBufferDataRef.current, 0, uniformByteLength);
     }
 
     if (bezelUniformBufferRef.current) {
-      const buf = new Float32Array(24);
+      const buf = bezelFloatRef.current;
       buf[0] = canvasMetrics.width; buf[1] = canvasMetrics.height;
       const minDim = Math.min(canvasMetrics.width, canvasMetrics.height);
       const circularLayout = isCircularLayoutShader(shaderFile);
@@ -1227,12 +1244,12 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
       buf[16] = volume;
       buf[17] = pan;
       buf[18] = bpm;
-      const uint32View = new Uint32Array(buf.buffer);
+      const uint32View = bezelUintRef.current;
       uint32View[19] = isLooping ? 1 : 0;
       uint32View[20] = 0;
       buf[21] = playheadRow;
       uint32View[22] = clickedButton;
-      device.queue.writeBuffer(bezelUniformBufferRef.current, 0, buf.buffer, buf.byteOffset, buf.byteLength);
+      device.queue.writeBuffer(bezelUniformBufferRef.current, 0, bezelBufferDataRef.current, 0, 96); // Float32Array(24) = 96 bytes
     }
 
     const isVideoShader = shaderFile.includes('v0.20') || shaderFile.includes('v0.23') || shaderFile.includes('v0.24') || shaderFile.includes('v0.25');
