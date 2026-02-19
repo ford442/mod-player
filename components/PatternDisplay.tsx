@@ -85,6 +85,7 @@ const fillUniformPayload = (
     bloomThreshold?: number;
     invertChannels?: boolean;
     dimFactor?: number;
+  analyserNode?: AnalyserNode | null;
     gridRect?: { x: number; y: number; w: number; h: number };
   },
   uint: Uint32Array,
@@ -191,6 +192,7 @@ interface PatternDisplayProps {
   onPanChange?: (pan: number) => void;
   totalRows?: number;
   dimFactor?: number;
+  analyserNode?: AnalyserNode | null;
 }
 
 const clampPlayhead = (value: number, numRows: number) => {
@@ -395,6 +397,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   const uniformBufferDataRef = useRef(new ArrayBuffer(96));
   const uniformUintRef = useRef(new Uint32Array(uniformBufferDataRef.current));
   const uniformFloatRef = useRef(new Float32Array(uniformBufferDataRef.current));
+  const freqDataRef = useRef(new Uint8Array(256));
 
   const bezelBufferDataRef = useRef(new ArrayBuffer(128)); // Enough for the Float32Array(24) and beyond
   const bezelFloatRef = useRef(new Float32Array(bezelBufferDataRef.current));
@@ -1320,7 +1323,16 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
         setLocalTime(time / 1000.0);
       }
 
+
+      if (analyserNode) {
+         if (freqDataRef.current.length !== analyserNode.frequencyBinCount) {
+             freqDataRef.current = new Uint8Array(analyserNode.frequencyBinCount);
+         }
+         analyserNode.getByteFrequencyData(freqDataRef.current);
+      }
+
       if (renderRef.current) {
+
         renderRef.current();
       }
     };

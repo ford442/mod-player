@@ -1,124 +1,142 @@
-/**
- * OpenMPT Audio Worklet Processor with Ring Buffer
- * Fixes skipping by buffering data ahead of playback.
- */
+import Module from './libopenmpt-audioworklet.js';
 
-class OpenMPTProcessor extends AudioWorkletProcessor {
-  constructor() {
-    super();
-    
-    // Buffer Configuration: 5 seconds @ 44.1kHz (Stereo)
-    this.bufferSize = 44100 * 5;
-    this.buffer = new Float32Array(this.bufferSize * 2);
-    
-    // Pointers (Read/Write heads)
-    this.readIndex = 0;
-    this.writeIndex = 0;
-    this.availableFrames = 0;
-    this.totalFramesRendered = 0;
-    this.lastStarvationTime = 0;
-    
-    // Constants
-    this.STARVATION_THROTTLE_SECONDS = 0.1; // Throttle starvation messages to 100ms
+class XMPlayerProcessor extends AudioWorkletProcessor {
+  constructor(options) {
+    super(options);
+    this.modulePtr = 0;
+    this.leftBufPtr = 0;
+    this.rightBufPtr = 0;
+    this.maxFrames = 4096;
+    this.lib = null;
+    this.lastPositionReportTime = 0;
 
-    this.port.onmessage = (e) => {
-      if (e.data?.type === 'flush') {
-        this.readIndex = 0;
-        this.writeIndex = 0;
-        this.availableFrames = 0;
-        this.totalFramesRendered = 0;
-        this.buffer.fill(0);
-        this.port.postMessage({ type: 'bufferLevel', level: 0 });
-        return;
+    this.port.onmessage = async (e) => {
+      const { moduleData, type } = e.data;
+
+      if (type === 'load' && moduleData) {
+        await this.loadModule(moduleData);
+      } else if (type === "seek") {
+        if (this.modulePtr && this.lib) {
+           this.lib._openmpt_module_set_position_order_row(this.modulePtr, e.data.order, e.data.row);
+        }
+      } else if (moduleData && !type) {
+        // Fallback for just sending data
+        await this.loadModule(moduleData);
       }
-      const { left, right } = e.data;
-      if (!left || !right) return;
-      this.pushData(left, right);
     };
   }
 
-  // Add incoming data to the Ring Buffer
-  pushData(leftData, rightData) {
-    const inputLen = leftData.length;
-    
-    // Check if we have space in the buffer
-    const freeSpace = this.bufferSize - this.availableFrames;
-    const framesToWrite = Math.min(inputLen, freeSpace);
-    
-    if (framesToWrite < inputLen) {
-      // Buffer overflow - we're writing faster than consuming
-      // This shouldn't happen with proper pump management, but log it
-      this.port.postMessage({ type: 'overflow', lost: inputLen - framesToWrite });
-    }
-    
-    for (let i = 0; i < framesToWrite; i++) {
-      // Write Left
-      this.buffer[this.writeIndex * 2] = leftData[i];
-      // Write Right
-      this.buffer[this.writeIndex * 2 + 1] = rightData[i];
-      
-      this.writeIndex = (this.writeIndex + 1) % this.bufferSize;
-    }
+  async loadModule(moduleData) {
+    try {
+      // Ensure Module is initialized
+      let lib = Module;
+      if (!lib._openmpt_module_create_from_memory) {
+         await new Promise(resolve => {
+            if (lib.calledRun && lib.onRuntimeInitialized) {
+               // Already ran?
+               resolve();
+            } else {
+               lib.onRuntimeInitialized = resolve;
+            }
+         });
+      }
+      this.lib = lib;
 
-    this.availableFrames = Math.min(this.availableFrames + framesToWrite, this.bufferSize);
+      // Cleanup old module
+      if (this.modulePtr) {
+        lib._openmpt_module_destroy(this.modulePtr);
+        this.modulePtr = 0;
+      }
+      if (this.leftBufPtr) {
+        lib._free(this.leftBufPtr);
+        this.leftBufPtr = 0;
+      }
+      if (this.rightBufPtr) {
+         lib._free(this.rightBufPtr);
+         this.rightBufPtr = 0;
+      }
+
+      // Create new module
+      const filePtr = lib._malloc(moduleData.byteLength);
+      lib.HEAPU8.set(new Uint8Array(moduleData), filePtr);
+      
+      this.modulePtr = lib._openmpt_module_create_from_memory(filePtr, moduleData.byteLength, 0, 0, 0);
+      lib._free(filePtr);
+
+      if (this.modulePtr === 0) {
+        this.port.postMessage({ type: 'error', message: 'Failed to create module' });
+        return;
+      }
+
+      // Alloc buffers
+      this.leftBufPtr = lib._malloc(4 * this.maxFrames);
+      this.rightBufPtr = lib._malloc(4 * this.maxFrames);
+
+      // Set render params
+      lib._openmpt_module_set_render_param(this.modulePtr, 0, 0); // Use read() value
+      lib._openmpt_module_set_render_param(this.modulePtr, 2, 4); // Interpolation best
+
+      this.port.postMessage({ type: 'loaded' });
+    } catch (err) {
+      this.port.postMessage({ type: 'error', message: err.toString() });
+    }
   }
 
   process(inputs, outputs, parameters) {
+    if (!this.modulePtr || !this.lib) return true;
+
     const output = outputs[0];
     const outputLeft = output[0];
     const outputRight = output[1];
-    
-    // Guard against empty output channels (can happen during teardown)
     if (!outputLeft || !outputRight) return true;
 
-    const framesToRead = outputLeft.length; // Usually 128
+    const numSamples = outputLeft.length;
+    // Use the AudioContext sampleRate (global in AudioWorkletScope)
+    const sr = sampleRate;
 
-    // If we are starving (not enough data), output silence and notify
-    if (this.availableFrames < framesToRead) {
-      // Output zeros to prevent glitches
-      outputLeft.fill(0);
-      outputRight.fill(0);
-      
-      // Throttle starvation messages to once per STARVATION_THROTTLE_SECONDS
-      const now = currentTime;
-      if (now - this.lastStarvationTime > this.STARVATION_THROTTLE_SECONDS) {
-        this.port.postMessage({ type: 'starvation', available: this.availableFrames });
-        this.lastStarvationTime = now;
-      }
-      this.totalFramesRendered += framesToRead;
-      this.port.postMessage({
-        type: 'renderPosition',
-        currentTime,
-        framesRendered: this.totalFramesRendered,
-        bufferLevel: this.availableFrames,
-      });
+    const samplesWritten = this.lib._openmpt_module_read_float_stereo(
+      this.modulePtr,
+      sr,
+      numSamples,
+      this.leftBufPtr,
+      this.rightBufPtr
+    );
+
+    if (samplesWritten === 0) {
+      this.port.postMessage({ type: 'ended' });
       return true;
     }
 
-    // Read from Ring Buffer
-    for (let i = 0; i < framesToRead; i++) {
-      outputLeft[i] = this.buffer[this.readIndex * 2];
-      outputRight[i] = this.buffer[this.readIndex * 2 + 1];
+    const leftView = new Float32Array(this.lib.HEAPF32.buffer, this.leftBufPtr, samplesWritten);
+    const rightView = new Float32Array(this.lib.HEAPF32.buffer, this.rightBufPtr, samplesWritten);
 
-      this.readIndex = (this.readIndex + 1) % this.bufferSize;
+    // Copy to output
+    outputLeft.set(leftView);
+    outputRight.set(rightView);
+
+    // Fill remaining with silence if needed (shouldn't happen if samplesWritten == numSamples)
+    if (samplesWritten < numSamples) {
+       outputLeft.fill(0, samplesWritten);
+       outputRight.fill(0, samplesWritten);
     }
 
-    this.availableFrames -= framesToRead;
-    this.totalFramesRendered += framesToRead;
+    // Position reporting
+    if (currentTime - this.lastPositionReportTime > 0.05) { // ~20fps
+       const order = this.lib._openmpt_module_get_current_order(this.modulePtr);
+       const row = this.lib._openmpt_module_get_current_row(this.modulePtr);
+       const positionSeconds = this.lib._openmpt_module_get_position_seconds(this.modulePtr);
 
-    // Report buffer level more frequently for accurate tracking (every 512 frames)
-    if (this.readIndex % 512 === 0) {
-        this.port.postMessage({ type: 'bufferLevel', level: this.availableFrames });
+       this.port.postMessage({
+         type: 'position',
+         order,
+         row,
+         positionSeconds
+       });
+       this.lastPositionReportTime = currentTime;
     }
-    this.port.postMessage({
-      type: 'renderPosition',
-      currentTime,
-      framesRendered: this.totalFramesRendered,
-      bufferLevel: this.availableFrames,
-    });
 
     return true;
   }
 }
 
-registerProcessor('openmpt-processor', OpenMPTProcessor);
+registerProcessor('openmpt-processor', XMPlayerProcessor);
