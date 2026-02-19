@@ -119,6 +119,7 @@ function App() {
         onViewModeToggle={() => setViewMode(viewMode === 'device' ? 'wall' : 'device')}
         onExitStudio={() => setIs3DMode(false)}
         dimFactor={dimFactor}
+              analyserNode={analyserNode}
         headerContent={
           <div className="scale-75 origin-top-left">
          <Header status={status} />
@@ -160,6 +161,7 @@ function App() {
               onPanChange={setPan}
               externalVideoSource={null}
               dimFactor={dimFactor}
+              analyserNode={analyserNode}
             />
           </div>
         }
@@ -318,6 +320,7 @@ function App() {
              onPanChange={setPan}
              externalVideoSource={null}
              dimFactor={dimFactor}
+              analyserNode={analyserNode}
            />
 
            <MediaOverlay
