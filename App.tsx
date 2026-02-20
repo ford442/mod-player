@@ -65,7 +65,7 @@ function App() {
     toggleAudioEngine,
     status,
     syncDebug,
-    analyserNode
+    analyserNode,
   } = useLibOpenMPT(volume);
 
   // Media Overlay State
@@ -122,7 +122,6 @@ function App() {
         onViewModeToggle={() => setViewMode(viewMode === 'device' ? 'wall' : 'device')}
         onExitStudio={() => setIs3DMode(false)}
         dimFactor={dimFactor}
-        analyserNode={analyserNode}
         headerContent={
           <div className="scale-75 origin-top-left">
          <Header status={status} />
