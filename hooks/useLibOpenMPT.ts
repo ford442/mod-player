@@ -245,8 +245,8 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
        // Interpolate/Predict row fraction?
        // For now, raw row is better than nothing.
        // We can use the timestamp of the last message vs current time to smooth it?
-       const now = audioContextRef.current?.currentTime || 0;
-       const dt = now - lastWorkletUpdateRef.current;
+
+
        // We could extrapolate if we knew speed... but row jumping is safer for now.
     } else {
        // Main thread module (ScriptProcessor)
