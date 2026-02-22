@@ -1,9 +1,7 @@
 
-@import url('https://rsms.me/inter/inter.css');
-
-/* 
-  FIX: Removed @tailwind directives. The Tailwind CDN script provides these utilities.
-*/
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
 /* Custom styles for a dark, tracker-like theme */
 body {
