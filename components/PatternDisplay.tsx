@@ -940,7 +940,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     const device = deviceRef.current;
     if (!device || !gpuReady) return;
     if (cellsBufferRef.current) cellsBufferRef.current.destroy();
-    const isHighPrec = shaderFile.includes('v0.36') || shaderFile.includes('v0.37') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49');
+    const isHighPrec = shaderFile.includes('v0.36') || shaderFile.includes('v0.37') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49');
     const packFunc = isHighPrec ? packPatternMatrixHighPrecision : packPatternMatrix;
     cellsBufferRef.current = createBufferWithData(device, packFunc(matrix, padTopChannel), GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
     if (layoutTypeRef.current === 'extended') {
