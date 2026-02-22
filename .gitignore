@@ -2,5 +2,7 @@
 node_modules/
 package-lock.json
 /dist/index.html
+/dist/assets/index-BeFwqY_j.js
+/dist/worklets/libopenmpt-audioworklet.js
 
 .aider*
