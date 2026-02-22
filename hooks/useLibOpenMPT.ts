@@ -13,7 +13,8 @@ interface SyncDebugInfo {
 const DEFAULT_ROWS = 64;
 const DEFAULT_CHANNELS = 4;
 const DEFAULT_MODULE_URL = '4-mat_-_space_debris.mod';
-const WORKLET_URL = 'worklets/openmpt-processor.js';
+// === PROPER WORKLET URL FOR VITE + PUBLIC FOLDER ===
+const WORKLET_URL = '/worklets/openmpt-processor.js';
 // const SAMPLE_RATE = 44100;
 
 export function useLibOpenMPT(initialVolume: number = 0.4) {
@@ -393,56 +394,60 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
       if (scriptNodeRef.current) scriptNodeRef.current.disconnect();
       if (audioWorkletNodeRef.current) audioWorkletNodeRef.current.disconnect();
 
-      if (activeEngine === 'worklet' && isWorkletSupported) {
-         console.log('Starting Worklet playback...');
-         // Create Worklet Node
-         try {
-             // Re-add module? No, already added in init.
-             const node = new AudioWorkletNode(ctx, 'openmpt-processor', {
-                 numberOfInputs: 0,
-                 numberOfOutputs: 1,
-                 outputChannelCount: [2]
-             });
+    if (activeEngine === 'worklet' && isWorkletSupported) {
+      console.log('🎵 Starting AudioWorklet playback...');
 
-             node.port.onmessage = (e) => {
-                 const { type, order, row, positionSeconds, message } = e.data;
-                 if (type === 'position') {
-                     workletOrderRef.current = order;
-                     workletRowRef.current = row;
-                     workletTimeRef.current = positionSeconds;
-                     lastWorkletUpdateRef.current = ctx.currentTime;
-                 } else if (type === 'ended') {
-                     if (isLooping) {
-                         // Loop? Processor stops.
-                         // We can seek to 0.
-                         seekToStepWrapper(0);
-                     } else {
-                         stopMusic(false);
-                     }
-                 } else if (type === 'error') {
-                     console.error("Worklet error:", message);
-                     setStatus("Worklet error: " + message);
-                 } else if (type === 'loaded') {
-                     console.log("Worklet loaded module.");
-                 }
-             };
+      try {
+        // ← CRITICAL FIX: load module on the real persistent context
+        if (ctx.audioWorklet) {
+          await ctx.audioWorklet.addModule(WORKLET_URL);
+          console.log('✅ openmpt-processor loaded on playback context');
+        }
 
-             // Send module data
-             node.port.postMessage({ type: 'load', moduleData: fileDataRef.current?.buffer });
+        const node = new AudioWorkletNode(ctx, 'openmpt-processor', {
+          numberOfInputs: 0,
+          numberOfOutputs: 1,
+          outputChannelCount: [2]
+        });
 
-             node.connect(analyserRef.current!);
-             analyserRef.current!.connect(stereoPannerRef.current!);
-             stereoPannerRef.current!.connect(gainNodeRef.current!);
-             gainNodeRef.current!.connect(ctx.destination);
+        node.port.onmessage = (e) => {
+          const { type, order, row, positionSeconds, message } = e.data;
+          if (type === 'position') {
+            workletOrderRef.current = order;
+            workletRowRef.current = row;
+            workletTimeRef.current = positionSeconds;
+            lastWorkletUpdateRef.current = ctx.currentTime;
+          } else if (type === 'ended') {
+            if (isLooping) {
+              seekToStepWrapper(0);
+            } else {
+              stopMusic(false);
+            }
+          } else if (type === 'error') {
+            console.error("Worklet error:", message);
+            setStatus("Worklet error: " + message);
+          } else if (type === 'loaded') {
+            console.log("Worklet loaded module.");
+          }
+        };
 
-             audioWorkletNodeRef.current = node;
-         } catch (e) {
-             console.error("Failed to create AudioWorkletNode:", e);
-             setActiveEngine('script');
-             return play(); // Retry
-         }
+        // Send module data
+        node.port.postMessage({ type: 'load', moduleData: fileDataRef.current?.buffer });
 
-      } else {
+        node.connect(analyserRef.current!);
+        analyserRef.current!.connect(stereoPannerRef.current!);
+        stereoPannerRef.current!.connect(gainNodeRef.current!);
+        gainNodeRef.current!.connect(ctx.destination);
+
+        audioWorkletNodeRef.current = node;
+      } catch (e) {
+        console.error("❌ Failed to create/load AudioWorkletNode:", e);
+        console.warn("Falling back to ScriptProcessorNode");
+        setActiveEngine('script');
+        setIsWorkletSupported(false);
+        return play(); // retry with script processor
+      }
+    } else {
          // ScriptProcessor fallback
          const bufferSize = 4096;
          const node = ctx.createScriptProcessor(bufferSize, 0, 2);
@@ -527,15 +532,14 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
              setIsReady(true);
 
              try {
-                const ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'playback' });
-                // Note: HEAD check for worklet URL skipped for brevity, addModule usually throws if 404
-                await ctx.audioWorklet.addModule(WORKLET_URL);
+                const tempCtx = new (window.AudioContext || window.webkitAudioContext)();
+                await tempCtx.audioWorklet.addModule(WORKLET_URL);
                 setIsWorkletSupported(true);
                 setActiveEngine('worklet');
-                await ctx.close();
-                console.log('AudioWorklet support enabled');
+                await tempCtx.close();
+                console.log('✅ AudioWorklet support confirmed');
              } catch (e) {
-                console.warn("AudioWorklet not available, falling back to ScriptProcessorNode:", e);
+                console.warn("⚠️ AudioWorklet not available (fallback to script processor):", e);
                 setIsWorkletSupported(false);
                 setActiveEngine('script');
              }
