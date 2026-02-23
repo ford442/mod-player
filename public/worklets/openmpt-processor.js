@@ -32,8 +32,8 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
       let lib = Module;
       if (!lib._openmpt_module_create_from_memory) {
          await new Promise(resolve => {
-            if (lib.calledRun && lib.onRuntimeInitialized) {
-               // Already ran?
+            if (lib.calledRun) {
+               // WASM already initialised (wasm2js path or previously loaded)
                resolve();
             } else {
                lib.onRuntimeInitialized = resolve;
