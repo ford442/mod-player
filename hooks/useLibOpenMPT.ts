@@ -12,7 +12,7 @@ interface SyncDebugInfo {
 // Constants
 const DEFAULT_ROWS = 64;
 const DEFAULT_CHANNELS = 4;
-const DEFAULT_MODULE_URL = '4-mat_-_space_debris.mod';
+const DEFAULT_MODULE_URL = '4-mat_madness.mod';
 // === PROPER WORKLET URL FOR VITE + PUBLIC FOLDER ===
 const WORKLET_URL = '/worklets/openmpt-processor.js';
 // const SAMPLE_RATE = 44100;
