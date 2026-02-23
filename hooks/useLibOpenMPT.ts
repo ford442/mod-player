@@ -68,6 +68,15 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
   const patternMatricesRef = useRef<PatternMatrix[]>([]); // Cache for all patterns
   const channelStatesRef = useRef<ChannelShadowState[]>([]);
 
+  // Stable refs to avoid stale closures across renders
+  const isPlayingRef = useRef<boolean>(false);
+  const playRef = useRef<(() => Promise<void>) | null>(null);
+  // Track whether the worklet module is loaded on the current AudioContext
+  const workletLoadedRef = useRef<boolean>(false);
+
+  // Sync isPlayingRef with the latest React state every render
+  isPlayingRef.current = isPlaying;
+
   // Helpers
   const getPatternMatrix = useCallback((modPtr: number, patternIndex: number, orderIndex: number): PatternMatrix => {
     const lib = libopenmptRef.current;
@@ -184,8 +193,8 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
     setIsModuleLoaded(true);
     setStatus(`Loaded "${title || fileName}"`);
 
-    // Auto-play
-    play();
+    // Auto-play using the latest play function (avoids stale closure)
+    if (playRef.current) playRef.current();
 
   }, [isPlaying, getPatternMatrix]);
 
@@ -228,7 +237,8 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
   }, [isLooping]);
 
   const updateUI = useCallback(() => {
-    if (!isPlaying) return;
+    // Use ref so this callback always sees the current isPlaying state
+    if (!isPlayingRef.current) return;
 
     const lib = libopenmptRef.current;
     const modPtr = currentModulePtr.current;
@@ -304,6 +314,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
   }, [isPlaying, activeEngine, sequencerMatrix]);
 
   const stopMusic = useCallback((destroy: boolean = false) => {
+    isPlayingRef.current = false;
     setIsPlaying(false);
     if (animationFrameHandle.current) cancelAnimationFrame(animationFrameHandle.current);
 
@@ -318,7 +329,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
 
     if (audioWorkletNodeRef.current) {
         audioWorkletNodeRef.current.disconnect();
-        // audioWorkletNodeRef.current = null; // Keep it to avoid recreation overhead? No, safer to recreate.
+        audioWorkletNodeRef.current = null;
     }
 
     if (destroy && currentModulePtr.current !== 0 && libopenmptRef.current) {
@@ -368,6 +379,8 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
     try {
       if (!audioContextRef.current) {
          audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'playback' });
+         // New context: worklet module needs to be (re)loaded
+         workletLoadedRef.current = false;
       }
 
       const ctx = audioContextRef.current;
@@ -391,16 +404,17 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
       }
 
       // Disconnect previous sources
-      if (scriptNodeRef.current) scriptNodeRef.current.disconnect();
-      if (audioWorkletNodeRef.current) audioWorkletNodeRef.current.disconnect();
+      if (scriptNodeRef.current) { scriptNodeRef.current.disconnect(); scriptNodeRef.current = null; }
+      if (audioWorkletNodeRef.current) { audioWorkletNodeRef.current.disconnect(); audioWorkletNodeRef.current = null; }
 
     if (activeEngine === 'worklet' && isWorkletSupported) {
       console.log('🎵 Starting AudioWorklet playback...');
 
       try {
-        // ← CRITICAL FIX: load module on the real persistent context
-        if (ctx.audioWorklet) {
+        // Load the worklet module only once per AudioContext
+        if (ctx.audioWorklet && !workletLoadedRef.current) {
           await ctx.audioWorklet.addModule(WORKLET_URL);
+          workletLoadedRef.current = true;
           console.log('✅ openmpt-processor loaded on playback context');
         }
 
@@ -431,8 +445,9 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
           }
         };
 
-        // Send module data
-        node.port.postMessage({ type: 'load', moduleData: fileDataRef.current?.buffer });
+        // Send module data (cloned, not transferred, so fileDataRef remains valid)
+        const buf = fileDataRef.current?.buffer;
+        if (buf) node.port.postMessage({ type: 'load', moduleData: buf });
 
         node.connect(analyserRef.current!);
         analyserRef.current!.connect(stereoPannerRef.current!);
@@ -443,9 +458,19 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
       } catch (e) {
         console.error("❌ Failed to create/load AudioWorkletNode:", e);
         console.warn("Falling back to ScriptProcessorNode");
-        setActiveEngine('script');
-        setIsWorkletSupported(false);
-        return play(); // retry with script processor
+        // Fall through to ScriptProcessor below (don't call play() recursively)
+        workletLoadedRef.current = false;
+
+        const bufferSize = 4096;
+        const node = ctx.createScriptProcessor(bufferSize, 0, 2);
+        node.onaudioprocess = (ev: AudioProcessingEvent) => processAudioChunk(ev.outputBuffer);
+
+        node.connect(analyserRef.current!);
+        analyserRef.current!.connect(stereoPannerRef.current!);
+        stereoPannerRef.current!.connect(gainNodeRef.current!);
+        gainNodeRef.current!.connect(ctx.destination);
+
+        scriptNodeRef.current = node;
       }
     } else {
          // ScriptProcessor fallback
@@ -461,6 +486,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
          scriptNodeRef.current = node;
       }
 
+      isPlayingRef.current = true;
       setIsPlaying(true);
       setStatus("Playing...");
       animationFrameHandle.current = requestAnimationFrame(updateUI);
@@ -470,6 +496,10 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
       setStatus("Error starting playback");
     }
   }, [activeEngine, isWorkletSupported, panValue, volume, processAudioChunk, isLooping, stopMusic]);
+
+  // Keep playRef always pointing to the latest play function
+  // so processModuleData (which memoises over different deps) can call it without stale closure
+  playRef.current = play;
 
   const toggleAudioEngine = useCallback(() => {
      if (activeEngine === 'script' && !isWorkletSupported) return;

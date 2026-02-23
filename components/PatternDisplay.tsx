@@ -34,7 +34,8 @@ const getLayoutType = (shaderFile: string): LayoutType => {
 
 const isSinglePassCompositeShader = (shaderFile: string) => {
   // Shaders that do their own background composition in one pass
-  if (shaderFile.includes('v0.21') || shaderFile.includes('v0.40') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.47') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49')) return 'chassis_frosted.wgsl';
+  // v0.45, v0.46, v0.47, v0.48, v0.49 are NOT single-pass — they need the external chassis_frosted background
+  if (shaderFile.includes('v0.21') || shaderFile.includes('v0.40') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44')) return 'chassis_frosted.wgsl';
   return false;
 };
 
@@ -419,7 +420,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   const canvasMetrics = useMemo(() => {
     // Force specific resolutions for certain chassis to match background images
     if (shaderFile.includes('v0.27') || shaderFile.includes('v0.28')) return { width: 1024, height: 1008 };
-    if (shaderFile.includes('v0.21') || shaderFile.includes('v0.37') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46')) return { width: 1024, height: 1024 };
+    if (shaderFile.includes('v0.21') || shaderFile.includes('v0.37') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.47') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49')) return { width: 1024, height: 1024 };
 
     if (isHorizontal) {
        return { width: 1024, height: 1024 }; // Square for horizontal layouts usually
@@ -1271,8 +1272,8 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
       }],
     });
 
-    // v0.45, v0.46, v0.47, v0.48, v0.49 need background pass since they only render UI strip
-    const needsBackground = !isSinglePassCompositeShader(shaderFile) || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.47') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49');
+    // Render background pass for all shaders that are not self-compositing
+    const needsBackground = !isSinglePassCompositeShader(shaderFile);
     if (bezelPipelineRef.current && bezelBindGroupRef.current && needsBackground) {
       pass.setPipeline(bezelPipelineRef.current);
       pass.setBindGroup(0, bezelBindGroupRef.current);
