@@ -1,4 +1,4 @@
-import { useEffect, useCallback } from 'react';
+import { useEffect, useRef } from 'react';
 
 interface KeyboardShortcutActions {
   onPlayPause: () => void;
@@ -14,56 +14,60 @@ interface KeyboardShortcutActions {
 }
 
 export function useKeyboardShortcuts(actions: KeyboardShortcutActions) {
-  const handleKeyDown = useCallback((e: KeyboardEvent) => {
-    // Don't capture when typing in inputs
-    const tag = (e.target as HTMLElement)?.tagName;
-    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
-
-    switch (e.key) {
-      case ' ':
-        e.preventDefault();
-        actions.onPlayPause();
-        break;
-      case 'Escape':
-        actions.onStop();
-        break;
-      case 'ArrowRight':
-        e.preventDefault();
-        if (e.shiftKey) {
-          actions.onNextTrack();
-        } else {
-          actions.onSeekForward();
-        }
-        break;
-      case 'ArrowLeft':
-        e.preventDefault();
-        if (e.shiftKey) {
-          actions.onPrevTrack();
-        } else {
-          actions.onSeekBackward();
-        }
-        break;
-      case 'ArrowUp':
-        e.preventDefault();
-        actions.onVolumeUp();
-        break;
-      case 'ArrowDown':
-        e.preventDefault();
-        actions.onVolumeDown();
-        break;
-      case 'l':
-      case 'L':
-        actions.onToggleLoop();
-        break;
-      case 'f':
-      case 'F':
-        actions.onToggleFullscreen();
-        break;
-    }
-  }, [actions]);
+  const actionsRef = useRef(actions);
+  actionsRef.current = actions;
 
   useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't capture when typing in inputs
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+
+      const a = actionsRef.current;
+      switch (e.key) {
+        case ' ':
+          e.preventDefault();
+          a.onPlayPause();
+          break;
+        case 'Escape':
+          a.onStop();
+          break;
+        case 'ArrowRight':
+          e.preventDefault();
+          if (e.shiftKey) {
+            a.onNextTrack();
+          } else {
+            a.onSeekForward();
+          }
+          break;
+        case 'ArrowLeft':
+          e.preventDefault();
+          if (e.shiftKey) {
+            a.onPrevTrack();
+          } else {
+            a.onSeekBackward();
+          }
+          break;
+        case 'ArrowUp':
+          e.preventDefault();
+          a.onVolumeUp();
+          break;
+        case 'ArrowDown':
+          e.preventDefault();
+          a.onVolumeDown();
+          break;
+        case 'l':
+        case 'L':
+          a.onToggleLoop();
+          break;
+        case 'f':
+        case 'F':
+          a.onToggleFullscreen();
+          break;
+      }
+    };
+
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handleKeyDown]);
+  }, []);
 }

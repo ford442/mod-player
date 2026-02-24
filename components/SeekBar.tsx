@@ -34,7 +34,7 @@ export const SeekBar: React.FC<SeekBarProps> = ({
     if (!barRef.current || totalRows <= 0) return 0;
     const rect = barRef.current.getBoundingClientRect();
     const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
-    return Math.round(ratio * totalRows);
+    return Math.round(ratio * Math.max(0, totalRows - 1));
   }, [totalRows]);
 
   const handleMouseDown = useCallback((e: React.MouseEvent) => {

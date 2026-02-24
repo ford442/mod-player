@@ -25,6 +25,14 @@ export const ChannelMeters: React.FC<ChannelMetersProps> = ({
   const [levels, setLevels] = useState<number[]>([]);
   const [peaks, setPeaks] = useState<number[]>([]);
 
+  // Stable refs for animation loop (avoids re-creating tick callback)
+  const channelVURef = useRef(channelVU);
+  const numChannelsRef = useRef(numChannels);
+  const analyserNodeRef = useRef(analyserNode);
+  channelVURef.current = channelVU;
+  numChannelsRef.current = numChannels;
+  analyserNodeRef.current = analyserNode;
+
   // Reset peaks when channel count changes
   useEffect(() => {
     peaksRef.current = new Float32Array(numChannels);
@@ -33,12 +41,13 @@ export const ChannelMeters: React.FC<ChannelMetersProps> = ({
   // Main animation loop: update VU peaks + draw oscilloscope
   const tick = useCallback(() => {
     // --- VU peak decay ---
-    const currentVU = channelVU;
+    const currentVU = channelVURef.current;
+    const nCh = numChannelsRef.current;
     const p = peaksRef.current;
     const newLevels: number[] = [];
     const newPeaks: number[] = [];
 
-    for (let i = 0; i < numChannels; i++) {
+    for (let i = 0; i < nCh; i++) {
       const v = currentVU && i < currentVU.length
         ? Math.min(1, Math.max(0, currentVU[i]))
         : 0;
@@ -52,12 +61,13 @@ export const ChannelMeters: React.FC<ChannelMetersProps> = ({
     // --- Oscilloscope ---
     const canvas = scopeCanvasRef.current;
     const ctx = canvas?.getContext('2d');
-    if (canvas && ctx && analyserNode) {
+    const an = analyserNodeRef.current;
+    if (canvas && ctx && an) {
       const w = canvas.width;
       const h = canvas.height;
-      const bufLen = analyserNode.frequencyBinCount;
+      const bufLen = an.frequencyBinCount;
       const buf = new Uint8Array(bufLen);
-      analyserNode.getByteTimeDomainData(buf);
+      an.getByteTimeDomainData(buf);
 
       ctx.fillStyle = SCOPE_BG;
       ctx.fillRect(0, 0, w, h);
@@ -86,7 +96,7 @@ export const ChannelMeters: React.FC<ChannelMetersProps> = ({
     }
 
     rafRef.current = requestAnimationFrame(tick);
-  }, [channelVU, numChannels, analyserNode]);
+  }, []);
 
   useEffect(() => {
     if (isPlaying) {
