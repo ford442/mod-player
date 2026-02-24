@@ -32,7 +32,8 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 # Source Emscripten
 CANDIDATES=(
-    "/content/build_space/emsdk/emsdk_env.sh"
+    "/workspaces/codepit/emsdk/emsdk_env.sh"   # GitHub Codespace
+    "/content/build_space/emsdk/emsdk_env.sh"  # Colab
     "$PROJECT_ROOT/emsdk/emsdk_env.sh"
     "$HOME/emsdk/emsdk_env.sh"
     "/usr/local/emsdk/emsdk_env.sh"
@@ -43,11 +44,12 @@ done
 
 CPP_DIR="$PROJECT_ROOT/cpp"
 OUTPUT_DIR="$PROJECT_ROOT/public/worklets"
+VENDOR_DIR="$PROJECT_ROOT/vendor/libopenmpt"
 
-# libopenmpt paths (override with env vars)
-LIBOPENMPT_DIR="${LIBOPENMPT_DIR:-/usr/local/libopenmpt}"
+# libopenmpt paths (override with env vars or auto-clone below)
+LIBOPENMPT_DIR="${LIBOPENMPT_DIR:-$VENDOR_DIR}"
 LIBOPENMPT_INCLUDE="${LIBOPENMPT_INCLUDE:-$LIBOPENMPT_DIR/include}"
-LIBOPENMPT_LIB="${LIBOPENMPT_LIB:-$LIBOPENMPT_DIR/lib}"
+LIBOPENMPT_LIB="${LIBOPENMPT_LIB:-$LIBOPENMPT_DIR/bin}"
 
 # Debug mode
 DEBUG_FLAGS="-O3 -DNDEBUG"
@@ -67,16 +69,29 @@ fi
 
 echo "📦 Emscripten version: $(emcc --version | head -1)"
 
-# Verify libopenmpt
+# Auto-clone and build libopenmpt if headers are not already present
 if [[ ! -f "$LIBOPENMPT_INCLUDE/libopenmpt/libopenmpt.h" ]]; then
-    echo "❌ libopenmpt headers not found at: $LIBOPENMPT_INCLUDE"
-    echo "   Set LIBOPENMPT_DIR or LIBOPENMPT_INCLUDE environment variable"
-    exit 1
+    echo "📥 libopenmpt headers not found – cloning from GitHub…"
+    mkdir -p "$PROJECT_ROOT/vendor"
+    # remove any half–cloned repo so the git operation starts clean
+    rm -rf "$VENDOR_DIR" 2>/dev/null || true
+    git clone --depth 1 --shallow-submodules --recursive \
+        --branch OpenMPT-1.31 https://github.com/OpenMPT/openmpt.git "$VENDOR_DIR"
+
+    echo "🔨 Building libopenmpt for Emscripten (this takes a few minutes)…"
+    pushd "$VENDOR_DIR" >/dev/null
+    make CONFIG=emscripten -j"$(nproc 2>/dev/null || echo 2)"
+    popd >/dev/null
+
+    # After the Makefile build, headers are in include/ and libs in bin/
+    LIBOPENMPT_INCLUDE="$VENDOR_DIR/include"
+    LIBOPENMPT_LIB="$VENDOR_DIR/bin"
+    echo "✅ libopenmpt built at $VENDOR_DIR"
 fi
 
-echo "📁 Source:  $CPP_DIR"
-echo "📁 Output:  $OUTPUT_DIR"
-echo "📁 libopenmpt: $LIBOPENMPT_DIR"
+echo "📁 Source:     $CPP_DIR"
+echo "📁 Output:     $OUTPUT_DIR"
+echo "📁 libopenmpt: include=$LIBOPENMPT_INCLUDE  lib=$LIBOPENMPT_LIB"
 echo ""
 
 mkdir -p "$OUTPUT_DIR"

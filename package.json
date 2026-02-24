@@ -6,8 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build:worklet": "bash ./build-wasm.sh",
-    "build:emcc": "bash scripts/build-wasm.sh",
-    "build": "tsc && vite build",
+    "build:emcc": "bash ./build-wasm.sh",
+    "build": "tsc && node --max-old-space-size=4096 node_modules/.bin/vite build",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -30,4 +30,3 @@
     "vite": "^5.2.11"
   }
 }
-

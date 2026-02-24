@@ -27,23 +27,23 @@ set -e
 
 echo "=== OpenMPT Web Worklet Build (2026) ==="
 
-# ── 1. Source emsdk if emcc is not already in PATH ──────────────────
-if ! command -v emcc &>/dev/null; then
-    EMSDK_CANDIDATES=(
-        "/content/build_space/emsdk/emsdk_env.sh"
-        "$HOME/emsdk/emsdk_env.sh"
-        "/usr/local/emsdk/emsdk_env.sh"
-        "$(dirname "$0")/emsdk/emsdk_env.sh"
-    )
-    for f in "${EMSDK_CANDIDATES[@]}"; do
-        if [ -f "$f" ]; then
-            echo "Sourcing emsdk from $f..."
-            # shellcheck disable=SC1090
-            source "$f"
-            break
-        fi
-    done
-fi
+# ── 1. Source emsdk ─────────────────────────────────────────────────
+# Prioritize local codepit emsdk over system emsdk for newer version
+EMSDK_CANDIDATES=(
+    "/workspaces/codepit/emsdk/emsdk_env.sh"   # GitHub Codespace (newer)
+    "/content/build_space/emsdk/emsdk_env.sh"  # Colab
+    "$HOME/emsdk/emsdk_env.sh"
+    "/usr/local/emsdk/emsdk_env.sh"
+    "$(dirname "$0")/emsdk/emsdk_env.sh"
+)
+for f in "${EMSDK_CANDIDATES[@]}"; do
+    if [ -f "$f" ]; then
+        echo "Sourcing emsdk from $f..."
+        # shellcheck disable=SC1090
+        source "$f"
+        break
+    fi
+done
 
 if ! command -v emcc &>/dev/null; then
     echo "❌ emcc not found. Please activate emsdk first:" >&2
@@ -51,15 +51,23 @@ if ! command -v emcc &>/dev/null; then
     exit 1
 fi
 
+# Set cache to user-writable location
+export EM_CACHE="${HOME}/.emscripten_cache"
+mkdir -p "$EM_CACHE"
+
 echo "📦 Emscripten: $(emcc --version | head -1)"
 
 # ── 2. Clean and prepare directories ────────────────────────────────
 rm -rf vendor/libopenmpt public/worklets
 mkdir -p vendor public/worklets
 
-# ── 3. Clone libopenmpt ─────────────────────────────────────────────
-echo "Cloning latest libopenmpt..."
-git clone --depth 1 --branch master https://github.com/OpenMPT/openmpt.git vendor/libopenmpt
+# ── 3. Download libopenmpt source ───────────────────────────────────
+echo "Downloading libopenmpt 0.7.12..."
+# Download tarball instead of git clone (more reliable)
+curl -L -o libopenmpt.tar.gz "https://github.com/OpenMPT/openmpt/archive/refs/tags/libopenmpt-0.7.12.tar.gz"
+tar -xzf libopenmpt.tar.gz
+mv openmpt-libopenmpt-0.7.12 vendor/libopenmpt
+rm libopenmpt.tar.gz
 
 # ── 4. Build libopenmpt for Emscripten ──────────────────────────────
 cd vendor/libopenmpt
