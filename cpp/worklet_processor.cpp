@@ -371,4 +371,49 @@ void cleanup_audio() {
     g_workletNode = 0;
 }
 
+// ── Pattern data query functions (called from TypeScript) ────────────
+// These allow the JS engine to build a PatternMatrix for the current
+// module without shipping pattern bytes through the PositionInfo struct.
+
+/**
+ * Get the number of channels in the currently loaded module.
+ */
+EMSCRIPTEN_KEEPALIVE
+int get_num_channels() {
+    return g_module.getNumChannels();
+}
+
+/**
+ * Get the number of orders (positions) in the currently loaded module.
+ */
+EMSCRIPTEN_KEEPALIVE
+int get_num_orders() {
+    return g_module.getNumOrders();
+}
+
+/**
+ * Get the pattern index for a given order position.
+ */
+EMSCRIPTEN_KEEPALIVE
+int get_order_pattern(int order) {
+    return g_module.getOrderPattern(order);
+}
+
+/**
+ * Get the number of rows in a given pattern.
+ */
+EMSCRIPTEN_KEEPALIVE
+int get_pattern_num_rows(int pattern) {
+    return g_module.getPatternNumRows(pattern);
+}
+
+/**
+ * Read a per-cell command value for a given pattern/row/channel.
+ * command values: 0=note, 1=instrument, 2=volCmd, 3=volVal, 4=effCmd, 5=effVal
+ */
+EMSCRIPTEN_KEEPALIVE
+int get_pattern_row_channel_command(int pattern, int row, int channel, int command) {
+    return g_module.getPatternRowChannelCommand(pattern, row, channel, command);
+}
+
 } // extern "C"

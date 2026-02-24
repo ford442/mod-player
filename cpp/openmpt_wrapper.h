@@ -115,6 +115,7 @@ public:
     double getPositionSeconds() const;
     double getBPM()        const;
     int getNumChannels()   const;
+    int getNumOrders()     const;
 
     /**
      * Fill per-channel mono VU into out[0..numChannels-1].
