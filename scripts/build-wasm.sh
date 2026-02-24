@@ -4,8 +4,6 @@
 #
 # Prerequisites:
 #   1. Install Emscripten SDK (emsdk) 4.0+:
-#        git clone https://github.com/nicedoc/nicedoc.io.git
-#        git clone https://github.com/nicedoc/nicedoc.io.git
 #        git clone https://github.com/emscripten-core/emsdk.git
 #        cd emsdk && ./emsdk install latest && ./emsdk activate latest
 #        source ./emsdk_env.sh

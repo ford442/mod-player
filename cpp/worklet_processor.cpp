@@ -154,16 +154,19 @@ EM_BOOL audio_process_cb(
 
     // ── Report position (throttled: every ~16ms OR on row change) ──
     int currentRow = g_module.getCurrentRow();
-    // Estimate time based on sample count (128 frames at sampleRate)
-    double nowS = g_lastReportTimeS + (double)frames / (double)(out.samplesPerSec > 0 ? out.samplesPerSec : 48000);
-    g_lastReportTimeS = nowS;
+    // Accumulate elapsed time based on sample count
+    double elapsed = (double)frames / (double)(out.samplesPerSec > 0 ? out.samplesPerSec : 48000);
+    static double timeSinceLastReport = 0.0;
+    timeSinceLastReport += elapsed;
+    g_lastReportTimeS += elapsed;
 
     bool rowChanged = (currentRow != g_lastReportedRow);
     // ~16ms = ~768 samples at 48kHz ≈ 6 process() calls
-    bool timeThreshold = (nowS - g_lastReportTimeS > 0.016) || rowChanged;
+    bool timeThreshold = (timeSinceLastReport >= 0.016);
 
     if (rowChanged || timeThreshold) {
         g_lastReportedRow = currentRow;
+        timeSinceLastReport = 0.0;
         g_module.fillPositionInfo(g_positionInfo);
         g_positionReady.store(1, std::memory_order_release);
     }
