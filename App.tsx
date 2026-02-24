@@ -1,10 +1,18 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Header } from './components/Header';
 import { Controls } from './components/Controls';
 import { PatternDisplay } from './components/PatternDisplay';
 import { MediaOverlay } from './components/MediaOverlay';
 import { Studio3D } from './components/Studio3D';
+import { PatternViewer } from './components/PatternViewer';
+import { ChannelMeters } from './components/ChannelMeters';
+import { MetadataPanel } from './components/MetadataPanel';
+import type { ModuleMetadata } from './components/MetadataPanel';
+import { Playlist } from './components/Playlist';
+import { SeekBar } from './components/SeekBar';
 import { useLibOpenMPT } from './hooks/useLibOpenMPT';
+import { usePlaylist } from './hooks/usePlaylist';
+import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import type { MediaItem } from './types';
 
 // Shader Definitions
@@ -75,8 +83,87 @@ function App() {
   const [mediaVisible, setMediaVisible] = useState<boolean>(false);
   const [mediaItem, setMediaItem] = useState<MediaItem | null>(null);
 
+  // Pro tracker panel visibility
+  const [showPatternViewer, setShowPatternViewer] = useState<boolean>(true);
+  const [showChannelMeters, setShowChannelMeters] = useState<boolean>(true);
+  const [showMetadata, setShowMetadata] = useState<boolean>(true);
+  const [showPlaylist, setShowPlaylist] = useState<boolean>(true);
+
+  // Channel VU data (from worklet channelStates)
+  const channelVU = useMemo(() => {
+    if (!channelStates || channelStates.length === 0) return null;
+    const vu = new Float32Array(channelStates.length);
+    for (let i = 0; i < channelStates.length; i++) {
+      vu[i] = channelStates[i]?.volume ?? 0;
+    }
+    return vu;
+  }, [channelStates]);
+
+  // Module metadata derived from existing state
+  const moduleMetadata = useMemo((): ModuleMetadata | null => {
+    if (!isModuleLoaded || !sequencerMatrix) return null;
+    return {
+      title: status.replace(/^Loaded "/, '').replace(/"$/, '') || 'Unknown',
+      artist: '',
+      tracker: activeEngine === 'native-worklet' ? 'Native C++/Wasm' : activeEngine === 'worklet' ? 'JS AudioWorklet' : 'ScriptProcessor',
+      numChannels: sequencerMatrix?.numChannels ?? 0,
+      numOrders: totalPatternRows > 0 ? Math.ceil(totalPatternRows / (sequencerMatrix?.numRows || 64)) : 0,
+      numPatterns: 0,
+      numInstruments: 0,
+      durationSeconds: 0,
+      currentBpm: 125,
+      instruments: [],
+    };
+  }, [isModuleLoaded, sequencerMatrix, status, activeEngine, totalPatternRows]);
+
+  // Playlist
+  const playlist = usePlaylist();
+
+  const handlePlaylistSelect = useCallback((index: number) => {
+    const item = playlist.select(index);
+    if (item) loadFile(item.fileData, item.fileName);
+  }, [playlist, loadFile]);
+
+  const handlePlaylistNext = useCallback(() => {
+    const item = playlist.next();
+    if (item) loadFile(item.fileData, item.fileName);
+  }, [playlist, loadFile]);
+
+  const handlePlaylistPrev = useCallback(() => {
+    const item = playlist.prev();
+    if (item) loadFile(item.fileData, item.fileName);
+  }, [playlist, loadFile]);
+
+  const handlePlaylistFilesAdded = useCallback((files: FileList) => {
+    playlist.addFiles(files);
+  }, [playlist]);
+
   // Sync pan with library
   useEffect(() => { setLibPan(pan); }, [pan, setLibPan]);
+
+  // Keyboard shortcuts
+  useKeyboardShortcuts({
+    onPlayPause: useCallback(() => { isPlaying ? stopMusic(false) : play(); }, [isPlaying, stopMusic, play]),
+    onStop: useCallback(() => stopMusic(false), [stopMusic]),
+    onSeekForward: useCallback(() => seekToStep(Math.floor(playbackRowFraction) + 4), [seekToStep, playbackRowFraction]),
+    onSeekBackward: useCallback(() => seekToStep(Math.max(0, Math.floor(playbackRowFraction) - 4)), [seekToStep, playbackRowFraction]),
+    onVolumeUp: useCallback(() => setVolume(v => Math.min(1, v + 0.05)), []),
+    onVolumeDown: useCallback(() => setVolume(v => Math.max(0, v - 0.05)), []),
+    onNextTrack: handlePlaylistNext,
+    onPrevTrack: handlePlaylistPrev,
+    onToggleLoop: useCallback(() => setIsLooping(!isLooping), [isLooping, setIsLooping]),
+    onToggleFullscreen: useCallback(() => {
+      if (document.fullscreenElement) document.exitFullscreen();
+      else document.documentElement.requestFullscreen();
+    }, []),
+  });
+
+  // Register PWA service worker
+  useEffect(() => {
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`).catch(() => {});
+    }
+  }, []);
 
   // Handle File Selection
 
@@ -360,6 +447,103 @@ function App() {
              { id: '1', kind: 'video', url: 'clouds.mp4', fileName: 'Clouds Demo (MP4)' }
           ]}
         />
+
+        {/* Seek Bar */}
+        {isModuleLoaded && (
+          <div className="mt-4">
+            <SeekBar
+              currentSeconds={playbackSeconds}
+              durationSeconds={0}
+              currentRow={Math.floor(playbackRowFraction)}
+              totalRows={totalPatternRows}
+              isPlaying={isPlaying}
+              onSeekRow={seekToStep}
+            />
+          </div>
+        )}
+
+        {/* Panel Toggle Buttons */}
+        <div className="mt-4 flex flex-wrap gap-2">
+          {[
+            { key: 'pattern', label: '🎹 Pattern', state: showPatternViewer, toggle: setShowPatternViewer },
+            { key: 'meters', label: '📊 VU Meters', state: showChannelMeters, toggle: setShowChannelMeters },
+            { key: 'meta', label: 'ℹ️ Metadata', state: showMetadata, toggle: setShowMetadata },
+            { key: 'playlist', label: '📋 Playlist', state: showPlaylist, toggle: setShowPlaylist },
+          ].map(({ key, label, state, toggle }) => (
+            <button
+              key={key}
+              onClick={() => toggle(!state)}
+              className={`px-3 py-1 text-xs font-mono rounded-lg border transition-colors ${
+                state
+                  ? 'bg-cyan-900/30 text-cyan-300 border-cyan-800'
+                  : isDarkMode
+                    ? 'bg-gray-800 text-gray-500 border-gray-700 hover:text-gray-300'
+                    : 'bg-gray-200 text-gray-500 border-gray-300 hover:text-gray-700'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {/* Pro Tracker Panels */}
+        <div className="mt-4 grid grid-cols-1 lg:grid-cols-3 gap-4">
+          {/* Left Column: Pattern Viewer */}
+          {showPatternViewer && (
+            <div className="lg:col-span-2">
+              <PatternViewer
+                matrix={sequencerMatrix}
+                currentRow={Math.floor(playbackRowFraction)}
+                numChannels={sequencerMatrix?.numChannels ?? 4}
+                isPlaying={isPlaying}
+              />
+            </div>
+          )}
+
+          {/* Right Column: Metadata + VU Meters */}
+          <div className="flex flex-col gap-4">
+            {showMetadata && (
+              <MetadataPanel
+                metadata={moduleMetadata}
+                currentOrder={sequencerMatrix?.order ?? 0}
+                currentRow={Math.floor(playbackRowFraction)}
+                currentPattern={sequencerMatrix?.patternIndex ?? 0}
+                matrix={sequencerMatrix}
+                isPlaying={isPlaying}
+                playbackSeconds={playbackSeconds}
+              />
+            )}
+            {showChannelMeters && (
+              <ChannelMeters
+                channelVU={channelVU}
+                numChannels={sequencerMatrix?.numChannels ?? 4}
+                analyserNode={analyserNode}
+                isPlaying={isPlaying}
+              />
+            )}
+          </div>
+        </div>
+
+        {/* Playlist */}
+        {showPlaylist && (
+          <div className="mt-4">
+            <Playlist
+              items={playlist.items}
+              currentIndex={playlist.currentIndex}
+              isPlaying={isPlaying}
+              shuffle={playlist.shuffle}
+              repeat={playlist.repeat}
+              onSelect={handlePlaylistSelect}
+              onRemove={playlist.remove}
+              onClear={playlist.clear}
+              onPrev={handlePlaylistPrev}
+              onNext={handlePlaylistNext}
+              onShuffleToggle={playlist.toggleShuffle}
+              onRepeatCycle={playlist.cycleRepeat}
+              onFilesAdded={handlePlaylistFilesAdded}
+            />
+          </div>
+        )}
 
         <div className="mt-8 text-center text-xs opacity-50">
              <p>Supports .mod, .xm, .s3m, .it files.</p>
