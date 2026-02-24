@@ -240,12 +240,14 @@ function App() {
                   className={`px-4 py-2 text-sm font-mono rounded-lg shadow-lg transition-colors border ${
                     !isWorkletSupported
                       ? 'bg-gray-300 text-gray-500 cursor-not-allowed border-gray-400 opacity-50'
-                      : activeEngine === 'worklet'
-                        ? 'bg-green-600 text-white border-green-500 hover:bg-green-700'
-                        : 'bg-yellow-500 text-black border-yellow-400 hover:bg-yellow-600'
+                      : activeEngine === 'native-worklet'
+                        ? 'bg-purple-600 text-white border-purple-500 hover:bg-purple-700'
+                        : activeEngine === 'worklet'
+                          ? 'bg-green-600 text-white border-green-500 hover:bg-green-700'
+                          : 'bg-yellow-500 text-black border-yellow-400 hover:bg-yellow-600'
                   }`}
                 >
-                  {activeEngine === 'worklet' ? '⚡ Worklet' : '🐌 Script'}
+                  {activeEngine === 'native-worklet' ? '🚀 Native' : activeEngine === 'worklet' ? '⚡ Worklet' : '🐌 Script'}
                 </button>
             </div>
 
