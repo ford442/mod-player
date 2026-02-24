@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
+    "build:emcc": "bash scripts/build-wasm.sh",
+    "build": "tsc && build:emcc && vite build",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -28,3 +29,4 @@
     "vite": "^5.2.11"
   }
 }
+
