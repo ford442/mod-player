@@ -27,6 +27,19 @@
 # ──────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# Source Emscripten
+CANDIDATES=(
+    "/content/build_space/emsdk/emsdk_env.sh"
+    "$REPO_ROOT/emsdk/emsdk_env.sh"
+    "$HOME/emsdk/emsdk_env.sh"
+    "/usr/local/emsdk/emsdk_env.sh"
+)
+for f in "${CANDIDATES[@]}"; do
+    if [ -f "$f" ]; then source "$f"; break; fi
+done
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
