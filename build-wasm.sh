@@ -90,7 +90,6 @@ emcc \
     \
     -s AUDIO_WORKLET=1 \
     -s WASM_WORKERS=1 \
-    -s ASYNCIFY=1 \
     -s ALLOW_MEMORY_GROWTH=1 \
     -s ENVIRONMENT=web,worker \
     -s MODULARIZE=1 \
