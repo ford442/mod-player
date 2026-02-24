@@ -1,0 +1,1167 @@
+=== OpenMPT Web Worklet Build (2026) ===
+Sourcing emsdk from /workspaces/codepit/emsdk/emsdk_env.sh...
+Setting up EMSDK environment (suppress these messages with EMSDK_QUIET=1)
+Adding directories to PATH:
+PATH += /workspaces/codepit/emsdk
+PATH += /workspaces/codepit/emsdk/upstream/emscripten
+
+Setting environment variables:
+PATH = /workspaces/codepit/emsdk:/workspaces/codepit/emsdk/upstream/emscripten:/vscode/bin/linux-x64/072586267e68ece9a47aa43f8c108e0dcbf44622/bin/remote-cli:/usr/local/python/current/bin:/usr/local/py-utils/bin:/usr/local/share/nvm/versions/node/v24.13.1/bin:/opt/emsdk:/opt/emsdk/upstream/emscripten:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/vscode/.local/bin
+EMSDK = /workspaces/codepit/emsdk
+EMSDK_NODE = /workspaces/codepit/emsdk/node/22.16.0_64bit/bin/node
+Clearing existing environment variable: EM_CACHE
+Clearing existing environment variable: EM_CONFIG
+📦 Emscripten: emcc (Emscripten gcc/clang-like replacement + linker emulating GNU ld) 5.0.2-git (d74f269e48873b239ba088f3c11fca9b1bff399f)
+Cloning libopenmpt 0.7.12 (stable release)...
+Cloning into 'vendor/libopenmpt'...
+Note: switching to 'f92f991b3290758468df5ab3435113f5d5476fe9'.
+
+You are in 'detached HEAD' state. You can look around, make experimental
+changes and commit them, and you can discard any commits you make in this
+state without impacting any branches by switching back to a branch.
+
+If you want to create a new branch to retain commits you create, you may
+do so (now or later) by using -c with the switch command. Example:
+
+  git switch -c <new-branch-name>
+
+Or undo this operation with:
+
+  git switch -
+
+Turn off this advice by setting config variable advice.detachedHead to false
+
+Updating files:  93% (6457/6886)Updating files:  94% (6473/6886)Updating files:  95% (6542/6886)Updating files:  96% (6611/6886)Updating files:  97% (6680/6886)Updating files:  98% (6749/6886)Updating files:  99% (6818/6886)Updating files: 100% (6886/6886)Updating files: 100% (6886/6886), done.
+Building libopenmpt with CONFIG=emscripten...
+[CXX] common/ComponentManager.cpp
+[CXX] common/Logging.cpp
+[CXX] common/Profiler.cpp
+[CXX] common/mptFileIO.cpp
+In file included from common/ComponentManager.cpp:11:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:83:13: warning: macro '__EMSCRIPTEN_major__' has been marked as deprecated: Use __EMSCRIPTEN_MAJOR__ instead [-Wdeprecated-pragma]
+   83 | #if defined(__EMSCRIPTEN_major__) && defined(__EMSCRIPTEN_minor__)
+      |             ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:10:82: note: macro marked 'deprecated' here
+   10 | #pragma clang deprecated(__EMSCRIPTEN_major__, "Use __EMSCRIPTEN_MAJOR__ instead")
+      |                                                                                  ^
+In file included from common/ComponentManager.cpp:11:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:83:46: warning: macro '__EMSCRIPTEN_minor__' has been marked as deprecated: Use __EMSCRIPTEN_MINOR__ instead [-Wdeprecated-pragma]
+   83 | #if defined(__EMSCRIPTEN_major__) && defined(__EMSCRIPTEN_minor__)
+      |                                              ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:11:82: note: macro marked 'deprecated' here
+   11 | #pragma clang deprecated(__EMSCRIPTEN_minor__, "Use __EMSCRIPTEN_MINOR__ instead")
+      |                                                                                  ^
+In file included from common/ComponentManager.cpp:11:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:84:6: warning: macro '__EMSCRIPTEN_major__' has been marked as deprecated: Use __EMSCRIPTEN_MAJOR__ instead [-Wdeprecated-pragma]
+   84 | #if (__EMSCRIPTEN_major__ > 3)
+      |      ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:10:82: note: macro marked 'deprecated' here
+   10 | #pragma clang deprecated(__EMSCRIPTEN_major__, "Use __EMSCRIPTEN_MAJOR__ instead")
+      |                                                                                  ^
+In file included from In file included from common/Profiler.cpp:11:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:83:13: warning: macro '__EMSCRIPTEN_major__' has been marked as deprecated: Use __EMSCRIPTEN_MAJOR__ instead [-Wdeprecated-pragma]
+   In file included from 83common/mptFileIO.cpp | :#11i:
+fIn file included from  common/stdafx.hd:e16f:
+iIn file included from nsrc/openmpt/all/BuildSettings.hppe:d16(:
+_src/mpt/base/detect_os.hpp_:E83M:S13C:R Iwarning: Pmacro '__EMSCRIPTEN_major__' has been marked as deprecated: Use __EMSCRIPTEN_MAJOR__ instead [-Wdeprecated-pragma]T
+EN_   m83a | j#oirf_ _d)e f&i&n edde(f_i_nEeMdS(C_R_IEPMTSECNR_ImPaTjEoNr__m_i)n o&r&_ _d)e
+f      i| n            ^e
+d(/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h_:_10E:M82S:C Rnote: Imacro marked 'deprecated' hereP
+TE   N10_ | m#ipnroarg_m_a) 
+c      l| a            ^n
+g/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h :d10e:p82r:e cnote: amacro marked 'deprecated' heret
+ed   (10_ | _#EpMragma clang deprecacommon/Logging.cpp:11ted(__EMS:
+In file included from common/stdafx.h:16CRIPTEN_major__, "Use __EMS:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:83:13: warning: macro '__EMSCRIPTEN_major__' has been marked as deprecated: Use __EMSCRIPTEN_MAJOR__ instead [-Wdeprecated-pragma]
+   83 | #if defined(__EMSCRIPTEN_major__) && defined(__EMSCRIPTEN_mCRISCinoPTRr_EN_)_M
+      |             ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:10:82: note: macro marked 'deprecated' here
+   10 | #pragma clang deprecated(__EIPAJOMSCRIPTEN_major__, "Use __EMSCRIPTEN_MAJOR__ instead")
+      |                                                                                  ^
+In file included from common/Logging.cpp:11:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:83:46: warning: macro '__EMSCRIPTEN_minor__' has been marked as deprecated: Use __EMSCRIPTEN_MINOR__ instead [-Wdeprecated-pragma]
+   83 | #if defined(__EMSCRIPTEN_major__) && defined(__EMSCRIPTEN_minor__)
+      |                                              ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:11:82: note: macro marked 'deprecated' here
+   11 | #pragma clang deprecated(__EMSCRIPTEN_minor__, "Use __EMSCRIPTEN_MINOR__ insteTER_aN__ mainjor__, "Use __EMSCRIPTEN_MAJOR__ instead")
+      |                                                                                  ^
+In file included from common/Profiler.cpp:11:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:83:46: warning: macro '__EMSCRIPTEN_minor__' has been marked as deprecated: Use __EMSCRIPTEN_MINOR__ instead [-Wdeprecated-pragma]
+   83 | #if defined(__EMSCRIPTEN_major__)d"ste &)
+ad&      | ")                                                                                 ^
+
+      |                                                                                  ^In file included from common/Logging.cpp:11:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:84:6: warning: macro '__EMSCRIPTEN_major__' has been marked as deprecated: Use __EMSCRIPTEN_MAJOR__ instead [-Wdeprecated-pragma]
+   84 | #if (__EMSCRIPTEN_major__ > 3)
+      |      ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:10:82: note: macro marked 'deprecated' here
+   10 | #pragma clang d d
+In file included from common/mptFileIO.cpp:epefined(__EMSCRIPTEN_minor__)
+      |                                              ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:11:82: note: macro marked 'deprecated' here
+   11 | #pragma clang deprecated(__EMSC11:
+reRIPIn file included from common/stdafx.hcTE:16N_minor__, "Use __EMSCRIPTEN_MINOR__ instead")
+      |                                                                                  ^
+In file included from common/Profiler.cpp:11:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:84:6: warning: macro '__EMSCRIPTEN_major__' has been marked as deprecated: Use __EMSCRIPTEN_MAJOR__ instead [-Wdeprecated-pragma]
+   84 | #if (__EMSCRIPTEN_major__ > 3)
+      |      ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:10:82: note: macro marked 'deprecated' here
+   10 | #pragma clang deprecated(__EMSCRIPTEN_major__, "Use __EMSCRIPTEN_MAJOR__ instead")
+      |                                                                                  ^
+at:
+In file included from edsrc/openmpt/all/BuildSettings.hpp:(_16:
+_Esrc/mpt/base/detect_os.hpp:MS83:CR46:IP warning: TEmacro '__EMSCRIPTEN_minor__' has been marked as deprecated: Use __EMSCRIPTEN_MINOR__ instead [-Wdeprecated-pragma]
+N_   83ma | #joifr_ d_efi, "Unese _d(_E__EMSCRIPTEN_major__) && defined(__EMSCRIPTEN_minor__)
+      |                                              ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:11:82: note: macro marked 'deprecated' here
+   11 | #pragma clang deprecated(__EMSCRIPTEN_minor_MSCRIPTEN_MAJOR__ instead")
+      |                                                                                  ^
+_, "Use __EMSCRIPTEN_MINOR__ instead")
+      |                                                                                  ^
+In file included from common/mptFileIO.cpp:11:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:84:6: warning: macro '__EMSCRIPTEN_major__' has been marked as deprecated: Use __EMSCRIPTEN_MAJOR__ instead [-Wdeprecated-pragma]
+   84 | #if (__EMSCRIPTEN_major__ > 3)
+      |      ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:10:82: note: macro marked 'deprecated' here
+   10 | #pragma clang deprecated(__EMSCRIPTEN_major__, "Use __EMSCRIPTEN_MAJOR__ instead")
+      |                                                                                  ^
+3 warnings generated.
+[CXX] common/mptFileTemporary.cpp
+3 warnings generated.
+[CXX] common/mptFileType.cpp
+3 warnings generated.
+[CXX] common/mptPathString.cpp
+In file included from common/mptFileTemporary.cpp:10:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:83:13: warning: macro '__EMSCRIPTEN_major__' has been marked as deprecated: Use __EMSCRIPTEN_MAJOR__ instead [-Wdeprecated-pragma]
+   83 | #if defined(__EMSCRIPTEN_major__) && defined(__EMSCRIPTEN_minor__)
+      |             ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:10:82: note: macro marked 'deprecated' here
+   10 | #pragma clang deprecated(__EMSCRIPTEN_major__, "Use __EMSCRIPTEN_MAJOR__ instead")
+      |                                                                                  ^
+In file included from common/mptFileTemporary.cpp:10:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:83:46: warning: macro '__EMSCRIPTEN_minor__' has been marked as deprecated: Use __EMSCRIPTEN_MINOR__ instead [-Wdeprecated-pragma]
+   83 | #if defined(__EMSCRIPTEN_major__) && defined(__EMSCRIPTEN_minor__)
+      |                                              ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:11:82: note: macro marked 'deprecated' here
+   11 | #pragma clang deprecated(__EMSCRIPTEN_minor__, "Use __EMSCRIPTEN_MINOR__ instead")
+      |                                                                                  ^
+In file included from common/mptFileTemporary.cpp:10:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:84:6: warning: macro '__EMSCRIPTEN_major__' has been marked as deprecated: Use __EMSCRIPTEN_MAJOR__ instead [-Wdeprecated-pragma]
+   84 | #if (__EMSCRIPTEN_major__ > 3)
+      |      ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:10:82: note: macro marked 'deprecated' here
+   10 | #pragma clang deprecated(__EMSCRIPTEN_major__, "Use __EMSCRIPTEN_MAJOR__ instead")
+      |                                                                                  ^
+3 warnings generated.
+[CXX] common/mptRandom.cpp
+In file included from common/mptPathString.cpp:10:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:83:13: warning: macro '__EMSCRIPTEN_major__' has been marked as deprecated: Use __EMSCRIPTEN_MAJOR__ instead [-Wdeprecated-pragma]
+   83 | #if defined(__EMSCRIPTEN_major__) && defined(__EMSCRIPTEN_minor__)
+      |             ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:10:82: note: macro marked 'deprecated' here
+   10 | #pragma clang deprecated(__EMSCRIPTEN_major__, "Use __EMSCRIPTEN_MAJOR__ instead")
+      |                                                                                  ^
+In file included from common/mptPathString.cpp:10:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:83:46: warning: macro '__EMSCRIPTEN_minor__' has been marked as deprecated: Use __EMSCRIPTEN_MINOR__ instead [-Wdeprecated-pragma]
+   83 | #if defined(__EMSCRIPTEN_major__) && defined(__EMSCRIPTEN_minor__)
+      |                                              ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:11:82: note: macro marked 'deprecated' here
+   11 | #pragma clang deprecated(__EMSCRIPTEN_minor__, "Use __EMSCRIPTEN_MINOR__ instead")
+      |                                                                                  ^
+In file included from common/mptPathString.cpp:10:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:84:6: warning: macro '__EMSCRIPTEN_major__' has been marked as deprecated: Use __EMSCRIPTEN_MAJOR__ instead [-Wdeprecated-pragma]
+   84 | #if (__EMSCRIPTEN_major__ > 3)
+      |      ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:10:82: note: macro marked 'deprecated' here
+   10 | #pragma clang deprecated(__EMSCRIPTEN_major__, "Use __EMSCRIPTEN_MAJOR__ instead")
+      |                                                                                  ^
+In file included from common/mptFileType.cpp:10:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:83:13: warning: macro '__EMSCRIPTEN_major__' has been marked as deprecated: Use __EMSCRIPTEN_MAJOR__ instead [-Wdeprecated-pragma]
+   83 | #if defined(__EMSCRIPTEN_major__) && defined(__EMSCRIPTEN_minor__)
+      |             ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:10:82: note: macro marked 'deprecated' here
+   10 | #pragma clang deprecated(__EMSCRIPTEN_major__, "Use __EMSCRIPTEN_MAJOR__ instead")
+      |                                                                                  ^
+In file included from common/mptFileType.cpp:10:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:83:46: warning: macro '__EMSCRIPTEN_minor__' has been marked as deprecated: Use __EMSCRIPTEN_MINOR__ instead [-Wdeprecated-pragma]
+   83 | #if defined(__EMSCRIPTEN_major__) && defined(__EMSCRIPTEN_minor__)
+      |                                              ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:11:82: note: macro marked 'deprecated' here
+   11 | #pragma clang deprecated(__EMSCRIPTEN_minor__, "Use __EMSCRIPTEN_MINOR__ instead")
+      |                                                                                  ^
+In file included from common/mptFileType.cpp:10:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:84:6: warning: macro '__EMSCRIPTEN_major__' has been marked as deprecated: Use __EMSCRIPTEN_MAJOR__ instead [-Wdeprecated-pragma]
+   84 | #if (__EMSCRIPTEN_major__ > 3)
+      |      ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:10:82: note: macro marked 'deprecated' here
+   10 | #pragma clang deprecated(__EMSCRIPTEN_major__, "Use __EMSCRIPTEN_MAJOR__ instead")
+      |                                                                                  ^
+In file included from common/mptRandom.cpp:10:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:83:13: warning: macro '__EMSCRIPTEN_major__' has been marked as deprecated: Use __EMSCRIPTEN_MAJOR__ instead [-Wdeprecated-pragma]
+   83 | #if defined(__EMSCRIPTEN_major__) && defined(__EMSCRIPTEN_minor__)
+      |             ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:10:82: note: macro marked 'deprecated' here
+   10 | #pragma clang deprecated(__EMSCRIPTEN_major__, "Use __EMSCRIPTEN_MAJOR__ instead")
+      |                                                                                  ^
+In file included from common/mptRandom.cpp:10:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:83:46: warning: macro '__EMSCRIPTEN_minor__' has been marked as deprecated: Use __EMSCRIPTEN_MINOR__ instead [-Wdeprecated-pragma]
+   83 | #if defined(__EMSCRIPTEN_major__) && defined(__EMSCRIPTEN_minor__)
+      |                                              ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:11:82: note: macro marked 'deprecated' here
+   11 | #pragma clang deprecated(__EMSCRIPTEN_minor__, "Use __EMSCRIPTEN_MINOR__ instead")
+      |                                                                                  ^
+In file included from common/mptRandom.cpp:10:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:84:6: warning: macro '__EMSCRIPTEN_major__' has been marked as deprecated: Use __EMSCRIPTEN_MAJOR__ instead [-Wdeprecated-pragma]
+   84 | #if (__EMSCRIPTEN_major__ > 3)
+      |      ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:10:82: note: macro marked 'deprecated' here
+   10 | #pragma clang deprecated(__EMSCRIPTEN_major__, "Use __EMSCRIPTEN_MAJOR__ instead")
+      |                                                                                  ^
+3 warnings generated.
+[CXX] common/mptStringBuffer.cpp
+3 warnings generated.
+[CXX] common/mptTime.cpp
+3 warnings generated.
+[CXX] common/serialization_utils.cpp
+In file included from common/mptStringBuffer.cpp:12:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:83:13: warning: macro '__EMSCRIPTEN_major__' has been marked as deprecated: Use __EMSCRIPTEN_MAJOR__ instead [-Wdeprecated-pragma]
+   83 | #if defined(__EMSCRIPTEN_major__) && defined(__EMSCRIPTEN_minor__)
+      |             ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:10:82: note: macro marked 'deprecated' here
+   10 | #pragma clang deprecated(__EMSCRIPTEN_major__, "Use __EMSCRIPTEN_MAJOR__ instead")
+      |                                                                                  ^
+In file included from common/mptStringBuffer.cpp:12:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:83:46: warning: macro '__EMSCRIPTEN_minor__' has been marked as deprecated: Use __EMSCRIPTEN_MINOR__ instead [-Wdeprecated-pragma]
+   83 | #if defined(__EMSCRIPTEN_major__) && defined(__EMSCRIPTEN_minor__)
+      |                                              ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:11:82: note: macro marked 'deprecated' here
+   11 | #pragma clang deprecated(__EMSCRIPTEN_minor__, "Use __EMSCRIPTEN_MINOR__ instead")
+      |                                                                                  ^
+In file included from common/mptStringBuffer.cpp:12:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:84:6: warning: macro '__EMSCRIPTEN_major__' has been marked as deprecated: Use __EMSCRIPTEN_MAJOR__ instead [-Wdeprecated-pragma]
+   84 | #if (__EMSCRIPTEN_major__ > 3)
+      |      ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:10:82: note: macro marked 'deprecated' here
+   10 | #pragma clang deprecated(__EMSCRIPTEN_major__, "Use __EMSCRIPTEN_MAJOR__ instead")
+      |                                                                                  ^
+In file included from common/mptTime.cpp:11:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:83:13: warning: macro '__EMSCRIPTEN_major__' has been marked as deprecated: Use __EMSCRIPTEN_MAJOR__ instead [-Wdeprecated-pragma]
+   83 | #if defined(__EMSCRIPTEN_major__) && defined(__EMSCRIPTEN_minor__)
+      |             ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:10:82: note: macro marked 'deprecated' here
+   10 | #pragma clang deprecated(__EMSCRIPTEN_major__, "Use __EMSCRIPTEN_MAJOR__ instead")
+      |                                                                                  ^
+In file included from common/mptTime.cpp:11:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:83:46: warning: macro '__EMSCRIPTEN_minor__' has been marked as deprecated: Use __EMSCRIPTEN_MINOR__ instead [-Wdeprecated-pragma]
+   83 | #if defined(__EMSCRIPTEN_major__) && defined(__EMSCRIPTEN_minor__)
+      |                                              ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:11:82: note: macro marked 'deprecated' here
+   11 | #pragma clang deprecated(__EMSCRIPTEN_minor__, "Use __EMSCRIPTEN_MINOR__ instead")
+      |                                                                                  ^
+In file included from common/mptTime.cpp:11:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:84:6: warning: macro '__EMSCRIPTEN_major__' has been marked as deprecated: Use __EMSCRIPTEN_MAJOR__ instead [-Wdeprecated-pragma]
+   84 | #if (__EMSCRIPTEN_major__ > 3)
+      |      ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:10:82: note: macro marked 'deprecated' here
+   10 | #pragma clang deprecated(__EMSCRIPTEN_major__, "Use __EMSCRIPTEN_MAJOR__ instead")
+      |                                                                                  ^
+In file included from common/serialization_utils.cpp:11:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:83:13: warning: macro '__EMSCRIPTEN_major__' has been marked as deprecated: Use __EMSCRIPTEN_MAJOR__ instead [-Wdeprecated-pragma]
+   83 | #if defined(__EMSCRIPTEN_major__) && defined(__EMSCRIPTEN_minor__)
+      |             ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:10:82: note: macro marked 'deprecated' here
+   10 | #pragma clang deprecated(__EMSCRIPTEN_major__, "Use __EMSCRIPTEN_MAJOR__ instead")
+      |                                                                                  ^
+In file included from common/serialization_utils.cpp:11:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:83:46: warning: macro '__EMSCRIPTEN_minor__' has been marked as deprecated: Use __EMSCRIPTEN_MINOR__ instead [-Wdeprecated-pragma]
+   83 | #if defined(__EMSCRIPTEN_major__) && defined(__EMSCRIPTEN_minor__)
+      |                                              ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:11:82: note: macro marked 'deprecated' here
+   11 | #pragma clang deprecated(__EMSCRIPTEN_minor__, "Use __EMSCRIPTEN_MINOR__ instead")
+      |                                                                                  ^
+In file included from common/serialization_utils.cpp:11:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:84:6: warning: macro '__EMSCRIPTEN_major__' has been marked as deprecated: Use __EMSCRIPTEN_MAJOR__ instead [-Wdeprecated-pragma]
+   84 | #if (__EMSCRIPTEN_major__ > 3)
+      |      ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:10:82: note: macro marked 'deprecated' here
+   10 | #pragma clang deprecated(__EMSCRIPTEN_major__, "Use __EMSCRIPTEN_MAJOR__ instead")
+      |                                                                                  ^
+3 warnings generated.
+[CXX] common/version.cpp
+In file included from common/version.cpp:10:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:83:13: warning: macro '__EMSCRIPTEN_major__' has been marked as deprecated: Use __EMSCRIPTEN_MAJOR__ instead [-Wdeprecated-pragma]
+   83 | #if defined(__EMSCRIPTEN_major__) && defined(__EMSCRIPTEN_minor__)
+      |             ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:10:82: note: macro marked 'deprecated' here
+   10 | #pragma clang deprecated(__EMSCRIPTEN_major__, "Use __EMSCRIPTEN_MAJOR__ instead")
+      |                                                                                  ^
+In file included from common/version.cpp:10:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:83:46: warning: macro '__EMSCRIPTEN_minor__' has been marked as deprecated: Use __EMSCRIPTEN_MINOR__ instead [-Wdeprecated-pragma]
+   83 | #if defined(__EMSCRIPTEN_major__) && defined(__EMSCRIPTEN_minor__)
+      |                                              ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:11:82: note: macro marked 'deprecated' here
+   11 | #pragma clang deprecated(__EMSCRIPTEN_minor__, "Use __EMSCRIPTEN_MINOR__ instead")
+      |                                                                                  ^
+In file included from common/version.cpp:10:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:84:6: warning: macro '__EMSCRIPTEN_major__' has been marked as deprecated: Use __EMSCRIPTEN_MAJOR__ instead [-Wdeprecated-pragma]
+   84 | #if (__EMSCRIPTEN_major__ > 3)
+      |      ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:10:82: note: macro marked 'deprecated' here
+   10 | #pragma clang deprecated(__EMSCRIPTEN_major__, "Use __EMSCRIPTEN_MAJOR__ instead")
+      |                                                                                  ^
+3 warnings generated.
+[CXX] soundlib/AudioCriticalSection.cpp
+3 warnings generated.
+[CXX] soundlib/ContainerMMCMP.cpp
+In file included from soundlib/AudioCriticalSection.cpp:10:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:83:13: warning: macro '__EMSCRIPTEN_major__' has been marked as deprecated: Use __EMSCRIPTEN_MAJOR__ instead [-Wdeprecated-pragma]
+   83 | #if defined(__EMSCRIPTEN_major__) && defined(__EMSCRIPTEN_minor__)
+      |             ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:10:82: note: macro marked 'deprecated' here
+   10 | #pragma clang deprecated(__EMSCRIPTEN_major__, "Use __EMSCRIPTEN_MAJOR__ instead")
+      |                                                                                  ^
+In file included from soundlib/AudioCriticalSection.cpp:10:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:83:46: warning: macro '__EMSCRIPTEN_minor__' has been marked as deprecated: Use __EMSCRIPTEN_MINOR__ instead [-Wdeprecated-pragma]
+   83 | #if defined(__EMSCRIPTEN_major__) && defined(__EMSCRIPTEN_minor__)
+      |                                              ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:11:82: note: macro marked 'deprecated' here
+   11 | #pragma clang deprecated(__EMSCRIPTEN_minor__, "Use __EMSCRIPTEN_MINOR__ instead")
+      |                                                                                  ^
+In file included from soundlib/AudioCriticalSection.cpp:10:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:84:6: warning: macro '__EMSCRIPTEN_major__' has been marked as deprecated: Use __EMSCRIPTEN_MAJOR__ instead [-Wdeprecated-pragma]
+   84 | #if (__EMSCRIPTEN_major__ > 3)
+      |      ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:10:82: note: macro marked 'deprecated' here
+   10 | #pragma clang deprecated(__EMSCRIPTEN_major__, "Use __EMSCRIPTEN_MAJOR__ instead")
+      |                                                                                  ^
+In file included from soundlib/ContainerMMCMP.cpp:12:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:83:13: warning: macro '__EMSCRIPTEN_major__' has been marked as deprecated: Use __EMSCRIPTEN_MAJOR__ instead [-Wdeprecated-pragma]
+   83 | #if defined(__EMSCRIPTEN_major__) && defined(__EMSCRIPTEN_minor__)
+      |             ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:10:82: note: macro marked 'deprecated' here
+   10 | #pragma clang deprecated(__EMSCRIPTEN_major__, "Use __EMSCRIPTEN_MAJOR__ instead")
+      |                                                                                  ^
+In file included from soundlib/ContainerMMCMP.cpp:12:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:83:46: warning: macro '__EMSCRIPTEN_minor__' has been marked as deprecated: Use __EMSCRIPTEN_MINOR__ instead [-Wdeprecated-pragma]
+   83 | #if defined(__EMSCRIPTEN_major__) && defined(__EMSCRIPTEN_minor__)
+      |                                              ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:11:82: note: macro marked 'deprecated' here
+   11 | #pragma clang deprecated(__EMSCRIPTEN_minor__, "Use __EMSCRIPTEN_MINOR__ instead")
+      |                                                                                  ^
+In file included from soundlib/ContainerMMCMP.cpp:12:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:84:6: warning: macro '__EMSCRIPTEN_major__' has been marked as deprecated: Use __EMSCRIPTEN_MAJOR__ instead [-Wdeprecated-pragma]
+   84 | #if (__EMSCRIPTEN_major__ > 3)
+      |      ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:10:82: note: macro marked 'deprecated' here
+   10 | #pragma clang deprecated(__EMSCRIPTEN_major__, "Use __EMSCRIPTEN_MAJOR__ instead")
+      |                                                                                  ^
+3 warnings generated.
+[CXX] soundlib/ContainerPP20.cpp
+In file included from soundlib/ContainerPP20.cpp:12:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:83:13: warning: macro '__EMSCRIPTEN_major__' has been marked as deprecated: Use __EMSCRIPTEN_MAJOR__ instead [-Wdeprecated-pragma]
+   83 | #if defined(__EMSCRIPTEN_major__) && defined(__EMSCRIPTEN_minor__)
+      |             ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:10:82: note: macro marked 'deprecated' here
+   10 | #pragma clang deprecated(__EMSCRIPTEN_major__, "Use __EMSCRIPTEN_MAJOR__ instead")
+      |                                                                                  ^
+In file included from soundlib/ContainerPP20.cpp:12:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:83:46: warning: macro '__EMSCRIPTEN_minor__' has been marked as deprecated: Use __EMSCRIPTEN_MINOR__ instead [-Wdeprecated-pragma]
+   83 | #if defined(__EMSCRIPTEN_major__) && defined(__EMSCRIPTEN_minor__)
+      |                                              ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:11:82: note: macro marked 'deprecated' here
+   11 | #pragma clang deprecated(__EMSCRIPTEN_minor__, "Use __EMSCRIPTEN_MINOR__ instead")
+      |                                                                                  ^
+In file included from soundlib/ContainerPP20.cpp:12:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:84:6: warning: macro '__EMSCRIPTEN_major__' has been marked as deprecated: Use __EMSCRIPTEN_MAJOR__ instead [-Wdeprecated-pragma]
+   84 | #if (__EMSCRIPTEN_major__ > 3)
+      |      ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:10:82: note: macro marked 'deprecated' here
+   10 | #pragma clang deprecated(__EMSCRIPTEN_major__, "Use __EMSCRIPTEN_MAJOR__ instead")
+      |                                                                                  ^
+3 warnings generated.
+[CXX] soundlib/ContainerUMX.cpp
+In file included from soundlib/ContainerUMX.cpp:11:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:83:13: warning: macro '__EMSCRIPTEN_major__' has been marked as deprecated: Use __EMSCRIPTEN_MAJOR__ instead [-Wdeprecated-pragma]
+   83 | #if defined(__EMSCRIPTEN_major__) && defined(__EMSCRIPTEN_minor__)
+      |             ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:10:82: note: macro marked 'deprecated' here
+   10 | #pragma clang deprecated(__EMSCRIPTEN_major__, "Use __EMSCRIPTEN_MAJOR__ instead")
+      |                                                                                  ^
+In file included from soundlib/ContainerUMX.cpp:11:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:83:46: warning: macro '__EMSCRIPTEN_minor__' has been marked as deprecated: Use __EMSCRIPTEN_MINOR__ instead [-Wdeprecated-pragma]
+   83 | #if defined(__EMSCRIPTEN_major__) && defined(__EMSCRIPTEN_minor__)
+      |                                              ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:11:82: note: macro marked 'deprecated' here
+   11 | #pragma clang deprecated(__EMSCRIPTEN_minor__, "Use __EMSCRIPTEN_MINOR__ instead")
+      |                                                                                  ^
+In file included from soundlib/ContainerUMX.cpp:11:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:84:6: warning: macro '__EMSCRIPTEN_major__' has been marked as deprecated: Use __EMSCRIPTEN_MAJOR__ instead [-Wdeprecated-pragma]
+   84 | #if (__EMSCRIPTEN_major__ > 3)
+      |      ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:10:82: note: macro marked 'deprecated' here
+   10 | #pragma clang deprecated(__EMSCRIPTEN_major__, "Use __EMSCRIPTEN_MAJOR__ instead")
+      |                                                                                  ^
+3 warnings generated.
+[CXX] soundlib/ContainerXPK.cpp
+In file included from soundlib/ContainerXPK.cpp:12:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:83:13: warning: macro '__EMSCRIPTEN_major__' has been marked as deprecated: Use __EMSCRIPTEN_MAJOR__ instead [-Wdeprecated-pragma]
+   83 | #if defined(__EMSCRIPTEN_major__) && defined(__EMSCRIPTEN_minor__)
+      |             ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:10:82: note: macro marked 'deprecated' here
+   10 | #pragma clang deprecated(__EMSCRIPTEN_major__, "Use __EMSCRIPTEN_MAJOR__ instead")
+      |                                                                                  ^
+In file included from soundlib/ContainerXPK.cpp:12:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:83:46: warning: macro '__EMSCRIPTEN_minor__' has been marked as deprecated: Use __EMSCRIPTEN_MINOR__ instead [-Wdeprecated-pragma]
+   83 | #if defined(__EMSCRIPTEN_major__) && defined(__EMSCRIPTEN_minor__)
+      |                                              ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:11:82: note: macro marked 'deprecated' here
+   11 | #pragma clang deprecated(__EMSCRIPTEN_minor__, "Use __EMSCRIPTEN_MINOR__ instead")
+      |                                                                                  ^
+In file included from soundlib/ContainerXPK.cpp:12:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:84:6: warning: macro '__EMSCRIPTEN_major__' has been marked as deprecated: Use __EMSCRIPTEN_MAJOR__ instead [-Wdeprecated-pragma]
+   84 | #if (__EMSCRIPTEN_major__ > 3)
+      |      ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:10:82: note: macro marked 'deprecated' here
+   10 | #pragma clang deprecated(__EMSCRIPTEN_major__, "Use __EMSCRIPTEN_MAJOR__ instead")
+      |                                                                                  ^
+3 warnings generated.
+[CXX] soundlib/Dlsbank.cpp
+3 warnings generated.
+[CXX] soundlib/Fastmix.cpp
+In file included from soundlib/Dlsbank.cpp:12:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:83:13: warning: macro '__EMSCRIPTEN_major__' has been marked as deprecated: Use __EMSCRIPTEN_MAJOR__ instead [-Wdeprecated-pragma]
+   83 | #if defined(__EMSCRIPTEN_major__) && defined(__EMSCRIPTEN_minor__)
+      |             ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:10:82: note: macro marked 'deprecated' here
+   10 | #pragma clang deprecated(__EMSCRIPTEN_major__, "Use __EMSCRIPTEN_MAJOR__ instead")
+      |                                                                                  ^
+In file included from soundlib/Dlsbank.cpp:12:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:83:46: warning: macro '__EMSCRIPTEN_minor__' has been marked as deprecated: Use __EMSCRIPTEN_MINOR__ instead [-Wdeprecated-pragma]
+   83 | #if defined(__EMSCRIPTEN_major__) && defined(__EMSCRIPTEN_minor__)
+      |                                              ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:11:82: note: macro marked 'deprecated' here
+   11 | #pragma clang deprecated(__EMSCRIPTEN_minor__, "Use __EMSCRIPTEN_MINOR__ instead")
+      |                                                                                  ^
+In file included from soundlib/Dlsbank.cpp:12:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:84:6: warning: macro '__EMSCRIPTEN_major__' has been marked as deprecated: Use __EMSCRIPTEN_MAJOR__ instead [-Wdeprecated-pragma]
+   84 | #if (__EMSCRIPTEN_major__ > 3)
+      |      ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:10:82: note: macro marked 'deprecated' here
+   10 | #pragma clang deprecated(__EMSCRIPTEN_major__, "Use __EMSCRIPTEN_MAJOR__ instead")
+      |                                                                                  ^
+In file included from soundlib/Fastmix.cpp:19:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:83:13: warning: macro '__EMSCRIPTEN_major__' has been marked as deprecated: Use __EMSCRIPTEN_MAJOR__ instead [-Wdeprecated-pragma]
+   83 | #if defined(__EMSCRIPTEN_major__) && defined(__EMSCRIPTEN_minor__)
+      |             ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:10:82: note: macro marked 'deprecated' here
+   10 | #pragma clang deprecated(__EMSCRIPTEN_major__, "Use __EMSCRIPTEN_MAJOR__ instead")
+      |                                                                                  ^
+In file included from soundlib/Fastmix.cpp:19:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:83:46: warning: macro '__EMSCRIPTEN_minor__' has been marked as deprecated: Use __EMSCRIPTEN_MINOR__ instead [-Wdeprecated-pragma]
+   83 | #if defined(__EMSCRIPTEN_major__) && defined(__EMSCRIPTEN_minor__)
+      |                                              ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:11:82: note: macro marked 'deprecated' here
+   11 | #pragma clang deprecated(__EMSCRIPTEN_minor__, "Use __EMSCRIPTEN_MINOR__ instead")
+      |                                                                                  ^
+In file included from soundlib/Fastmix.cpp:19:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:84:6: warning: macro '__EMSCRIPTEN_major__' has been marked as deprecated: Use __EMSCRIPTEN_MAJOR__ instead [-Wdeprecated-pragma]
+   84 | #if (__EMSCRIPTEN_major__ > 3)
+      |      ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:10:82: note: macro marked 'deprecated' here
+   10 | #pragma clang deprecated(__EMSCRIPTEN_major__, "Use __EMSCRIPTEN_MAJOR__ instead")
+      |                                                                                  ^
+3 warnings generated.
+[CXX] soundlib/ITCompression.cpp
+In file included from soundlib/ITCompression.cpp:12:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:83:13: warning: macro '__EMSCRIPTEN_major__' has been marked as deprecated: Use __EMSCRIPTEN_MAJOR__ instead [-Wdeprecated-pragma]
+   83 | #if defined(__EMSCRIPTEN_major__) && defined(__EMSCRIPTEN_minor__)
+      |             ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:10:82: note: macro marked 'deprecated' here
+   10 | #pragma clang deprecated(__EMSCRIPTEN_major__, "Use __EMSCRIPTEN_MAJOR__ instead")
+      |                                                                                  ^
+In file included from soundlib/ITCompression.cpp:12:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:83:46: warning: macro '__EMSCRIPTEN_minor__' has been marked as deprecated: Use __EMSCRIPTEN_MINOR__ instead [-Wdeprecated-pragma]
+   83 | #if defined(__EMSCRIPTEN_major__) && defined(__EMSCRIPTEN_minor__)
+      |                                              ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:11:82: note: macro marked 'deprecated' here
+   11 | #pragma clang deprecated(__EMSCRIPTEN_minor__, "Use __EMSCRIPTEN_MINOR__ instead")
+      |                                                                                  ^
+In file included from soundlib/ITCompression.cpp:12:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:84:6: warning: macro '__EMSCRIPTEN_major__' has been marked as deprecated: Use __EMSCRIPTEN_MAJOR__ instead [-Wdeprecated-pragma]
+   84 | #if (__EMSCRIPTEN_major__ > 3)
+      |      ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:10:82: note: macro marked 'deprecated' here
+   10 | #pragma clang deprecated(__EMSCRIPTEN_major__, "Use __EMSCRIPTEN_MAJOR__ instead")
+      |                                                                                  ^
+3 warnings generated.
+[CXX] soundlib/ITTools.cpp
+In file included from soundlib/ITTools.cpp:11:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:83:13: warning: macro '__EMSCRIPTEN_major__' has been marked as deprecated: Use __EMSCRIPTEN_MAJOR__ instead [-Wdeprecated-pragma]
+   83 | #if defined(__EMSCRIPTEN_major__) && defined(__EMSCRIPTEN_minor__)
+      |             ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:10:82: note: macro marked 'deprecated' here
+   10 | #pragma clang deprecated(__EMSCRIPTEN_major__, "Use __EMSCRIPTEN_MAJOR__ instead")
+      |                                                                                  ^
+In file included from soundlib/ITTools.cpp:11:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:83:46: warning: macro '__EMSCRIPTEN_minor__' has been marked as deprecated: Use __EMSCRIPTEN_MINOR__ instead [-Wdeprecated-pragma]
+   83 | #if defined(__EMSCRIPTEN_major__) && defined(__EMSCRIPTEN_minor__)
+      |                                              ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:11:82: note: macro marked 'deprecated' here
+   11 | #pragma clang deprecated(__EMSCRIPTEN_minor__, "Use __EMSCRIPTEN_MINOR__ instead")
+      |                                                                                  ^
+In file included from soundlib/ITTools.cpp:11:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:84:6: warning: macro '__EMSCRIPTEN_major__' has been marked as deprecated: Use __EMSCRIPTEN_MAJOR__ instead [-Wdeprecated-pragma]
+   84 | #if (__EMSCRIPTEN_major__ > 3)
+      |      ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:10:82: note: macro marked 'deprecated' here
+   10 | #pragma clang deprecated(__EMSCRIPTEN_major__, "Use __EMSCRIPTEN_MAJOR__ instead")
+      |                                                                                  ^
+3 warnings generated.
+[CXX] soundlib/InstrumentExtensions.cpp
+3 warnings generated.
+[CXX] soundlib/Load_667.cpp
+In file included from soundlib/InstrumentExtensions.cpp:14:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:83:13: warning: macro '__EMSCRIPTEN_major__' has been marked as deprecated: Use __EMSCRIPTEN_MAJOR__ instead [-Wdeprecated-pragma]
+   83 | #if defined(__EMSCRIPTEN_major__) && defined(__EMSCRIPTEN_minor__)
+      |             ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:10:82: note: macro marked 'deprecated' here
+   10 | #pragma clang deprecated(__EMSCRIPTEN_major__, "Use __EMSCRIPTEN_MAJOR__ instead")
+      |                                                                                  ^
+In file included from soundlib/InstrumentExtensions.cpp:14:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:83:46: warning: macro '__EMSCRIPTEN_minor__' has been marked as deprecated: Use __EMSCRIPTEN_MINOR__ instead [-Wdeprecated-pragma]
+   83 | #if defined(__EMSCRIPTEN_major__) && defined(__EMSCRIPTEN_minor__)
+      |                                              ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:11:82: note: macro marked 'deprecated' here
+   11 | #pragma clang deprecated(__EMSCRIPTEN_minor__, "Use __EMSCRIPTEN_MINOR__ instead")
+      |                                                                                  ^
+In file included from soundlib/InstrumentExtensions.cpp:14:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:84:6: warning: macro '__EMSCRIPTEN_major__' has been marked as deprecated: Use __EMSCRIPTEN_MAJOR__ instead [-Wdeprecated-pragma]
+   84 | #if (__EMSCRIPTEN_major__ > 3)
+      |      ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:10:82: note: macro marked 'deprecated' here
+   10 | #pragma clang deprecated(__EMSCRIPTEN_major__, "Use __EMSCRIPTEN_MAJOR__ instead")
+      |                                                                                  ^
+In file included from soundlib/Load_667.cpp:11:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:83:13: warning: macro '__EMSCRIPTEN_major__' has been marked as deprecated: Use __EMSCRIPTEN_MAJOR__ instead [-Wdeprecated-pragma]
+   83 | #if defined(__EMSCRIPTEN_major__) && defined(__EMSCRIPTEN_minor__)
+      |             ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:10:82: note: macro marked 'deprecated' here
+   10 | #pragma clang deprecated(__EMSCRIPTEN_major__, "Use __EMSCRIPTEN_MAJOR__ instead")
+      |                                                                                  ^
+In file included from soundlib/Load_667.cpp:11:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:83:46: warning: macro '__EMSCRIPTEN_minor__' has been marked as deprecated: Use __EMSCRIPTEN_MINOR__ instead [-Wdeprecated-pragma]
+   83 | #if defined(__EMSCRIPTEN_major__) && defined(__EMSCRIPTEN_minor__)
+      |                                              ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:11:82: note: macro marked 'deprecated' here
+   11 | #pragma clang deprecated(__EMSCRIPTEN_minor__, "Use __EMSCRIPTEN_MINOR__ instead")
+      |                                                                                  ^
+In file included from soundlib/Load_667.cpp:11:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:84:6: warning: macro '__EMSCRIPTEN_major__' has been marked as deprecated: Use __EMSCRIPTEN_MAJOR__ instead [-Wdeprecated-pragma]
+   84 | #if (__EMSCRIPTEN_major__ > 3)
+      |      ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:10:82: note: macro marked 'deprecated' here
+   10 | #pragma clang deprecated(__EMSCRIPTEN_major__, "Use __EMSCRIPTEN_MAJOR__ instead")
+      |                                                                                  ^
+3 warnings generated.
+[CXX] soundlib/Load_669.cpp
+In file included from soundlib/Load_669.cpp:13:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:83:13: warning: macro '__EMSCRIPTEN_major__' has been marked as deprecated: Use __EMSCRIPTEN_MAJOR__ instead [-Wdeprecated-pragma]
+   83 | #if defined(__EMSCRIPTEN_major__) && defined(__EMSCRIPTEN_minor__)
+      |             ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:10:82: note: macro marked 'deprecated' here
+   10 | #pragma clang deprecated(__EMSCRIPTEN_major__, "Use __EMSCRIPTEN_MAJOR__ instead")
+      |                                                                                  ^
+In file included from soundlib/Load_669.cpp:13:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:83:46: warning: macro '__EMSCRIPTEN_minor__' has been marked as deprecated: Use __EMSCRIPTEN_MINOR__ instead [-Wdeprecated-pragma]
+   83 | #if defined(__EMSCRIPTEN_major__) && defined(__EMSCRIPTEN_minor__)
+      |                                              ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:11:82: note: macro marked 'deprecated' here
+   11 | #pragma clang deprecated(__EMSCRIPTEN_minor__, "Use __EMSCRIPTEN_MINOR__ instead")
+      |                                                                                  ^
+In file included from soundlib/Load_669.cpp:13:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:84:6: warning: macro '__EMSCRIPTEN_major__' has been marked as deprecated: Use __EMSCRIPTEN_MAJOR__ instead [-Wdeprecated-pragma]
+   84 | #if (__EMSCRIPTEN_major__ > 3)
+      |      ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:10:82: note: macro marked 'deprecated' here
+   10 | #pragma clang deprecated(__EMSCRIPTEN_major__, "Use __EMSCRIPTEN_MAJOR__ instead")
+      |                                                                                  ^
+3 warnings generated.
+[CXX] soundlib/Load_amf.cpp
+In file included from soundlib/Load_amf.cpp:18:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:83:13: warning: macro '__EMSCRIPTEN_major__' has been marked as deprecated: Use __EMSCRIPTEN_MAJOR__ instead [-Wdeprecated-pragma]
+   83 | #if defined(__EMSCRIPTEN_major__) && defined(__EMSCRIPTEN_minor__)
+      |             ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:10:82: note: macro marked 'deprecated' here
+   10 | #pragma clang deprecated(__EMSCRIPTEN_major__, "Use __EMSCRIPTEN_MAJOR__ instead")
+      |                                                                                  ^
+In file included from soundlib/Load_amf.cpp:18:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:83:46: warning: macro '__EMSCRIPTEN_minor__' has been marked as deprecated: Use __EMSCRIPTEN_MINOR__ instead [-Wdeprecated-pragma]
+   83 | #if defined(__EMSCRIPTEN_major__) && defined(__EMSCRIPTEN_minor__)
+      |                                              ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:11:82: note: macro marked 'deprecated' here
+   11 | #pragma clang deprecated(__EMSCRIPTEN_minor__, "Use __EMSCRIPTEN_MINOR__ instead")
+      |                                                                                  ^
+In file included from soundlib/Load_amf.cpp:18:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:84:6: warning: macro '__EMSCRIPTEN_major__' has been marked as deprecated: Use __EMSCRIPTEN_MAJOR__ instead [-Wdeprecated-pragma]
+   84 | #if (__EMSCRIPTEN_major__ > 3)
+      |      ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:10:82: note: macro marked 'deprecated' here
+   10 | #pragma clang deprecated(__EMSCRIPTEN_major__, "Use __EMSCRIPTEN_MAJOR__ instead")
+      |                                                                                  ^
+3 warnings generated.
+[CXX] soundlib/Load_ams.cpp
+3 warnings generated.
+[CXX] soundlib/Load_c67.cpp
+In file included from soundlib/Load_ams.cpp:18:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:83:13: warning: macro '__EMSCRIPTEN_major__' has been marked as deprecated: Use __EMSCRIPTEN_MAJOR__ instead [-Wdeprecated-pragma]
+   83 | #if defined(__EMSCRIPTEN_major__) && defined(__EMSCRIPTEN_minor__)
+      |             ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:10:82: note: macro marked 'deprecated' here
+   10 | #pragma clang deprecated(__EMSCRIPTEN_major__, "Use __EMSCRIPTEN_MAJOR__ instead")
+      |                                                                                  ^
+In file included from soundlib/Load_ams.cpp:18:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:83:46: warning: macro '__EMSCRIPTEN_minor__' has been marked as deprecated: Use __EMSCRIPTEN_MINOR__ instead [-Wdeprecated-pragma]
+   83 | #if defined(__EMSCRIPTEN_major__) && defined(__EMSCRIPTEN_minor__)
+      |                                              ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:11:82: note: macro marked 'deprecated' here
+   11 | #pragma clang deprecated(__EMSCRIPTEN_minor__, "Use __EMSCRIPTEN_MINOR__ instead")
+      |                                                                                  ^
+In file included from soundlib/Load_ams.cpp:18:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:84:6: warning: macro '__EMSCRIPTEN_major__' has been marked as deprecated: Use __EMSCRIPTEN_MAJOR__ instead [-Wdeprecated-pragma]
+   84 | #if (__EMSCRIPTEN_major__ > 3)
+      |      ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:10:82: note: macro marked 'deprecated' here
+   10 | #pragma clang deprecated(__EMSCRIPTEN_major__, "Use __EMSCRIPTEN_MAJOR__ instead")
+      |                                                                                  ^
+In file included from soundlib/Load_c67.cpp:11:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:83:13: warning: macro '__EMSCRIPTEN_major__' has been marked as deprecated: Use __EMSCRIPTEN_MAJOR__ instead [-Wdeprecated-pragma]
+   83 | #if defined(__EMSCRIPTEN_major__) && defined(__EMSCRIPTEN_minor__)
+      |             ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:10:82: note: macro marked 'deprecated' here
+   10 | #pragma clang deprecated(__EMSCRIPTEN_major__, "Use __EMSCRIPTEN_MAJOR__ instead")
+      |                                                                                  ^
+In file included from soundlib/Load_c67.cpp:11:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:83:46: warning: macro '__EMSCRIPTEN_minor__' has been marked as deprecated: Use __EMSCRIPTEN_MINOR__ instead [-Wdeprecated-pragma]
+   83 | #if defined(__EMSCRIPTEN_major__) && defined(__EMSCRIPTEN_minor__)
+      |                                              ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:11:82: note: macro marked 'deprecated' here
+   11 | #pragma clang deprecated(__EMSCRIPTEN_minor__, "Use __EMSCRIPTEN_MINOR__ instead")
+      |                                                                                  ^
+In file included from soundlib/Load_c67.cpp:11:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:84:6: warning: macro '__EMSCRIPTEN_major__' has been marked as deprecated: Use __EMSCRIPTEN_MAJOR__ instead [-Wdeprecated-pragma]
+   84 | #if (__EMSCRIPTEN_major__ > 3)
+      |      ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:10:82: note: macro marked 'deprecated' here
+   10 | #pragma clang deprecated(__EMSCRIPTEN_major__, "Use __EMSCRIPTEN_MAJOR__ instead")
+      |                                                                                  ^
+3 warnings generated.
+[CXX] soundlib/Load_dbm.cpp
+In file included from soundlib/Load_dbm.cpp:11:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:83:13: warning: macro '__EMSCRIPTEN_major__' has been marked as deprecated: Use __EMSCRIPTEN_MAJOR__ instead [-Wdeprecated-pragma]
+   83 | #if defined(__EMSCRIPTEN_major__) && defined(__EMSCRIPTEN_minor__)
+      |             ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:10:82: note: macro marked 'deprecated' here
+   10 | #pragma clang deprecated(__EMSCRIPTEN_major__, "Use __EMSCRIPTEN_MAJOR__ instead")
+      |                                                                                  ^
+In file included from soundlib/Load_dbm.cpp:11:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:83:46: warning: macro '__EMSCRIPTEN_minor__' has been marked as deprecated: Use __EMSCRIPTEN_MINOR__ instead [-Wdeprecated-pragma]
+   83 | #if defined(__EMSCRIPTEN_major__) && defined(__EMSCRIPTEN_minor__)
+      |                                              ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:11:82: note: macro marked 'deprecated' here
+   11 | #pragma clang deprecated(__EMSCRIPTEN_minor__, "Use __EMSCRIPTEN_MINOR__ instead")
+      |                                                                                  ^
+In file included from soundlib/Load_dbm.cpp:11:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:84:6: warning: macro '__EMSCRIPTEN_major__' has been marked as deprecated: Use __EMSCRIPTEN_MAJOR__ instead [-Wdeprecated-pragma]
+   84 | #if (__EMSCRIPTEN_major__ > 3)
+      |      ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:10:82: note: macro marked 'deprecated' here
+   10 | #pragma clang deprecated(__EMSCRIPTEN_major__, "Use __EMSCRIPTEN_MAJOR__ instead")
+      |                                                                                  ^
+3 warnings generated.
+[CXX] soundlib/Load_digi.cpp
+In file included from soundlib/Load_digi.cpp:11:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:83:13: warning: macro '__EMSCRIPTEN_major__' has been marked as deprecated: Use __EMSCRIPTEN_MAJOR__ instead [-Wdeprecated-pragma]
+   83 | #if defined(__EMSCRIPTEN_major__) && defined(__EMSCRIPTEN_minor__)
+      |             ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:10:82: note: macro marked 'deprecated' here
+   10 | #pragma clang deprecated(__EMSCRIPTEN_major__, "Use __EMSCRIPTEN_MAJOR__ instead")
+      |                                                                                  ^
+In file included from soundlib/Load_digi.cpp:11:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:83:46: warning: macro '__EMSCRIPTEN_minor__' has been marked as deprecated: Use __EMSCRIPTEN_MINOR__ instead [-Wdeprecated-pragma]
+   83 | #if defined(__EMSCRIPTEN_major__) && defined(__EMSCRIPTEN_minor__)
+      |                                              ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:11:82: note: macro marked 'deprecated' here
+   11 | #pragma clang deprecated(__EMSCRIPTEN_minor__, "Use __EMSCRIPTEN_MINOR__ instead")
+      |                                                                                  ^
+In file included from soundlib/Load_digi.cpp:11:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:84:6: warning: macro '__EMSCRIPTEN_major__' has been marked as deprecated: Use __EMSCRIPTEN_MAJOR__ instead [-Wdeprecated-pragma]
+   84 | #if (__EMSCRIPTEN_major__ > 3)
+      |      ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:10:82: note: macro marked 'deprecated' here
+   10 | #pragma clang deprecated(__EMSCRIPTEN_major__, "Use __EMSCRIPTEN_MAJOR__ instead")
+      |                                                                                  ^
+3 warnings generated.
+[CXX] soundlib/Load_dmf.cpp
+3 warnings generated.
+[CXX] soundlib/Load_dsm.cpp
+In file included from soundlib/Load_dmf.cpp:16:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:83:13: warning: macro '__EMSCRIPTEN_major__' has been marked as deprecated: Use __EMSCRIPTEN_MAJOR__ instead [-Wdeprecated-pragma]
+   83 | #if defined(__EMSCRIPTEN_major__) && defined(__EMSCRIPTEN_minor__)
+      |             ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:10:82: note: macro marked 'deprecated' here
+   10 | #pragma clang deprecated(__EMSCRIPTEN_major__, "Use __EMSCRIPTEN_MAJOR__ instead")
+      |                                                                                  ^
+In file included from soundlib/Load_dmf.cpp:16:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:83:46: warning: macro '__EMSCRIPTEN_minor__' has been marked as deprecated: Use __EMSCRIPTEN_MINOR__ instead [-Wdeprecated-pragma]
+   83 | #if defined(__EMSCRIPTEN_major__) && defined(__EMSCRIPTEN_minor__)
+      |                                              ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:11:82: note: macro marked 'deprecated' here
+   11 | #pragma clang deprecated(__EMSCRIPTEN_minor__, "Use __EMSCRIPTEN_MINOR__ instead")
+      |                                                                                  ^
+In file included from soundlib/Load_dmf.cpp:16:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:84:6: warning: macro '__EMSCRIPTEN_major__' has been marked as deprecated: Use __EMSCRIPTEN_MAJOR__ instead [-Wdeprecated-pragma]
+   84 | #if (__EMSCRIPTEN_major__ > 3)
+      |      ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:10:82: note: macro marked 'deprecated' here
+   10 | #pragma clang deprecated(__EMSCRIPTEN_major__, "Use __EMSCRIPTEN_MAJOR__ instead")
+      |                                                                                  ^
+In file included from soundlib/Load_dsm.cpp:20:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:83:13: warning: macro '__EMSCRIPTEN_major__' has been marked as deprecated: Use __EMSCRIPTEN_MAJOR__ instead [-Wdeprecated-pragma]
+   83 | #if defined(__EMSCRIPTEN_major__) && defined(__EMSCRIPTEN_minor__)
+      |             ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:10:82: note: macro marked 'deprecated' here
+   10 | #pragma clang deprecated(__EMSCRIPTEN_major__, "Use __EMSCRIPTEN_MAJOR__ instead")
+      |                                                                                  ^
+In file included from soundlib/Load_dsm.cpp:20:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:83:46: warning: macro '__EMSCRIPTEN_minor__' has been marked as deprecated: Use __EMSCRIPTEN_MINOR__ instead [-Wdeprecated-pragma]
+   83 | #if defined(__EMSCRIPTEN_major__) && defined(__EMSCRIPTEN_minor__)
+      |                                              ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:11:82: note: macro marked 'deprecated' here
+   11 | #pragma clang deprecated(__EMSCRIPTEN_minor__, "Use __EMSCRIPTEN_MINOR__ instead")
+      |                                                                                  ^
+In file included from soundlib/Load_dsm.cpp:20:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:84:6: warning: macro '__EMSCRIPTEN_major__' has been marked as deprecated: Use __EMSCRIPTEN_MAJOR__ instead [-Wdeprecated-pragma]
+   84 | #if (__EMSCRIPTEN_major__ > 3)
+      |      ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:10:82: note: macro marked 'deprecated' here
+   10 | #pragma clang deprecated(__EMSCRIPTEN_major__, "Use __EMSCRIPTEN_MAJOR__ instead")
+      |                                                                                  ^
+3 warnings generated.
+[CXX] soundlib/Load_dsym.cpp
+In file included from soundlib/Load_dsym.cpp:11:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:83:13: warning: macro '__EMSCRIPTEN_major__' has been marked as deprecated: Use __EMSCRIPTEN_MAJOR__ instead [-Wdeprecated-pragma]
+   83 | #if defined(__EMSCRIPTEN_major__) && defined(__EMSCRIPTEN_minor__)
+      |             ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:10:82: note: macro marked 'deprecated' here
+   10 | #pragma clang deprecated(__EMSCRIPTEN_major__, "Use __EMSCRIPTEN_MAJOR__ instead")
+      |                                                                                  ^
+In file included from soundlib/Load_dsym.cpp:11:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:83:46: warning: macro '__EMSCRIPTEN_minor__' has been marked as deprecated: Use __EMSCRIPTEN_MINOR__ instead [-Wdeprecated-pragma]
+   83 | #if defined(__EMSCRIPTEN_major__) && defined(__EMSCRIPTEN_minor__)
+      |                                              ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:11:82: note: macro marked 'deprecated' here
+   11 | #pragma clang deprecated(__EMSCRIPTEN_minor__, "Use __EMSCRIPTEN_MINOR__ instead")
+      |                                                                                  ^
+In file included from soundlib/Load_dsym.cpp:11:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:84:6: warning: macro '__EMSCRIPTEN_major__' has been marked as deprecated: Use __EMSCRIPTEN_MAJOR__ instead [-Wdeprecated-pragma]
+   84 | #if (__EMSCRIPTEN_major__ > 3)
+      |      ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:10:82: note: macro marked 'deprecated' here
+   10 | #pragma clang deprecated(__EMSCRIPTEN_major__, "Use __EMSCRIPTEN_MAJOR__ instead")
+      |                                                                                  ^
+3 warnings generated.
+[CXX] soundlib/Load_dtm.cpp
+In file included from soundlib/Load_dtm.cpp:11:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:83:13: warning: macro '__EMSCRIPTEN_major__' has been marked as deprecated: Use __EMSCRIPTEN_MAJOR__ instead [-Wdeprecated-pragma]
+   83 | #if defined(__EMSCRIPTEN_major__) && defined(__EMSCRIPTEN_minor__)
+      |             ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:10:82: note: macro marked 'deprecated' here
+   10 | #pragma clang deprecated(__EMSCRIPTEN_major__, "Use __EMSCRIPTEN_MAJOR__ instead")
+      |                                                                                  ^
+In file included from soundlib/Load_dtm.cpp:11:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:83:46: warning: macro '__EMSCRIPTEN_minor__' has been marked as deprecated: Use __EMSCRIPTEN_MINOR__ instead [-Wdeprecated-pragma]
+   83 | #if defined(__EMSCRIPTEN_major__) && defined(__EMSCRIPTEN_minor__)
+      |                                              ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:11:82: note: macro marked 'deprecated' here
+   11 | #pragma clang deprecated(__EMSCRIPTEN_minor__, "Use __EMSCRIPTEN_MINOR__ instead")
+      |                                                                                  ^
+In file included from soundlib/Load_dtm.cpp:11:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:84:6: warning: macro '__EMSCRIPTEN_major__' has been marked as deprecated: Use __EMSCRIPTEN_MAJOR__ instead [-Wdeprecated-pragma]
+   84 | #if (__EMSCRIPTEN_major__ > 3)
+      |      ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:10:82: note: macro marked 'deprecated' here
+   10 | #pragma clang deprecated(__EMSCRIPTEN_major__, "Use __EMSCRIPTEN_MAJOR__ instead")
+      |                                                                                  ^
+3 warnings generated.
+[CXX] soundlib/Load_far.cpp
+3 warnings generated.
+[CXX] soundlib/Load_fmt.cpp
+In file included from soundlib/Load_fmt.cpp:11:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:83:13: warning: macro '__EMSCRIPTEN_major__' has been marked as deprecated: Use __EMSCRIPTEN_MAJOR__ instead [-Wdeprecated-pragma]
+   83 | #if defined(__EMSCRIPTEN_major__) && defined(__EMSCRIPTEN_minor__)
+      |             ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:10:82: note: macro marked 'deprecated' here
+   10 | #pragma clang deprecated(__EMSCRIPTEN_major__, "Use __EMSCRIPTEN_MAJOR__ instead")
+      |                                                                                  ^
+In file included from soundlib/Load_fmt.cpp:11:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:83:46: warning: macro '__EMSCRIPTEN_minor__' has been marked as deprecated: Use __EMSCRIPTEN_MINOR__ instead [-Wdeprecated-pragma]
+   83 | #if defined(__EMSCRIPTEN_major__) && defined(__EMSCRIPTEN_minor__)
+      |                                              ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:11:82: note: macro marked 'deprecated' here
+   11 | #pragma clang deprecated(__EMSCRIPTEN_minor__, "Use __EMSCRIPTEN_MINOR__ instead")
+      |                                                                                  ^
+In file included from soundlib/Load_fmt.cpp:11:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:84:6: warning: macro '__EMSCRIPTEN_major__' has been marked as deprecated: Use __EMSCRIPTEN_MAJOR__ instead [-Wdeprecated-pragma]
+   84 | #if (__EMSCRIPTEN_major__ > 3)
+      |      ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:10:82: note: macro marked 'deprecated' here
+   10 | #pragma clang deprecated(__EMSCRIPTEN_major__, "Use __EMSCRIPTEN_MAJOR__ instead")
+      |                                                                                  ^
+In file included from soundlib/Load_far.cpp:11:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:83:13: warning: macro '__EMSCRIPTEN_major__' has been marked as deprecated: Use __EMSCRIPTEN_MAJOR__ instead [-Wdeprecated-pragma]
+   83 | #if defined(__EMSCRIPTEN_major__) && defined(__EMSCRIPTEN_minor__)
+      |             ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:10:82: note: macro marked 'deprecated' here
+   10 | #pragma clang deprecated(__EMSCRIPTEN_major__, "Use __EMSCRIPTEN_MAJOR__ instead")
+      |                                                                                  ^
+In file included from soundlib/Load_far.cpp:11:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:83:46: warning: macro '__EMSCRIPTEN_minor__' has been marked as deprecated: Use __EMSCRIPTEN_MINOR__ instead [-Wdeprecated-pragma]
+   83 | #if defined(__EMSCRIPTEN_major__) && defined(__EMSCRIPTEN_minor__)
+      |                                              ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:11:82: note: macro marked 'deprecated' here
+   11 | #pragma clang deprecated(__EMSCRIPTEN_minor__, "Use __EMSCRIPTEN_MINOR__ instead")
+      |                                                                                  ^
+In file included from soundlib/Load_far.cpp:11:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:84:6: warning: macro '__EMSCRIPTEN_major__' has been marked as deprecated: Use __EMSCRIPTEN_MAJOR__ instead [-Wdeprecated-pragma]
+   84 | #if (__EMSCRIPTEN_major__ > 3)
+      |      ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:10:82: note: macro marked 'deprecated' here
+   10 | #pragma clang deprecated(__EMSCRIPTEN_major__, "Use __EMSCRIPTEN_MAJOR__ instead")
+      |                                                                                  ^
+3 warnings generated.
+[CXX] soundlib/Load_gdm.cpp
+In file included from soundlib/Load_gdm.cpp:16:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:83:13: warning: macro '__EMSCRIPTEN_major__' has been marked as deprecated: Use __EMSCRIPTEN_MAJOR__ instead [-Wdeprecated-pragma]
+   83 | #if defined(__EMSCRIPTEN_major__) && defined(__EMSCRIPTEN_minor__)
+      |             ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:10:82: note: macro marked 'deprecated' here
+   10 | #pragma clang deprecated(__EMSCRIPTEN_major__, "Use __EMSCRIPTEN_MAJOR__ instead")
+      |                                                                                  ^
+In file included from soundlib/Load_gdm.cpp:16:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:83:46: warning: macro '__EMSCRIPTEN_minor__' has been marked as deprecated: Use __EMSCRIPTEN_MINOR__ instead [-Wdeprecated-pragma]
+   83 | #if defined(__EMSCRIPTEN_major__) && defined(__EMSCRIPTEN_minor__)
+      |                                              ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:11:82: note: macro marked 'deprecated' here
+   11 | #pragma clang deprecated(__EMSCRIPTEN_minor__, "Use __EMSCRIPTEN_MINOR__ instead")
+      |                                                                                  ^
+In file included from soundlib/Load_gdm.cpp:16:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:84:6: warning: macro '__EMSCRIPTEN_major__' has been marked as deprecated: Use __EMSCRIPTEN_MAJOR__ instead [-Wdeprecated-pragma]
+   84 | #if (__EMSCRIPTEN_major__ > 3)
+      |      ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:10:82: note: macro marked 'deprecated' here
+   10 | #pragma clang deprecated(__EMSCRIPTEN_major__, "Use __EMSCRIPTEN_MAJOR__ instead")
+      |                                                                                  ^
+3 warnings generated.
+[CXX] soundlib/Load_gt2.cpp
+In file included from soundlib/Load_gt2.cpp:11:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:83:13: warning: macro '__EMSCRIPTEN_major__' has been marked as deprecated: Use __EMSCRIPTEN_MAJOR__ instead [-Wdeprecated-pragma]
+   83 | #if defined(__EMSCRIPTEN_major__) && defined(__EMSCRIPTEN_minor__)
+      |             ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:10:82: note: macro marked 'deprecated' here
+   10 | #pragma clang deprecated(__EMSCRIPTEN_major__, "Use __EMSCRIPTEN_MAJOR__ instead")
+      |                                                                                  ^
+In file included from soundlib/Load_gt2.cpp:11:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:83:46: warning: macro '__EMSCRIPTEN_minor__' has been marked as deprecated: Use __EMSCRIPTEN_MINOR__ instead [-Wdeprecated-pragma]
+   83 | #if defined(__EMSCRIPTEN_major__) && defined(__EMSCRIPTEN_minor__)
+      |                                              ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:11:82: note: macro marked 'deprecated' here
+   11 | #pragma clang deprecated(__EMSCRIPTEN_minor__, "Use __EMSCRIPTEN_MINOR__ instead")
+      |                                                                                  ^
+In file included from soundlib/Load_gt2.cpp:11:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:84:6: warning: macro '__EMSCRIPTEN_major__' has been marked as deprecated: Use __EMSCRIPTEN_MAJOR__ instead [-Wdeprecated-pragma]
+   84 | #if (__EMSCRIPTEN_major__ > 3)
+      |      ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:10:82: note: macro marked 'deprecated' here
+   10 | #pragma clang deprecated(__EMSCRIPTEN_major__, "Use __EMSCRIPTEN_MAJOR__ instead")
+      |                                                                                  ^
+3 warnings generated.
+[CXX] soundlib/Load_imf.cpp
+3 warnings generated.
+[CXX] soundlib/Load_it.cpp
+In file included from soundlib/Load_imf.cpp:12:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:83:13: warning: macro '__EMSCRIPTEN_major__' has been marked as deprecated: Use __EMSCRIPTEN_MAJOR__ instead [-Wdeprecated-pragma]
+   83 | #if defined(__EMSCRIPTEN_major__) && defined(__EMSCRIPTEN_minor__)
+      |             ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:10:82: note: macro marked 'deprecated' here
+   10 | #pragma clang deprecated(__EMSCRIPTEN_major__, "Use __EMSCRIPTEN_MAJOR__ instead")
+      |                                                                                  ^
+In file included from soundlib/Load_imf.cpp:12:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:83:46: warning: macro '__EMSCRIPTEN_minor__' has been marked as deprecated: Use __EMSCRIPTEN_MINOR__ instead [-Wdeprecated-pragma]
+   83 | #if defined(__EMSCRIPTEN_major__) && defined(__EMSCRIPTEN_minor__)
+      |                                              ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:11:82: note: macro marked 'deprecated' here
+   11 | #pragma clang deprecated(__EMSCRIPTEN_minor__, "Use __EMSCRIPTEN_MINOR__ instead")
+      |                                                                                  ^
+In file included from soundlib/Load_imf.cpp:12:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:84:6: warning: macro '__EMSCRIPTEN_major__' has been marked as deprecated: Use __EMSCRIPTEN_MAJOR__ instead [-Wdeprecated-pragma]
+   84 | #if (__EMSCRIPTEN_major__ > 3)
+      |      ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:10:82: note: macro marked 'deprecated' here
+   10 | #pragma clang deprecated(__EMSCRIPTEN_major__, "Use __EMSCRIPTEN_MAJOR__ instead")
+      |                                                                                  ^
+In file included from soundlib/Load_it.cpp:12:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:83:13: warning: macro '__EMSCRIPTEN_major__' has been marked as deprecated: Use __EMSCRIPTEN_MAJOR__ instead [-Wdeprecated-pragma]
+   83 | #if defined(__EMSCRIPTEN_major__) && defined(__EMSCRIPTEN_minor__)
+      |             ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:10:82: note: macro marked 'deprecated' here
+   10 | #pragma clang deprecated(__EMSCRIPTEN_major__, "Use __EMSCRIPTEN_MAJOR__ instead")
+      |                                                                                  ^
+In file included from soundlib/Load_it.cpp:12:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:83:46: warning: macro '__EMSCRIPTEN_minor__' has been marked as deprecated: Use __EMSCRIPTEN_MINOR__ instead [-Wdeprecated-pragma]
+   83 | #if defined(__EMSCRIPTEN_major__) && defined(__EMSCRIPTEN_minor__)
+      |                                              ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:11:82: note: macro marked 'deprecated' here
+   11 | #pragma clang deprecated(__EMSCRIPTEN_minor__, "Use __EMSCRIPTEN_MINOR__ instead")
+      |                                                                                  ^
+In file included from soundlib/Load_it.cpp:12:
+In file included from common/stdafx.h:16:
+In file included from src/openmpt/all/BuildSettings.hpp:16:
+src/mpt/base/detect_os.hpp:84:6: warning: macro '__EMSCRIPTEN_major__' has been marked as deprecated: Use __EMSCRIPTEN_MAJOR__ instead [-Wdeprecated-pragma]
+   84 | #if (__EMSCRIPTEN_major__ > 3)
+      |      ^
+/home/vscode/.emscripten_cache/sysroot/include/emscripten/version.h:10:82: note: macro marked 'deprecated' here
+   10 | #pragma clang deprecated(__EMSCRIPTEN_major__, "Use __EMSCRIPTEN_MAJOR__ instead")
+      |                                                                                  ^
+make: *** [Makefile:1003: soundlib/Load_it.o] Terminated
+make: *** [Makefile:1003: soundlib/Load_imf.o] Terminated
+make: *** [Makefile:1003: soundlib/Load_gt2.o] Terminated
+make: *** [Makefile:1003: soundlib/Load_gdm.o] Terminated
+Terminated
