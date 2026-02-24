@@ -97,10 +97,9 @@ emcc \
     \
     -sAUDIO_WORKLET=1 \
     -sWASM_WORKERS=1 \
-    -sASYNCIFY=1 \
     -sSINGLE_FILE=0 \
     -sALLOW_MEMORY_GROWTH=1 \
-    -sENVIRONMENT=web \
+    -sENVIRONMENT=web,worker \
     -sEXPORTED_RUNTIME_METHODS="['ccall','cwrap','UTF8ToString','getValue','setValue']" \
     -sEXPORTED_FUNCTIONS="['_init_audio','_load_module','_resume_audio','_suspend_audio','_seek_order_row','_set_loop','_set_volume','_poll_position','_get_audio_context','_get_worklet_node','_cleanup_audio','_malloc','_free']" \
     -sMODULARIZE=1 \
