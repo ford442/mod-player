@@ -143,25 +143,27 @@ function App() {
 
   // Keyboard shortcuts
   useKeyboardShortcuts({
-    onPlayPause: useCallback(() => { isPlaying ? stopMusic(false) : play(); }, [isPlaying, stopMusic, play]),
-    onStop: useCallback(() => stopMusic(false), [stopMusic]),
-    onSeekForward: useCallback(() => seekToStep(Math.floor(playbackRowFraction) + 4), [seekToStep, playbackRowFraction]),
-    onSeekBackward: useCallback(() => seekToStep(Math.max(0, Math.floor(playbackRowFraction) - 4)), [seekToStep, playbackRowFraction]),
-    onVolumeUp: useCallback(() => setVolume(v => Math.min(1, v + 0.05)), []),
-    onVolumeDown: useCallback(() => setVolume(v => Math.max(0, v - 0.05)), []),
+    onPlayPause: () => { isPlaying ? stopMusic(false) : play(); },
+    onStop: () => stopMusic(false),
+    onSeekForward: () => seekToStep(Math.floor(playbackRowFraction) + 4),
+    onSeekBackward: () => seekToStep(Math.max(0, Math.floor(playbackRowFraction) - 4)),
+    onVolumeUp: () => setVolume(v => Math.min(1, v + 0.05)),
+    onVolumeDown: () => setVolume(v => Math.max(0, v - 0.05)),
     onNextTrack: handlePlaylistNext,
     onPrevTrack: handlePlaylistPrev,
-    onToggleLoop: useCallback(() => setIsLooping(!isLooping), [isLooping, setIsLooping]),
-    onToggleFullscreen: useCallback(() => {
+    onToggleLoop: () => setIsLooping(!isLooping),
+    onToggleFullscreen: () => {
       if (document.fullscreenElement) document.exitFullscreen();
       else document.documentElement.requestFullscreen();
-    }, []),
+    },
   });
 
   // Register PWA service worker
   useEffect(() => {
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`).catch(() => {});
+      navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`).catch((err) => {
+        console.warn('[PWA] Service worker registration failed:', err);
+      });
     }
   }, []);
 

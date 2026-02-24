@@ -83,33 +83,39 @@ export const Playlist: React.FC<PlaylistProps> = ({
             disabled={items.length === 0}
             className="px-1.5 py-0.5 rounded text-gray-400 hover:text-white hover:bg-white/10 disabled:opacity-30"
             title="Previous"
+            aria-label="Previous track"
           >⏮</button>
           <button
             onClick={onNext}
             disabled={items.length === 0}
             className="px-1.5 py-0.5 rounded text-gray-400 hover:text-white hover:bg-white/10 disabled:opacity-30"
             title="Next"
+            aria-label="Next track"
           >⏭</button>
           <button
             onClick={onShuffleToggle}
             className={`px-1.5 py-0.5 rounded ${shuffle ? 'text-cyan-400 bg-cyan-900/30' : 'text-gray-400 hover:text-white hover:bg-white/10'}`}
             title={shuffle ? 'Shuffle On' : 'Shuffle Off'}
+            aria-label={shuffle ? 'Shuffle On' : 'Shuffle Off'}
           >🔀</button>
           <button
             onClick={onRepeatCycle}
             className={`px-1.5 py-0.5 rounded ${repeat !== 'none' ? 'text-cyan-400 bg-cyan-900/30' : 'text-gray-400 hover:text-white hover:bg-white/10'}`}
             title={repeatTitle}
+            aria-label={repeatTitle}
           >{repeatLabel}</button>
           <button
             onClick={() => fileInputRef.current?.click()}
             className="px-1.5 py-0.5 rounded text-gray-400 hover:text-white hover:bg-white/10"
             title="Add files"
+            aria-label="Add files to playlist"
           >➕</button>
           {items.length > 0 && (
             <button
               onClick={onClear}
               className="px-1.5 py-0.5 rounded text-gray-400 hover:text-red-400 hover:bg-red-900/20"
               title="Clear playlist"
+              aria-label="Clear playlist"
             >🗑</button>
           )}
         </div>

@@ -63,14 +63,15 @@ export function usePlaylist(): UsePlaylistReturn {
     setItems(prev => {
       const next = [...prev];
       next.splice(index, 1);
+      // Adjust currentIndex based on the new array length
+      setCurrentIndex(ci => {
+        if (index < ci) return ci - 1;
+        if (index === ci) return Math.min(ci, next.length - 1);
+        return ci;
+      });
       return next;
     });
-    setCurrentIndex(prev => {
-      if (index < prev) return prev - 1;
-      if (index === prev) return Math.min(prev, items.length - 2);
-      return prev;
-    });
-  }, [items.length]);
+  }, []);
 
   const clear = useCallback(() => {
     setItems([]);
