@@ -61,19 +61,16 @@ echo "📦 Emscripten: $(emcc --version | head -1)"
 rm -rf vendor/libopenmpt public/worklets
 mkdir -p vendor public/worklets
 
-# ── 3. Download libopenmpt source ───────────────────────────────────
-echo "Downloading libopenmpt 0.7.12..."
-# Download tarball instead of git clone (more reliable)
-curl -L -o libopenmpt.tar.gz "https://github.com/OpenMPT/openmpt/archive/refs/tags/libopenmpt-0.7.12.tar.gz"
-tar -xzf libopenmpt.tar.gz
-mv openmpt-libopenmpt-0.7.12 vendor/libopenmpt
-rm libopenmpt.tar.gz
+# ── 3. Clone libopenmpt ─────────────────────────────────────────────
+echo "Cloning libopenmpt 0.7.12 (minimal)..."
+# Shallow clone without submodules (not needed for Emscripten build)
+git clone --depth 1 --branch libopenmpt-0.7.12 https://github.com/OpenMPT/openmpt.git vendor/libopenmpt
 
 # ── 4. Build libopenmpt for Emscripten ──────────────────────────────
 cd vendor/libopenmpt
 
 echo "Building libopenmpt with CONFIG=emscripten..."
-make CONFIG=emscripten -j4
+make CONFIG=emscripten -j55
 
 echo "=== libopenmpt build artifacts ==="
 ls -la bin/ include/ 2>/dev/null || true

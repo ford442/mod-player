@@ -1,17 +1,18 @@
-
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="theme-color" content="#06b6d4" />
   <title>MOD Player Pro</title>
-  <link rel="stylesheet" href="/index.css">
-  <link rel="manifest" href="/xm-player/manifest.json">
+  <link rel="stylesheet" href="./index.css">
+  <link rel="manifest" href="./manifest.json">
 </head>
+
 <body class="bg-gray-900 text-gray-200">
   <div id="root"></div>
-  
+
   <script type="importmap">
     {
       "imports": {
@@ -21,8 +22,8 @@
     }
   </script>
 
-  <script type="module" src="/index.tsx"></script>
-  
+  <script type="module" src="./index.tsx"></script>
+
   <!--
     Note: Define the libopenmpt configuration object BEFORE the script loads.
     This prevents the script from overwriting our onRuntimeInitialized callback.
@@ -31,7 +32,7 @@
   <script>
     window.libopenmptReady = new Promise((resolve, reject) => {
       window.libopenmpt = {
-        onRuntimeInitialized: function() {
+        onRuntimeInitialized: function () {
           console.log('libopenmpt runtime initialized via pre-load script.');
           // 'this' is the fully initialized module object.
           resolve(this);
@@ -41,11 +42,8 @@
       window._libopenmptReject = reject;
     });
   </script>
-  <script
-    charset="utf-8"
-    src="https://wasm.noahcohn.com/libmpt/libopenmptjs.1ijs"
-    onerror="window._libopenmptReject && window._libopenmptReject(new Error('Failed to load libopenmpt script from CDN'))"
-  ></script>
+  <script charset="utf-8" src="https://wasm.noahcohn.com/libmpt/libopenmptjs.1ijs"
+    onerror="window._libopenmptReject && window._libopenmptReject(new Error('Failed to load libopenmpt script from CDN'))"></script>
 </body>
-</html>
 
+</html>
