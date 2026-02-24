@@ -123,19 +123,27 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
 
   const processModuleData = useCallback(async (fileData: Uint8Array, fileName: string) => {
     const lib = libopenmptRef.current;
-    if (!lib) return;
+    if (!lib) {
+      console.error("[processModuleData] libopenmpt not initialized");
+      return;
+    }
+    
+    console.log("[processModuleData] Processing module:", fileName, "size:", fileData.byteLength);
 
     if (isPlaying) {
+      console.log("[processModuleData] Stopping current playback");
       stopMusic(false);
     }
 
     // Cleanup previous module
     if (currentModulePtr.current !== 0) {
+      console.log("[processModuleData] Destroying previous module");
       lib._openmpt_module_destroy(currentModulePtr.current);
       currentModulePtr.current = 0;
     }
 
     // Store file data for Worklet
+    console.log("[processModuleData] Storing fileDataRef for worklet");
     fileDataRef.current = fileData;
 
     // Load module into MAIN thread instance (for metadata and pattern viewing)
@@ -374,55 +382,92 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
   };
 
   const play = useCallback(async () => {
-    if (!libopenmptRef.current || !fileDataRef.current) return;
+    if (!libopenmptRef.current) {
+      console.error("❌ [PLAY] libopenmpt not initialized");
+      setStatus("Error: Audio library not ready");
+      return;
+    }
+    if (!fileDataRef.current) {
+      console.error("❌ [PLAY] No module data available (fileDataRef is null)");
+      setStatus("Error: No module loaded");
+      return;
+    }
+
+    console.log('🎵 [PLAY] Starting playback...', { 
+      engine: activeEngine, 
+      isWorkletSupported, 
+      hasFileData: !!fileDataRef.current,
+      fileDataLength: fileDataRef.current?.length 
+    });
 
     try {
       if (!audioContextRef.current) {
+         console.log('🔧 [PLAY] Creating new AudioContext...');
          audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'playback' });
          // New context: worklet module needs to be (re)loaded
          workletLoadedRef.current = false;
       }
 
       const ctx = audioContextRef.current;
+      console.log('🔧 [PLAY] AudioContext state:', ctx.state);
+      
       if (ctx.state === 'suspended') {
+        console.log('🔧 [PLAY] Resuming suspended AudioContext...');
         await ctx.resume();
+        console.log('✅ [PLAY] AudioContext resumed, new state:', ctx.state);
       }
 
       // Setup common nodes
       if (!stereoPannerRef.current) {
+         console.log('🔧 [PLAY] Creating StereoPanner node...');
          stereoPannerRef.current = ctx.createStereoPanner();
          stereoPannerRef.current.pan.value = panValue;
       }
       if (!gainNodeRef.current) {
+         console.log('🔧 [PLAY] Creating Gain node...');
          gainNodeRef.current = ctx.createGain();
          gainNodeRef.current.gain.value = volume;
       }
       if (!analyserRef.current) {
+         console.log('🔧 [PLAY] Creating Analyser node...');
          analyserRef.current = ctx.createAnalyser();
          analyserRef.current.fftSize = 2048;
          analyserRef.current.smoothingTimeConstant = 0.8;
       }
 
       // Disconnect previous sources
-      if (scriptNodeRef.current) { scriptNodeRef.current.disconnect(); scriptNodeRef.current = null; }
-      if (audioWorkletNodeRef.current) { audioWorkletNodeRef.current.disconnect(); audioWorkletNodeRef.current = null; }
+      if (scriptNodeRef.current) { 
+        console.log('🔧 [PLAY] Disconnecting previous ScriptProcessor...');
+        scriptNodeRef.current.disconnect(); 
+        scriptNodeRef.current = null; 
+      }
+      if (audioWorkletNodeRef.current) { 
+        console.log('🔧 [PLAY] Disconnecting previous AudioWorkletNode...');
+        audioWorkletNodeRef.current.disconnect(); 
+        audioWorkletNodeRef.current = null; 
+      }
 
     if (activeEngine === 'worklet' && isWorkletSupported) {
-      console.log('🎵 Starting AudioWorklet playback...');
+      console.log('🎵 [PLAY] Using AudioWorklet engine...');
 
       try {
         // Load the worklet module only once per AudioContext
         if (ctx.audioWorklet && !workletLoadedRef.current) {
+          console.log('🔧 [PLAY] Loading worklet module from:', WORKLET_URL);
           await ctx.audioWorklet.addModule(WORKLET_URL);
           workletLoadedRef.current = true;
-          console.log('✅ openmpt-processor loaded on playback context');
+          console.log('✅ [PLAY] openmpt-processor loaded successfully');
+        } else {
+          console.log('ℹ️ [PLAY] Worklet module already loaded (skipping addModule)');
         }
 
+        console.log('🔧 [PLAY] Creating AudioWorkletNode...');
         const node = new AudioWorkletNode(ctx, 'openmpt-processor', {
           numberOfInputs: 0,
           numberOfOutputs: 1,
           outputChannelCount: [2]
         });
+        console.log('✅ [PLAY] AudioWorkletNode created:', node);
 
         node.port.onmessage = (e) => {
           const { type, order, row, positionSeconds, message } = e.data;
@@ -432,32 +477,40 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
             workletTimeRef.current = positionSeconds;
             lastWorkletUpdateRef.current = ctx.currentTime;
           } else if (type === 'ended') {
+            console.log('ℹ️ [PLAY] Worklet reported module ended');
             if (isLooping) {
               seekToStepWrapper(0);
             } else {
               stopMusic(false);
             }
           } else if (type === 'error') {
-            console.error("Worklet error:", message);
+            console.error("❌ [PLAY] Worklet error:", message);
             setStatus("Worklet error: " + message);
           } else if (type === 'loaded') {
-            console.log("Worklet loaded module.");
+            console.log("✅ [PLAY] Worklet loaded module successfully");
           }
         };
 
         // Send module data (cloned, not transferred, so fileDataRef remains valid)
         const buf = fileDataRef.current?.buffer;
-        if (buf) node.port.postMessage({ type: 'load', moduleData: buf });
+        if (buf) {
+          console.log('📦 [PLAY] Sending module data to worklet:', buf.byteLength, 'bytes');
+          node.port.postMessage({ type: 'load', moduleData: buf });
+        } else {
+          console.error("❌ [PLAY] No buffer to send to worklet!");
+        }
 
+        console.log('🔧 [PLAY] Connecting audio graph: worklet -> analyser -> panner -> gain -> destination');
         node.connect(analyserRef.current!);
         analyserRef.current!.connect(stereoPannerRef.current!);
         stereoPannerRef.current!.connect(gainNodeRef.current!);
         gainNodeRef.current!.connect(ctx.destination);
 
         audioWorkletNodeRef.current = node;
+        console.log('✅ [PLAY] AudioWorklet setup complete!');
       } catch (e) {
-        console.error("❌ Failed to create/load AudioWorkletNode:", e);
-        console.warn("Falling back to ScriptProcessorNode");
+        console.error("❌ [PLAY] Failed to create/load AudioWorkletNode:", e);
+        console.warn("⚠️ [PLAY] Falling back to ScriptProcessorNode");
         // Fall through to ScriptProcessor below (don't call play() recursively)
         workletLoadedRef.current = false;
 
@@ -471,8 +524,10 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
         gainNodeRef.current!.connect(ctx.destination);
 
         scriptNodeRef.current = node;
+        console.log('✅ [PLAY] ScriptProcessor fallback setup complete');
       }
     } else {
+         console.log('🎵 [PLAY] Using ScriptProcessor engine...');
          // ScriptProcessor fallback
          const bufferSize = 4096;
          const node = ctx.createScriptProcessor(bufferSize, 0, 2);
@@ -484,6 +539,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
          gainNodeRef.current!.connect(ctx.destination);
 
          scriptNodeRef.current = node;
+         console.log('✅ [PLAY] ScriptProcessor setup complete');
       }
 
       isPlayingRef.current = true;
@@ -492,7 +548,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
       animationFrameHandle.current = requestAnimationFrame(updateUI);
 
     } catch (e) {
-      console.error("Play error:", e);
+      console.error("❌ [PLAY] Play error:", e);
       setStatus("Error starting playback");
     }
   }, [activeEngine, isWorkletSupported, panValue, volume, processAudioChunk, isLooping, stopMusic]);
@@ -522,9 +578,11 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
 
   useEffect(() => {
      const init = async () => {
+         console.log("[INIT] Starting libopenmpt initialization...");
+         
          if (!window.libopenmptReady) {
              setStatus("Error: libopenmpt initialization script not found.");
-             console.error("window.libopenmptReady promise not found. Check index.html.");
+             console.error("[INIT] window.libopenmptReady promise not found. Check index.html.");
              return;
          }
 
@@ -533,7 +591,9 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
                  setTimeout(() => reject(new Error('Initialization timed out')), 15000);
              });
 
+             console.log("[INIT] Waiting for libopenmptReady...");
              const lib = await Promise.race([window.libopenmptReady, timeoutPromise]);
+             console.log("[INIT] libopenmptReady resolved");
 
              if (!lib.UTF8ToString) {
                 console.warn('Polyfilling libopenmpt.UTF8ToString...');
@@ -562,14 +622,15 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
              setIsReady(true);
 
              try {
+                console.log("[INIT] Testing AudioWorklet support...");
                 const tempCtx = new (window.AudioContext || window.webkitAudioContext)();
                 await tempCtx.audioWorklet.addModule(WORKLET_URL);
                 setIsWorkletSupported(true);
                 setActiveEngine('worklet');
                 await tempCtx.close();
-                console.log('✅ AudioWorklet support confirmed');
+                console.log('✅ [INIT] AudioWorklet support confirmed');
              } catch (e) {
-                console.warn("⚠️ AudioWorklet not available (fallback to script processor):", e);
+                console.warn("⚠️ [INIT] AudioWorklet not available (fallback to script processor):", e);
                 setIsWorkletSupported(false);
                 setActiveEngine('script');
              }

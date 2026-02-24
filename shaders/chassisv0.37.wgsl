@@ -3,31 +3,30 @@
 // Drawn via the existing background pass slot (uniform @binding(0)).
 
 struct BezelUniforms {
-  canvasW: f32,
-  canvasH: f32,
-  bezelWidth: f32,
-  surfaceR: f32,
-  surfaceG: f32,
-  surfaceB: f32,
-  bezelR: f32,
-  bezelG: f32,
-  bezelB: f32,
-  screwRadius: f32,
-  recessKind: f32,
-  recessOuterScale: f32,
-  recessInnerScale: f32,
-  recessCorner: f32,
-  dimFactor: f32,   // Visual Dimming (Controlled by UI)
-  isPlaying: f32,   // 1.0 if playing, 0.0 otherwise
-  // New fields for UI controls
-  volume: f32,      // 0.0 to 1.0
-  pan: f32,         // -1.0 to 1.0
-  bpm: f32,
-  isLooping: u32,
-  currentOrder: u32,
-  currentRow: u32,
-  clickedButton: u32, // 0=none, 1=loop, 2=open, 3=play, 4=stop
-  _pad2: f32,
+  canvasW: f32,      // 0
+  canvasH: f32,      // 1
+  bezelWidth: f32,   // 2
+  surfaceR: f32,     // 3
+  surfaceG: f32,     // 4
+  surfaceB: f32,     // 5
+  bezelR: f32,       // 6
+  bezelG: f32,       // 7
+  bezelB: f32,       // 8
+  screwRadius: f32,  // 9
+  recessKind: f32,   // 10
+  recessOuterScale: f32, // 11
+  recessInnerScale: f32, // 12
+  recessCorner: f32, // 13
+  dimFactor: f32,    // 14 - Visual Dimming (Controlled by UI)
+  isPlaying: f32,    // 15 - 1.0 if playing, 0.0 otherwise
+  volume: f32,       // 16 - 0.0 to 1.0
+  pan: f32,          // 17 - -1.0 to 1.0
+  bpm: f32,          // 18
+  isLooping: u32,    // 19
+  currentOrder: u32, // 20
+  currentRow: u32,   // 21
+  clickedButton: u32, // 22 - 0=none, 1=loop, 2=open, 3=play, 4=stop
+  _pad2: f32,        // 23
 };
 
 @group(0) @binding(0) var<uniform> bez: BezelUniforms;
