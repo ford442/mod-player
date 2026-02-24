@@ -31,15 +31,15 @@ struct Uniforms {
 @group(0) @binding(1) var<uniform> uniforms: Uniforms;
 @group(0) @binding(2) var<storage, read> rowFlags: array<u32>;
 
-struct ChannelState {
-    volume: f32,
-    pan: f32,
-    freq: f32,
-    trigger: u32,
-    noteAge: f32,
-    activeEffect: u32,
-    effectValue: f32,
-    isMuted: u32
+struct ChannelState { 
+    volume: f32, 
+    pan: f32, 
+    freq: f32, 
+    trigger: u32, 
+    noteAge: f32, 
+    activeEffect: u32, 
+    effectValue: f32, 
+    isMuted: u32 
 };
 @group(0) @binding(3) var<storage, read> channels: array<ChannelState>;
 @group(0) @binding(4) var buttonsSampler: sampler;
@@ -65,7 +65,7 @@ fn vs(@builtin(vertex_index) vIdx: u32, @builtin(instance_index) iIdx: u32) -> V
   var out: VertexOut;
   out.position = vec4<f32>(pos[vIdx], 0.0, 1.0);
   // UV 0,0 at Top-Left
-  out.uv = pos[vIdx] * vec2<f32>(0.5, -0.5) + 0.5;
+  out.uv = pos[vIdx] * vec2<f32>(0.5, -0.5) + 0.5; 
   return out;
 }
 
@@ -107,50 +107,50 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   let uv = in.uv;
   let aspect = uniforms.canvasW / uniforms.canvasH;
   let dimFactor = uniforms.dimFactor;
-
+  
   // Dark background
   var col = vec3<f32>(0.05, 0.05, 0.06);
-
+  
   // --- LAYOUT ---
   // Top: 0.0 - 0.85 (Grid)
   // Bottom: 0.85 - 1.0 (Controls)
-
+  
   let gridBottom = 0.85;
   let margin = 0.05;
-
+  
   // --- GRID RENDER ---
   if (uv.x > margin && uv.x < (1.0 - margin) && uv.y > margin && uv.y < gridBottom) {
       // Grid Coordinate System
       let gridW = 1.0 - 2.0 * margin;
       let gridH = gridBottom - margin;
       let localUV = vec2<f32>((uv.x - margin) / gridW, (uv.y - margin) / gridH);
-
+      
       let nCols = 64.0; // 64 channels
       let nRows = 32.0; // Visible rows
-
+      
       let colId = floor(localUV.x * nCols);
       let rowId = floor(localUV.y * nRows);
-
+      
       let cellUV = fract(localUV * vec2<f32>(nCols, nRows));
-
+      
       // Determine Pattern Row
       // Center playhead at row 16
       let centerRow = 16.0;
       let scrollOffset = fract(uniforms.playheadRow);
       let visRow = rowId + scrollOffset;
-
+      
       // Actual pattern row index
       let baseRow = i32(floor(uniforms.playheadRow));
       let patternRowIdx = baseRow + i32(floor(visRow - centerRow));
-
+      
       // Cell Shape
       let dBox = sdBox(cellUV - 0.5, vec2<f32>(0.42)); // Gap between keys
       let isCap = dBox < 0.0;
-
+      
       if (isCap) {
           var capColor = vec3<f32>(0.15, 0.16, 0.18); // Inactive plastic
           var glow = 0.0;
-
+          
           // Fetch Data
           if (patternRowIdx >= 0 && patternRowIdx < i32(uniforms.numRows)) {
               if (colId < f32(uniforms.numChannels)) {
@@ -159,11 +159,11 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
                   if (dataIdx < arrayLength(&cells) / 2u) {
                       let packedA = cells[dataIdx * 2u];
                       let note = (packedA >> 24) & 255u;
-
+                      
                       if (note > 0u) {
                           let baseCol = getNoteColor(note);
                           capColor = mix(capColor, baseCol, 0.4);
-
+                          
                           // Highlight if active row
                           let playheadDist = abs(visRow - centerRow);
                           let playheadGlow = 1.0 - smoothstep(0.0, 1.2, playheadDist);
@@ -175,12 +175,12 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
                   }
               }
           }
-
+          
           // Playhead Highlight Line
           let lineDist = abs(visRow - centerRow);
           let lineGlow = 1.0 - smoothstep(0.0, 1.0, lineDist);
           capColor += vec3<f32>(0.1, 0.1, 0.15) * lineGlow;
-
+          
           // Frosted Effect
           // Soften edges
           let edge = smoothstep(0.0, 0.1, -dBox);
@@ -188,25 +188,25 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
           let light = vec3<f32>(0.5, -0.8, 1.0);
           let n = normalize(vec3<f32>((cellUV.x - 0.5), (cellUV.y - 0.5), 0.5));
           let diff = max(0.0, dot(n, normalize(light)));
-
+          
           capColor *= (0.5 + 0.5 * diff);
           capColor += vec3<f32>(glow * 0.5);
-
+          
           col = mix(col, capColor, edge);
       }
   }
-
+  
   // --- CONTROLS RENDER ---
   if (uv.y > gridBottom) {
       let ctrlH = 1.0 - gridBottom;
       let ctrlUV = vec2<f32>(uv.x, (uv.y - gridBottom) / ctrlH);
-
+      
       // Background strip
       col = mix(col, vec3<f32>(0.08, 0.08, 0.1), 1.0);
-
+      
       // Buttons: Loop (Left), Play (Center), Stop (Right)
       let btnY = 0.5;
-
+      
       // Play
       var pPlay = ctrlUV - vec2<f32>(0.5, btnY);
       pPlay.x *= aspect * (ctrlH / 1.0); // Correct aspect
@@ -214,20 +214,20 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
       let isPlaying = uniforms.isPlaying == 1u;
       let playCol = select(vec3<f32>(0.0, 0.4, 0.0), vec3<f32>(0.2, 1.0, 0.2), isPlaying);
       col = mix(col, playCol, 1.0 - smoothstep(0.0, 0.05, dPlay));
-
+      
       // Stop
       var pStop = ctrlUV - vec2<f32>(0.6, btnY);
       pStop.x *= aspect * (ctrlH / 1.0);
       let dStop = sdBox(pStop * 4.0, vec2<f32>(0.25));
       col = mix(col, vec3<f32>(0.8, 0.1, 0.1), 1.0 - smoothstep(0.0, 0.05, dStop));
-
+      
       // Loop (Circle)
       var pLoop = ctrlUV - vec2<f32>(0.4, btnY);
       pLoop.x *= aspect * (ctrlH / 1.0);
       let dLoop = abs(sdCircle(pLoop * 4.0, 0.25)) - 0.05;
       col = mix(col, vec3<f32>(0.9, 0.6, 0.0), 1.0 - smoothstep(0.0, 0.05, dLoop));
   }
-
+  
   let pageProgress = fract(uniforms.playheadRow / 64.0);
   var boundaryFade = 1.0;
   if (pageProgress < 0.05) {

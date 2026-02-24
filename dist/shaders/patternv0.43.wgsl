@@ -33,15 +33,15 @@ struct Uniforms {
 @group(0) @binding(1) var<uniform> uniforms: Uniforms;
 @group(0) @binding(2) var<storage, read> rowFlags: array<u32>;
 
-struct ChannelState {
-    volume: f32,
-    pan: f32,
-    freq: f32,
-    trigger: u32,
-    noteAge: f32,
-    activeEffect: u32,
-    effectValue: f32,
-    isMuted: u32
+struct ChannelState { 
+    volume: f32, 
+    pan: f32, 
+    freq: f32, 
+    trigger: u32, 
+    noteAge: f32, 
+    activeEffect: u32, 
+    effectValue: f32, 
+    isMuted: u32 
 };
 @group(0) @binding(3) var<storage, read> channels: array<ChannelState>;
 @group(0) @binding(4) var buttonsSampler: sampler;
@@ -67,7 +67,7 @@ fn vs(@builtin(vertex_index) vIdx: u32, @builtin(instance_index) iIdx: u32) -> V
   var out: VertexOut;
   out.position = vec4<f32>(pos[vIdx], 0.0, 1.0);
   // UV 0,0 at Top-Left
-  out.uv = pos[vIdx] * vec2<f32>(0.5, -0.5) + 0.5;
+  out.uv = pos[vIdx] * vec2<f32>(0.5, -0.5) + 0.5; 
   return out;
 }
 
@@ -109,17 +109,17 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   let uv = in.uv;
   let aspect = uniforms.canvasW / uniforms.canvasH;
   let dimFactor = uniforms.dimFactor;
-
+  
   // Background (will show through transparent areas)
   var col = vec3<f32>(0.05, 0.05, 0.06);
-
+  
   // --- LAYOUT using gridRect for precise bezel alignment ---
   // gridRect defines the exact grid area within the bezel
   let gridLeft = uniforms.gridRect.x;
   let gridRight = uniforms.gridRect.x + uniforms.gridRect.z;
   let gridTop = uniforms.gridRect.y;
   let gridBottom = uniforms.gridRect.y + uniforms.gridRect.w;
-
+  
   // --- GRID RENDER ---
   if (uv.x > gridLeft && uv.x < gridRight && uv.y > gridTop && uv.y < gridBottom) {
       // Grid Coordinate System - normalize to 0-1 within grid area
@@ -127,33 +127,33 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
           (uv.x - gridLeft) / uniforms.gridRect.z,
           (uv.y - gridTop) / uniforms.gridRect.w
       );
-
+      
       let nCols = 32.0; // Fixed 32 channels for this shader
       let nRows = 32.0; // Visible rows
-
+      
       let colId = floor(localUV.x * nCols);
       let rowId = floor(localUV.y * nRows);
-
+      
       let cellUV = fract(localUV * vec2<f32>(nCols, nRows));
-
+      
       // Determine Pattern Row
       // Center playhead at row 16
       let centerRow = 16.0;
       let scrollOffset = fract(uniforms.playheadRow);
       let visRow = rowId + scrollOffset;
-
+      
       // Actual pattern row index
       let baseRow = i32(floor(uniforms.playheadRow));
       let patternRowIdx = baseRow + i32(floor(visRow - centerRow));
-
+      
       // Cell Shape
       let dBox = sdBox(cellUV - 0.5, vec2<f32>(0.42)); // Gap between keys
       let isCap = dBox < 0.0;
-
+      
       if (isCap) {
           var capColor = vec3<f32>(0.15, 0.16, 0.18); // Inactive plastic
           var noteGlow = 0.0;
-
+          
           // Fetch Data
           if (patternRowIdx >= 0 && patternRowIdx < i32(uniforms.numRows)) {
               if (colId < f32(uniforms.numChannels)) {
@@ -162,11 +162,11 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
                   if (dataIdx < arrayLength(&cells) / 2u) {
                       let packedA = cells[dataIdx * 2u];
                       let note = (packedA >> 24) & 255u;
-
+                      
                       if (note > 0u) {
                           let baseCol = getNoteColor(note);
                           capColor = mix(capColor, baseCol, 0.4);
-
+                          
                           // Highlight if active row
                           let playheadDist = abs(visRow - centerRow);
                           let playheadGlow = 1.0 - smoothstep(0.0, 1.2, playheadDist);
@@ -178,61 +178,61 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
                   }
               }
           }
-
+          
           // Playhead Highlight Line
           let lineDist = abs(visRow - centerRow);
           let lineGlow = 1.0 - smoothstep(0.0, 1.0, lineDist);
           capColor += vec3<f32>(0.1, 0.1, 0.15) * lineGlow;
-
+          
           // --- TRANSLUCENT FROSTED GLASS CAPS ---
           // Calculate normal for fresnel effect
           let p = cellUV - 0.5;
           let n = normalize(vec3<f32>(p.x * 2.0, p.y * 2.0, 0.5));
           let viewDir = vec3<f32>(0.0, 0.0, 1.0);
-
+          
           // Fresnel rim effect
           let fresnel = pow(1.0 - abs(dot(n, viewDir)), 2.0);
-
+          
           // Subsurface scattering from note glow
           let thickness = 0.2;
           let subsurface = exp(-thickness * 5.0) * noteGlow;
-
+          
           // Glass color mixing
           let bgColor = vec3<f32>(0.05, 0.05, 0.06);
           let glassColor = mix(bgColor * 0.3, capColor, 0.7);
-
+          
           // Alpha with fresnel rim enhancement
           let edgeAlpha = smoothstep(0.0, 0.1, -dBox);
           let alpha = edgeAlpha * (0.6 + 0.4 * fresnel);
-
+          
           // Diffuse light for 3D effect
           let light = vec3<f32>(0.5, -0.8, 1.0);
           let diff = max(0.0, dot(n, normalize(light)));
           let litGlassColor = glassColor * (0.5 + 0.5 * diff);
-
+          
           // Composite with background
           var finalColor = mix(bgColor, litGlassColor, alpha);
-
+          
           // Add subsurface glow
           finalColor += subsurface * capColor * 2.0;
-
+          
           col = finalColor;
       }
   }
-
+  
   // --- CONTROLS RENDER ---
   // Controls below the grid area
   let controlY = gridBottom + 0.02;
   if (uv.y > controlY) {
       let ctrlH = 1.0 - controlY;
       let ctrlUV = vec2<f32>(uv.x, (uv.y - controlY) / ctrlH);
-
+      
       // Background strip
       col = mix(col, vec3<f32>(0.08, 0.08, 0.1), 1.0);
-
+      
       // Buttons: Loop (Left), Play (Center), Stop (Right)
       let btnY = 0.5;
-
+      
       // Play
       var pPlay = ctrlUV - vec2<f32>(0.5, btnY);
       pPlay.x *= aspect * (ctrlH / 1.0); // Correct aspect
@@ -240,20 +240,20 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
       let isPlaying = uniforms.isPlaying == 1u;
       let playCol = select(vec3<f32>(0.0, 0.4, 0.0), vec3<f32>(0.2, 1.0, 0.2), isPlaying);
       col = mix(col, playCol, 1.0 - smoothstep(0.0, 0.05, dPlay));
-
+      
       // Stop
       var pStop = ctrlUV - vec2<f32>(0.6, btnY);
       pStop.x *= aspect * (ctrlH / 1.0);
       let dStop = sdBox(pStop * 4.0, vec2<f32>(0.25));
       col = mix(col, vec3<f32>(0.8, 0.1, 0.1), 1.0 - smoothstep(0.0, 0.05, dStop));
-
+      
       // Loop (Circle)
       var pLoop = ctrlUV - vec2<f32>(0.4, btnY);
       pLoop.x *= aspect * (ctrlH / 1.0);
       let dLoop = abs(sdCircle(pLoop * 4.0, 0.25)) - 0.05;
       col = mix(col, vec3<f32>(0.9, 0.6, 0.0), 1.0 - smoothstep(0.0, 0.05, dLoop));
   }
-
+  
   let pageProgress = fract(uniforms.playheadRow / 32.0);
   var boundaryFade = 1.0;
   if (pageProgress < 0.05) {

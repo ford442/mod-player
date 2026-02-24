@@ -148,53 +148,53 @@ fn getFragmentConstants() -> FragmentConstants {
 fn drawFrostedGlassCap(uv: vec2<f32>, size: vec2<f32>, color: vec3<f32>, isOn: bool, aa: f32, noteGlow: f32) -> vec4<f32> {
     let p = uv;
     let dBox = sdRoundedBox(p, size * 0.5, 0.08);
-
+    
     if (dBox > 0.0) {
         return vec4<f32>(0.0);
     }
-
+    
     // Calculate normal for fresnel effect — flatter z for wider rim highlight
     let n = normalize(vec3<f32>(p.x * 2.0 / size.x, p.y * 2.0 / size.y, 0.35));
     let viewDir = vec3<f32>(0.0, 0.0, 1.0);
-
+    
     // Fresnel rim effect — sharper exponent for a brighter rim band
     let fresnel = pow(1.0 - abs(dot(n, viewDir)), 2.5);
-
+    
     // Radial distance for inner glow falloff (0 at center, 1 at edge)
     let radial = length(p / (size * 0.5));
-
+    
     // Subsurface scattering — thinner cap lets more light through, radial spread
     let thickness = 0.12;
     let subsurface = exp(-thickness * 3.5) * noteGlow * (1.0 - radial * 0.4);
-
+    
     // Glass color mixing — higher color contribution for vividness
     let bgColor = vec3<f32>(0.05, 0.05, 0.06);
     let glassColor = mix(bgColor * 0.2, color, 0.8);
-
+    
     // Alpha with fresnel rim enhancement — higher base transmittance
     let edgeAlpha = smoothstep(0.0, aa * 2.0, -dBox);
     let alpha = edgeAlpha * (0.7 + 0.3 * fresnel);
-
+    
     // Diffuse light for 3D effect
     let light = vec3<f32>(0.5, -0.8, 1.0);
     let diff = max(0.0, dot(n, normalize(light)));
     let litGlassColor = glassColor * (0.55 + 0.45 * diff);
-
+    
     // Composite with background
     var finalColor = mix(bgColor, litGlassColor, alpha);
-
+    
     // Add subsurface glow — brighter and more diffuse
     finalColor += subsurface * color * 3.5;
-
+    
     // Inner glow bloom for active caps — uniform radial spread
     if (isOn) {
         let innerGlow = (1.0 - radial) * noteGlow * 0.4;
         finalColor += color * innerGlow;
     }
-
+    
     // Rim highlight — bright edge halo on illuminated caps
     finalColor += fresnel * color * noteGlow * 0.3;
-
+    
     return vec4<f32>(finalColor, edgeAlpha);
 }
 

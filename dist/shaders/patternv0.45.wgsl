@@ -192,7 +192,7 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   let dimFactor = uniforms.dimFactor;
   let bloom = uniforms.bloomIntensity;
   let isPlaying = (uniforms.isPlaying == 1u);
-
+  
   let uv = in.uv;
 
   // --- UI RENDER ---
@@ -201,28 +201,28 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
       if (uv.y <= gridBottom) {
           discard;
       }
-
+      
       var col = vec3<f32>(0.0);
       let aspect = uniforms.canvasW / uniforms.canvasH;
       let ctrlH = 1.0 - gridBottom;
       let ctrlUV = vec2<f32>(uv.x, (uv.y - gridBottom) / ctrlH);
-
+      
       // Buttons: Loop (Left), Play (Center), Stop (Right)
       let btnY = 0.5;
-
+      
       // Play
       var pPlay = ctrlUV - vec2<f32>(0.5, btnY);
       pPlay.x *= aspect * (ctrlH / 1.0);
       let dPlay = sdTriangle(pPlay * 4.0, 0.3);
       let playCol = select(vec3<f32>(0.0, 0.4, 0.0), vec3<f32>(0.2, 1.0, 0.2), isPlaying);
       col = mix(col, playCol, 1.0 - smoothstep(0.0, 0.05, dPlay));
-
+      
       // Stop
       var pStop = ctrlUV - vec2<f32>(0.6, btnY);
       pStop.x *= aspect * (ctrlH / 1.0);
       let dStop = sdBox(pStop * 4.0, vec2<f32>(0.25));
       col = mix(col, vec3<f32>(0.8, 0.1, 0.1), 1.0 - smoothstep(0.0, 0.05, dStop));
-
+      
       // Loop (Circle)
       var pLoop = ctrlUV - vec2<f32>(0.4, btnY);
       pLoop.x *= aspect * (ctrlH / 1.0);
@@ -234,17 +234,17 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   // Frosted Cap Shape
   let dBox = sdRoundedBox(uv - 0.5, vec2<f32>(0.42), 0.1);
   let isCap = dBox < 0.0;
-
+  
   if (!isCap) {
       discard;
   }
-
+  
   var capColor = vec3<f32>(0.15, 0.16, 0.18); // Inactive plastic
   var glow = 0.0;
-
+  
   let noteChar = (in.packedA >> 24) & 255u;
   let hasNote = (noteChar >= 65u && noteChar <= 122u); // Simple check
-
+  
   let playheadStep = uniforms.playheadRow - floor(uniforms.playheadRow / 64.0) * 64.0;
   let rowDistRaw = abs(f32(in.row % 64u) - playheadStep);
   let rowDist = min(rowDistRaw, 64.0 - rowDistRaw);
@@ -253,13 +253,13 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
       let pitchHue = pitchClassFromPacked(in.packedA);
       let baseCol = neonPalette(pitchHue);
       capColor = mix(capColor, baseCol, 0.4);
-
+      
       // Highlight if active row
       if (playheadActivation > 0.0) {
           glow = playheadActivation;
           capColor = mix(capColor, vec3<f32>(1.0), 0.5);
       }
-
+      
       // Trigger flash
       let ch = channels[in.channel];
       if (ch.trigger > 0u && playheadActivation > 0.5) {
@@ -267,7 +267,7 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
           capColor += vec3<f32>(0.5);
       }
   }
-
+  
   // Playhead Highlight Line
   if (playheadActivation > 0.0) {
       capColor += vec3<f32>(0.1, 0.1, 0.15) * playheadActivation;
@@ -275,20 +275,20 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
           glow += 0.2;
       }
   }
-
+  
   // Frosted Effect
   let edge = smoothstep(0.0, 0.1, -dBox);
   let light = vec3<f32>(0.5, -0.8, 1.0);
   let n = normalize(vec3<f32>((uv.x - 0.5), (uv.y - 0.5), 0.5));
   let diff = max(0.0, dot(n, normalize(light)));
-
+  
   capColor *= (0.5 + 0.5 * diff);
   capColor += vec3<f32>(glow * 0.5);
-
+  
   // Bloom boost
   if (glow > 0.0) {
       capColor *= (1.0 + bloom);
   }
-
+  
   return vec4<f32>(capColor * dimFactor, edge);
 }

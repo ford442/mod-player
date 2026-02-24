@@ -654,7 +654,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
             currentGl.texImage2D(currentGl.TEXTURE_2D, 0, currentGl.RGBA, currentGl.RGBA, currentGl.UNSIGNED_BYTE, capImg);
         }
     };
-    capImg.src = 'unlit-button.png';
+    capImg.src = `${import.meta.env.BASE_URL}unlit-button.png`;
 
         glResourcesRef.current = {
       program: prog, vao, texture: tex, capTexture: capTex, buffer: buf,
@@ -721,7 +721,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     if (bezelTextureResourcesRef.current) return;
     
     // v0.39 and v0.40 use square bezel, others use round/custom
-    const textureName = (shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44')) ? 'bezel-square.png' : 'bezel.png';
+    const textureName = (shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44')) ? `${import.meta.env.BASE_URL}bezel-square.png` : `${import.meta.env.BASE_URL}bezel.png`;
 
     let bitmap: ImageBitmap;
     try {
@@ -744,7 +744,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   
   const ensureButtonTexture = async (device: GPUDevice) => {
     if (textureResourcesRef.current) return;
-    const textureUrl = shaderFile.includes('v0.30') ? 'unlit-button-2.png' : 'https://test.1ink.us/xm-player/unlit-button.png';
+    const textureUrl = shaderFile.includes('v0.30') ? `${import.meta.env.BASE_URL}unlit-button-2.png` : 'https://test.1ink.us/xm-player/unlit-button.png';
     let bitmap: ImageBitmap;
     try {
       const img = new Image();
@@ -848,7 +848,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
         textureResourcesRef.current = null;
         bezelTextureResourcesRef.current = null;
 
-        const shaderSource = await fetch(`./shaders/${shaderFile}`).then(res => res.text());
+        const shaderSource = await fetch(`${import.meta.env.BASE_URL}shaders/${shaderFile}`).then(res => res.text());
         if (cancelled) return;
         const module = device.createShaderModule({ code: shaderSource });
         if ('getCompilationInfo' in module) module.getCompilationInfo().catch(() => {});
@@ -884,7 +884,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
         if (shouldUseBackgroundPass(shaderFile)) {
           try {
             const backgroundShaderFile = getBackgroundShaderFile(shaderFile);
-            const backgroundSource = await fetch(`./shaders/${backgroundShaderFile}`).then(res => res.text());
+            const backgroundSource = await fetch(`${import.meta.env.BASE_URL}shaders/${backgroundShaderFile}`).then(res => res.text());
             const bezelModule = device.createShaderModule({ code: backgroundSource });
             const bezelBindLayout = device.createBindGroupLayout({ entries: [{ binding: 0, visibility: GPUShaderStage.FRAGMENT, buffer: { type: 'uniform' } }, { binding: 1, visibility: GPUShaderStage.FRAGMENT, sampler: { type: 'filtering' } }, { binding: 2, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float' } }] });
             bezelPipelineRef.current = device.createRenderPipeline({ layout: device.createPipelineLayout({ bindGroupLayouts: [bezelBindLayout] }), vertex: { module: bezelModule, entryPoint: 'vs' }, fragment: { module: bezelModule, entryPoint: 'fs', targets: [{ format }] }, primitive: { topology: 'triangle-list' } });
