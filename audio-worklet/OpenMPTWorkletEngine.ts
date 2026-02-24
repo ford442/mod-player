@@ -18,6 +18,7 @@
 
 import type {
     WorkletPositionData,
+    WorkletPatternData,
     WorkletModuleMetadata,
     EngineState,
     EngineEventMap,
@@ -84,6 +85,7 @@ export class OpenMPTWorkletEngine extends MiniEventEmitter<EngineEventMap> {
     private state: EngineState = 'uninitialized';
     private pollTimer: ReturnType<typeof setInterval> | null = null;
     private lastRow = -1;
+    private lastPatternOrder = -1;
     private basePath: string;
 
     /**
@@ -117,9 +119,16 @@ export class OpenMPTWorkletEngine extends MiniEventEmitter<EngineEventMap> {
 
         try {
             // Dynamically import the Emscripten glue code
-            const glueUrl = `${this.basePath}openmpt-native.js`;
-            const glueModule = await import(/* @vite-ignore */ glueUrl);
-            const createModule: CreateOpenMPTModule = glueModule.default || glueModule.createOpenMPTModule;
+            // Try new filename first (build-wasm.sh output), fall back to legacy name.
+            let glueModule: Record<string, unknown>;
+            try {
+                const newUrl = `${this.basePath}openmpt-worklet.js`;
+                glueModule = await import(/* @vite-ignore */ newUrl) as Record<string, unknown>;
+            } catch {
+                const legacyUrl = `${this.basePath}openmpt-native.js`;
+                glueModule = await import(/* @vite-ignore */ legacyUrl) as Record<string, unknown>;
+            }
+            const createModule = (glueModule.default || glueModule['createOpenMPTModule']) as CreateOpenMPTModule;
 
             if (typeof createModule !== 'function') {
                 throw new Error('Failed to load Emscripten module factory');
@@ -328,6 +337,15 @@ export class OpenMPTWorkletEngine extends MiniEventEmitter<EngineEventMap> {
                     return;
                 }
 
+                // Attach pattern data when the order (pattern) changes
+                if (data.currentOrder !== this.lastPatternOrder) {
+                    this.lastPatternOrder = data.currentOrder;
+                    const patternData = this.readPatternData(data.currentPattern, data.numChannels);
+                    if (patternData) {
+                        data.patternData = patternData;
+                    }
+                }
+
                 this.emit('position', data);
 
                 // Detect row change for higher-frequency updates
@@ -343,6 +361,40 @@ export class OpenMPTWorkletEngine extends MiniEventEmitter<EngineEventMap> {
             clearInterval(this.pollTimer);
             this.pollTimer = null;
         }
+    }
+
+    /**
+     * Read all cell commands for the given pattern from C++ WASM memory
+     * and return a structured WorkletPatternData object.
+     * Returns null when the module or pattern data functions are unavailable.
+     */
+    private readPatternData(patternIndex: number, numChannels: number): WorkletPatternData | null {
+        const m = this.module;
+        if (!m || typeof m._get_pattern_num_rows !== 'function') return null;
+
+        const numRows = m._get_pattern_num_rows(patternIndex);
+        if (numRows <= 0) return null;
+
+        const rows = [];
+        for (let r = 0; r < numRows; r++) {
+            const notes: number[]        = [];
+            const instruments: number[]  = [];
+            const volCmds: number[]      = [];
+            const volVals: number[]      = [];
+            const effCmds: number[]      = [];
+            const effVals: number[]      = [];
+            for (let c = 0; c < numChannels; c++) {
+                notes.push(m._get_pattern_row_channel_command(patternIndex, r, c, 0));
+                instruments.push(m._get_pattern_row_channel_command(patternIndex, r, c, 1));
+                volCmds.push(m._get_pattern_row_channel_command(patternIndex, r, c, 2));
+                volVals.push(m._get_pattern_row_channel_command(patternIndex, r, c, 3));
+                effCmds.push(m._get_pattern_row_channel_command(patternIndex, r, c, 4));
+                effVals.push(m._get_pattern_row_channel_command(patternIndex, r, c, 5));
+            }
+            rows.push({ notes, instruments, volCmds, volVals, effCmds, effVals });
+        }
+
+        return { patternIndex, numRows, numChannels, rows };
     }
 
     /**

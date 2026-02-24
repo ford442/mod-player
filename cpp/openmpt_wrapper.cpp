@@ -163,6 +163,10 @@ int OpenMPTModule::getNumChannels() const {
     return mod_ ? openmpt_module_get_num_channels(mod_) : 0;
 }
 
+int OpenMPTModule::getNumOrders() const {
+    return mod_ ? openmpt_module_get_num_orders(mod_) : 0;
+}
+
 void OpenMPTModule::getChannelVU(float* out, int maxCh) const {
     if (!mod_) {
         std::memset(out, 0, sizeof(float) * maxCh);
