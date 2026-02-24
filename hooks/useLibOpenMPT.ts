@@ -73,6 +73,9 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
   const playRef = useRef<(() => Promise<void>) | null>(null);
   // Track whether the worklet module is loaded on the current AudioContext
   const workletLoadedRef = useRef<boolean>(false);
+  
+  // Track if user has manually loaded a module (to prevent default from overwriting)
+  const userModuleLoadedRef = useRef<boolean>(false);
 
   // Sync isPlayingRef with the latest React state every render
   isPlayingRef.current = isPlaying;
@@ -117,6 +120,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
 
   const loadModule = useCallback(async (fileData: Uint8Array, fileName: string) => {
     if (!libopenmptRef.current) return;
+    userModuleLoadedRef.current = true; // Mark that user loaded a module
     setStatus(`Loading "${fileName}"...`);
     await processModuleData(fileData, fileName);
   }, []);
@@ -130,9 +134,24 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
     
     console.log("[processModuleData] Processing module:", fileName, "size:", fileData.byteLength);
 
-    if (isPlaying) {
+    // Use ref to check playing state to avoid dependency loop
+    if (isPlayingRef.current) {
       console.log("[processModuleData] Stopping current playback");
-      stopMusic(false);
+      // Stop without calling stopMusic to avoid circular dependency
+      isPlayingRef.current = false;
+      setIsPlaying(false);
+      if (animationFrameHandle.current) cancelAnimationFrame(animationFrameHandle.current);
+      if (audioContextRef.current) {
+         try { audioContextRef.current.suspend(); } catch (e) {}
+      }
+      if (scriptNodeRef.current) {
+        try { scriptNodeRef.current.disconnect(); } catch (e) {}
+        scriptNodeRef.current = null;
+      }
+      if (audioWorkletNodeRef.current) {
+        try { audioWorkletNodeRef.current.disconnect(); } catch (e) {}
+        audioWorkletNodeRef.current = null;
+      }
     }
 
     // Cleanup previous module
@@ -204,7 +223,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
     // Auto-play using the latest play function (avoids stale closure)
     if (playRef.current) playRef.current();
 
-  }, [isPlaying, getPatternMatrix]);
+  }, [getPatternMatrix]);
 
   const processAudioChunk = useCallback((outputBuffer: AudioBuffer) => {
     // Only used for ScriptProcessor
@@ -673,9 +692,9 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
     }
   }, [volume]);
 
-  // Load default module
+  // Load default module (only if user hasn't loaded one)
   useEffect(() => {
-    if (isReady) {
+    if (isReady && !userModuleLoadedRef.current) {
       const loadDefault = async () => {
         const fileName = DEFAULT_MODULE_URL.split('/').pop() || 'default.mod';
         setStatus(`Fetching "${fileName}"...`);

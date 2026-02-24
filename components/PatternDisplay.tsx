@@ -4,8 +4,9 @@ import { ChannelShadowState, PatternMatrix } from '../types';
 const DEFAULT_ROWS = 64;
 const DEFAULT_CHANNELS = 4;
 
-// Bezel inset for v0.40/v0.43 shaders - exact square bezel bounds
-const BEZEL_INSET = { x: 160, y: 160, w: 705, h: 725 };
+// Bezel inset for v0.40/v0.43 shaders - adjusted to fill more of the display
+// The display area is roughly 160,160 to 865,885 on a 1024x1024 canvas
+const BEZEL_INSET = { x: 160, y: 180, w: 705, h: 685 };
 // Normalized grid rect for shader (x, y, w, h)
 const GRID_RECT = {
   x: BEZEL_INSET.x / 1024,
@@ -448,6 +449,20 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   // Click handler for Glass UI interaction
   // WebGL Overlay Setup (Glass Effects)
   const initWebGL = () => {
+    // Clean up existing WebGL resources first
+    if (glContextRef.current && glResourcesRef.current) {
+      const oldGl = glContextRef.current;
+      const oldRes = glResourcesRef.current;
+      try {
+        oldGl.deleteProgram(oldRes.program);
+        oldGl.deleteVertexArray(oldRes.vao);
+        oldGl.deleteBuffer(oldRes.buffer);
+        oldGl.deleteTexture(oldRes.texture);
+        if (oldRes.capTexture) oldGl.deleteTexture(oldRes.capTexture);
+      } catch (e) {}
+      glResourcesRef.current = null;
+    }
+    
     if (!glCanvasRef.current) return;
     const gl = glCanvasRef.current.getContext('webgl2', { alpha: true, premultipliedAlpha: false });
     if (!gl) return;
@@ -926,14 +941,52 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     };
     init();
     return () => {
-      cancelled = true; setWebgpuAvailable(true); setGpuReady(false);
-      bindGroupRef.current = null; pipelineRef.current = null;
-      if (bezelUniformBufferRef.current) { bezelUniformBufferRef.current.destroy(); bezelUniformBufferRef.current = null; }
-      bezelBindGroupRef.current = null; bezelPipelineRef.current = null; bezelTextureResourcesRef.current = null;
-      if (clickTimeoutRef.current !== null) { window.clearTimeout(clickTimeoutRef.current); clickTimeoutRef.current = null; }
-      cellsBufferRef.current = null; uniformBufferRef.current = null; rowFlagsBufferRef.current = null; channelsBufferRef.current = null; textureResourcesRef.current = null;
-      if (videoTextureRef.current) { const deviceToWait = deviceRef.current; if(deviceToWait) deviceToWait.queue.onSubmittedWorkDone().then(() => { try { videoTextureRef.current?.destroy(); } catch (e) {} videoTextureRef.current = null; }).catch(()=>{ try { videoTextureRef.current?.destroy(); } catch (e) {} videoTextureRef.current = null; }); else { try { videoTextureRef.current.destroy(); } catch (e) {} videoTextureRef.current = null; } }
-      deviceRef.current = null; contextRef.current = null;
+      cancelled = true; 
+      setGpuReady(false);
+      
+      // Clean up WebGL resources first
+      if (glContextRef.current && glResourcesRef.current) {
+        const gl = glContextRef.current;
+        const res = glResourcesRef.current;
+        try {
+          gl.deleteProgram(res.program);
+          gl.deleteVertexArray(res.vao);
+          gl.deleteBuffer(res.buffer);
+          gl.deleteTexture(res.texture);
+          if (res.capTexture) gl.deleteTexture(res.capTexture);
+        } catch (e) {}
+        glResourcesRef.current = null;
+      }
+      
+      // Clean up WebGPU resources
+      bindGroupRef.current = null; 
+      pipelineRef.current = null;
+      if (bezelUniformBufferRef.current) { 
+        try { bezelUniformBufferRef.current.destroy(); } catch (e) {}
+        bezelUniformBufferRef.current = null; 
+      }
+      bezelBindGroupRef.current = null; 
+      bezelPipelineRef.current = null; 
+      bezelTextureResourcesRef.current = null;
+      if (clickTimeoutRef.current !== null) { 
+        window.clearTimeout(clickTimeoutRef.current); 
+        clickTimeoutRef.current = null; 
+      }
+      cellsBufferRef.current = null; 
+      uniformBufferRef.current = null; 
+      rowFlagsBufferRef.current = null; 
+      channelsBufferRef.current = null; 
+      textureResourcesRef.current = null;
+      if (videoTextureRef.current) { 
+        try { videoTextureRef.current.destroy(); } catch (e) {}
+        videoTextureRef.current = null; 
+      }
+      if (deviceRef.current) {
+        try { deviceRef.current.destroy(); } catch (e) {}
+      }
+      deviceRef.current = null; 
+      contextRef.current = null;
+      glContextRef.current = null;
     };
   }, [shaderFile]);
 
@@ -1316,14 +1369,15 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   });
 
   useEffect(() => {
+    let isActive = true;
     const loop = (time: number) => {
+      if (!isActive) return;
       animationFrameRef.current = requestAnimationFrame(loop);
 
       // Update local time if module is not playing/loaded, for idle animations
       if (!isModuleLoaded && !isPlaying) {
         setLocalTime(time / 1000.0);
       }
-
 
       if (analyserNode) {
          if (freqDataRef.current.length !== analyserNode.frequencyBinCount) {
@@ -1332,8 +1386,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
          analyserNode.getByteFrequencyData(freqDataRef.current);
       }
 
-      if (renderRef.current) {
-
+      if (renderRef.current && gpuReady) {
         renderRef.current();
       }
     };
@@ -1341,9 +1394,10 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     animationFrameRef.current = requestAnimationFrame(loop);
 
     return () => {
+      isActive = false;
       if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
     };
-  }, [isModuleLoaded, isPlaying]);
+  }, [isModuleLoaded, isPlaying, gpuReady]);
 
   return (
     <div className={`pattern-display relative ${padTopChannel && !shaderFile.includes('v0.40') && !shaderFile.includes('v0.43') && !shaderFile.includes('v0.44') ? 'p-8 rounded-xl bg-[#18181a] shadow-2xl border border-[#333]' : ''}`}>

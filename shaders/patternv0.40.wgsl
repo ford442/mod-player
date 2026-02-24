@@ -77,12 +77,26 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
   
   // Use gridRect for precise positioning within bezel area
   // gridRect is in normalized coordinates (0-1)
+  // Note: channel 0 is the header row, channels 1+ are the actual pattern data
+  
+  // Calculate effective channel index (0 = header, 1-N = pattern channels)
+  let effectiveChannel = f32(channel);
+  
+  // For Y positioning, account for the header row if present
+  // If numChannels includes header (padTopChannel), subtract 1 from data channels
+  let hasHeader = uniforms.numChannels > 1u && uniforms.gridRect.y > 0.15;
+  let dataChannels = f32(uniforms.numChannels) - select(0.0, 1.0, hasHeader);
+  let channelIndex = select(effectiveChannel, effectiveChannel - 1.0, hasHeader && effectiveChannel > 0.0);
+  
   let gridX = uniforms.gridRect.x + (localRow / stepsPerPage) * uniforms.gridRect.z;
-  let gridY = uniforms.gridRect.y + (f32(channel) / f32(numChannels)) * uniforms.gridRect.w;
+  let gridY = uniforms.gridRect.y + (channelIndex / max(1.0, dataChannels)) * uniforms.gridRect.w;
   
   // Convert to clip space (-1 to 1)
-  let clipX = gridX * 2.0 - 1.0 + quad[vertexIndex].x * (uniforms.gridRect.z / stepsPerPage) * 2.0;
-  let clipY = 1.0 - (gridY * 2.0) - quad[vertexIndex].y * (uniforms.gridRect.w / f32(numChannels)) * 2.0;
+  let cellWidth = uniforms.gridRect.z / stepsPerPage;
+  let cellHeight = uniforms.gridRect.w / max(1.0, dataChannels);
+  
+  let clipX = gridX * 2.0 - 1.0 + quad[vertexIndex].x * cellWidth * 2.0;
+  let clipY = 1.0 - (gridY * 2.0) - quad[vertexIndex].y * cellHeight * 2.0;
   
   // Collapse if not visible
   let finalPos = select(vec4<f32>(0.0), vec4<f32>(clipX, clipY, 0.0, 1.0), isVisible > 0.5);
