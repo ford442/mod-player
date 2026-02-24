@@ -7,6 +7,28 @@
 
 // ── Position data posted from worklet → main thread ─────────────────
 
+export interface WorkletPatternRow {
+    /** Per-channel note values (0 = none) */
+    notes: number[];
+    /** Per-channel instrument indices */
+    instruments: number[];
+    /** Per-channel volume commands */
+    volCmds: number[];
+    /** Per-channel volume values */
+    volVals: number[];
+    /** Per-channel effect commands */
+    effCmds: number[];
+    /** Per-channel effect values */
+    effVals: number[];
+}
+
+export interface WorkletPatternData {
+    patternIndex: number;
+    numRows: number;
+    numChannels: number;
+    rows: WorkletPatternRow[];
+}
+
 export interface WorkletPositionData {
     positionMs: number;
     currentRow: number;
@@ -16,6 +38,11 @@ export interface WorkletPositionData {
     numChannels: number;
     /** Per-channel mono VU values, indices [0..numChannels-1] */
     channelVU: Float32Array;
+    /**
+     * Full pattern data for the current order position.
+     * Only included when the order changes (pattern switch).
+     */
+    patternData?: WorkletPatternData;
 }
 
 // ── Module metadata returned after loading ───────────────────────────
@@ -85,6 +112,12 @@ export interface EmscriptenOpenMPTModule {
     _get_audio_context: () => number;
     _get_worklet_node: () => number;
     _cleanup_audio: () => void;
+    // Pattern data query functions
+    _get_num_channels: () => number;
+    _get_num_orders: () => number;
+    _get_order_pattern: (order: number) => number;
+    _get_pattern_num_rows: (pattern: number) => number;
+    _get_pattern_row_channel_command: (pattern: number, row: number, channel: number, command: number) => number;
 }
 
 /**
