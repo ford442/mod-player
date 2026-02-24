@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { LibOpenMPT, ModuleInfo, PatternMatrix, ChannelShadowState } from '../types';
+import { OpenMPTWorkletEngine } from '../audio-worklet/OpenMPTWorkletEngine';
+import type { WorkletPositionData } from '../audio-worklet/types';
 
 interface SyncDebugInfo {
   mode: string;
@@ -38,8 +40,9 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
   const [isLooping, setIsLooping] = useState<boolean>(true);
   const [panValue, setPanValue] = useState<number>(0); // -1 to 1
   const [volume, _setVolume] = useState<number>(initialVolume); // 0 to 1
-  const [activeEngine, setActiveEngine] = useState<'script' | 'worklet'>('worklet');
+  const [activeEngine, setActiveEngine] = useState<'script' | 'worklet' | 'native-worklet'>('worklet');
   const [isWorkletSupported, setIsWorkletSupported] = useState<boolean>(false);
+  const [isNativeWorkletAvailable, setIsNativeWorkletAvailable] = useState<boolean>(false);
   const [restartPlayback, setRestartPlayback] = useState<boolean>(false);
   const [syncDebug, _setSyncDebug] = useState<SyncDebugInfo>({ mode: "none", bufferMs: 0, driftMs: 0, row: 0, starvationCount: 0 });
 
@@ -76,6 +79,9 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
   
   // Track if user has manually loaded a module (to prevent default from overwriting)
   const userModuleLoadedRef = useRef<boolean>(false);
+
+  // Native C++/Wasm AudioWorklet engine (Phase 2)
+  const nativeEngineRef = useRef<OpenMPTWorkletEngine | null>(null);
 
   // Sync isPlayingRef with the latest React state every render
   isPlayingRef.current = isPlaying;
@@ -274,8 +280,8 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
     let row = 0;
     let time = 0;
 
-    if (activeEngine === 'worklet' && audioWorkletNodeRef.current) {
-       // Use state from worklet
+    if ((activeEngine === 'worklet' || activeEngine === 'native-worklet') && (audioWorkletNodeRef.current || nativeEngineRef.current)) {
+       // Use state from worklet (JS or native)
        order = workletOrderRef.current;
        row = workletRowRef.current;
        time = workletTimeRef.current;
@@ -345,6 +351,11 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
     setIsPlaying(false);
     if (animationFrameHandle.current) cancelAnimationFrame(animationFrameHandle.current);
 
+    // Pause native engine if active
+    if (nativeEngineRef.current) {
+       nativeEngineRef.current.pause();
+    }
+
     if (audioContextRef.current) {
        audioContextRef.current.suspend();
     }
@@ -395,7 +406,9 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
      setSequencerGlobalRow(step);
 
      // Worklet update
-     if (activeEngine === 'worklet' && audioWorkletNodeRef.current) {
+     if (activeEngine === 'native-worklet' && nativeEngineRef.current) {
+         nativeEngineRef.current.seek(targetOrder, targetRow);
+     } else if (activeEngine === 'worklet' && audioWorkletNodeRef.current) {
          audioWorkletNodeRef.current.port.postMessage({ type: 'seek', order: targetOrder, row: targetRow });
      }
   };
@@ -466,7 +479,60 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
         audioWorkletNodeRef.current = null; 
       }
 
-    if (activeEngine === 'worklet' && isWorkletSupported) {
+    if (activeEngine === 'native-worklet' && isNativeWorkletAvailable) {
+      // ── Native C++/Wasm AudioWorklet engine (Phase 2) ──
+      console.log('🎵 [PLAY] Using native C++/Wasm AudioWorklet engine...');
+      try {
+        const engine = nativeEngineRef.current!;
+
+        // Load module data into the native engine
+        const buf = fileDataRef.current?.buffer;
+        if (buf) {
+          console.log('📦 [PLAY] Sending module data to native engine:', buf.byteLength, 'bytes');
+          await engine.load(buf as ArrayBuffer);
+        }
+
+        // Set engine parameters
+        engine.setVolume(volume);
+        engine.setLoop(isLooping);
+
+        // Listen for position updates from the native engine
+        engine.on('position', (data: WorkletPositionData) => {
+          workletOrderRef.current = data.currentOrder;
+          workletRowRef.current = data.currentRow;
+          workletTimeRef.current = data.positionMs / 1000;
+          lastWorkletUpdateRef.current = performance.now() / 1000;
+
+          // Update channel VU data
+          const numCh = data.numChannels;
+          for (let c = 0; c < numCh && c < channelStatesRef.current.length; c++) {
+            channelStatesRef.current[c] = {
+              ...channelStatesRef.current[c],
+              volume: data.channelVU[c] || 0,
+              trigger: (data.channelVU[c] || 0) > 0.5 ? 1 : 0,
+            };
+          }
+        });
+
+        engine.on('ended', () => {
+          console.log('ℹ️ [PLAY] Native engine reported module ended');
+          if (isLooping) {
+            seekToStepWrapper(0);
+          } else {
+            stopMusic(false);
+          }
+        });
+
+        // Start playback
+        engine.play();
+        console.log('✅ [PLAY] Native C++/Wasm AudioWorklet engine started');
+      } catch (e) {
+        console.error("❌ [PLAY] Failed to start native engine:", e);
+        console.warn("⚠️ [PLAY] Falling back to JS AudioWorklet engine");
+        setActiveEngine('worklet');
+        // Continue to existing worklet path below
+      }
+    } else if (activeEngine === 'worklet' && isWorkletSupported) {
       console.log('🎵 [PLAY] Using AudioWorklet engine...');
 
       try {
@@ -570,23 +636,31 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
       console.error("❌ [PLAY] Play error:", e);
       setStatus("Error starting playback");
     }
-  }, [activeEngine, isWorkletSupported, panValue, volume, processAudioChunk, isLooping, stopMusic]);
+  }, [activeEngine, isWorkletSupported, isNativeWorkletAvailable, panValue, volume, processAudioChunk, isLooping, stopMusic]);
 
   // Keep playRef always pointing to the latest play function
   // so processModuleData (which memoises over different deps) can call it without stale closure
   playRef.current = play;
 
   const toggleAudioEngine = useCallback(() => {
-     if (activeEngine === 'script' && !isWorkletSupported) return;
-     const newEngine = activeEngine === 'worklet' ? 'script' : 'worklet';
+     // Cycle: native-worklet → worklet → script → native-worklet (if available)
+     let newEngine: 'script' | 'worklet' | 'native-worklet';
+     if (activeEngine === 'native-worklet') {
+       newEngine = isWorkletSupported ? 'worklet' : 'script';
+     } else if (activeEngine === 'worklet') {
+       newEngine = 'script';
+     } else {
+       // script → try native first, then worklet
+       newEngine = isNativeWorkletAvailable ? 'native-worklet' : (isWorkletSupported ? 'worklet' : 'script');
+     }
 
      if (isPlaying) {
          setRestartPlayback(true);
          stopMusic(false);
      }
      setActiveEngine(newEngine);
-     console.log();
-  }, [activeEngine, isPlaying, isWorkletSupported, stopMusic]);
+     console.log('[toggleEngine]', activeEngine, '→', newEngine);
+  }, [activeEngine, isPlaying, isWorkletSupported, isNativeWorkletAvailable, stopMusic]);
 
   useEffect(() => {
      if (restartPlayback) {
@@ -653,6 +727,24 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
                 setIsWorkletSupported(false);
                 setActiveEngine('script');
              }
+
+              // Probe for native C++/Wasm AudioWorklet engine
+              try {
+                 const nativeGlueUrl = `${import.meta.env.BASE_URL}worklets/openmpt-native.js`;
+                 const probeResp = await fetch(nativeGlueUrl, { method: 'HEAD' });
+                 if (probeResp.ok) {
+                   console.log('[INIT] Native C++/Wasm AudioWorklet engine available');
+                   const engine = new OpenMPTWorkletEngine();
+                   await engine.init();
+                   nativeEngineRef.current = engine;
+                   setIsNativeWorkletAvailable(true);
+                   setActiveEngine('native-worklet');
+                   console.log('[INIT] Native engine initialized');
+                 }
+              } catch (nativeErr) {
+                 console.log('[INIT] Native C++/Wasm engine not available (using JS fallback):', nativeErr);
+                 setIsNativeWorkletAvailable(false);
+              }
          } catch (e) {
              const error = e as Error;
              if (error.message === 'Initialization timed out') {
@@ -667,6 +759,10 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
 
      return () => {
         console.log("Cleaning up libopenmpt resources.");
+        if (nativeEngineRef.current) {
+            nativeEngineRef.current.destroy();
+            nativeEngineRef.current = null;
+        }
         if (scriptNodeRef.current) scriptNodeRef.current.disconnect();
         if (audioWorkletNodeRef.current) audioWorkletNodeRef.current.disconnect();
         if (stereoPannerRef.current) stereoPannerRef.current.disconnect();
@@ -689,6 +785,10 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
   useEffect(() => {
     if (gainNodeRef.current) {
       gainNodeRef.current.gain.value = volume;
+    }
+    // Sync volume with native C++/Wasm engine
+    if (nativeEngineRef.current) {
+      nativeEngineRef.current.setVolume(volume);
     }
   }, [volume]);
 
