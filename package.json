@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build:worklet": "bash ./build-wasm.sh",
-    "build:emcc": "bash ./build-wasm.sh",
+    "build:emcc": "bash scripts/build-wasm.sh",
     "build": "tsc && node --max-old-space-size=4096 node_modules/.bin/vite build",
     "preview": "vite preview"
   },

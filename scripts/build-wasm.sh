@@ -73,10 +73,8 @@ echo "📦 Emscripten version: $(emcc --version | head -1)"
 if [[ ! -f "$LIBOPENMPT_INCLUDE/libopenmpt/libopenmpt.h" ]]; then
     echo "📥 libopenmpt headers not found – cloning from GitHub…"
     mkdir -p "$PROJECT_ROOT/vendor"
-    # remove any half–cloned repo so the git operation starts clean
-    rm -rf "$VENDOR_DIR" 2>/dev/null || true
-    git clone --depth 1 --shallow-submodules --recursive \
-        --branch OpenMPT-1.31 https://github.com/OpenMPT/openmpt.git "$VENDOR_DIR"
+    git clone --depth 1 --branch OpenMPT-1.31 \
+        https://github.com/OpenMPT/openmpt.git "$VENDOR_DIR"
 
     echo "🔨 Building libopenmpt for Emscripten (this takes a few minutes)…"
     pushd "$VENDOR_DIR" >/dev/null
