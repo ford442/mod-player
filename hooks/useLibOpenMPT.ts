@@ -512,6 +512,39 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
               trigger: (data.channelVU[c] || 0) > 0.5 ? 1 : 0,
             };
           }
+
+          // When the engine supplies new pattern data (on order/pattern change),
+          // convert it to a PatternMatrix and update the sequencer display.
+          if (data.patternData) {
+            const pd = data.patternData;
+            const rows = pd.rows.map((row) =>
+              Array.from({ length: pd.numChannels }, (_, c): import('../types').PatternCell => {
+                const hasNote = row.notes[c] > 0;
+                const hasInst = row.instruments[c] > 0;
+                const hasEffect = row.effCmds[c] > 0 || row.effVals[c] > 0;
+                const type = hasNote ? 'note' : hasInst ? 'instrument' : hasEffect ? 'effect' : 'empty';
+                return {
+                  type,
+                  text: '',
+                  note:    row.notes[c] || undefined,
+                  inst:    row.instruments[c] || undefined,
+                  volCmd:  row.volCmds[c] || undefined,
+                  volVal:  row.volVals[c] || undefined,
+                  effCmd:  row.effCmds[c] || undefined,
+                  effVal:  row.effVals[c] || undefined,
+                };
+              })
+            );
+            const matrix = {
+              order: data.currentOrder,
+              patternIndex: pd.patternIndex,
+              numRows: pd.numRows,
+              numChannels: pd.numChannels,
+              rows,
+            };
+            patternMatricesRef.current[data.currentOrder] = matrix;
+            setSequencerMatrix(matrix);
+          }
         });
 
         engine.on('ended', () => {
