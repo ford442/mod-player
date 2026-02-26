@@ -863,7 +863,8 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
         textureResourcesRef.current = null;
         bezelTextureResourcesRef.current = null;
 
-        const shaderSource = await fetch(`${import.meta.env.BASE_URL}shaders/${shaderFile}`).then(res => res.text());
+        const shaderBase = import.meta.env.DEV ? import.meta.env.BASE_URL : '/xm-player/';
+        const shaderSource = await fetch(`${shaderBase}shaders/${shaderFile}`).then(res => res.text());
         if (cancelled) return;
         const module = device.createShaderModule({ code: shaderSource });
         if ('getCompilationInfo' in module) module.getCompilationInfo().catch(() => {});
@@ -899,7 +900,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
         if (shouldUseBackgroundPass(shaderFile)) {
           try {
             const backgroundShaderFile = getBackgroundShaderFile(shaderFile);
-            const backgroundSource = await fetch(`${import.meta.env.BASE_URL}shaders/${backgroundShaderFile}`).then(res => res.text());
+            const backgroundSource = await fetch(`${shaderBase}shaders/${backgroundShaderFile}`).then(res => res.text());
             const bezelModule = device.createShaderModule({ code: backgroundSource });
             const bezelBindLayout = device.createBindGroupLayout({ entries: [{ binding: 0, visibility: GPUShaderStage.FRAGMENT, buffer: { type: 'uniform' } }, { binding: 1, visibility: GPUShaderStage.FRAGMENT, sampler: { type: 'filtering' } }, { binding: 2, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float' } }] });
             bezelPipelineRef.current = device.createRenderPipeline({ layout: device.createPipelineLayout({ bindGroupLayouts: [bezelBindLayout] }), vertex: { module: bezelModule, entryPoint: 'vs' }, fragment: { module: bezelModule, entryPoint: 'fs', targets: [{ format }] }, primitive: { topology: 'triangle-list' } });
