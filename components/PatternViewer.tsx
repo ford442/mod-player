@@ -1,4 +1,4 @@
-import { useEffect, useRef, useMemo, useCallback } from 'react';
+import React, { useEffect, useRef, useMemo, memo, forwardRef } from 'react';
 import type { PatternMatrix, PatternCell } from '../types';
 
 interface PatternViewerProps {
@@ -50,6 +50,73 @@ function formatRowNumber(row: number): string {
   return row.toString(16).toUpperCase().padStart(2, '0');
 }
 
+const EMPTY_CELL: PatternCell = { type: 'empty', text: '' };
+const EMPTY_ROW: PatternCell[] = [];
+
+const PatternCellComponent = memo(({ cell }: { cell: PatternCell }) => {
+  const note = formatNote(cell);
+  const inst = formatInstrument(cell);
+  const vol = formatVolume(cell);
+  const eff = formatEffect(cell);
+  return (
+    <span className="inline-flex gap-1.5">
+      <span className={note === '...' ? 'text-gray-600' : 'text-cyan-300'}>{note}</span>
+      <span className={inst === '..' ? 'text-gray-600' : 'text-yellow-400'}>{inst}</span>
+      <span className={vol === '..' ? 'text-gray-600' : 'text-green-400'}>{vol}</span>
+      <span className={eff === '...' ? 'text-gray-600' : 'text-purple-400'}>{eff}</span>
+    </span>
+  );
+});
+
+interface PatternRowProps {
+  rowIndex: number;
+  cells: PatternCell[];
+  isCurrent: boolean;
+  displayChannels: number;
+}
+
+const PatternRow = memo(forwardRef<HTMLDivElement, PatternRowProps>(
+  ({ rowIndex, cells, isCurrent, displayChannels }, ref) => {
+    return (
+      <div
+        ref={ref}
+        className={
+          'flex items-center px-2 transition-colors duration-75 ' +
+          (isCurrent
+            ? 'bg-cyan-900/40 text-green-300'
+            : rowIndex % 4 === 0
+              ? 'bg-gray-800/30 text-gray-300'
+              : 'text-gray-400')
+        }
+      >
+        {/* Row number */}
+        <span
+          className={
+            'w-8 text-center shrink-0 ' +
+            (isCurrent ? 'text-cyan-200 font-bold' : 'text-gray-500')
+          }
+        >
+          {formatRowNumber(rowIndex)}
+        </span>
+        <span className="border-l border-white/5 h-5 mx-0.5" />
+
+        {/* Channel cells */}
+        <div className="flex">
+          {Array.from({ length: displayChannels }, (_, ch) => (
+            <span
+              key={ch}
+              className="shrink-0 px-1 border-r border-white/5 last:border-r-0"
+              style={{ minWidth: '10.5ch' }}
+            >
+              <PatternCellComponent cell={cells[ch] ?? EMPTY_CELL} />
+            </span>
+          ))}
+        </div>
+      </div>
+    );
+  }
+));
+
 export const PatternViewer: React.FC<PatternViewerProps> = ({
   matrix,
   currentRow,
@@ -67,38 +134,15 @@ export const PatternViewer: React.FC<PatternViewerProps> = ({
     currentRowRef.current.scrollIntoView({ block: 'center', behavior: 'smooth' });
   }, [currentRow, isPlaying]);
 
-  const renderCell = useCallback(
-    (cell: PatternCell) => {
-      const note = formatNote(cell);
-      const inst = formatInstrument(cell);
-      const vol = formatVolume(cell);
-      const eff = formatEffect(cell);
-      return (
-        <span className="inline-flex gap-1.5">
-          <span className={note === '...' ? 'text-gray-600' : 'text-cyan-300'}>{note}</span>
-          <span className={inst === '..' ? 'text-gray-600' : 'text-yellow-400'}>{inst}</span>
-          <span className={vol === '..' ? 'text-gray-600' : 'text-green-400'}>{vol}</span>
-          <span className={eff === '...' ? 'text-gray-600' : 'text-purple-400'}>{eff}</span>
-        </span>
-      );
-    },
-    [],
-  );
-
-  const rows = useMemo(() => {
-    if (!matrix) return [];
+  const rowRange = useMemo(() => {
+    if (!matrix) return { start: 0, end: 0 };
     const totalRows = matrix.numRows;
     const half = Math.floor(VISIBLE_ROWS / 2);
     let start = currentRow - half;
     let end = start + VISIBLE_ROWS;
     if (start < 0) { start = 0; end = Math.min(VISIBLE_ROWS, totalRows); }
     if (end > totalRows) { end = totalRows; start = Math.max(0, end - VISIBLE_ROWS); }
-
-    const result: { rowIndex: number; cells: PatternCell[] }[] = [];
-    for (let r = start; r < end; r++) {
-      result.push({ rowIndex: r, cells: matrix.rows[r] ?? [] });
-    }
-    return result;
+    return { start, end };
   }, [matrix, currentRow]);
 
   if (!matrix) {
@@ -144,51 +188,18 @@ export const PatternViewer: React.FC<PatternViewerProps> = ({
         className="overflow-y-auto overflow-x-auto font-mono text-xs leading-5"
         style={{ maxHeight: `${VISIBLE_ROWS * 1.25 + 1}rem` }}
       >
-        {rows.map(({ rowIndex, cells }) => {
+        {Array.from({ length: rowRange.end - rowRange.start }, (_, i) => {
+          const rowIndex = rowRange.start + i;
           const isCurrent = rowIndex === currentRow;
           return (
-            <div
+            <PatternRow
               key={rowIndex}
               ref={isCurrent ? currentRowRef : undefined}
-              className={
-                'flex items-center px-2 transition-colors duration-75 ' +
-                (isCurrent
-                  ? 'bg-cyan-900/40 text-green-300'
-                  : rowIndex % 4 === 0
-                    ? 'bg-gray-800/30 text-gray-300'
-                    : 'text-gray-400')
-              }
-            >
-              {/* Row number */}
-              <span
-                className={
-                  'w-8 text-center shrink-0 ' +
-                  (isCurrent ? 'text-cyan-200 font-bold' : 'text-gray-500')
-                }
-              >
-                {formatRowNumber(rowIndex)}
-              </span>
-              <span className="border-l border-white/5 h-5 mx-0.5" />
-
-              {/* Channel cells */}
-              <div className="flex">
-                {Array.from({ length: displayChannels }, (_, ch) => {
-                  const cell: PatternCell = cells[ch] ?? {
-                    type: 'empty',
-                    text: '',
-                  };
-                  return (
-                    <span
-                      key={ch}
-                      className="shrink-0 px-1 border-r border-white/5 last:border-r-0"
-                      style={{ minWidth: '10.5ch' }}
-                    >
-                      {renderCell(cell)}
-                    </span>
-                  );
-                })}
-              </div>
-            </div>
+              rowIndex={rowIndex}
+              cells={matrix.rows[rowIndex] ?? EMPTY_ROW}
+              isCurrent={isCurrent}
+              displayChannels={displayChannels}
+            />
           );
         })}
       </div>

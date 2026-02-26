@@ -3,7 +3,7 @@ import time
 
 def verify_changes(page: Page):
     print("Navigating to app...")
-    page.goto("http://localhost:5173")
+    page.goto("http://127.0.0.1:4173")
 
     # Wait for app to load
     page.wait_for_timeout(2000)
@@ -27,7 +27,7 @@ def verify_changes(page: Page):
     page.wait_for_timeout(2000)
 
     print("Taking screenshot...")
-    page.screenshot(path="/home/jules/verification/verification.png")
+    page.screenshot(path="verification/verification.png")
 
 if __name__ == "__main__":
     with sync_playwright() as p:
