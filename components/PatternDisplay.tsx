@@ -669,7 +669,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
             currentGl.texImage2D(currentGl.TEXTURE_2D, 0, currentGl.RGBA, currentGl.RGBA, currentGl.UNSIGNED_BYTE, capImg);
         }
     };
-    capImg.src = `${import.meta.env.BASE_URL}unlit-button.png`;
+    capImg.src = `./unlit-button.png`;
 
         glResourcesRef.current = {
       program: prog, vao, texture: tex, capTexture: capTex, buffer: buf,
