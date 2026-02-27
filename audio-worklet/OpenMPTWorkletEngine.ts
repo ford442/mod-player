@@ -122,10 +122,10 @@ export class OpenMPTWorkletEngine extends MiniEventEmitter<EngineEventMap> {
             // Try new filename first (build-wasm.sh output), fall back to legacy name.
             let glueModule: Record<string, unknown>;
             try {
-                const newUrl = `${this.basePath}openmpt-worklet.js`;
+                const newUrl = `./openmpt-worklet.js`;
                 glueModule = await import(/* @vite-ignore */ newUrl) as Record<string, unknown>;
             } catch {
-                const legacyUrl = `${this.basePath}openmpt-native.js`;
+                const legacyUrl = `./openmpt-native.js`;
                 glueModule = await import(/* @vite-ignore */ legacyUrl) as Record<string, unknown>;
             }
             const createModule = (glueModule.default || glueModule['createOpenMPTModule']) as CreateOpenMPTModule;
