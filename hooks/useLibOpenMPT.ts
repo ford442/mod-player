@@ -15,7 +15,7 @@ interface SyncDebugInfo {
 const DEFAULT_ROWS = 64;
 const DEFAULT_CHANNELS = 4;
 // Use BASE_URL for proper subdirectory deployment support
-const DEFAULT_MODULE_URL = `./7-DAYS.XM`;
+const DEFAULT_MODULE_URL = `./7DAYS.XM`;
 const WORKLET_URL = `./worklets/openmpt-processor.js`;
 // const SAMPLE_RATE = 44100;
 
