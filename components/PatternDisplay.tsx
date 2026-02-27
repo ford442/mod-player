@@ -736,7 +736,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     if (bezelTextureResourcesRef.current) return;
     
     // v0.39 and v0.40 use square bezel, others use round/custom
-    const textureName = (shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44')) ? `${import.meta.env.BASE_URL}bezel-square.png` : `${import.meta.env.BASE_URL}bezel.png`;
+    const textureName = (shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44')) ? `./bezel-square.png` : `./bezel.png`;
 
     let bitmap: ImageBitmap;
     try {
@@ -759,7 +759,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   
   const ensureButtonTexture = async (device: GPUDevice) => {
     if (textureResourcesRef.current) return;
-    const textureUrl = shaderFile.includes('v0.30') ? `${import.meta.env.BASE_URL}unlit-button-2.png` : 'https://test.1ink.us/xm-player/unlit-button.png';
+    const textureUrl = shaderFile.includes('v0.30') ? `./unlit-button-2.png` : 'https://test.1ink.us/xm-player/unlit-button.png';
     let bitmap: ImageBitmap;
     try {
       const img = new Image();
