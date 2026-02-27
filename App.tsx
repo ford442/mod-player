@@ -4,7 +4,7 @@ import { Controls } from './components/Controls';
 import { PatternDisplay } from './components/PatternDisplay';
 import { MediaOverlay } from './components/MediaOverlay';
 import { Studio3D } from './components/Studio3D';
-import { PatternViewer } from './components/PatternViewer';
+
 import { ChannelMeters } from './components/ChannelMeters';
 import { MetadataPanel } from './components/MetadataPanel';
 import type { ModuleMetadata } from './components/MetadataPanel';
@@ -83,8 +83,7 @@ function App() {
   const [mediaVisible, setMediaVisible] = useState<boolean>(false);
   const [mediaItem, setMediaItem] = useState<MediaItem | null>(null);
 
-  // Pro tracker panel visibility
-  const [showPatternViewer, setShowPatternViewer] = useState<boolean>(true);
+  // Panel visibility
   const [showChannelMeters, setShowChannelMeters] = useState<boolean>(true);
   const [showMetadata, setShowMetadata] = useState<boolean>(true);
   const [showPlaylist, setShowPlaylist] = useState<boolean>(true);
@@ -467,7 +466,6 @@ function App() {
         {/* Panel Toggle Buttons */}
         <div className="mt-4 flex flex-wrap gap-2">
           {[
-            { key: 'pattern', label: '🎹 Pattern', state: showPatternViewer, toggle: setShowPatternViewer },
             { key: 'meters', label: '📊 VU Meters', state: showChannelMeters, toggle: setShowChannelMeters },
             { key: 'meta', label: 'ℹ️ Metadata', state: showMetadata, toggle: setShowMetadata },
             { key: 'playlist', label: '📋 Playlist', state: showPlaylist, toggle: setShowPlaylist },
@@ -488,19 +486,15 @@ function App() {
           ))}
         </div>
 
-        {/* Pro Tracker Panels */}
+        {/* Virtual Hardware Panels */}
         <div className="mt-4 grid grid-cols-1 lg:grid-cols-3 gap-4">
-          {/* Left Column: Pattern Viewer */}
-          {showPatternViewer && (
-            <div className="lg:col-span-2">
-              <PatternViewer
-                matrix={sequencerMatrix}
-                currentRow={Math.floor(playbackRowFraction)}
-                numChannels={sequencerMatrix?.numChannels ?? 4}
-                isPlaying={isPlaying}
-              />
+          {/* Left Column: Visualizer placeholder (optional) */}
+          <div className="lg:col-span-2">
+            {/* Hardware display area - PatternDisplay is already shown above */}
+            <div className="h-full min-h-[200px] flex items-center justify-center text-gray-500 text-sm">
+              {/* Virtual hardware display active */}
             </div>
-          )}
+          </div>
 
           {/* Right Column: Metadata + VU Meters */}
           <div className="flex flex-col gap-4">
