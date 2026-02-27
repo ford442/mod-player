@@ -15,8 +15,8 @@ interface SyncDebugInfo {
 const DEFAULT_ROWS = 64;
 const DEFAULT_CHANNELS = 4;
 // Use BASE_URL for proper subdirectory deployment support
-const DEFAULT_MODULE_URL = `${import.meta.env.BASE_URL}4-mat_madness.mod`;
-const WORKLET_URL = `${import.meta.env.BASE_URL}worklets/openmpt-processor.js`;
+const DEFAULT_MODULE_URL = `./7-DAYS.XM`;
+const WORKLET_URL = `./worklets/openmpt-processor.js`;
 // const SAMPLE_RATE = 44100;
 
 export function useLibOpenMPT(initialVolume: number = 0.4) {
