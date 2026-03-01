@@ -16,7 +16,8 @@ const DEFAULT_ROWS = 64;
 const DEFAULT_CHANNELS = 4;
 // Use BASE_URL for proper subdirectory deployment support
 const DEFAULT_MODULE_URL = `./7DAYS.XM`;
-const WORKLET_URL = `./worklets/openmpt-processor.js`;
+// the file produced by our build scripts is openmpt-worklet.js (previously called openmpt-processor.js)
+const WORKLET_URL = `./worklets/openmpt-worklet.js`;
 // const SAMPLE_RATE = 44100;
 
 export function useLibOpenMPT(initialVolume: number = 0.4) {
@@ -51,6 +52,8 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
   const audioContextRef = useRef<AudioContext | null>(null);
   const scriptNodeRef = useRef<ScriptProcessorNode | null>(null);
   const audioWorkletNodeRef = useRef<AudioWorkletNode | null>(null);
+  // Shared WASM memory supplied to the worklet; allocated once on main thread
+  const wasmMemoryRef = useRef<WebAssembly.Memory | null>(null);
   const stereoPannerRef = useRef<StereoPannerNode | null>(null);
   const gainNodeRef = useRef<GainNode | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
@@ -583,10 +586,22 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
           }
 
           console.log('🔧 [PLAY] Creating AudioWorkletNode...');
+          // allocate or reuse a shared WASM memory buffer and pass it into the worklet
+          let wasmMemory = wasmMemoryRef.current;
+          if (!wasmMemory) {
+            console.log('🔧 [PLAY] Allocating shared WASM.Memory for worklet (16MB)');
+            wasmMemory = new WebAssembly.Memory({
+              initial: 256, // 256 pages = 16 MB
+              maximum: 256,
+              shared: true // required for any threaded/Emscripten use
+            });
+            wasmMemoryRef.current = wasmMemory;
+          }
           const node = new AudioWorkletNode(ctx, 'openmpt-processor', {
             numberOfInputs: 0,
             numberOfOutputs: 1,
-            outputChannelCount: [2]
+            outputChannelCount: [2],
+            processorOptions: { memory: wasmMemory }
           });
           console.log('✅ [PLAY] AudioWorkletNode created:', node);
 
