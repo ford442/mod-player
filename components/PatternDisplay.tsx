@@ -22,6 +22,10 @@ const EMPTY_CHANNEL: ChannelShadowState = {
 const PLAYHEAD_EPSILON = 0.0001;
 const alignTo = (val: number, align: number) => Math.floor((val + align - 1) / align) * align;
 
+// Step counts for WebGL2 overlay layout modes (must match shader constants)
+const GL_STEPS_HORIZONTAL_32 = 32; // u_layoutMode == 2
+const GL_STEPS_DEFAULT = 64;       // u_layoutMode == 3 (horizontal 64) and mode 1 (circular)
+
 // Shader Helper Functions
 type LayoutType = 'standard' | 'extended' | 'texture';
 
@@ -499,7 +503,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
         v_hasNote = (note > 0u) ? 1.0 : 0.0;
 
         // 2. Calculate Scale/Size
-        float scale = (note > 0u) ? 0.92 : 0.0; // Hide empty steps, shrink valid ones slightly for gap
+        float scale = (note > 0u) ? 0.85 : 0.0; // Hide empty steps, shrink valid ones slightly for gap
 
         // 3. Playhead Logic
         float stepsPerPage = (u_layoutMode == 3) ? 64.0 : 32.0;
@@ -508,7 +512,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
         float distToPlayhead = abs(float(row) - relativePlayhead);
         distToPlayhead = min(distToPlayhead, stepsPerPage - distToPlayhead);
         float activation = 1.0 - smoothstep(0.0, 1.5, distToPlayhead);
-        scale *= 1.0 + (0.15 * activation); // Pop effect with smooth falloff
+        scale *= 1.0 + (0.2 * activation); // Pop effect with smooth falloff
         v_active = activation;
 
         // 4. Positioning Logic
@@ -698,6 +702,28 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   useEffect(() => {
     return initWebGL();
   }, [shaderFile]);
+
+  // Sync WebGL canvas buffer dimensions to its CSS display size on resize
+  useEffect(() => {
+    let rafId: number;
+    const syncGLCanvasSize = () => {
+      cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(() => {
+        const canvas = glCanvasRef.current;
+        if (!canvas) return;
+        if (canvas.width !== canvas.clientWidth || canvas.height !== canvas.clientHeight) {
+          canvas.width = canvas.clientWidth;
+          canvas.height = canvas.clientHeight;
+        }
+      });
+    };
+    syncGLCanvasSize();
+    window.addEventListener('resize', syncGLCanvasSize);
+    return () => {
+      window.removeEventListener('resize', syncGLCanvasSize);
+      cancelAnimationFrame(rafId);
+    };
+  }, []);
 
   // === WEBGL2 DATA UPLOAD ===
   useEffect(() => {
@@ -1137,18 +1163,17 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     if (!gl || !res || !isOverlayShader || !matrix) return;
 
     const { program, vao, texture, uniforms } = res;
-    const { width, height } = canvasMetrics;
     const cols = padTopChannel ? (matrix.numChannels || DEFAULT_CHANNELS) + 1 : (matrix.numChannels || DEFAULT_CHANNELS);
     const rows = matrix.numRows || DEFAULT_ROWS;
 
-    gl.viewport(0, 0, width, height);
+    gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
     gl.clearColor(0, 0, 0, 0);
-    gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
     
     gl.useProgram(program);
     gl.bindVertexArray(vao);
 
-    gl.uniform2f(uniforms.u_resolution, width, height);
+    gl.uniform2f(uniforms.u_resolution, gl.canvas.width, gl.canvas.height);
     gl.uniform1f(uniforms.u_cols, cols);
     gl.uniform1f(uniforms.u_rows, rows);
     gl.uniform1f(uniforms.u_playhead, playheadRow);
@@ -1203,7 +1228,8 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
 
-    const totalInstances = rows * cols;
+    const stepsForMode = layoutMode === 2 ? GL_STEPS_HORIZONTAL_32 : GL_STEPS_DEFAULT;
+    const totalInstances = stepsForMode * cols;
     gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, totalInstances);
 
     gl.bindVertexArray(null);
