@@ -139,6 +139,27 @@ public/worklets/
 
 ## Troubleshooting
 
+### Worklet runtime crashes or OOM errors
+If you plan to run the Emscripten‑compiled engine *inside the audio worklet thread* (i.e. keep the
+WASM completely contained in the worklet) there are two gotchas:
+
+1. **`setTimeout` is not defined in the worklet scope** – the generated glue tries to use it and the
+   worklet will crash.  We now inject a small polyfill via `cpp/pre.js` before the glue code which
+   schedules callbacks as microtasks.
+
+2. **Memory allocation failures ("Array buffer allocation failed")** – the default Emscripten
+   initializer allocates its own `WebAssembly.Memory`, which is not allowed inside the worklet.
+   Instead the main thread must create the memory and pass it in through `processorOptions`.  A
+   wrapper added in `cpp/pre.js` reads `options.processorOptions.memory` and stashes it on
+   `Module.wasmMemory` before the module is instantiated.  The React hook (`useLibOpenMPT.ts`) now
+   allocates a shared `WebAssembly.Memory` and includes it when constructing the `AudioWorkletNode`.
+
+These changes are required for stable operation when using the JS worklet engine; if you are only
+using the native C++ engine (`openmpt-native.js`) they are harmless but unused.
+
+
+## Troubleshooting
+
 ### "Emscripten >= 3.1.51 is required"
 - Use libopenmpt 0.7.x or older for Emscripten 3.1.50
 - Or upgrade Emscripten to latest
