@@ -785,6 +785,8 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
         }
 
         // Probe for native C++/Wasm AudioWorklet engine
+        // Note: enabling this requires building the wasm engine using
+        // ./scripts/build-wasm.sh (Emscripten SDK must be installed).
         try {
           const nativeGlueUrl = `./worklets/openmpt-native.js`;
           const probeResp = await fetch(nativeGlueUrl, { method: 'HEAD' });

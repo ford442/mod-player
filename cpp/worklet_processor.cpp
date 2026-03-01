@@ -124,7 +124,7 @@ EM_BOOL audio_process_cb(
     // Render interleaved stereo into a temp buffer
     float interleaved[128 * 2]; // Stack allocation for 128 frames
     int rendered = g_module.readInterleavedStereo(
-        out.samplesPerSec > 0 ? out.samplesPerSec : 48000,
+        48000,
         frames,
         interleaved
     );
@@ -155,7 +155,7 @@ EM_BOOL audio_process_cb(
     // ── Report position (throttled: every ~16ms OR on row change) ──
     int currentRow = g_module.getCurrentRow();
     // Accumulate elapsed time based on sample count
-    double elapsed = (double)frames / (double)(out.samplesPerSec > 0 ? out.samplesPerSec : 48000);
+    double elapsed = (double)frames / 48000.0;
     static double timeSinceLastReport = 0.0;
     timeSinceLastReport += elapsed;
     g_lastReportTimeS += elapsed;
@@ -191,7 +191,7 @@ static void worklet_thread_initialized(EMSCRIPTEN_WEBAUDIO_T audioCtx, EM_BOOL s
     opts.numberOfOutputs = 1;
     opts.outputChannelCounts = outputChannelCounts;
 
-    g_workletNode = emscripten_create_audio_worklet_node(
+    g_workletNode = emscripten_create_wasm_audio_worklet_node(
         audioCtx,
         "openmpt-native-processor",
         &opts,
@@ -236,7 +236,7 @@ int init_audio(int sampleRate) {
     }
 
     // Start the worklet thread with a stack size of 128KB
-    emscripten_start_audio_worklet_thread_async(
+    emscripten_start_wasm_audio_worklet_thread_async(
         g_audioCtx,
         nullptr, 0,  // no custom shared memory (Emscripten manages it)
         worklet_thread_initialized,
