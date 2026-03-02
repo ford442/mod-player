@@ -22,21 +22,13 @@ class APIConfig:
         
         if self.kimi_key:
             self.key = self.kimi_key
-            # Try multiple possible endpoints for Kimi Code
-            # Order: user override > code.kimi.com (known working) > others
-            self.base_urls = [
-                custom_base,  # User override first
-                "https://code.kimi.com/api",  # Known working from test
-                "https://api.kimi.com/v1",
-                "https://kimi.com/api/v1",
-            ]
-            self.base_url = self.base_urls[0] if custom_base else self.base_urls[1]
+            # Use code.kimi.com - the working endpoint
+            self.base_url = custom_base or "https://code.kimi.com/api"
+            self.base_urls = [self.base_url]  # Only try the working endpoint
             self.provider = "kimi-code"
             self.model = os.getenv("KIMI_MODEL", "kimi-code-latest")
             print(f"🔑 Using Kimi Code API (Allegro)")
             print(f"   Endpoint: {self.base_url}")
-            if not custom_base:
-                print(f"   Tip: Set KIMI_BASE_URL to override")
         elif self.moonshot_key:
             self.key = self.moonshot_key
             self.base_url = custom_base or "https://api.moonshot.cn/v1"
