@@ -1,0 +1,48 @@
+{
+  "name": "chassis-generation-pipeline",
+  "version": "1.0.0",
+  "description": "Pipeline for generating audio-reactive chassis shaders",
+  "stages": [
+    {
+      "id": "sdf-spec",
+      "task": "001-sdf-spec.yaml",
+      "description": "Generate mathematical SDF specification"
+    },
+    {
+      "id": "shader-static",
+      "task": "002-shader-gen.yaml",
+      "description": "Implement static WGSL shader",
+      "depends_on": ["sdf-spec"]
+    },
+    {
+      "id": "shader-audio",
+      "task": "003-audio-reactive.yaml",
+      "description": "Add audio reactivity",
+      "depends_on": ["shader-static"]
+    },
+    {
+      "id": "frontend-integrate",
+      "task": "004-frontend-integrate.yaml",
+      "description": "Integrate into React frontend",
+      "depends_on": ["shader-audio"]
+    }
+  ],
+  "variables": {
+    "design_name": {
+      "required": true,
+      "description": "Kebab-case design identifier"
+    },
+    "aesthetic_reference": {
+      "default": "Access Virus Polar",
+      "description": "Visual reference for the design"
+    },
+    "quality_preset": {
+      "default": "high",
+      "enum": ["performance", "high", "ultra"]
+    },
+    "animation_style": {
+      "default": "smooth",
+      "enum": ["smooth", "punchy", "ambient", "strobe"]
+    }
+  }
+}

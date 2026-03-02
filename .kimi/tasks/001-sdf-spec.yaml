@@ -1,0 +1,64 @@
+id: sdf-spec
+name: SDF Specification Generator
+description: Creates mathematical SDF specifications for audio player chassis
+role: Technical Specification Agent (Industrial Design/Shaders)
+
+context:
+  repository: github.com/ford442/mod-player
+  requires_files: []
+  outputs_to: specs/{{design_name}}_chassis_spec.md
+
+variables:
+  design_name:
+    type: string
+    description: "Kebab-case design identifier (e.g., 'polar', 'cyberpunk', 'neural')"
+    default: "new-design"
+  
+  aesthetic_reference:
+    type: string
+    description: "Primary visual reference (synth model, sci-fi aesthetic, etc.)"
+    default: "Access Virus Polar"
+  
+  material_palette:
+    type: object
+    properties:
+      primary_color: "matte white/silver"
+      accent_color: "purple metallic"
+      emissive_color: "cyan/blue"
+      finish: "satin metallic"
+  
+  geometry_requirements:
+    type: array
+    default:
+      - "sleek front panel with precise bevels"
+      - "four modern minimalist knobs with illuminated rings"
+      - "central concentric ring array with segmented glowing elements"
+
+prompt_template: |
+  You are a coding agent working on the mod-player project at {{repository}}.
+  
+  Design Theme: {{aesthetic_reference}}
+  
+  Create a Markdown file named '{{design_name}}_chassis_spec.md' containing:
+  1. SDF (Signed Distance Field) mathematics for:
+     {{#each geometry_requirements}}
+     - {{this}}
+     {{/each}}
+     - Material definitions ({{material_palette.finish}}, {{material_palette.primary_color}}, {{material_palette.accent_color}})
+     - PBR lighting model with emissive properties ({{material_palette.emissive_color}})
+  
+  2. Uniform buffer structures for:
+     - Audio frequency data (bass/mid/high bands)
+     - Amplitude/envelope followers
+     - Time/beat synchronization
+  
+  3. Technical specifications:
+     - Raymarching parameters (step count, epsilon values)
+     - Material roughness/metallic values
+     - Emissive intensity ranges
+  
+  Constraints:
+  - Use WGSL-compatible mathematical notation
+  - Static geometry only (no animation)
+  - High-end premium aesthetic
+  - Output: Complete markdown specification only
