@@ -25,6 +25,17 @@
 
 set -e
 
+echo "🔨 Downloading & building libopenmpt (this only runs once)..."
+wget -q https://lib.openmpt.org/files/libopenmpt/src/libopenmpt-0.8.4+release.makefile.tar.gz -O libopenmpt.tar.gz
+tar xzf libopenmpt.tar.gz
+
+echo "🔨 Building libopenmpt for Emscripten..."
+cd libopenmpt-0.8.4+release.makefile
+make CONFIG=emscripten -j2
+cd ..
+
+echo "✅ libopenmpt ready!"
+
 echo "=== OpenMPT Web Worklet Build (2026) ==="
 
 # ── 1. Source emsdk ─────────────────────────────────────────────────
@@ -106,9 +117,9 @@ emcc \
     -s EXPORTED_RUNTIME_METHODS="['ccall','cwrap','UTF8ToString','stringToUTF8','lengthBytesUTF8','getValue','setValue']" \
     -s EXPORTED_FUNCTIONS="['_init_audio','_load_module','_resume_audio','_suspend_audio','_seek_order_row','_set_loop','_set_volume','_poll_position','_get_audio_context','_get_worklet_node','_cleanup_audio','_get_num_channels','_get_num_orders','_get_order_pattern','_get_pattern_num_rows','_get_pattern_row_channel_command','_malloc','_free']" \
     \
-    -I vendor/libopenmpt/include \
-    -L vendor/libopenmpt/bin \
-    -l openmpt \
+    -I./libopenmpt-0.8.4+release.makefile/include \
+    -L./libopenmpt-0.8.4+release.makefile/bin \
+    -lopenmpt \
     \
     cpp/openmpt_wrapper.cpp \
     cpp/worklet_processor.cpp \
