@@ -16,22 +16,23 @@ Since we're already talking, I can execute these tasks sequentially. Just say:
 4. Copy/paste `tasks/001c-rings-spec.md` into Tab 3
 5. When all complete, copy results into `specs/{design}/` and run the merge task in Tab 4
 
-### Option 3: Kimi Code API (Allegro Subscription)
-If you have a Kimi Code subscription with API access:
+### Option 3: API Automation (Unified Pipeline)
+Auto-detects Kimi Code API (Allegro) or Moonshot API:
 
 ```bash
-# Set your Kimi Code API key (from IDE Settings → API Keys)
-export KIMI_CODE_API_KEY=your-key
+# Set your API key (Kimi Code preferred, Moonshot fallback)
+export KIMI_API_KEY="your-kimi-code-key"      # From kimi.com/code/console
+# OR
+export MOONSHOT_API_KEY="your-moonshot-key"   # From platform.moonshot.cn
 
-# Sequential execution (slower, respects rate limits)
-python scripts/kimi_code_pipeline.py polar
-
-# Parallel execution (faster, uses more quota)
-python scripts/kimi_code_pipeline_parallel.py polar
+# Run the full pipeline (parallel specs → sequential shader gen)
+python scripts/run_chassis_pipeline.py polar
 ```
 
-**Note:** Kimi Code API (api.kimi.com) is different from Moonshot API (api.moonshot.cn).
-Kimi Code is optimized for code generation and uses your Allegro subscription credits.
+**What it does:**
+1. **Phase 1 (Parallel)**: Panel + Knobs + Rings specs simultaneously
+2. **Phase 2 (Sequential)**: Merge → Static shader → Audio reactive → Integration
+3. **Auto-saves** to `specs/`, `src/shaders/`, `logs/` automatically
 
 ## File Structure
 
