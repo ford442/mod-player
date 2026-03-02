@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { LibOpenMPT, ModuleInfo, PatternMatrix, ChannelShadowState } from '../types';
 import { OpenMPTWorkletEngine } from '../audio-worklet/OpenMPTWorkletEngine';
 import type { WorkletPositionData } from '../audio-worklet/types';
+import { withBase } from '../src/lib/paths';
 
 interface SyncDebugInfo {
   mode: string;
@@ -17,7 +18,7 @@ const DEFAULT_CHANNELS = 4;
 // Use BASE_URL for proper subdirectory deployment support
 const DEFAULT_MODULE_URL = `./7DAYS.XM`;
 // the file produced by our build scripts is openmpt-worklet.js (previously called openmpt-processor.js)
-const WORKLET_URL = `./worklets/openmpt-worklet.js`;
+const WORKLET_URL = withBase('worklets/openmpt-worklet.js');
 // const SAMPLE_RATE = 44100;
 
 export function useLibOpenMPT(initialVolume: number = 0.4) {
@@ -803,7 +804,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
         // Note: enabling this requires building the wasm engine using
         // ./scripts/build-wasm.sh (Emscripten SDK must be installed).
         try {
-          const nativeGlueUrl = `./worklets/openmpt-native.js`;
+          const nativeGlueUrl = withBase('worklets/openmpt-native.js');
           const probeResp = await fetch(nativeGlueUrl, { method: 'HEAD' });
           if (probeResp.ok) {
             console.log('[INIT] Native C++/Wasm AudioWorklet engine available');
