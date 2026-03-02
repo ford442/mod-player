@@ -23,10 +23,11 @@ class APIConfig:
         if self.kimi_key:
             self.key = self.kimi_key
             # Try multiple possible endpoints for Kimi Code
+            # Order: user override > code.kimi.com (known working) > others
             self.base_urls = [
                 custom_base,  # User override first
+                "https://code.kimi.com/api",  # Known working from test
                 "https://api.kimi.com/v1",
-                "https://code.kimi.com/api",
                 "https://kimi.com/api/v1",
             ]
             self.base_url = self.base_urls[0] if custom_base else self.base_urls[1]
@@ -35,7 +36,7 @@ class APIConfig:
             print(f"🔑 Using Kimi Code API (Allegro)")
             print(f"   Endpoint: {self.base_url}")
             if not custom_base:
-                print(f"   Tip: Set KIMI_BASE_URL if this endpoint is wrong")
+                print(f"   Tip: Set KIMI_BASE_URL to override")
         elif self.moonshot_key:
             self.key = self.moonshot_key
             self.base_url = custom_base or "https://api.moonshot.cn/v1"
@@ -146,8 +147,8 @@ class ChassisPipeline:
                 content = "\n".join(lines[1:-1]) if lines[-1].strip() == "```" else "\n".join(lines[1:])
         return content.strip()
     
-    async def run_parallel_specs(self, session: aiohttp.ClientSession):
-        """Run 001a, 001b, 001c in parallel"""
+    async def run_parallel_specs(self):
+        """Run 001a, 001b, 001c in parallel with individual sessions"""
         print("🚀 Phase 1: Parallel spec generation...")
         
         tasks = {
@@ -158,7 +159,9 @@ class ChassisPipeline:
         
         async def run_component(name: str, prompt: str):
             print(f"  🎨 Starting {name}...")
-            result = await self.call_api(session, prompt, f"001-{name}")
+            # Each component gets its own session to avoid conflicts
+            async with aiohttp.ClientSession() as session:
+                result = await self.call_api(session, prompt, f"001-{name}")
             cleaned = self.clean_output(result, "md")
             
             output_path = f"specs/{self.design}/{name}_spec.md"
@@ -169,9 +172,18 @@ class ChassisPipeline:
         # Execute all three in parallel
         results = await asyncio.gather(*[
             run_component(name, prompt) for name, prompt in tasks.items()
-        ])
+        ], return_exceptions=True)
         
-        return dict(results)
+        # Check for errors
+        final_results = {}
+        for i, (name, _) in enumerate(tasks.items()):
+            result = results[i]
+            if isinstance(result, Exception):
+                print(f"  ❌ {name} failed: {result}")
+                raise result
+            final_results[name] = result[1]  # result is (name, content) tuple
+        
+        return final_results
     
     async def run_sequential_pipeline(self, session: aiohttp.ClientSession, specs: Dict[str, str]):
         """Run 001d, 002, 003, 004 sequentially"""
@@ -254,19 +266,19 @@ CURRENT SHADER TO MODIFY:
         print(f"   Provider: {self.config.provider}")
         print(f"   Model: {self.config.model}\n")
         
+        # Phase 1: Parallel (each component has its own session)
+        specs = await self.run_parallel_specs()
+        
+        # Phase 2-5: Sequential (uses new session)
         async with aiohttp.ClientSession() as session:
-            # Phase 1: Parallel
-            specs = await self.run_parallel_specs(session)
-            
-            # Phase 2-5: Sequential
             final_shader, integration = await self.run_sequential_pipeline(session, specs)
-            
-            print(f"\n✅ Pipeline complete!")
-            print(f"   Spec: specs/{self.design}_chassis_spec.md")
-            print(f"   Shader: src/shaders/{self.design}_chassis.wgsl")
-            print(f"   Integration: logs/{self.design}_integration.md")
-            
-            return final_shader
+        
+        print(f"\n✅ Pipeline complete!")
+        print(f"   Spec: specs/{self.design}_chassis_spec.md")
+        print(f"   Shader: src/shaders/{self.design}_chassis.wgsl")
+        print(f"   Integration: logs/{self.design}_integration.md")
+        
+        return final_shader
 
 async def test_endpoints():
     """Test which endpoints are available"""
