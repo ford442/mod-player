@@ -69,26 +69,10 @@ mkdir -p "$EM_CACHE"
 echo "📦 Emscripten: $(emcc --version | head -1)"
 
 # ── 2. Clean and prepare directories ────────────────────────────────
-rm -rf vendor/libopenmpt public/worklets
-mkdir -p vendor public/worklets
+rm -rf public/worklets
+mkdir -p public/worklets
 
-# ── 3. Clone libopenmpt ─────────────────────────────────────────────
-echo "Cloning libopenmpt 0.7.12 (minimal)..."
-# Shallow clone without submodules (not needed for Emscripten build)
-git clone --depth 1 --branch libopenmpt-0.7.12 https://github.com/OpenMPT/openmpt.git vendor/libopenmpt
-
-# ── 4. Build libopenmpt for Emscripten ──────────────────────────────
-cd vendor/libopenmpt
-
-echo "Building libopenmpt with CONFIG=emscripten..."
-make CONFIG=emscripten -j55
-
-echo "=== libopenmpt build artifacts ==="
-ls -la bin/ include/ 2>/dev/null || true
-
-cd ../..
-
-# ── 5. Compile the custom AudioWorklet ──────────────────────────────
+# ── 3. Compile the custom AudioWorklet ──────────────────────────────
 echo "Compiling custom AudioWorklet..."
 
 # Debug vs release flags
