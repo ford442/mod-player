@@ -1196,15 +1196,17 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
 
     if (shaderFile.includes('v0.40') || shaderFile.includes('v0.43') || shaderFile.includes('v0.46')) {
         // Horizontal 32
-        effectiveCellW = 705.0 / 32.0;
-        effectiveCellH = 725.0 / cols;
-        gl.uniform2f(uniforms.u_offset, 160.0, 160.0);
+        const rect = GRID_RECT;
+        effectiveCellW = (rect.w * gl.canvas.width) / 32.0;
+        effectiveCellH = (rect.h * gl.canvas.height) / cols;
+        gl.uniform2f(uniforms.u_offset, rect.x * gl.canvas.width, rect.y * gl.canvas.height);
         layoutMode = 2;
     } else if (shaderFile.includes('v0.44')) {
         // Horizontal 64
-        effectiveCellW = 705.0 / 64.0;
-        effectiveCellH = 725.0 / cols;
-        gl.uniform2f(uniforms.u_offset, 160.0, 160.0);
+        const rect = GRID_RECT;
+        effectiveCellW = (rect.w * gl.canvas.width) / 64.0;
+        effectiveCellH = (rect.h * gl.canvas.height) / cols;
+        gl.uniform2f(uniforms.u_offset, rect.x * gl.canvas.width, rect.y * gl.canvas.height);
         layoutMode = 3;
     } else if (shaderFile.includes('v0.39')) {
         // Full Screen Horizontal
@@ -1264,8 +1266,8 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
       let effectiveCellW = cellWidth;
       let effectiveCellH = cellHeight;
       if (shaderFile.includes('v0.21') || shaderFile.includes('v0.40') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.47') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49')) {
-          effectiveCellW = 705.0 / 32.0;
-          effectiveCellH = 725.0 / numChannels;
+          effectiveCellW = (GRID_RECT.w * canvasMetrics.width) / 32.0;
+          effectiveCellH = (GRID_RECT.h * canvasMetrics.height) / numChannels;
       } else if (shaderFile.includes('v0.39')) {
           effectiveCellW = canvasMetrics.width / 32.0;
           effectiveCellH = canvasMetrics.height / numChannels; // Approx
@@ -1275,7 +1277,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
         numRows,
         numChannels,
         playheadRow: tickRow,
-        playheadRowAsFloat: shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.47') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49'),
+        playheadRowAsFloat: shaderFile.includes('v0.40') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.47') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49'),
         isPlaying,
         cellW: effectiveCellW,
         cellH: effectiveCellH,
@@ -1347,14 +1349,44 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
       colorAttachments: [{
           view: context.getCurrentTexture().createView(),
           loadOp: 'clear',
-          clearValue: { r: 0.98, g: 0.98, b: 0.98, a: 1 },
+          clearValue: { r: 0, g: 0, b: 0, a: 1 }, // Changed from 0.98 for cleaner composite
           storeOp: 'store',
       }],
     });
 
     // Render background pass for all shaders that are not self-compositing
     const needsBackground = !isSinglePassCompositeShader(shaderFile);
-    if (bezelPipelineRef.current && bezelBindGroupRef.current && needsBackground) {
+    if (bezelPipelineRef.current && bezelBindGroupRef.current && needsBackground && bezelUniformBufferRef.current) {
+      const bezelData = new Float32Array(24);
+      bezelData[0] = canvasMetrics.width;
+      bezelData[1] = canvasMetrics.height;
+      bezelData[2] = 0; // bezelWidth
+      // Colors (using defaults from shader constants or params)
+      bezelData[3] = 0.92; bezelData[4] = 0.93; bezelData[5] = 0.95; // surface
+      bezelData[6] = 0.88; bezelData[7] = 0.89; bezelData[8] = 0.91; // bezel
+      bezelData[9] = 0.015; // screwRadius
+      bezelData[10] = 0; // recessKind
+      bezelData[11] = 1.0; // recessOuterScale
+      bezelData[12] = 1.0; // recessInnerScale
+      bezelData[13] = 0.02; // recessCorner
+      bezelData[14] = dimFactor ?? 1.0;
+      bezelData[15] = isPlaying ? 1.0 : 0.0;
+      bezelData[16] = 1.0; // volume
+      bezelData[17] = 0.5; // pan
+      bezelData[18] = bpm ?? 120.0;
+      const bezelUint = new Uint32Array(bezelData.buffer);
+      bezelUint[19] = isLooping ? 1 : 0;
+      bezelUint[20] = 0; // currentOrder (could pass if needed)
+      bezelUint[21] = Math.floor(playheadRow);
+      bezelUint[22] = 0; // clickedButton
+      // gridRect at index 20 (offset 80 in bytes, but Float32 index 20)
+      bezelData[20] = GRID_RECT.x;
+      bezelData[21] = GRID_RECT.y;
+      bezelData[22] = GRID_RECT.w;
+      bezelData[23] = GRID_RECT.h;
+      
+      device.queue.writeBuffer(bezelUniformBufferRef.current, 0, bezelData);
+
       pass.setPipeline(bezelPipelineRef.current);
       pass.setBindGroup(0, bezelBindGroupRef.current);
       pass.draw(6, 1, 0, 0);

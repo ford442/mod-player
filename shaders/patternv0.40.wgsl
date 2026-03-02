@@ -6,7 +6,7 @@
 struct Uniforms {
   numRows: u32,
   numChannels: u32,
-  playheadRow: u32,
+  playheadRow: f32,
   isPlaying: u32,
   cellW: f32,
   cellH: f32,
@@ -60,7 +60,7 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
   // Static Paged Grid: We only render active page of 32 steps.
   
   let stepsPerPage = 32.0;
-  let pageStart = floor(f32(uniforms.playheadRow) / stepsPerPage) * stepsPerPage;
+  let pageStart = floor(uniforms.playheadRow / stepsPerPage) * stepsPerPage;
   
   // Calculate row local to current page (0..31)
   let localRow = f32(row) - pageStart;
@@ -168,7 +168,9 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   // Inset shadow
   col *= smoothstep(0.0, 0.1, dBox + 0.5);
 
-  let onPlayhead = (in.row == uniforms.playheadRow);
+  let playheadStep = uniforms.playheadRow; 
+  let distToPlayhead = abs(f32(in.row) - playheadStep);
+  let playheadGlow = 1.0 - smoothstep(0.0, 1.2, distToPlayhead);
   
   // Active Note
   let note = (in.packedA >> 24) & 255u;
@@ -181,10 +183,10 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
       col += noteCol * glow * 1.5;
   }
   
-  // Playhead Highlight (Vertical Line across active column)
-  if (onPlayhead) {
-      // Additive highlight
-      col += vec3<f32>(0.2, 0.2, 0.25) * 0.8;
+  // Playhead Highlight (Horizontal glow matching caps)
+  if (playheadGlow > 0.0) {
+      // Additive highlight that transitions smoothly
+      col += vec3<f32>(0.2, 0.2, 0.25) * playheadGlow * 0.8;
   }
 
   // Border

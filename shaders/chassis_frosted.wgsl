@@ -26,7 +26,7 @@ struct BezelUniforms {
   currentOrder: u32,
   currentRow: u32,
   clickedButton: u32,
-  _pad2: f32,
+  gridRect: vec4<f32>, // x, y, w, h (normalized)
 };
 
 @group(0) @binding(0) var<uniform> bez: BezelUniforms;
@@ -174,10 +174,10 @@ fn fs(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
   let check = step(checkSize * 0.5, fract(p.x / checkSize)) == step(checkSize * 0.5, fract(p.y / checkSize));
   color = mix(color, color * 0.97, 0.3 * f32(check));
 
-  // --- DISPLAY RECESS (square cutout for pattern display) ---
-  let recessCenter = vec2<f32>(0.05, 0.05);
-  let recessSize = vec2<f32>(0.38, 0.38);
-  let dRecess = sdRoundedBox(p - recessCenter, recessSize, 0.02);
+  // --- DISPLAY RECESS (cutout centered exactly on gridRect) ---
+  let center = bez.gridRect.xy + bez.gridRect.zw * 0.5 - 0.5;
+  let size = bez.gridRect.zw * 0.5;
+  let dRecess = sdRoundedBox(p - center, size, 0.01);
   
   // Dark recessed area behind the display
   if (dRecess < 0.0) {
