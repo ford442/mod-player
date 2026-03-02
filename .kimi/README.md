@@ -1,74 +1,71 @@
 # Kimi Agent Tasks for mod-player
 
-These are **prompt templates** for use with Kimi (via web interface or this chat).
+These are **prompt templates** for generating chassis shaders.
 
-## Usage
+## Usage Options
 
-### Option 1: Run with me (Current Chat)
-Since we're already talking, I can execute these tasks sequentially. Just say:
-- "Run the polar chassis pipeline" 
-- Or run individual tasks: "Execute 001-sdf-spec for design 'cyberpunk'"
+### Option 1: Run with me (Current Chat) ✅ RECOMMENDED
+Since we're already in chat, I can execute these tasks directly. Just tell me:
+- **"Run the polar chassis pipeline"** - I'll execute all 5 tasks
+- **"Execute task 001a for design 'cyberpunk'"** - Run individual task
+- **"Generate chassis spec for design X"** - Quick start
 
 ### Option 2: Manual (Web Interface)
-1. Open [kimi.com](https://kimi.com) in 3 browser tabs
-2. Copy/paste the prompt from `tasks/001a-panel-spec.md` into Tab 1
-3. Copy/paste `tasks/001b-knobs-spec.md` into Tab 2  
-4. Copy/paste `tasks/001c-rings-spec.md` into Tab 3
-5. When all complete, copy results into `specs/{design}/` and run the merge task in Tab 4
+1. Open [kimi.com](https://kimi.com) 
+2. Copy/paste the prompt from a task file into the chat
+3. Save the output to the appropriate file
 
-### Option 3: API Automation (Unified Pipeline)
-Auto-detects Kimi Code API (Allegro) or Moonshot API:
+### Option 3: Copy Task Files as Prompts
+Each `.md` file in `tasks/` is a self-contained prompt. Variables like `{{design_name}}` need to be replaced manually.
 
-```bash
-# Set your API key (Kimi Code preferred, Moonshot fallback)
-export KIMI_API_KEY="your-kimi-code-key"      # From kimi.com/code/console
-# OR
-export MOONSHOT_API_KEY="your-moonshot-key"   # From platform.moonshot.cn
+## Task Files
 
-# Run the full pipeline (parallel specs → sequential shader gen)
-python scripts/run_chassis_pipeline.py polar
+| Task | File | Purpose |
+|------|------|---------|
+| 001a | `tasks/001a-panel-spec.md` | Panel SDF specification |
+| 001b | `tasks/001b-knobs-spec.md` | Knobs SDF specification |
+| 001c | `tasks/001c-rings-spec.md` | Rings SDF specification |
+| 001d | `tasks/001d-merge-specs.md` | Merge specs into one |
+| 002 | `tasks/002-shader-gen.md` | Generate WGSL shader |
+| 003 | `tasks/003-audio-reactive.md` | Add audio reactivity |
+| 004 | `tasks/004-frontend-integrate.md` | React integration |
+
+## Quick Start (With Me)
+
+Just say:
+```
+"Run the chassis pipeline for design 'polar' with Access Virus Polar aesthetic"
 ```
 
-**What it does:**
-1. **Phase 1 (Parallel)**: Panel + Knobs + Rings specs simultaneously
-2. **Phase 2 (Sequential)**: Merge → Static shader → Audio reactive → Integration
-3. **Auto-saves** to `specs/`, `src/shaders/`, `logs/` automatically
-
-## File Structure
-
-- `tasks/001a-panel-spec.md` - Panel SDF specification prompt
-- `tasks/001b-knobs-spec.md` - Knobs SDF specification prompt
-- `tasks/001c-rings-spec.md` - Rings SDF specification prompt
-- `tasks/001d-merge-specs.md` - Merge task prompt
-- `tasks/002-shader-gen.md` - Static shader generation prompt
-- `tasks/003-audio-reactive.md` - Audio reactivity prompt
-- `tasks/004-frontend-integrate.md` - Frontend integration prompt
-- `config/chassis-pipeline.yaml` - Pipeline configuration
+I'll:
+1. Generate panel/knobs/rings specs
+2. Merge them
+3. Create the WGSL shader
+4. Add audio reactivity
+5. Provide integration code
 
 ## Variables
 
-All tasks accept these variables (replace in prompts manually):
+All tasks accept these variables:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| design_name | required | Identifier for the design (e.g., "polar", "cyber") |
+| design_name | required | Identifier (e.g., "polar", "cyber") |
 | aesthetic_reference | "Access Virus Polar" | Visual style reference |
 | primary_color | "white/silver" | Main chassis color |
 | accent_color | "purple" | Knob/accent color |
 | emissive_color | "cyan" | LED/Ring glow color |
-| quality_preset | "high" | Raymarching quality |
-| target_component | "Studio3D.tsx" | React component to modify |
 
-## Quick Start
+## Output Structure
 
-```bash
-# Create output directory
-mkdir -p specs/polar
+```
+specs/
+├── {design}/
+│   ├── panel_spec.md
+│   ├── knobs_spec.md
+│   └── rings_spec.md
+└── {design}_chassis_spec.md
 
-# Then use one of the methods above to generate and save:
-# specs/polar/panel_spec.md
-# specs/polar/knobs_spec.md
-# specs/polar/rings_spec.md
-# specs/polar_chassis_spec.md (merged)
-# src/shaders/polar_chassis.wgsl
+src/shaders/
+└── {design}_chassis.wgsl
 ```
