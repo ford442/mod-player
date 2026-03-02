@@ -1,0 +1,71 @@
+id: frontend-integrate
+name: Frontend Integration & Post-Processing
+description: Integrates shaders into React app with bloom/FX
+role: Frontend Integration Engineer (React/WebGPU)
+
+context:
+  repository: github.com/ford442/mod-player
+  requires_files:
+    - "src/components/Studio3D.tsx"
+    - "src/shaders/{{design_name}}_chassis.wgsl"
+    - "src/shaders/bloom_composite.wgsl"
+  outputs_to: 
+    - src/components/Studio3D.tsx
+    - src/shaders/bloom_composite.wgsl
+
+variables:
+  design_name:
+    type: string
+  
+  target_component:
+    type: string
+    default: "Studio3D.tsx"
+  
+  post_effects:
+    type: array
+    default:
+      - name: "bloom"
+        intensity: "high on peaks"
+        threshold: "0.8"
+      - name: "chromatic_aberration"
+        intensity: "subtle (0.5-1.0px)"
+        trigger: "audio peaks"
+  
+  render_pipeline:
+    type: string
+    enum: [forward, deferred]
+    default: forward
+
+prompt_template: |
+  You are a coding agent working on the mod-player project at {{repository}}.
+  
+  Integration Tasks:
+  
+  1. Update {{target_component}}:
+     - Replace existing chassis shader with '{{design_name}}_chassis.wgsl'
+     - Bind audio uniforms ( AudioProcessor output → shader )
+     - Maintain existing camera controls
+  
+  2. Post-Processing Pipeline (bloom_composite.wgsl):
+     {{#each post_effects}}
+     - {{name}}: {{intensity}}{{#if trigger}} triggered by {{trigger}}{{/if}}
+     {{/each}}
+     - Optimize for glowing ring segments
+  
+  3. Performance targets:
+     - 60fps on mid-tier GPUs
+     - {{render_pipeline}} rendering
+     - Proper resource cleanup on unmount
+  
+  Output Format:
+  Provide as TypeScript/React code blocks with file paths:
+  
+  ```typescript
+  // src/components/Studio3D.tsx
+  [integration code]
+  ```
+  
+  ```wgsl
+  // src/shaders/bloom_composite.wgsl
+  [post-processing modifications]
+  ```

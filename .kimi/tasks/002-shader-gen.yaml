@@ -1,0 +1,53 @@
+id: shader-static
+name: Static WGSL Shader Generator
+description: Implements SDF specifications as WebGPU shaders
+role: WGSL Shader Engineer (Raymarching/SDF Specialist)
+
+context:
+  repository: github.com/ford442/mod-player
+  requires_files:
+    - "specs/{{design_name}}_chassis_spec.md"
+    - "src/shaders/chassis_frosted.wgsl"
+  outputs_to: src/shaders/{{design_name}}_chassis.wgsl
+
+variables:
+  design_name:
+    type: string
+    description: "Must match 001-sdf-spec design_name"
+  
+  base_shader_reference:
+    type: string
+    description: "Existing shader to reference for patterns"
+    default: "chassis_frosted.wgsl"
+  
+  quality_preset:
+    type: string
+    enum: [high, ultra, performance]
+    default: high
+
+prompt_template: |
+  You are a coding agent working on the mod-player project at {{repository}}.
+  
+  Reference existing: src/shaders/{{base_shader_reference}}
+  Specification: specs/{{design_name}}_chassis_spec.md
+  
+  Write a new shader file 'src/shaders/{{design_name}}_chassis.wgsl' implementing:
+  
+  1. SDF geometry from specification (raymarched)
+  2. PBR materials:
+     - Satin metallics with sharp reflections
+     - Emissive elements for ring segments
+     - {{quality_preset}} quality lighting
+  
+  3. Uniform bindings matching spec structs:
+     - Camera matrices
+     - Time uniform
+     - Reserved audio uniform slots (implement structs but leave unused for now)
+  
+  Technical Requirements:
+  - WebGPU/WGSL compliant
+  - Optimized raymarching ({{quality_preset}} preset)
+  - No audio reactivity yet (static materials)
+  - Import existing utility functions from {{base_shader_reference}} if compatible
+  
+  Output: Complete WGSL source code only
