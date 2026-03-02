@@ -160,7 +160,9 @@ function App() {
   // Register PWA service worker
   useEffect(() => {
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`).catch((err) => {
+      const swUrl = `${import.meta.env.BASE_URL}sw.js`;
+      const scope = import.meta.env.BASE_URL || '/';
+      navigator.serviceWorker.register(swUrl, { scope }).catch((err) => {
         console.warn('[PWA] Service worker registration failed:', err);
       });
     }
