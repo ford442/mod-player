@@ -1,29 +1,40 @@
 # Kimi Agent Tasks for mod-player
 
-Reusable AI agent tasks for generating audio-reactive 3D chassis shaders.
+These are **prompt templates** for use with Kimi (via web interface or this chat).
 
-## Quick Start
+## Usage
 
-```bash
-# Run full pipeline for new design
-kimi pipeline run .kimi/config/chassis-pipeline.yaml --var design_name=cyberpunk --var aesthetic_reference="Cyberpunk 2077"
+### Option 1: Run with me (Current Chat)
+Since we're already talking, I can execute these tasks sequentially. Just say:
+- "Run the polar chassis pipeline" 
+- Or run individual tasks: "Execute 001-sdf-spec for design 'cyberpunk'"
 
-# Or run individual stages
-kimi task run .kimi/tasks/001-sdf-spec.md --var design_name=retro
-kimi task run .kimi/tasks/002-shader-gen.md --var design_name=retro
-```
+### Option 2: Manual (Web Interface)
+1. Open [kimi.com](https://kimi.com) in 3 browser tabs
+2. Copy/paste the prompt from `tasks/001a-panel-spec.md` into Tab 1
+3. Copy/paste `tasks/001b-knobs-spec.md` into Tab 2  
+4. Copy/paste `tasks/001c-rings-spec.md` into Tab 3
+5. When all complete, copy results into `specs/{design}/` and run the merge task in Tab 4
+
+### Option 3: API (If you have working keys)
+Use the standard OpenAI-compatible endpoint with `curl` or Python `openai` library.
+
+See `scripts/run_pipeline.py` for an example using the OpenAI SDK.
 
 ## File Structure
 
-- `tasks/001-sdf-spec.md` - Generates mathematical specifications
-- `tasks/002-shader-gen.md` - Creates static WGSL shaders
-- `tasks/003-audio-reactive.md` - Adds audio reactivity
-- `tasks/004-frontend-integrate.md` - Integrates into React/Three.js
-- `config/chassis-pipeline.yaml` - Orchestrates full pipeline
+- `tasks/001a-panel-spec.md` - Panel SDF specification prompt
+- `tasks/001b-knobs-spec.md` - Knobs SDF specification prompt
+- `tasks/001c-rings-spec.md` - Rings SDF specification prompt
+- `tasks/001d-merge-specs.md` - Merge task prompt
+- `tasks/002-shader-gen.md` - Static shader generation prompt
+- `tasks/003-audio-reactive.md` - Audio reactivity prompt
+- `tasks/004-frontend-integrate.md` - Frontend integration prompt
+- `config/chassis-pipeline.yaml` - Pipeline configuration
 
 ## Variables
 
-All tasks accept these variables:
+All tasks accept these variables (replace in prompts manually):
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -35,38 +46,16 @@ All tasks accept these variables:
 | quality_preset | "high" | Raymarching quality |
 | target_component | "Studio3D.tsx" | React component to modify |
 
-## Examples
-
-### Virus Polar Style
+## Quick Start
 
 ```bash
-kimi task run .kimi/tasks/001-sdf-spec.md \
-  --var design_name=polar \
-  --var aesthetic_reference="Access Virus Polar"
-```
+# Create output directory
+mkdir -p specs/polar
 
-### Cyberpunk Style
-
-```bash
-kimi task run .kimi/tasks/001-sdf-spec.md \
-  --var design_name=cyber \
-  --var aesthetic_reference="Cyberpunk 2077" \
-  --var primary_color="matte black" \
-  --var accent_color="neon orange" \
-  --var emissive_color="hot pink"
-```
-
-### Parallel Swarm (Multiple Designs)
-
-Run multiple designs simultaneously in separate terminals:
-
-```bash
-# Terminal 1
-kimi pipeline run .kimi/config/chassis-pipeline.yaml --var design_name=polar
-
-# Terminal 2  
-kimi pipeline run .kimi/config/chassis-pipeline.yaml --var design_name=cyber
-
-# Terminal 3
-kimi pipeline run .kimi/config/chassis-pipeline.yaml --var design_name=brutalist
+# Then use one of the methods above to generate and save:
+# specs/polar/panel_spec.md
+# specs/polar/knobs_spec.md
+# specs/polar/rings_spec.md
+# specs/polar_chassis_spec.md (merged)
+# src/shaders/polar_chassis.wgsl
 ```
