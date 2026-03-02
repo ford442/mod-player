@@ -22,9 +22,15 @@ class APIConfig:
         
         if self.kimi_key:
             self.key = self.kimi_key
-            # Use code.kimi.com - the working endpoint
-            self.base_url = custom_base or "https://code.kimi.com/api"
-            self.base_urls = [self.base_url]  # Only try the working endpoint
+            # Try different Kimi Code endpoint variants
+            self.base_urls = [
+                custom_base,  # User override
+                "https://code.kimi.com/v1",  # Standard OpenAI format
+                "https://api.kimi.com/v1",
+                "https://kimi.com/api/v1",
+            ]
+            self.base_urls = [u for u in self.base_urls if u]  # Remove None
+            self.base_url = self.base_urls[0]
             self.provider = "kimi-code"
             self.model = os.getenv("KIMI_MODEL", "kimi-code-latest")
             print(f"🔑 Using Kimi Code API (Allegro)")
@@ -273,31 +279,49 @@ CURRENT SHADER TO MODIFY:
         return final_shader
 
 async def test_endpoints():
-    """Test which endpoints are available"""
+    """Test which chat completions endpoints work"""
     key = os.getenv("KIMI_API_KEY") or os.getenv("MOONSHOT_API_KEY")
     if not key:
         print("No API key set. Set KIMI_API_KEY or MOONSHOT_API_KEY")
         return
     
+    # Test chat completions endpoints (not just /models)
     endpoints = [
-        ("Kimi Code (api.kimi.com)", "https://api.kimi.com/v1"),
-        ("Kimi Code (code.kimi.com)", "https://code.kimi.com/api"),
-        ("Kimi Code (kimi.com/api)", "https://kimi.com/api/v1"),
+        ("Kimi Code (code.kimi.com/v1)", "https://code.kimi.com/v1"),
+        ("Kimi Code (api.kimi.com/v1)", "https://api.kimi.com/v1"),
+        ("Kimi Code (kimi.com/api/v1)", "https://kimi.com/api/v1"),
         ("Moonshot", "https://api.moonshot.cn/v1"),
     ]
     
     headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
+    test_payload = {
+        "model": "kimi-code-latest" if os.getenv("KIMI_API_KEY") else "kimi-latest",
+        "messages": [{"role": "user", "content": "Hello"}],
+        "max_tokens": 10
+    }
     
-    print("🔍 Testing API endpoints...\n")
+    print("🔍 Testing chat completions endpoints...\n")
     
     async with aiohttp.ClientSession() as session:
         for name, url in endpoints:
             try:
-                async with session.get(f"{url}/models", headers=headers, timeout=10) as resp:
-                    status = "✅ Working" if resp.status == 200 else f"❌ HTTP {resp.status}"
-                    print(f"  {name}: {status}")
+                async with session.post(
+                    f"{url}/chat/completions",
+                    headers=headers,
+                    json=test_payload,
+                    timeout=10
+                ) as resp:
+                    if resp.status == 200:
+                        content_type = resp.headers.get('content-type', '')
+                        if 'json' in content_type:
+                            print(f"  {name}: ✅ Working (JSON)")
+                        else:
+                            print(f"  {name}: ⚠️ HTTP 200 but wrong content-type: {content_type}")
+                    else:
+                        text = await resp.text()
+                        print(f"  {name}: ❌ HTTP {resp.status} - {text[:50]}")
             except Exception as e:
-                print(f"  {name}: ❌ {type(e).__name__}")
+                print(f"  {name}: ❌ {type(e).__name__}: {str(e)[:50]}")
     
     print("\nSet the working endpoint with:")
     print("  export KIMI_BASE_URL=https://working.endpoint.com/v1")
