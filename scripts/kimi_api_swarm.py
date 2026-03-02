@@ -3,6 +3,8 @@
 # Parallel task execution via Kimi HTTP API
 # Requires: KIMI_API_KEY environment variable
 # Usage: KIMI_API_KEY=your-key python scripts/kimi_api_swarm.py <design_name>
+#
+# Get your API key from: https://platform.moonshot.cn/
 
 import asyncio
 import aiohttp
@@ -11,6 +13,16 @@ import sys
 
 API_KEY = os.getenv("KIMI_API_KEY", "")
 API_URL = "https://api.moonshot.cn/v1/chat/completions"
+
+# Validate key format
+def validate_key(key):
+    if not key:
+        return False, "API key is empty"
+    if not key.startswith("sk-"):
+        return False, "API key should start with 'sk-'"
+    if len(key) < 20:
+        return False, "API key appears too short"
+    return True, "OK"
 
 TASKS = {
     "panel": ".kimi/tasks/001a-panel-spec.md",
@@ -40,8 +52,21 @@ async def run_agent(session, component, design_name, vars_dict):
     
     async with session.post(API_URL, json=payload, headers=headers) as resp:
         result = await resp.json()
+        
+        # Handle API errors
+        if resp.status != 200:
+            error_msg = result.get('error', {}).get('message', f'HTTP {resp.status}')
+            error_type = result.get('error', {}).get('type', 'unknown')
+            print(f"❌ {component} failed: [{error_type}] {error_msg}")
+            
+            if error_type == 'invalid_authentication_error':
+                print(f"   Check your KIMI_API_KEY is valid and not expired")
+                print(f"   Key prefix: {API_KEY[:10]}..." if len(API_KEY) > 10 else "   Key is too short")
+            
+            return component, False
+        
         if 'choices' not in result:
-            print(f"❌ {component} failed: {result.get('error', 'Unknown error')}")
+            print(f"❌ {component} failed: Unexpected response format")
             return component, False
             
         output = result['choices'][0]['message']['content']
@@ -54,9 +79,17 @@ async def run_agent(session, component, design_name, vars_dict):
         return component, True
 
 async def main():
-    if not API_KEY:
-        print("Error: KIMI_API_KEY environment variable not set")
-        print("Usage: KIMI_API_KEY=your-key python scripts/kimi_api_swarm.py <design_name>")
+    # Validate API key
+    valid, msg = validate_key(API_KEY)
+    if not valid:
+        print(f"Error: {msg}")
+        print("\nTo use this script:")
+        print("1. Get an API key from https://platform.moonshot.cn/")
+        print("2. Set it as an environment variable:")
+        print("   export KIMI_API_KEY=sk-your-key-here")
+        print("3. Run: python scripts/kimi_api_swarm.py <design_name>")
+        print("\nOr use the local CLI version instead:")
+        print("   ./scripts/codespace-swarm.sh <design_name>")
         sys.exit(1)
     
     design = sys.argv[1] if len(sys.argv) > 1 else "polar"
