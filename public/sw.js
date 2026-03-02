@@ -1,14 +1,27 @@
 /// <reference lib="webworker" />
 
+// Service Worker for MOD Player
+// This SW is scope-aware and works under any base path (e.g., /xm-player/)
+
 const CACHE_NAME = 'mod-player-v1';
-const PRECACHE_URLS = [
-  '/xm-player/',
-  '/xm-player/index.html',
-];
+
+// Get the scope (base path) from the service worker's registration
+const getScope = () => self.registration.scope || '/';
+
+// Build precache URLs relative to the scope
+const getPrecacheUrls = () => {
+  const scope = getScope();
+  // Ensure scope ends with /
+  const base = scope.endsWith('/') ? scope : scope + '/';
+  return [
+    base,
+    base + 'index.html',
+  ];
+};
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(PRECACHE_URLS))
+    caches.open(CACHE_NAME).then((cache) => cache.addAll(getPrecacheUrls()))
   );
   self.skipWaiting();
 });

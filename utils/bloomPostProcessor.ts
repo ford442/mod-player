@@ -1,7 +1,8 @@
 // utils/bloomPostProcessor.ts
 // Lightweight Bloom post-processor for WebGPU.
 // It expects WGSL code strings for the threshold/blur/composite shaders or will try to fetch them
-// from the server at '/shaders/*.wgsl'. In a Vite project, you can import them as `import t from './shaders/bloom_threshold.wgsl?raw'`.
+// from the server. In a Vite project, you can import them as `import t from './shaders/bloom_threshold.wgsl?raw'`.
+// For subpath deployment, use withBase() from src/lib/paths to construct shader URLs.
 
 export interface BloomOptions {
   shaderThreshold?: string;
@@ -50,17 +51,24 @@ export class BloomPostProcessor {
     this.finalFormat = options.finalFormat ?? ('bgra8unorm' as GPUTextureFormat);
   }
 
+  // Base URL for fetching shaders (set this for subpath deployments)
+  private baseUrl: string = '';
+
+  public setBaseUrl(baseUrl: string) {
+    this.baseUrl = baseUrl.replace(/\/$/, ''); // Remove trailing slash
+  }
+
   // Call once after construction
   public async init() {
     // Try to load shader code if not supplied
     if (!this.thresholdShaderCode) {
-      this.thresholdShaderCode = await this.tryFetch('/shaders/bloom_threshold.wgsl');
+      this.thresholdShaderCode = await this.tryFetch(`${this.baseUrl}/shaders/bloom_threshold.wgsl`);
     }
     if (!this.blurShaderCode) {
-      this.blurShaderCode = await this.tryFetch('/shaders/bloom_blur.wgsl');
+      this.blurShaderCode = await this.tryFetch(`${this.baseUrl}/shaders/bloom_blur.wgsl`);
     }
     if (!this.compositeShaderCode) {
-      this.compositeShaderCode = await this.tryFetch('/shaders/bloom_composite.wgsl');
+      this.compositeShaderCode = await this.tryFetch(`${this.baseUrl}/shaders/bloom_composite.wgsl`);
     }
 
     // Create textures
