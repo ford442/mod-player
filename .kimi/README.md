@@ -16,10 +16,22 @@ Since we're already talking, I can execute these tasks sequentially. Just say:
 4. Copy/paste `tasks/001c-rings-spec.md` into Tab 3
 5. When all complete, copy results into `specs/{design}/` and run the merge task in Tab 4
 
-### Option 3: API (If you have working keys)
-Use the standard OpenAI-compatible endpoint with `curl` or Python `openai` library.
+### Option 3: Kimi Code API (Allegro Subscription)
+If you have a Kimi Code subscription with API access:
 
-See `scripts/run_pipeline.py` for an example using the OpenAI SDK.
+```bash
+# Set your Kimi Code API key (from IDE Settings → API Keys)
+export KIMI_CODE_API_KEY=your-key
+
+# Sequential execution (slower, respects rate limits)
+python scripts/kimi_code_pipeline.py polar
+
+# Parallel execution (faster, uses more quota)
+python scripts/kimi_code_pipeline_parallel.py polar
+```
+
+**Note:** Kimi Code API (api.kimi.com) is different from Moonshot API (api.moonshot.cn).
+Kimi Code is optimized for code generation and uses your Allegro subscription credits.
 
 ## File Structure
 
