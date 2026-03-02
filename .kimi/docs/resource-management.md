@@ -1,12 +1,208 @@
 # Resource Management for Parallel Agent Execution
 
-This document describes OS-level resource controls for running heavy parallel shader generation without system lag.
+This document describes resource controls for running parallel shader generation.
 
-## Quick Reference
+## Codespaces Environment
 
-### Option 1: Niceness + Core Affinity (Recommended)
+In Codespaces you're containerized with limited privileges—no `nice`, `taskset`, or cgroups. Use these alternatives:
 
-Lightweight and prevents IDE lag while agents run:
+### Option 1: Asyncio/Python (Most Reliable)
+
+Pure Python - no OS privileges needed:
+
+```python
+# scripts/swarm_codespace.py
+import asyncio
+import subprocess
+
+async def run_agent(task_file: str, design: str, component: str):
+    """Pure asyncio - no OS privileges needed"""
+    proc = await asyncio.create_subprocess_exec(
+        "kimi", "task", "run", task_file,
+        "--var", f"design_name={design}",
+        "--var", f"component={component}",
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE
+    )
+    stdout, stderr = await proc.communicate()
+    return proc.returncode == 0, stdout.decode()
+
+# Run all three specs simultaneously
+async def parallel_specs(design):
+    results = await asyncio.gather(
+        run_agent(".kimi/tasks/001a-panel-spec.md", design, "panel"),
+        run_agent(".kimi/tasks/001b-knobs-spec.md", design, "knobs"),
+        run_agent(".kimi/tasks/001c-rings-spec.md", design, "rings"),
+        return_exceptions=True
+    )
+    return results
+```
+
+### Option 2: GNU Parallel (If installed)
+
+```bash
+# Run 3 tasks in parallel, 1 job at a time per CPU
+parallel -j 3 ::: \
+  "kimi task run .kimi/tasks/001a-panel-spec.md --var design_name=polar" \
+  "kimi task run .kimi/tasks/001b-knobs-spec.md --var design_name=polar" \
+  "kimi task run .kimi/tasks/001c-rings-spec.md --var design_name=polar"
+```
+
+### Option 3: npm concurrently (Node-based, works everywhere)
+
+Add to `package.json`:
+
+```json
+{
+  "scripts": {
+    "swarm:specs": "concurrently -n panel,knobs,rings \"npm run spec:panel\" \"npm run spec:knobs\" \"npm run spec:rings\"",
+    "spec:panel": "kimi task run .kimi/tasks/001a-panel-spec.md --var design_name=polar",
+    "spec:knobs": "kimi task run .kimi/tasks/001b-knobs-spec.md --var design_name=polar",
+    "spec:rings": "kimi task run .kimi/tasks/001c-rings-spec.md --var design_name=polar"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.0"
+  }
+}
+```
+
+Then: `npm run swarm:specs`
+
+### Option 4: GitHub Actions Matrix (True Cloud Parallelism)
+
+For unlimited parallelism, offload to GitHub Actions:
+
+`.github/workflows/chassis-swarm.yml`:
+
+```yaml
+name: Chassis Generation Swarm
+on:
+  workflow_dispatch:
+    inputs:
+      design_name:
+        description: 'Design identifier'
+        required: true
+        default: 'polar'
+
+jobs:
+  # Parallel job 1
+  spec-panel:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Generate Panel Spec
+        run: |
+          kimi task run .kimi/tasks/001a-panel-spec.md \
+            --var design_name=${{ github.event.inputs.design_name }}
+      - uses: actions/upload-artifact@v3
+        with:
+          name: panel-spec
+          path: specs/${{ github.event.inputs.design_name }}/panel_spec.md
+
+  # Parallel job 2
+  spec-knobs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Generate Knobs Spec
+        run: |
+          kimi task run .kimi/tasks/001b-knobs-spec.md \
+            --var design_name=${{ github.event.inputs.design_name }}
+      - uses: actions/upload-artifact@v3
+        with:
+          name: knobs-spec
+          path: specs/${{ github.event.inputs.design_name }}/knobs_spec.md
+
+  # Parallel job 3
+  spec-rings:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Generate Rings Spec
+        run: |
+          kimi task run .kimi/tasks/001c-rings-spec.md \
+            --var design_name=${{ github.event.inputs.design_name }}
+      - uses: actions/upload-artifact@v3
+        with:
+          name: rings-spec
+          path: specs/${{ github.event.inputs.design_name }}/rings_spec.md
+
+  # Sequential merge (depends on all parallel jobs)
+  merge-and-continue:
+    needs: [spec-panel, spec-knobs, spec-rings]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/download-artifact@v3
+      - name: Merge specs
+        run: |
+          mkdir -p specs/${{ github.event.inputs.design_name }}
+          mv panel-spec/* specs/${{ github.event.inputs.design_name }}/
+          mv knobs-spec/* specs/${{ github.event.inputs.design_name }}/
+          mv rings-spec/* specs/${{ github.event.inputs.design_name }}/
+          kimi task run .kimi/tasks/001d-merge-specs.md \
+            --var design_name=${{ github.event.inputs.design_name }}
+```
+
+Trigger from Codespaces:
+
+```bash
+gh workflow run chassis-swarm.yml -f design_name=cyberpunk
+```
+
+### Option 5: Simple Bash Background Jobs (Classic)
+
+Works in any Codespace:
+
+```bash
+#!/bin/bash
+# scripts/codespace-swarm.sh
+
+DESIGN=$1
+mkdir -p logs specs/$DESIGN
+
+echo "🚀 Starting parallel agents..."
+
+# Background with output redirection (no special OS calls)
+kimi task run .kimi/tasks/001a-panel-spec.md --var design_name=$DESIGN > logs/panel.log 2>&1 &
+P1=$!
+kimi task run .kimi/tasks/001b-knobs-spec.md --var design_name=$DESIGN > logs/knobs.log 2>&1 &
+P2=$!
+kimi task run .kimi/tasks/001c-rings-spec.md --var design_name=$DESIGN > logs/rings.log 2>&1 &
+P3=$!
+
+echo "PIDs: Panel($P1) Knobs($P2) Rings($P3)"
+
+# Wait for completion
+wait $P1 && echo "✅ Panel done" || echo "❌ Panel failed"
+wait $P2 && echo "✅ Knobs done" || echo "❌ Knobs failed"  
+wait $P3 && echo "✅ Rings done" || echo "❌ Rings failed"
+
+# Sequential merge
+kimi task run .kimi/tasks/001d-merge-specs.md --var design_name=$DESIGN
+```
+
+### Recommendation for Codespaces
+
+Use **Option 5 (Bash)** for local testing, **Option 4 (GitHub Actions)** for heavy generation:
+
+```bash
+# Local quick test (parallel in Codespace)
+./scripts/codespace-swarm.sh polar
+
+# Heavy production run (cloud parallel)
+gh workflow run chassis-swarm.yml -f design_name=polar
+```
+
+The GitHub Actions matrix gives you 3 separate VMs running in parallel—true resource isolation without needing OS privileges.
+
+---
+
+## Self-Hosted / Local Development (With OS Privileges)
+
+If running on your own Linux machine with proper privileges:
+
+### Option 1: Niceness + Core Affinity
 
 ```bash
 # High priority for current work, background for swarm
@@ -16,202 +212,33 @@ taskset -c 2-3 nice -n 10 kimi task run ... &  # Background swarm (low priority)
 
 ### Option 2: CPU Limiting (Prevent Thermal Throttling)
 
-Use `cpulimit` to cap CPU usage per agent (good for laptops):
-
 ```bash
 # Limit each agent to 25% CPU (prevents fan noise/overheating)
 cpulimit -l 25 -i kimi task run .kimi/tasks/001a-panel-spec.md ... &
 cpulimit -l 25 -i kimi task run .kimi/tasks/001b-knobs-spec.md ... &
-cpulimit -l 40 -i kimi task run .kimi/tasks/001c-rings-spec.md ... &  # Rings get more
+cpulimit -l 40 -i kimi task run .kimi/tasks/001c-rings-spec.md ... &
 ```
 
 ### Option 3: Docker/CGroups (Hard Isolation)
 
-Create `.kimi/Dockerfile.agent`:
-
-```dockerfile
-FROM ubuntu:22.04
-RUN apt-get update && apt-get install -y kimi-cli
-WORKDIR /workspace
-COPY . .
-ENTRYPOINT ["kimi", "task", "run"]
-```
-
-Run parallel containers with resource constraints:
-
 ```bash
-#!/bin/bash
-# scripts/docker-swarm.sh
-
-DESIGN=$1
-
-# Panel agent - 0.5 CPU, 512MB RAM, low priority
+# Panel agent - 0.5 CPU, 512MB RAM
 docker run -d --rm \
-  --name "${DESIGN}-panel" \
-  --cpus="0.5" \
-  --memory="512m" \
-  --cpu-shares=512 \
-  -v $(pwd):/workspace \
-  kimi-agent:latest \
+  --cpus="0.5" --memory="512m" \
+  -v $(pwd):/workspace kimi-agent:latest \
   .kimi/tasks/001a-panel-spec.md --var design_name=$DESIGN
-
-# Knobs agent - 0.5 CPU, 512MB RAM  
-docker run -d --rm \
-  --name "${DESIGN}-knobs" \
-  --cpus="0.5" \
-  --memory="512m" \
-  --cpu-shares=512 \
-  -v $(pwd):/workspace \
-  kimi-agent:latest \
-  .kimi/tasks/001b-knobs-spec.md --var design_name=$DESIGN
-
-# Rings agent - 1.0 CPU, 1GB RAM (heaviest computation)
-docker run -d --rm \
-  --name "${DESIGN}-rings" \
-  --cpus="1.0" \
-  --memory="1g" \
-  --cpu-shares=1024 \
-  -v $(pwd):/workspace \
-  kimi-agent:latest \
-  .kimi/tasks/001c-rings-spec.md --var design_name=$DESIGN
-
-# Wait for completion
-docker wait ${DESIGN}-panel ${DESIGN}-knobs ${DESIGN}-rings
 ```
 
-### Option 4: Systemd-Style (Linux Advanced)
-
-For persistent resource control, use systemd slices:
+### Option 4: Systemd-Style cgroups
 
 ```bash
-# scripts/setup-cgroups.sh
-sudo mkdir -p /sys/fs/cgroup/kimi-swarm/
-
-# Create sub-groups for each component
 sudo mkdir -p /sys/fs/cgroup/kimi-swarm/panel
-sudo mkdir -p /sys/fs/cgroup/kimi-swarm/knobs  
-sudo mkdir -p /sys/fs/cgroup/kimi-swarm/rings
-
-# Set limits (CPU quota: 50%, Memory: 1GB each)
-echo "50000" | sudo tee /sys/fs/cgroup/kimi-swarm/panel/cpu.max  # 50ms per 100ms
-echo "1000000" | sudo tee /sys/fs/cgroup/kimi-swarm/panel/memory.max  # 1MB
-
-# Run agents in cgroups
-systemd-run --scope --property=Delegate=cpu,memory \
-  --unit=kimi-panel -p CPUQuota=50% \
+echo "50000" | sudo tee /sys/fs/cgroup/kimi-swarm/panel/cpu.max
+systemd-run --scope --unit=kimi-panel -p CPUQuota=50% \
   kimi task run .kimi/tasks/001a-panel-spec.md ...
 ```
 
-## Enhanced Python Orchestrator
-
-Update `scripts/swarm_dag.py` with resource controls:
-
-```python
-import psutil
-import os
-
-async def run_task(task_id: str, design_name: str, vars: dict, cpu_cores: list = None, nice: int = 0):
-    """Execute task with resource constraints"""
-    task = TASKS[task_id]
-    cmd = ["kimi", "task", "run", task.file, "--var", f"design_name={design_name}"]
-    
-    # Apply nice level (Unix only)
-    if nice != 0:
-        cmd = ["nice", "-n", str(nice)] + cmd
-    
-    # Apply core affinity if specified
-    if cpu_cores:
-        cmd = ["taskset", "-c", ",".join(map(str, cpu_cores))] + cmd
-    
-    proc = await asyncio.create_subprocess_exec(*cmd)
-    
-    # Additional runtime limits via psutil
-    if cpu_cores and proc.pid:
-        p = psutil.Process(proc.pid)
-        p.cpu_affinity(cpu_cores)  # Lock to specific cores
-        p.nice(nice)  # Adjust priority
-    
-    await proc.communicate()
-    return proc.returncode == 0
-
-# Usage in parallel phase:
-await asyncio.gather(
-    run_task("001a", design_name, vars, cpu_cores=[0,1], nice=5),   # Panel: fast, high priority
-    run_task("001b", design_name, vars, cpu_cores=[2], nice=10),   # Knobs: single core
-    run_task("001c", design_name, vars, cpu_cores=[3], nice=15),   # Rings: heavy, isolated
-)
-```
-
-## Recommended Setup
-
-Since you're generating WebGPU shaders (text generation, not heavy GPU training), use **Option 1 (nice + taskset)** - it's lightweight and prevents your IDE from lagging while agents run.
-
-### Example: Resource-Managed Swarm Script
-
-```bash
-#!/bin/bash
-# scripts/kimi-swarm-orchestrator-managed.sh
-
-set -e
-DESIGN_NAME=$1
-shift
-
-mkdir -p specs/$DESIGN_NAME logs/$DESIGN_NAME
-
-VAR_FLAGS=""
-for var in "$@"; do
-    VAR_FLAGS="$VAR_FLAGS --var $var"
-done
-
-# ==========================================
-# RESOURCE MANAGEMENT CONFIG
-# ==========================================
-NICE_LEVEL=10  # Lower priority (0 is normal, 19 is lowest)
-CPU_CORES=4    # Number of cores to use (0-3)
-
-echo "📋 Phase 1: Parallel specs (nice $NICE_LEVEL, cores 0-$((CPU_CORES-1)))..."
-
-# Panel spec - High priority, cores 0-1
-taskset -c 0-1 nice -n 5 kimi task run .kimi/tasks/001a-panel-spec.md \
-  --var design_name=$DESIGN_NAME $VAR_FLAGS > logs/$DESIGN_NAME/panel.log 2>&1 &
-PID_PANEL=$!
-
-# Knobs spec - Medium priority, core 2  
-taskset -c 2 nice -n 10 kimi task run .kimi/tasks/001b-knobs-spec.md \
-  --var design_name=$DESIGN_NAME $VAR_FLAGS > logs/$DESIGN_NAME/knobs.log 2>&1 &
-PID_KNOBS=$!
-
-# Rings spec - Low priority, core 3 (heaviest task)
-taskset -c 3 nice -n 15 kimi task run .kimi/tasks/001c-rings-spec.md \
-  --var design_name=$DESIGN_NAME $VAR_FLAGS > logs/$DESIGN_NAME/rings.log 2>&1 &
-PID_RINGS=$!
-
-echo "  └─ Panel (PID: $PID_PANEL, cores 0-1, nice 5)"
-echo "  └─ Knobs (PID: $PID_KNOBS, core 2, nice 10)"  
-echo "  └─ Rings (PID: $PID_RINGS, core 3, nice 15)"
-
-# Wait for completion...
-wait $PID_PANEL && wait $PID_KNOBS && wait $PID_RINGS
-
-# Continue with sequential phases...
-```
-
-## GPU Isolation (Optional)
-
-If agents are testing/compiling shaders and you want to reserve your main GPU for preview while agents use integrated graphics:
-
-```bash
-# Force agent to use integrated GPU (Intel/AMD iGPU)
-export DRI_PRIME=0
-kimi task run .kimi/tasks/001a-panel-spec.md ...
-
-# Or use NVIDIA's prime-select
-__NV_PRIME_RENDER_OFFLOAD=0 __GLX_VENDOR_LIBRARY_NAME=mesa kimi task run ...
-```
-
 ## Monitoring
-
-Monitor resource usage during swarm execution:
 
 ```bash
 # Watch all kimi processes
@@ -219,7 +246,4 @@ watch -n 1 'ps aux | grep kimi'
 
 # Per-process CPU/memory
 htop -p $(pgrep -d',' kimi)
-
-# Cgroup stats (if using cgroups)
-cat /sys/fs/cgroup/kimi-swarm/panel/cpu.stat
 ```
