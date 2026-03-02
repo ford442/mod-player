@@ -17,18 +17,33 @@ class APIConfig:
         self.kimi_key = os.getenv("KIMI_API_KEY")
         self.moonshot_key = os.getenv("MOONSHOT_API_KEY")
         
+        # Allow custom base URL via environment
+        custom_base = os.getenv("KIMI_BASE_URL")
+        
         if self.kimi_key:
             self.key = self.kimi_key
-            self.base_url = "https://api.kimi.com/v1"
+            # Try multiple possible endpoints for Kimi Code
+            self.base_urls = [
+                custom_base,  # User override first
+                "https://api.kimi.com/v1",
+                "https://code.kimi.com/api",
+                "https://kimi.com/api/v1",
+            ]
+            self.base_url = self.base_urls[0] if custom_base else self.base_urls[1]
             self.provider = "kimi-code"
-            self.model = "kimi-code-latest"
-            print("🔑 Using Kimi Code API (Allegro)")
+            self.model = os.getenv("KIMI_MODEL", "kimi-code-latest")
+            print(f"🔑 Using Kimi Code API (Allegro)")
+            print(f"   Endpoint: {self.base_url}")
+            if not custom_base:
+                print(f"   Tip: Set KIMI_BASE_URL if this endpoint is wrong")
         elif self.moonshot_key:
             self.key = self.moonshot_key
-            self.base_url = "https://api.moonshot.cn/v1"
+            self.base_url = custom_base or "https://api.moonshot.cn/v1"
+            self.base_urls = [self.base_url]
             self.provider = "moonshot"
-            self.model = "kimi-latest"
+            self.model = os.getenv("MOONSHOT_MODEL", "kimi-latest")
             print("🔑 Using Moonshot API")
+            print(f"   Endpoint: {self.base_url}")
         else:
             raise ValueError("No API key found. Set KIMI_API_KEY or MOONSHOT_API_KEY")
 
@@ -47,7 +62,7 @@ class ChassisPipeline:
         Path("logs").mkdir(exist_ok=True)
     
     async def call_api(self, session: aiohttp.ClientSession, prompt: str, task_name: str) -> str:
-        """Make API call with retry logic"""
+        """Make API call with retry logic and endpoint fallback"""
         payload = {
             "model": self.config.model,
             "messages": [
@@ -64,22 +79,50 @@ class ChassisPipeline:
             "max_tokens": 8000
         }
         
-        try:
-            async with session.post(
-                f"{self.config.base_url}/chat/completions",
-                headers=self.headers,
-                json=payload,
-                timeout=aiohttp.ClientTimeout(total=120)
-            ) as resp:
-                if resp.status != 200:
-                    text = await resp.text()
-                    raise Exception(f"API Error {resp.status}: {text}")
+        last_error = None
+        
+        # Try each endpoint in order
+        for base_url in self.config.base_urls:
+            if not base_url:
+                continue
                 
-                data = await resp.json()
-                return data["choices"][0]["message"]["content"]
-        except Exception as e:
-            print(f"❌ Error in {task_name}: {e}")
-            raise
+            try:
+                async with session.post(
+                    f"{base_url}/chat/completions",
+                    headers=self.headers,
+                    json=payload,
+                    timeout=aiohttp.ClientTimeout(total=120)
+                ) as resp:
+                    if resp.status == 404:
+                        # Endpoint not found, try next
+                        last_error = f"404 from {base_url}"
+                        continue
+                    
+                    if resp.status != 200:
+                        text = await resp.text()
+                        raise Exception(f"API Error {resp.status} from {base_url}: {text}")
+                    
+                    data = await resp.json()
+                    return data["choices"][0]["message"]["content"]
+                    
+            except aiohttp.ClientConnectorError as e:
+                last_error = f"Cannot connect to {base_url}: {e}"
+                continue
+            except Exception as e:
+                last_error = str(e)
+                # Don't retry on auth errors
+                if "401" in str(e) or "403" in str(e):
+                    raise
+                continue
+        
+        # All endpoints failed
+        print(f"❌ Error in {task_name}: All endpoints failed")
+        print(f"   Last error: {last_error}")
+        print(f"\n   Troubleshooting:")
+        print(f"   1. Check your API key is correct: echo $KIMI_API_KEY")
+        print(f"   2. Verify the endpoint URL in your Kimi Code console")
+        print(f"   3. Set custom endpoint: export KIMI_BASE_URL=https://correct.endpoint.com/v1")
+        raise Exception(f"All API endpoints failed. Last: {last_error}")
     
     def load_task(self, task_file: str, **vars) -> str:
         """Load task template and substitute variables"""
@@ -225,12 +268,52 @@ CURRENT SHADER TO MODIFY:
             
             return final_shader
 
+async def test_endpoints():
+    """Test which endpoints are available"""
+    key = os.getenv("KIMI_API_KEY") or os.getenv("MOONSHOT_API_KEY")
+    if not key:
+        print("No API key set. Set KIMI_API_KEY or MOONSHOT_API_KEY")
+        return
+    
+    endpoints = [
+        ("Kimi Code (api.kimi.com)", "https://api.kimi.com/v1"),
+        ("Kimi Code (code.kimi.com)", "https://code.kimi.com/api"),
+        ("Kimi Code (kimi.com/api)", "https://kimi.com/api/v1"),
+        ("Moonshot", "https://api.moonshot.cn/v1"),
+    ]
+    
+    headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
+    
+    print("🔍 Testing API endpoints...\n")
+    
+    async with aiohttp.ClientSession() as session:
+        for name, url in endpoints:
+            try:
+                async with session.get(f"{url}/models", headers=headers, timeout=10) as resp:
+                    status = "✅ Working" if resp.status == 200 else f"❌ HTTP {resp.status}"
+                    print(f"  {name}: {status}")
+            except Exception as e:
+                print(f"  {name}: ❌ {type(e).__name__}")
+    
+    print("\nSet the working endpoint with:")
+    print("  export KIMI_BASE_URL=https://working.endpoint.com/v1")
+
 def main():
     import argparse
     parser = argparse.ArgumentParser(description="Generate chassis shaders via Kimi API")
-    parser.add_argument("design_name", help="Design identifier (e.g., polar, cyberpunk)")
+    parser.add_argument("design_name", nargs="?", help="Design identifier (e.g., polar, cyberpunk)")
+    parser.add_argument("--test", action="store_true", help="Test API endpoints and exit")
     parser.add_argument("--sequential", action="store_true", help="Force sequential execution (slower but safer)")
     args = parser.parse_args()
+    
+    if args.test:
+        asyncio.run(test_endpoints())
+        return
+    
+    if not args.design_name:
+        parser.print_help()
+        print("\nExample: python scripts/run_chassis_pipeline.py polar")
+        sys.exit(1)
     
     try:
         config = APIConfig()
@@ -246,6 +329,8 @@ def main():
             
     except Exception as e:
         print(f"\n❌ Pipeline failed: {e}")
+        print("\nRun with --test to check available endpoints:")
+        print("  python scripts/run_chassis_pipeline.py --test")
         sys.exit(1)
 
 if __name__ == "__main__":
