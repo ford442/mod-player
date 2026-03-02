@@ -1,0 +1,52 @@
+pipeline:
+  name: chassis-designer
+  description: Complete pipeline for generating audio-reactive chassis shaders
+  version: 1.0.0
+  
+  stages:
+    - id: 001
+      task: sdf-spec
+      name: "Specification"
+      description: "Generate SDF mathematics and material specs"
+      output: "specs/{{design_name}}_chassis_spec.md"
+      
+    - id: 002
+      task: shader-static
+      name: "Static Shader"
+      description: "Implement static geometry in WGSL"
+      input: "specs/{{design_name}}_chassis_spec.md"
+      output: "src/shaders/{{design_name}}_chassis.wgsl"
+      
+    - id: 003
+      task: shader-audio
+      name: "Audio Reactivity"
+      description: "Add frequency-reactive animations"
+      input: "src/shaders/{{design_name}}_chassis.wgsl"
+      output: "src/shaders/{{design_name}}_chassis.wgsl"
+      
+    - id: 004
+      task: frontend-integrate
+      name: "Integration"
+      description: "Integrate into React app with post-processing"
+      input: "src/shaders/{{design_name}}_chassis.wgsl"
+      output: 
+        - "src/components/Studio3D.tsx"
+        - "src/shaders/bloom_composite.wgsl"
+
+  variables:
+    design_name:
+      type: string
+      required: true
+      description: "Kebab-case design identifier"
+    
+    aesthetic_reference:
+      type: string
+      default: "Access Virus Polar / XASM-1"
+    
+    quality_preset:
+      type: string
+      default: "high"
+      options: ["performance", "high", "ultra"]
+
+# Usage:
+# kimi pipeline run .kimi/config/chassis-pipeline.yaml --var design_name=polar
