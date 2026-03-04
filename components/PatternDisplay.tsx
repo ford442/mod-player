@@ -14,6 +14,12 @@ const GRID_RECT = {
   w: BEZEL_INSET.w / 1024,
   h: BEZEL_INSET.h / 1024
 };
+
+// Unified Geometry Constants - shared between WebGL and WebGPU
+const GRID_INSET_X = GRID_RECT.x;   // 0.15625
+const GRID_INSET_Y = GRID_RECT.y;   // 0.17578125
+const GRID_WIDTH   = GRID_RECT.w;   // 0.6884765625
+const GRID_HEIGHT  = GRID_RECT.h;   // 0.6689453125
 const EMPTY_CHANNEL: ChannelShadowState = {
   
   volume: 1.0, pan: 0.5, freq: 440, trigger: 0, noteAge: 1000,
@@ -122,12 +128,12 @@ const fillUniformPayload = (
     float[17] = params.bloomThreshold ?? 0.8;
     uint[18] = params.invertChannels ? 1 : 0;
     float[19] = params.dimFactor ?? 1.0;
-    // gridRect for bezel alignment (v0.40/v0.43+)
-    const gridRect = params.gridRect ?? GRID_RECT;
-    float[20] = gridRect.x;
-    float[21] = gridRect.y;
-    float[22] = gridRect.w;
-    float[23] = gridRect.h;
+    // Grid bounds for unified WebGL/WebGPU alignment
+    // Use individual components for easier WGSL struct alignment
+    float[20] = params.gridRect?.x ?? GRID_RECT.x;
+    float[21] = params.gridRect?.y ?? GRID_RECT.y;
+    float[22] = params.gridRect?.w ?? GRID_RECT.w;
+    float[23] = params.gridRect?.h ?? GRID_RECT.h;
     return 96;
   }
 
@@ -486,6 +492,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     uniform vec2 u_cellSize;
     uniform vec2 u_offset;
     uniform float u_cols;
+    uniform float u_rows;
     uniform float u_playhead;
     uniform int u_invertChannels;
     uniform int u_layoutMode; // 1=Circ, 2=Horiz32, 3=Horiz64
@@ -503,7 +510,9 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
         v_hasNote = (note > 0u) ? 1.0 : 0.0;
 
         // 2. Calculate Scale/Size
-        float scale = (note > 0u) ? 0.85 : 0.0; // Hide empty steps, shrink valid ones slightly for gap
+        // Scale is derived from u_cellSize with 0.92 factor to prevent border overlap
+        float scale = min(u_cellSize.x, u_cellSize.y) * 0.92;
+        if (note == 0u) scale = 0.0; // Hide empty steps
 
         // 3. Playhead Logic
         float stepsPerPage = (u_layoutMode == 3) ? 64.0 : 32.0;
@@ -517,49 +526,61 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
 
         // 4. Positioning Logic
         if (u_layoutMode == 2 || u_layoutMode == 3) {
-            float xPos = float(row) * u_cellSize.x;
-            float yPos = float(col) * u_cellSize.y;
+            // --- HORIZONTAL LAYOUT (32-step or 64-step) ---
+            // Position using u_offset + step index * cell size + vertex offset
+            // a_pos is in [-0.5, 0.5] range
+            float i = float(row); // step index
+            float x = u_offset.x + a_pos.x * scale + i * u_cellSize.x;
+            float y = u_offset.y + a_pos.y * scale + float(col) * u_cellSize.y;
 
-            vec2 center = vec2(xPos, yPos) + u_cellSize * 0.5 + u_offset;
-            // Use standard quad positions (-0.5 to 0.5)
-            vec2 pos = center + (a_pos * u_cellSize * scale);
-
+            vec2 pos = vec2(x, y);
             vec2 ndc = (pos / u_resolution) * 2.0 - 1.0;
             ndc.y = -ndc.y;
             gl_Position = vec4(ndc, 0.0, 1.0);
 
         } else {
-            int ringIndex = col;
-            if (u_invertChannels == 0) { ringIndex = int(u_cols) - 1 - col; }
-
-            vec2 center = u_resolution * 0.5;
-            float minDim = min(u_resolution.x, u_resolution.y);
-            float maxRadius = minDim * 0.45;
-            float minRadius = minDim * 0.15;
-            float ringDepth = (maxRadius - minRadius) / u_cols;
-            float radius = minRadius + float(ringIndex) * ringDepth;
-
+            // --- CIRCULAR LAYOUT ---
+            // Use exact radii from WGSL shaders (v0.42, v0.45): inner=0.3, outer=0.9
+            // These are in normalized UV space [0,1]
+            
+            float innerRadius = 0.3;
+            float outerRadius = 0.9;
+            float numTracks = u_cols;
+            
+            // Calculate track index with inversion support
+            float trackIndex = float(col);
+            if (u_invertChannels == 0) { trackIndex = numTracks - 1.0 - trackIndex; }
+            
+            // Normalized radius for this track (centered in track band)
+            float normalizedRadius = innerRadius + (trackIndex + 0.5) * ((outerRadius - innerRadius) / numTracks);
+            
+            // Full circle angle
             float totalSteps = 64.0;
             float anglePerStep = (2.0 * PI) / totalSteps;
             float theta = -1.570796 + float(row) * anglePerStep;
-
-            float circumference = 2.0 * PI * radius;
-            float arcLength = circumference / totalSteps;
-            float btnW = arcLength * 0.95;
-            float btnH = ringDepth * 0.95;
-
+            
+            // Convert polar to cartesian in normalized space [0,1]
+            vec2 center = vec2(0.5, 0.5);
+            vec2 normPos = center + vec2(cos(theta), sin(theta)) * normalizedRadius * 0.5;
+            
+            // Calculate btnW and btnH from angular arc length and radial width
+            float trackWidth = (outerRadius - innerRadius) / numTracks;
+            float arcLength = normalizedRadius * anglePerStep;
+            float btnW = arcLength * 0.92;
+            float btnH = trackWidth * 0.92;
+            
+            // Local position with rotation
             vec2 localPos = a_pos * vec2(btnW, btnH) * scale;
-
-            // Rotate
             float rotAng = theta + 1.570796;
             float cA = cos(rotAng); float sA = sin(rotAng);
             float rotX = localPos.x * cA - localPos.y * sA;
             float rotY = localPos.x * sA + localPos.y * cA;
-
-            float worldX = center.x + cos(theta) * radius + rotX;
-            float worldY = center.y + sin(theta) * radius + rotY;
-
-            vec2 ndc = vec2((worldX / u_resolution.x) * 2.0 - 1.0, 1.0 - (worldY / u_resolution.y) * 2.0);
+            
+            // Map to pixel space for NDC conversion
+            vec2 pixelPos = normPos * u_resolution + vec2(rotX, rotY) * u_resolution;
+            
+            vec2 ndc = (pixelPos / u_resolution) * 2.0 - 1.0;
+            ndc.y = -ndc.y;
             gl_Position = vec4(ndc, 0.0, 1.0);
         }
 
@@ -1194,19 +1215,22 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     let effectiveCellH = cellHeight;
     let layoutMode = 1; // Default Circular
 
+    // Use unified GRID constants for consistent alignment
+    const u_offset = { x: GRID_INSET_X * gl.canvas.width, y: GRID_INSET_Y * gl.canvas.height };
+
     if (shaderFile.includes('v0.40') || shaderFile.includes('v0.43') || shaderFile.includes('v0.46')) {
         // Horizontal 32
-        const rect = GRID_RECT;
-        effectiveCellW = (rect.w * gl.canvas.width) / 32.0;
-        effectiveCellH = (rect.h * gl.canvas.height) / cols;
-        gl.uniform2f(uniforms.u_offset, rect.x * gl.canvas.width, rect.y * gl.canvas.height);
+        const stepCols = 32;
+        effectiveCellW = (GRID_WIDTH * gl.canvas.width) / stepCols;
+        effectiveCellH = (GRID_HEIGHT * gl.canvas.height) / rows;
+        gl.uniform2f(uniforms.u_offset, u_offset.x, u_offset.y);
         layoutMode = 2;
     } else if (shaderFile.includes('v0.44')) {
         // Horizontal 64
-        const rect = GRID_RECT;
-        effectiveCellW = (rect.w * gl.canvas.width) / 64.0;
-        effectiveCellH = (rect.h * gl.canvas.height) / cols;
-        gl.uniform2f(uniforms.u_offset, rect.x * gl.canvas.width, rect.y * gl.canvas.height);
+        const stepCols = 64;
+        effectiveCellW = (GRID_WIDTH * gl.canvas.width) / stepCols;
+        effectiveCellH = (GRID_HEIGHT * gl.canvas.height) / rows;
+        gl.uniform2f(uniforms.u_offset, u_offset.x, u_offset.y);
         layoutMode = 3;
     } else if (shaderFile.includes('v0.39')) {
         // Full Screen Horizontal
