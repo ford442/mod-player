@@ -149,6 +149,8 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
     userModuleLoadedRef.current = true; // Mark that user loaded a module
     setStatus(`Loading "${fileName}"...`);
     await processModuleData(fileData, fileName);
+    // Auto-play ONLY when a user manually loads a file/selects from playlist
+    if (playRef.current) playRef.current();
   }, []);
 
   const processModuleData = useCallback(async (fileData: Uint8Array, fileName: string) => {
@@ -242,12 +244,9 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
     setIsModuleLoaded(true);
     setStatus(`Loaded "${title || fileName}"`);
 
-    // Auto-play using the latest play function (avoids stale closure)
-    if (playRef.current) playRef.current();
-
+    // REMOVED AUTO-PLAY FROM HERE. 
+    // It prevented the AudioContext from securely starting because it lacked a user gesture on page load.
   }, [getPatternMatrix]);
-
-  // ScriptProcessor path removed (AudioWorklet-only)
 
   const updateUI = useCallback(() => {
     // Use ref so this callback always sees the current isPlaying state
@@ -266,10 +265,6 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
       row = workletRowRef.current;
       time = workletTimeRef.current;
 
-      // Extrapolate playback time using the audio clock to eliminate the lag
-      // between 60Hz position reports and 60fps display updates.
-      // audioContext.currentTime is on the same clock as the worklet, so
-      // this gives accurate sub-report-interval position interpolation.
       const audioCtx = audioContextRef.current;
       if (audioCtx && lastWorkletUpdateRef.current > 0) {
         const elapsed = audioCtx.currentTime - lastWorkletUpdateRef.current;
@@ -302,26 +297,10 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
 
     setPlaybackRowFraction(row);
 
-    // VU / Channel Data (disabled - uses native engine channel data instead)
-    // if (lib && modPtr) {
-    //   const numChannels = lib._openmpt_module_get_num_channels(modPtr);
-    //   const active: number[] = [];
-    //   for (let c = 0; c < numChannels; c++) {
-    //     const volFn = lib._openmpt_module_get_current_channel_vu_mono;
-    //     const vol = volFn ? volFn(modPtr, c) : 0;
-    //     if (vol > 0.01) active.push(c);
-    //     channelStatesRef.current[c] = {
-    //       volume: vol, pan: 128, freq: 0, trigger: vol > 0.5 ? 1 : 0,
-    //       noteAge: 0, activeEffect: 0, effectValue: 0, isMuted: 0
-    //     };
-    //   }
-    //   setActiveChannels(active);
-    // }
-
     // Calculate beat phase
     const beatPhaseValue = (time * 2) % 1;
     setBeatPhase(beatPhaseValue);
-    
+
     // PERFORMANCE OPTIMIZATION: Update mutable ref directly
     // PatternDisplay reads from this ref - avoids 60fps React re-renders
     playbackStateRef.current = {
@@ -332,7 +311,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
       kickTrigger: kickTrigger, // Use existing kick trigger value
       grooveAmount: grooveAmount
     };
-    
+
     lastUpdateTimeRef.current = performance.now() / 1000;
     animationFrameHandle.current = requestAnimationFrame(updateUI);
   }, [isPlaying, activeEngine, sequencerMatrix, kickTrigger, grooveAmount]);
@@ -657,9 +636,6 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
         return;
       }
 
-      // For the JS AudioWorklet path playback is deferred until the worklet sends
-      // { type: 'loaded' } (avoids off-timing during WASM startup).
-      // For native worklet start immediately.
       if (!audioWorkletNodeRef.current && activeEngine === 'native-worklet') {
         isPlayingRef.current = true;
         setIsPlaying(true);
@@ -858,7 +834,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
     activeEngine, isWorkletSupported, toggleAudioEngine, syncDebug,
     analyserNode: analyserRef.current,
     // PERFORMANCE OPTIMIZATION: Export ref for high-frequency updates
-    // PatternDisplay reads directly from this to avoid React re-renders
+    // PatternDisplay reads directly from this to this ref - avoids React re-renders
     playbackStateRef
   };
 }
