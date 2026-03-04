@@ -134,11 +134,13 @@ fn getFragmentConstants() -> FragmentConstants {
 
 @fragment
 fn fs(in: VertexOut) -> @location(0) vec4<f32> {
-  if (in.channel >= uniforms.numChannels) { return vec4<f32>(1.0, 0.0, 0.0, 1.0); }
-  let fs = getFragmentConstants();
+  // Compute derivatives in uniform control flow (before any early returns)
   let uv = in.uv;
   let p = uv - vec2<f32>(0.5, 0.5);
   let aa = fwidth(p.y) * 0.75;
+  
+  if (in.channel >= uniforms.numChannels) { return vec4<f32>(1.0, 0.0, 0.0, 1.0); }
+  let fs = getFragmentConstants();
 
   if (in.channel == 0u) {
       var col = fs.bgColor * 0.8;
