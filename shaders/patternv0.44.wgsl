@@ -96,7 +96,6 @@ fn getNoteColor(note: u32) -> vec3<f32> {
 
 @fragment
 fn fs(in: VertexOut) -> @location(0) vec4<f32> {
-  if (in.channel >= uniforms.numChannels) { return vec4<f32>(1.0, 0.0, 0.0, 1.0); }
   let uv = in.uv;
   let aspect = uniforms.canvasW / uniforms.canvasH;
   let dimFactor = uniforms.dimFactor;
