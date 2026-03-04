@@ -8,7 +8,9 @@
     "build:worklet": "bash ./build-wasm.sh",
     "build:emcc": "bash scripts/build-wasm.sh",
     "build": "tsc && node --max-old-space-size=4096 node_modules/.bin/vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "lint": "eslint . --ext .ts,.tsx --max-warnings 50",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@react-three/drei": "^9.122.0",

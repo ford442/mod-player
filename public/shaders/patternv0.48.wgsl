@@ -112,7 +112,8 @@ fn neonPalette(t: f32) -> vec3<f32> {
   let b = vec3<f32>(0.5, 0.5, 0.5);
   let c = vec3<f32>(1.0, 1.0, 1.0);
   let d = vec3<f32>(0.0, 0.33, 0.67);
-  return a + b * cos(6.28318 * (c * t + d));
+  let beatDrift = uniforms.beatPhase * 0.1;
+  return a + b * cos(6.28318 * (c * (t + beatDrift) + d));
 }
 
 fn sdRoundedBox(p: vec2<f32>, b: vec2<f32>, r: f32) -> f32 {
@@ -187,6 +188,7 @@ fn drawFrostedGlassCap(uv: vec2<f32>, size: vec2<f32>, color: vec3<f32>, isOn: b
 
 @fragment
 fn fs(in: VertexOut) -> @location(0) vec4<f32> {
+  if (in.channel >= uniforms.numChannels) { return vec4<f32>(1.0, 0.0, 0.0, 1.0); }
   let fs = getFragmentConstants();
   let uv = in.uv;
   let p = uv - 0.5;
@@ -204,8 +206,8 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   // --- INDICATOR RING ---
   if (in.channel == 0u) {
     let onPlayhead = playheadActivation > 0.5;
-    let indSize = vec2(0.3, 0.3);
-    let indColor = mix(vec3(0.15), fs.ledOnColor * 1.3, playheadActivation);
+    let indSize = vec2<f32>(0.3, 0.3);
+    let indColor = mix(vec3<f32>(0.15), fs.ledOnColor * 1.3, playheadActivation);
     let indLed = drawFrostedGlassCap(p, indSize, indColor, onPlayhead, aa, playheadActivation * 1.5);
     var col = indLed.rgb;
     var alpha = indLed.a;
@@ -247,18 +249,18 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     let isMuted = (ch.isMuted == 1u);
 
     // COMPONENT 1: DATA LIGHT (Blue accent for trap)
-    let topUV = btnUV - vec2(0.5, 0.16);
-    let topSize = vec2(0.20, 0.20);
+    let topUV = btnUV - vec2<f32>(0.5, 0.16);
+    let topSize = vec2<f32>(0.20, 0.20);
     let isDataPresent = hasExpression && !isMuted;
-    let topColorBase = vec3(0.15, 0.5, 1.0);
+    let topColorBase = vec3<f32>(0.15, 0.5, 1.0);
     let topColor = topColorBase * select(0.0, 1.5 + bloom, isDataPresent);
     let topLed = drawFrostedGlassCap(topUV, topSize, topColor, isDataPresent, aa, select(0.0, 1.0, isDataPresent));
     finalColor = mix(finalColor, topLed.rgb, topLed.a);
 
     // COMPONENT 2: NOTE LIGHT
-    let mainUV = btnUV - vec2(0.5, 0.5);
-    let mainSize = vec2(0.55, 0.45);
-    var noteColor = vec3(0.15);
+    let mainUV = btnUV - vec2<f32>(0.5, 0.5);
+    let mainSize = vec2<f32>(0.55, 0.45);
+    var noteColor = vec3<f32>(0.15);
     var lightAmount = 0.0;
     var noteGlow = 0.0;
 
@@ -273,11 +275,9 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
       let strike = playheadActivation * 3.5;
       let flash = f32(ch.trigger) * 1.2;
 
-      var d = f32(in.row % 64u) - playheadStep;
       let totalSteps = 64.0;
-      if (d > totalSteps * 0.5) { d = d - totalSteps; }
-      if (d < -totalSteps * 0.5) { d = d + totalSteps; }
-      let coreDist = abs(d);
+      let d = fract((f32(in.row) + uniforms.tickOffset - uniforms.playheadRow) / totalSteps) * totalSteps;
+      let coreDist = min(d, totalSteps - d);
       let energy = 0.03 / (coreDist + 0.001);
       let trail = exp(-7.0 * max(0.0, -d));
       let activeVal = clamp(pow(energy, 1.3) + trail, 0.0, 1.0);
@@ -296,14 +296,14 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
 
     // Brighter LED pulse when playhead is on this step
     if (playheadActivation > 0.5 && hasNote) {
-      let pulseColor = mix(vec3(0.15, 0.5, 1.0), vec3(1.0, 0.55, 0.1), 0.5 + 0.5 * sin(beat * 6.2832));
+      let pulseColor = mix(vec3<f32>(0.15, 0.5, 1.0), vec3<f32>(1.0, 0.55, 0.1), 0.5 + 0.5 * sin(beat * 6.2832));
       finalColor += pulseColor * playheadActivation * 0.15;
     }
 
     // COMPONENT 3: EFFECT LIGHT (Orange pill for trap)
-    let botUV = btnUV - vec2(0.5, 0.85);
-    let botSize = vec2(0.25, 0.12);
-    var effColor = vec3(0.0);
+    let botUV = btnUV - vec2<f32>(0.5, 0.85);
+    let botSize = vec2<f32>(0.25, 0.12);
+    var effColor = vec3<f32>(0.0);
     var isEffOn = false;
 
     if (effCmd > 0u) {
@@ -314,7 +314,7 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
         isEffOn = true;
       }
     } else if (volCmd > 0u) {
-      effColor = vec3(1.0, 0.55, 0.1);
+      effColor = vec3<f32>(1.0, 0.55, 0.1);
       if (!isMuted) { effColor *= 0.6; isEffOn = true; }
     }
 
@@ -322,6 +322,13 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     finalColor = mix(finalColor, botLed.rgb, botLed.a);
   }
 
-  if (housingMask < 0.5) { return vec4(fs.borderColor, 0.0); }
-  return vec4(finalColor, 1.0);
+  // Kick reactive glow
+  let kickPulse = uniforms.kickTrigger * exp(-length(p) * 3.0) * 0.3;
+  finalColor += vec3<f32>(0.9, 0.2, 0.4) * kickPulse * uniforms.bloomIntensity;
+  // Dithering for night mode
+  let noise = fract(sin(dot(in.uv * uniforms.timeSec, vec2<f32>(12.9898, 78.233))) * 43758.5453);
+  finalColor += (noise - 0.5) * 0.01;
+
+  if (housingMask < 0.5) { return vec4<f32>(fs.borderColor, 0.0); }
+  return vec4<f32>(finalColor, 1.0);
 }

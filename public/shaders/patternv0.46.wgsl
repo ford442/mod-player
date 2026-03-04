@@ -1,6 +1,5 @@
 // patternv0.46.wgsl
 // Frosted Glass - Circular Layout with Translucent Glass Caps
-// Based on v0.38 circular layout + v0.43 translucent glass rendering
 
 struct Uniforms {
   numRows: u32,
@@ -22,11 +21,6 @@ struct Uniforms {
   bloomIntensity: f32,
   bloomThreshold: f32,
   invertChannels: u32,
-  // Grid bounds for unified WebGL/WebGPU alignment (used for circular bounds)
-  gridInsetX: f32,
-  gridInsetY: f32,
-  gridWidth: f32,
-  gridHeight: f32,
 };
 
 @group(0) @binding(0) var<storage, read> cells: array<u32>;
@@ -58,23 +52,21 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
   let row = instanceIndex / numChannels;
   let channel = instanceIndex % numChannels;
 
-  // Use inverted channel logic for rings
+  // CRITICAL FIX: Cull instances not in current 64-step page to prevent alpha/z-fighting
+  let pageStart = u32(uniforms.playheadRow / 64.0) * 64u;
+  var isVisible = 1.0;
+  if (row < pageStart || row >= pageStart + 64u) {
+      isVisible = 0.0;
+  }
+
   let invertedChannel = numChannels - 1u - channel;
   let ringIndex = select(invertedChannel, channel, (uniforms.invertChannels == 1u));
 
-  // Use grid bounds to define the circular layout area for alignment with WebGL overlay
-  let gridRect = vec4<f32>(uniforms.gridInsetX, uniforms.gridInsetY, uniforms.gridWidth, uniforms.gridHeight);
-  let gridCenter = vec2<f32>(gridRect.x + gridRect.z * 0.5, gridRect.y + gridRect.w * 0.5);
-  let gridMinDim = min(gridRect.z, gridRect.w);
-  
-  // Map to pixel space for consistency with WebGL
-  let canvasSize = vec2<f32>(uniforms.canvasW, uniforms.canvasH);
-  let center = vec2<f32>(gridCenter.x * uniforms.canvasW, gridCenter.y * uniforms.canvasH);
-  let minDim = gridMinDim * min(uniforms.canvasW, uniforms.canvasH);
+  let center = vec2<f32>(uniforms.canvasW * 0.5, uniforms.canvasH * 0.5);
+  let minDim = min(uniforms.canvasW, uniforms.canvasH);
 
-  // Use exact radii ratios that match WebGL: inner=0.3, outer=0.9 in normalized space
-  let maxRadius = minDim * 0.45; // 0.9 * 0.5
-  let minRadius = minDim * 0.15; // 0.3 * 0.5
+  let maxRadius = minDim * 0.45;
+  let minRadius = minDim * 0.15;
   let ringDepth = (maxRadius - minRadius) / f32(numChannels);
 
   let radius = minRadius + f32(ringIndex) * ringDepth;
@@ -86,12 +78,11 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
   let circumference = 2.0 * 3.14159265 * radius;
   let arcLength = circumference / totalSteps;
 
-  // Sizing: 0.95 factor for fuller squares
   let btnW = arcLength * 0.95;
   let btnH = ringDepth * 0.95;
 
   let lp = quad[vertexIndex];
-  let localPos = (lp - 0.5) * vec2<f32>(btnW, btnH);
+  let localPos = (lp - vec2<f32>(0.5, 0.5)) * vec2<f32>(btnW, btnH);
 
   let rotAng = theta + 1.570796;
   let cA = cos(rotAng);
@@ -107,11 +98,17 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
   let clipY = 1.0 - (worldY / uniforms.canvasH) * 2.0;
 
   let idx = instanceIndex * 2u;
-  let a = cells[idx];
-  let b = cells[idx + 1u];
+  var a = 0u;
+  var b = 0u;
+  if (idx + 1u < arrayLength(&cells)) {
+      a = cells[idx];
+      b = cells[idx + 1u];
+  }
+
+  let finalPos = select(vec4<f32>(0.0, 0.0, 0.0, 0.0), vec4<f32>(clipX, clipY, 0.0, 1.0), isVisible > 0.5);
 
   var out: VertexOut;
-  out.position = vec4<f32>(clipX, clipY, 0.0, 1.0);
+  out.position = finalPos;
   out.row = row;
   out.channel = channel;
   out.uv = lp;
@@ -125,12 +122,13 @@ fn neonPalette(t: f32) -> vec3<f32> {
   let b = vec3<f32>(0.5, 0.5, 0.5);
   let c = vec3<f32>(1.0, 1.0, 1.0);
   let d = vec3<f32>(0.0, 0.33, 0.67);
-  return a + b * cos(6.28318 * (c * t + d));
+  let beatDrift = uniforms.beatPhase * 0.1;
+  return a + b * cos(6.28318 * (c * (t + beatDrift) + d));
 }
 
 fn sdRoundedBox(p: vec2<f32>, b: vec2<f32>, r: f32) -> f32 {
   let q = abs(p) - b + r;
-  return length(max(q, vec2<f32>(0.0))) + min(max(q.x, q.y), 0.0) - r;
+  return length(max(q, vec2<f32>(0.0, 0.0))) + min(max(q.x, q.y), 0.0) - r;
 }
 
 fn pitchClassFromIndex(note: u32) -> f32 {
@@ -157,83 +155,69 @@ fn getFragmentConstants() -> FragmentConstants {
   return c;
 }
 
-// --- TRANSLUCENT GLASS CAP RENDERING ---
 fn drawFrostedGlassCap(uv: vec2<f32>, size: vec2<f32>, color: vec3<f32>, isOn: bool, aa: f32, noteGlow: f32) -> vec4<f32> {
     let p = uv;
     let dBox = sdRoundedBox(p, size * 0.5, 0.08);
     
     if (dBox > 0.0) {
-        return vec4<f32>(0.0);
+        return vec4<f32>(0.0, 0.0, 0.0, 0.0);
     }
     
-    // Calculate normal for fresnel effect — flatter z for wider rim highlight
     let n = normalize(vec3<f32>(p.x * 2.0 / size.x, p.y * 2.0 / size.y, 0.35));
     let viewDir = vec3<f32>(0.0, 0.0, 1.0);
     
-    // Fresnel rim effect — sharper exponent for a brighter rim band
     let fresnel = pow(1.0 - abs(dot(n, viewDir)), 2.5);
-    
-    // Radial distance for inner glow falloff (0 at center, 1 at edge)
     let radial = length(p / (size * 0.5));
-    
-    // Subsurface scattering — thinner cap lets more light through, radial spread
     let thickness = 0.12;
     let subsurface = exp(-thickness * 3.5) * noteGlow * (1.0 - radial * 0.4);
     
-    // Glass color mixing — higher color contribution for vividness
     let bgColor = vec3<f32>(0.05, 0.05, 0.06);
     let glassColor = mix(bgColor * 0.2, color, 0.8);
     
-    // Alpha with fresnel rim enhancement — higher base transmittance
     let edgeAlpha = smoothstep(0.0, aa * 2.0, -dBox);
     let alpha = edgeAlpha * (0.7 + 0.3 * fresnel);
     
-    // Diffuse light for 3D effect
     let light = vec3<f32>(0.5, -0.8, 1.0);
     let diff = max(0.0, dot(n, normalize(light)));
     let litGlassColor = glassColor * (0.55 + 0.45 * diff);
     
-    // Composite with background
     var finalColor = mix(bgColor, litGlassColor, alpha);
-    
-    // Add subsurface glow — brighter and more diffuse
     finalColor += subsurface * color * 3.5;
     
-    // Inner glow bloom for active caps — uniform radial spread
     if (isOn) {
         let innerGlow = (1.0 - radial) * noteGlow * 0.4;
         finalColor += color * innerGlow;
     }
     
-    // Rim highlight — bright edge halo on illuminated caps
     finalColor += fresnel * color * noteGlow * 0.3;
-    
     return vec4<f32>(finalColor, edgeAlpha);
 }
 
 @fragment
 fn fs(in: VertexOut) -> @location(0) vec4<f32> {
+  if (in.channel >= uniforms.numChannels) { return vec4<f32>(1.0, 0.0, 0.0, 1.0); }
   let fs = getFragmentConstants();
   let uv = in.uv;
-  let p = uv - 0.5;
+  let p = uv - vec2<f32>(0.5, 0.5);
   let aa = fwidth(p.y) * 0.33;
   let bloom = uniforms.bloomIntensity;
 
-  // Hardware Layering: Discard pixels over UI
   if (in.position.y > uniforms.canvasH * 0.88) {
     discard;
   }
 
-  // CHANNEL 0 is the Indicator Ring
   if (in.channel == 0u) {
     let playheadStep = uniforms.playheadRow - floor(uniforms.playheadRow / 64.0) * 64.0;
     let rowDistRaw = abs(f32(in.row % 64u) - playheadStep);
     let rowDist = min(rowDistRaw, 64.0 - rowDistRaw);
     let playheadActivation = 1.0 - smoothstep(0.0, 1.5, rowDist);
     let onPlayhead = playheadActivation > 0.5;
-    let indSize = vec2(0.3, 0.3);
-    let indColor = mix(vec3(0.2), fs.ledOnColor * 1.2, playheadActivation);
+    
+    // Explicit Type Fixes
+    let indSize = vec2<f32>(0.3, 0.3);
+    let indColor = mix(vec3<f32>(0.2, 0.2, 0.2), fs.ledOnColor * 1.2, playheadActivation);
     let indLed = drawFrostedGlassCap(p, indSize, indColor, onPlayhead, aa, playheadActivation * 1.5);
+    
     var col = indLed.rgb;
     var alpha = indLed.a;
     if (playheadActivation > 0.0) {
@@ -244,14 +228,13 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     return vec4<f32>(col, clamp(alpha, 0.0, 1.0));
   }
 
-  // --- MUSIC CHANNELS (1-32) with TRANSLUCENT GLASS ---
   let dHousing = sdRoundedBox(p, fs.housingSize * 0.5, 0.06);
   let housingMask = 1.0 - smoothstep(0.0, aa * 1.5, dHousing);
 
   var finalColor = fs.bgColor;
 
   let btnScale = 1.05;
-  let btnUV = (uv - 0.5) * btnScale + 0.5;
+  let btnUV = (uv - vec2<f32>(0.5, 0.5)) * btnScale + vec2<f32>(0.5, 0.5);
   var inButton = 0.0;
   if (btnUV.x > 0.0 && btnUV.x < 1.0 && btnUV.y > 0.0 && btnUV.y < 1.0) {
     inButton = 1.0;
@@ -269,19 +252,19 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     let ch = channels[in.channel];
     let isMuted = (ch.isMuted == 1u);
 
-    // Top LED indicator
-    let topUV = btnUV - vec2(0.5, 0.16);
-    let topSize = vec2(0.20, 0.20);
+    // Explicit Type Fixes
+    let topUV = btnUV - vec2<f32>(0.5, 0.16);
+    let topSize = vec2<f32>(0.20, 0.20);
     let isDataPresent = hasExpression && !isMuted;
-    let topColorBase = vec3(0.0, 0.9, 1.0);
+    let topColorBase = vec3<f32>(0.0, 0.9, 1.0);
     let topColor = topColorBase * select(0.0, 1.5 + bloom, isDataPresent);
     let topLed = drawFrostedGlassCap(topUV, topSize, topColor, isDataPresent, aa, select(0.0, 1.0, isDataPresent));
     finalColor = mix(finalColor, topLed.rgb, topLed.a);
 
-    // Main display area with translucent glass
-    let mainUV = btnUV - vec2(0.5, 0.5);
-    let mainSize = vec2(0.55, 0.45);
-    var noteColor = vec3(0.2);
+    // Explicit Type Fixes
+    let mainUV = btnUV - vec2<f32>(0.5, 0.5);
+    let mainSize = vec2<f32>(0.55, 0.45);
+    var noteColor = vec3<f32>(0.2, 0.2, 0.2);
     var lightAmount = 0.0;
     var noteGlow = 0.0;
 
@@ -300,11 +283,9 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
       let strike = playheadActivation * 3.5;
       let flash = f32(ch.trigger) * 1.2;
 
-      var d = f32(in.row % 64u) - playheadStep;
       let totalSteps = 64.0;
-      if (d > totalSteps * 0.5) { d = d - totalSteps; }
-      if (d < -totalSteps * 0.5) { d = d + totalSteps; }
-      let coreDist = abs(d);
+      let d = fract((f32(in.row) + uniforms.tickOffset - uniforms.playheadRow) / totalSteps) * totalSteps;
+      let coreDist = min(d, totalSteps - d);
       let energy = 0.03 / (coreDist + 0.001);
       let trail = exp(-7.0 * max(0.0, -d));
       let activeVal = clamp(pow(energy, 1.3) + trail, 0.0, 1.0);
@@ -319,10 +300,10 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     let mainPad = drawFrostedGlassCap(mainUV, mainSize, displayColor, isLit, aa, noteGlow);
     finalColor = mix(finalColor, mainPad.rgb, mainPad.a);
 
-    // Bottom effect indicator
-    let botUV = btnUV - vec2(0.5, 0.85);
-    let botSize = vec2(0.25, 0.12);
-    var effColor = vec3(0.0);
+    // Explicit Type Fixes
+    let botUV = btnUV - vec2<f32>(0.5, 0.85);
+    let botSize = vec2<f32>(0.25, 0.12);
+    var effColor = vec3<f32>(0.0, 0.0, 0.0);
     var isEffOn = false;
 
     if (effCmd > 0u) {
@@ -333,7 +314,7 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
         isEffOn = true;
       }
     } else if (volCmd > 0u) {
-      effColor = vec3(0.9, 0.9, 0.9);
+      effColor = vec3<f32>(0.9, 0.9, 0.9);
       if (!isMuted) { effColor *= 0.6; isEffOn = true; }
     }
 
@@ -341,6 +322,13 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     finalColor = mix(finalColor, botLed.rgb, botLed.a);
   }
 
-  if (housingMask < 0.5) { return vec4(fs.borderColor, 0.0); }
-  return vec4(finalColor, 1.0);
+  // Kick reactive glow
+  let kickPulse = uniforms.kickTrigger * exp(-length(p) * 3.0) * 0.3;
+  finalColor += vec3<f32>(0.9, 0.2, 0.4) * kickPulse * uniforms.bloomIntensity;
+  // Dithering for night mode
+  let noise = fract(sin(dot(in.uv * uniforms.timeSec, vec2<f32>(12.9898, 78.233))) * 43758.5453);
+  finalColor += (noise - 0.5) * 0.01;
+
+  if (housingMask < 0.5) { return vec4<f32>(fs.borderColor, 0.0); }
+  return vec4<f32>(finalColor, 1.0);
 }

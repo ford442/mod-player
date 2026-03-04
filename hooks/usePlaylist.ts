@@ -31,6 +31,7 @@ export function usePlaylist(): UsePlaylistReturn {
 
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
+      if (!file) continue;
       readers.push(
         file.arrayBuffer().then(buf => {
           newItems.push({

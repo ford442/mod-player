@@ -39,12 +39,12 @@ export interface MediaState {
 export interface PatternCell {
   type: 'note' | 'effect' | 'instrument' | 'empty';
   text: string;
-  note?: number;
-  inst?: number;
-  volCmd?: number;
-  volVal?: number;
-  effCmd?: number;
-  effVal?: number;
+  note?: number | undefined;
+  inst?: number | undefined;
+  volCmd?: number | undefined;
+  volVal?: number | undefined;
+  effCmd?: number | undefined;
+  effVal?: number | undefined;
 }
 
 // Pattern matrix for sequencer visualization: rows x channels cell grid

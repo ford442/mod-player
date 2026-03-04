@@ -87,13 +87,16 @@ export const PatternSequencer: React.FC<PatternSequencerProps> = ({ matrix, curr
     const match = (note || '').match(/^([A-G]#?)-?(\d)?/i);
     if (!match) return 0;
     const noteName = match[1];
+    if (!noteName) return 0;
     return noteMap[noteName.toUpperCase()] ?? 0;
   };
 
   const octaveToLightness = (note: string): number => {
     const match = (note || '').match(/-(\d)/);
     if (!match) return 50;
-    const octave = parseInt(match[1], 10);
+    const octaveStr = match[1];
+    if (!octaveStr) return 50;
+    const octave = parseInt(octaveStr, 10);
     return 35 + (octave * 8);
   };
 

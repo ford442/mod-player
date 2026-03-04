@@ -77,6 +77,7 @@ function App() {
     status,
     syncDebug,
     analyserNode,
+    playbackStateRef,
   } = useLibOpenMPT(volume);
 
   // Media Overlay State
@@ -257,6 +258,8 @@ function App() {
               externalVideoSource={null}
               dimFactor={dimFactor}
               analyserNode={analyserNode}
+              // PERFORMANCE OPTIMIZATION: Pass ref for high-frequency updates
+              playbackStateRef={playbackStateRef}
             />
           </div>
         }
@@ -417,7 +420,9 @@ function App() {
              onPanChange={setPan}
              externalVideoSource={null}
              dimFactor={dimFactor}
-              analyserNode={analyserNode}
+             analyserNode={analyserNode}
+             // PERFORMANCE OPTIMIZATION: Pass ref for high-frequency updates
+             playbackStateRef={playbackStateRef}
            />
 
            <MediaOverlay

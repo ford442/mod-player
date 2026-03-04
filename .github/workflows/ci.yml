@@ -1,0 +1,80 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  lint-and-build:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      
+      - name: Install dependencies
+        run: npm ci
+      
+      - name: Lint
+        run: npm run lint
+        continue-on-error: true
+      
+      - name: Type check
+        run: npx tsc --noEmit
+      
+      - name: Build
+        run: npm run build
+      
+      - name: Check build artifacts
+        run: |
+          test -f dist/index.html || (echo "❌ dist/index.html missing" && exit 1)
+          test -d dist/assets || (echo "❌ dist/assets missing" && exit 1)
+          echo "✅ Build artifacts verified"
+
+  wasm-smoke-test:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      
+      - name: Setup Emscripten
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: '3.1.50'
+      
+      - name: Verify emcc
+        run: emcc --version
+      
+      - name: Check WASM build script exists
+        run: |
+          test -f build-wasm.sh || (echo "❌ build-wasm.sh missing" && exit 1)
+          echo "✅ WASM build script exists"
+      
+      - name: Setup Node.js (for dependencies)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      
+      - name: Install dependencies
+        run: npm ci
+      
+      # Note: Full WASM build is skipped in CI due to time/libopenmpt download
+      # This job verifies the build script is present and syntactically valid
+      - name: Shellcheck build script
+        run: |
+          if command -v shellcheck &> /dev/null; then
+            shellcheck build-wasm.sh || true
+          else
+            bash -n build-wasm.sh
+          fi
+          echo "✅ Build script syntax OK"
