@@ -61,8 +61,6 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
 
   const fileDataRef = useRef<Uint8Array | null>(null);
 
-  const leftBufferPtr = useRef<number>(0);
-  const rightBufferPtr = useRef<number>(0);
   const animationFrameHandle = useRef<number>(0);
   const lastUpdateTimeRef = useRef<number>(0);
 
@@ -286,27 +284,21 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
 
     setPlaybackRowFraction(row);
 
-    // VU / Channel Data
-    if (false && lib && modPtr) {
-      const numChannels = lib._openmpt_module_get_num_channels(modPtr);
-      const active: number[] = [];
-      for (let c = 0; c < numChannels; c++) {
-        const vol = lib._openmpt_module_get_current_channel_vu_mono ? lib._openmpt_module_get_current_channel_vu_mono(modPtr, c) : 0;
-        if (vol > 0.01) active.push(c);
-
-        channelStatesRef.current[c] = {
-          volume: vol,
-          pan: 128,
-          freq: 0,
-          trigger: vol > 0.5 ? 1 : 0,
-          noteAge: 0,
-          activeEffect: 0,
-          effectValue: 0,
-          isMuted: 0
-        };
-      }
-      setActiveChannels(active);
-    }
+    // VU / Channel Data (disabled - uses native engine channel data instead)
+    // if (lib && modPtr) {
+    //   const numChannels = lib._openmpt_module_get_num_channels(modPtr);
+    //   const active: number[] = [];
+    //   for (let c = 0; c < numChannels; c++) {
+    //     const volFn = lib._openmpt_module_get_current_channel_vu_mono;
+    //     const vol = volFn ? volFn(modPtr, c) : 0;
+    //     if (vol > 0.01) active.push(c);
+    //     channelStatesRef.current[c] = {
+    //       volume: vol, pan: 128, freq: 0, trigger: vol > 0.5 ? 1 : 0,
+    //       noteAge: 0, activeEffect: 0, effectValue: 0, isMuted: 0
+    //     };
+    //   }
+    //   setActiveChannels(active);
+    // }
 
     setBeatPhase((time * 2) % 1);
     lastUpdateTimeRef.current = performance.now() / 1000;
