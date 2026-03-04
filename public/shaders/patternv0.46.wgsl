@@ -22,6 +22,11 @@ struct Uniforms {
   bloomIntensity: f32,
   bloomThreshold: f32,
   invertChannels: u32,
+  // Grid bounds for unified WebGL/WebGPU alignment (used for circular bounds)
+  gridInsetX: f32,
+  gridInsetY: f32,
+  gridWidth: f32,
+  gridHeight: f32,
 };
 
 @group(0) @binding(0) var<storage, read> cells: array<u32>;
@@ -57,11 +62,19 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
   let invertedChannel = numChannels - 1u - channel;
   let ringIndex = select(invertedChannel, channel, (uniforms.invertChannels == 1u));
 
-  let center = vec2<f32>(uniforms.canvasW * 0.5, uniforms.canvasH * 0.5);
-  let minDim = min(uniforms.canvasW, uniforms.canvasH);
+  // Use grid bounds to define the circular layout area for alignment with WebGL overlay
+  let gridRect = vec4<f32>(uniforms.gridInsetX, uniforms.gridInsetY, uniforms.gridWidth, uniforms.gridHeight);
+  let gridCenter = vec2<f32>(gridRect.x + gridRect.z * 0.5, gridRect.y + gridRect.w * 0.5);
+  let gridMinDim = min(gridRect.z, gridRect.w);
+  
+  // Map to pixel space for consistency with WebGL
+  let canvasSize = vec2<f32>(uniforms.canvasW, uniforms.canvasH);
+  let center = vec2<f32>(gridCenter.x * uniforms.canvasW, gridCenter.y * uniforms.canvasH);
+  let minDim = gridMinDim * min(uniforms.canvasW, uniforms.canvasH);
 
-  let maxRadius = minDim * 0.45;
-  let minRadius = minDim * 0.15;
+  // Use exact radii ratios that match WebGL: inner=0.3, outer=0.9 in normalized space
+  let maxRadius = minDim * 0.45; // 0.9 * 0.5
+  let minRadius = minDim * 0.15; // 0.3 * 0.5
   let ringDepth = (maxRadius - minRadius) / f32(numChannels);
 
   let radius = minRadius + f32(ringIndex) * ringDepth;

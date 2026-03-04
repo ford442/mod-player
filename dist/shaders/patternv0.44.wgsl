@@ -25,6 +25,11 @@ struct Uniforms {
   bloomThreshold: f32,
   invertChannels: u32,
   dimFactor: f32,
+  // Grid bounds for unified WebGL/WebGPU alignment
+  gridInsetX: f32,
+  gridInsetY: f32,
+  gridWidth: f32,
+  gridHeight: f32,
 };
 
 @group(0) @binding(0) var<storage, read> cells: array<u32>;
@@ -111,19 +116,20 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   // Dark background
   var col = vec3<f32>(0.05, 0.05, 0.06);
   
-  // --- LAYOUT ---
-  // Top: 0.0 - 0.85 (Grid)
-  // Bottom: 0.85 - 1.0 (Controls)
-  
-  let gridBottom = 0.85;
-  let margin = 0.05;
+  // --- LAYOUT using unified grid bounds for precise bezel alignment ---
+  let gridRect = vec4<f32>(uniforms.gridInsetX, uniforms.gridInsetY, uniforms.gridWidth, uniforms.gridHeight);
+  let gridLeft = gridRect.x;
+  let gridRight = gridRect.x + gridRect.z;
+  let gridTop = gridRect.y;
+  let gridBottom = gridRect.y + gridRect.w;
   
   // --- GRID RENDER ---
-  if (uv.x > margin && uv.x < (1.0 - margin) && uv.y > margin && uv.y < gridBottom) {
-      // Grid Coordinate System
-      let gridW = 1.0 - 2.0 * margin;
-      let gridH = gridBottom - margin;
-      let localUV = vec2<f32>((uv.x - margin) / gridW, (uv.y - margin) / gridH);
+  if (uv.x > gridLeft && uv.x < gridRight && uv.y > gridTop && uv.y < gridBottom) {
+      // Grid Coordinate System - normalize to 0-1 within grid area
+      let localUV = vec2<f32>(
+          (uv.x - gridLeft) / gridRect.z,
+          (uv.y - gridTop) / gridRect.w
+      );
       
       let nCols = 64.0; // 64 channels
       let nRows = 32.0; // Visible rows
@@ -197,8 +203,9 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   }
   
   // --- CONTROLS RENDER ---
-  if (uv.y > gridBottom) {
-      let ctrlH = 1.0 - gridBottom;
+  let ctrlY = gridBottom + 0.02;
+  if (uv.y > ctrlY) {
+      let ctrlH = 1.0 - ctrlY;
       let ctrlUV = vec2<f32>(uv.x, (uv.y - gridBottom) / ctrlH);
       
       // Background strip

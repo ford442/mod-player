@@ -42,7 +42,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
   const [isLooping, setIsLooping] = useState<boolean>(true);
   const [panValue, setPanValue] = useState<number>(0); // -1 to 1
   const [volume, _setVolume] = useState<number>(initialVolume); // 0 to 1
-  const [activeEngine, setActiveEngine] = useState<'script' | 'worklet' | 'native-worklet'>('worklet');
+  const [activeEngine, setActiveEngine] = useState<'worklet' | 'native-worklet'>('worklet');
   const [isWorkletSupported, setIsWorkletSupported] = useState<boolean>(false);
   const [isNativeWorkletAvailable, setIsNativeWorkletAvailable] = useState<boolean>(false);
   const [restartPlayback, setRestartPlayback] = useState<boolean>(false);
@@ -51,7 +51,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
   const libopenmptRef = useRef<LibOpenMPT | null>(null);
   const currentModulePtr = useRef<number>(0);
   const audioContextRef = useRef<AudioContext | null>(null);
-  const scriptNodeRef = useRef<ScriptProcessorNode | null>(null);
+  // ScriptProcessor removed to avoid hiss/timing instability
   const audioWorkletNodeRef = useRef<AudioWorkletNode | null>(null);
   // Shared WASM memory supplied to the worklet; allocated once on main thread
   const wasmMemoryRef = useRef<WebAssembly.Memory | null>(null);
@@ -154,10 +154,6 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
       if (audioContextRef.current) {
         try { audioContextRef.current.suspend(); } catch (e) { }
       }
-      if (scriptNodeRef.current) {
-        try { scriptNodeRef.current.disconnect(); } catch (e) { }
-        scriptNodeRef.current = null;
-      }
       if (audioWorkletNodeRef.current) {
         try { audioWorkletNodeRef.current.disconnect(); } catch (e) { }
         audioWorkletNodeRef.current = null;
@@ -235,43 +231,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
 
   }, [getPatternMatrix]);
 
-  const processAudioChunk = useCallback((outputBuffer: AudioBuffer) => {
-    // Only used for ScriptProcessor
-    const lib = libopenmptRef.current;
-    if (!lib || currentModulePtr.current === 0) return;
-
-    const modPtr = currentModulePtr.current;
-
-    if (leftBufferPtr.current === 0) {
-      // Just allocate once large enough for script processor chunks (usually 2048-4096)
-      leftBufferPtr.current = lib._malloc(4 * 16384);
-      rightBufferPtr.current = lib._malloc(4 * 16384);
-    }
-
-    const count = outputBuffer.length;
-    const framesProcessed = lib._openmpt_module_read_float_stereo(modPtr, outputBuffer.sampleRate, count, leftBufferPtr.current, rightBufferPtr.current);
-
-    if (framesProcessed === 0) {
-      if (isLooping) {
-        lib._openmpt_module_set_position_order_row(modPtr, 0, 0);
-      } else {
-        stopMusic(false);
-        return;
-      }
-    }
-
-    const outputL = outputBuffer.getChannelData(0);
-    const outputR = outputBuffer.getChannelData(1);
-
-    const heapF32 = lib.HEAPF32;
-    const startL = leftBufferPtr.current >> 2;
-    const startR = rightBufferPtr.current >> 2;
-
-    for (let i = 0; i < count; i++) {
-      outputL[i] = heapF32[startL + i];
-      outputR[i] = heapF32[startR + i];
-    }
-  }, [isLooping]);
+  // ScriptProcessor path removed (AudioWorklet-only)
 
   const updateUI = useCallback(() => {
     // Use ref so this callback always sees the current isPlaying state
@@ -300,7 +260,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
         time = workletTimeRef.current + Math.max(0, elapsed);
       }
     } else {
-      // Main thread module (ScriptProcessor)
+      // No ScriptProcessor fallback; if no worklet state yet, keep prior UI values
       if (!lib || modPtr === 0) return;
       order = lib._openmpt_module_get_current_order(modPtr);
       row = lib._openmpt_module_get_current_row(modPtr);
@@ -327,7 +287,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
     setPlaybackRowFraction(row);
 
     // VU / Channel Data
-    if (activeEngine === 'script' && lib && modPtr) {
+    if (false && lib && modPtr) {
       const numChannels = lib._openmpt_module_get_num_channels(modPtr);
       const active: number[] = [];
       for (let c = 0; c < numChannels; c++) {
@@ -365,11 +325,6 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
 
     if (audioContextRef.current) {
       audioContextRef.current.suspend();
-    }
-
-    if (scriptNodeRef.current) {
-      scriptNodeRef.current.disconnect();
-      scriptNodeRef.current = null;
     }
 
     if (audioWorkletNodeRef.current) {
@@ -474,12 +429,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
         analyserRef.current.smoothingTimeConstant = 0.8;
       }
 
-      // Disconnect previous sources
-      if (scriptNodeRef.current) {
-        console.log('🔧 [PLAY] Disconnecting previous ScriptProcessor...');
-        scriptNodeRef.current.disconnect();
-        scriptNodeRef.current = null;
-      }
+      // Disconnect previous source
       if (audioWorkletNodeRef.current) {
         console.log('🔧 [PLAY] Disconnecting previous AudioWorkletNode...');
         audioWorkletNodeRef.current.disconnect();
@@ -662,42 +612,19 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
           console.log('✅ [PLAY] AudioWorklet setup complete – waiting for WASM loaded event');
         } catch (e) {
           console.error("❌ [PLAY] Failed to create/load AudioWorkletNode:", e);
-          console.warn("⚠️ [PLAY] Falling back to ScriptProcessorNode");
-          // Fall through to ScriptProcessor below (don't call play() recursively)
           workletLoadedRef.current = false;
-
-          const bufferSize = 4096;
-          const node = ctx.createScriptProcessor(bufferSize, 0, 2);
-          node.onaudioprocess = (ev: AudioProcessingEvent) => processAudioChunk(ev.outputBuffer);
-
-          node.connect(analyserRef.current!);
-          analyserRef.current!.connect(stereoPannerRef.current!);
-          stereoPannerRef.current!.connect(gainNodeRef.current!);
-          gainNodeRef.current!.connect(ctx.destination);
-
-          scriptNodeRef.current = node;
-          console.log('✅ [PLAY] ScriptProcessor fallback setup complete');
+          setStatus("Error: AudioWorklet failed to start (no ScriptProcessor fallback).");
+          return;
         }
       } else {
-        console.log('🎵 [PLAY] Using ScriptProcessor engine...');
-        // ScriptProcessor fallback
-        const bufferSize = 4096;
-        const node = ctx.createScriptProcessor(bufferSize, 0, 2);
-        node.onaudioprocess = (e) => processAudioChunk(e.outputBuffer);
-
-        node.connect(analyserRef.current!);
-        analyserRef.current!.connect(stereoPannerRef.current!);
-        stereoPannerRef.current!.connect(gainNodeRef.current!);
-        gainNodeRef.current!.connect(ctx.destination);
-
-        scriptNodeRef.current = node;
-        console.log('✅ [PLAY] ScriptProcessor setup complete');
+        setStatus("Error: AudioWorklet not supported/available.");
+        return;
       }
 
       // For the JS AudioWorklet path playback is deferred until the worklet sends
       // { type: 'loaded' } (avoids off-timing during WASM startup).
-      // For everything else (ScriptProcessor / native worklet) start immediately.
-      if (!audioWorkletNodeRef.current) {
+      // For native worklet start immediately.
+      if (!audioWorkletNodeRef.current && activeEngine === 'native-worklet') {
         isPlayingRef.current = true;
         setIsPlaying(true);
         setStatus("Playing...");
@@ -708,22 +635,19 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
       console.error("❌ [PLAY] Play error:", e);
       setStatus("Error starting playback");
     }
-  }, [activeEngine, isWorkletSupported, isNativeWorkletAvailable, panValue, volume, processAudioChunk, isLooping, stopMusic]);
+  }, [activeEngine, isWorkletSupported, isNativeWorkletAvailable, panValue, volume, isLooping, stopMusic]);
 
   // Keep playRef always pointing to the latest play function
   // so processModuleData (which memoises over different deps) can call it without stale closure
   playRef.current = play;
 
   const toggleAudioEngine = useCallback(() => {
-    // Cycle: native-worklet → worklet → script → native-worklet (if available)
-    let newEngine: 'script' | 'worklet' | 'native-worklet';
+    // Cycle: native-worklet → worklet → native-worklet (if available)
+    let newEngine: 'worklet' | 'native-worklet';
     if (activeEngine === 'native-worklet') {
-      newEngine = isWorkletSupported ? 'worklet' : 'script';
-    } else if (activeEngine === 'worklet') {
-      newEngine = 'script';
+      newEngine = 'worklet';
     } else {
-      // script → try native first, then worklet
-      newEngine = isNativeWorkletAvailable ? 'native-worklet' : (isWorkletSupported ? 'worklet' : 'script');
+      newEngine = isNativeWorkletAvailable ? 'native-worklet' : 'worklet';
     }
 
     if (isPlaying) {
@@ -795,9 +719,9 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
           await tempCtx.close();
           console.log('✅ [INIT] AudioWorklet support confirmed');
         } catch (e) {
-          console.warn("⚠️ [INIT] AudioWorklet not available (fallback to script processor):", e);
+          console.warn("⚠️ [INIT] AudioWorklet not available:", e);
           setIsWorkletSupported(false);
-          setActiveEngine('script');
+          setStatus("Error: AudioWorklet not supported in this browser/context.");
         }
 
         // Probe for native C++/Wasm AudioWorklet engine
@@ -837,7 +761,6 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
         nativeEngineRef.current.destroy();
         nativeEngineRef.current = null;
       }
-      if (scriptNodeRef.current) scriptNodeRef.current.disconnect();
       if (audioWorkletNodeRef.current) audioWorkletNodeRef.current.disconnect();
       if (stereoPannerRef.current) stereoPannerRef.current.disconnect();
       if (audioContextRef.current && audioContextRef.current.state !== 'closed') audioContextRef.current.close();
