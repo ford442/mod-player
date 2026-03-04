@@ -1,25 +1,19 @@
 import React, { useEffect, useRef, useState, useMemo } from 'react';
 import { ChannelShadowState, PatternMatrix } from '../types';
+import {
+  GRID_RECT,
+  POLAR_RINGS,
+  LAYOUT_MODES,
+  CAP_CONFIG,
+  calculateHorizontalCellSize,
+  calculateCapScale,
+  getLayoutModeFromShader,
+  type LayoutMode
+} from '../utils/geometryConstants';
 
 const DEFAULT_ROWS = 64;
 const DEFAULT_CHANNELS = 4;
 
-// Bezel inset for v0.40/v0.43 shaders - adjusted to fill more of the display
-// The display area is roughly 160,160 to 865,885 on a 1024x1024 canvas
-const BEZEL_INSET = { x: 160, y: 180, w: 705, h: 685 };
-// Normalized grid rect for shader (x, y, w, h)
-const GRID_RECT = {
-  x: BEZEL_INSET.x / 1024,
-  y: BEZEL_INSET.y / 1024,
-  w: BEZEL_INSET.w / 1024,
-  h: BEZEL_INSET.h / 1024
-};
-
-// Unified Geometry Constants - shared between WebGL and WebGPU
-const GRID_INSET_X = GRID_RECT.x;   // 0.15625
-const GRID_INSET_Y = GRID_RECT.y;   // 0.17578125
-const GRID_WIDTH   = GRID_RECT.w;   // 0.6884765625
-const GRID_HEIGHT  = GRID_RECT.h;   // 0.6689453125
 const EMPTY_CHANNEL: ChannelShadowState = {
   
   volume: 1.0, pan: 0.5, freq: 440, trigger: 0, noteAge: 1000,
@@ -29,9 +23,6 @@ const PLAYHEAD_EPSILON = 0.0001;
 const alignTo = (val: number, align: number) => Math.floor((val + align - 1) / align) * align;
 
 // Step counts for WebGL2 overlay layout modes (must match shader constants)
-const GL_STEPS_HORIZONTAL_32 = 32; // u_layoutMode == 2
-const GL_STEPS_DEFAULT = 64;       // u_layoutMode == 3 (horizontal 64) and mode 1 (circular)
-
 // Shader Helper Functions
 type LayoutType = 'standard' | 'extended' | 'texture';
 
@@ -205,6 +196,15 @@ interface PatternDisplayProps {
   totalRows?: number;
   dimFactor?: number;
   analyserNode?: AnalyserNode | null;
+  // PERFORMANCE OPTIMIZATION: Ref for high-frequency updates (avoids React re-renders)
+  playbackStateRef?: React.MutableRefObject<{
+    playheadRow: number;
+    currentOrder: number;
+    timeSec: number;
+    beatPhase: number;
+    kickTrigger: number;
+    grooveAmount: number;
+  }>;
 }
 
 const clampPlayhead = (value: number, numRows: number) => {
@@ -217,24 +217,24 @@ const parsePackedB = (text: string) => {
   let volType = 0, volValue = 0;
   let effCode = 0, effParam = 0;
   const volMatch = text.match(/v(\d{1,3})/i);
-  if (volMatch) {
+  if (volMatch?.[1]) {
     volType = 1;
     const v = Math.min(255, Math.round((parseInt(volMatch[1], 10) / 64) * 255));
     volValue = isFinite(v) ? v : 0;
   }
   const panMatch = text.match(/p(\d{1,3})/i);
-  if (panMatch) {
+  if (panMatch?.[1]) {
     volType = 2;
     const p = Math.min(255, Math.round((parseInt(panMatch[1], 10) / 64) * 255));
     volValue = isFinite(p) ? p : 0;
   }
   const effMatch = text.match(/([A-Za-z])[ ]*([0-9A-Fa-f]{2})/);
-  if (effMatch) {
+  if (effMatch?.[1] && effMatch[2]) {
     effCode = effMatch[1].toUpperCase().charCodeAt(0) & 0xff;
     effParam = parseInt(effMatch[2], 16) & 0xff;
   } else {
     const effNum = text.match(/([0-9])[ ]*([0-9A-Fa-f]{2})/);
-    if (effNum) {
+    if (effNum?.[1] && effNum[2]) {
       effCode = ('0'.charCodeAt(0) + (parseInt(effNum[1], 10) & 0xf)) & 0xff;
       effParam = parseInt(effNum[2], 16) & 0xff;
     }
@@ -264,7 +264,7 @@ const packPatternMatrix = (matrix: PatternMatrix | null, padTopChannel = false):
       const upper = text.toUpperCase();
       const notePart = upper.slice(0, 3).padEnd(3, '\u0000');
       const instMatch = text.match(/(\d{1,3})$/);
-      const instByte = instMatch ? Math.min(255, parseInt(instMatch[1], 10)) : 0;
+      const instByte = instMatch?.[1] ? Math.min(255, parseInt(instMatch[1], 10)) : 0;
       const n0 = notePart.charCodeAt(0) & 0xff;
       const n1 = notePart.charCodeAt(1) & 0xff;
       const n2 = notePart.charCodeAt(2) & 0xff;
@@ -367,6 +367,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     onPanChange,
     totalRows,
     dimFactor = 1.0, analyserNode,
+    playbackStateRef,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const glCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -376,6 +377,14 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   const [invertChannels, setInvertChannels] = useState(false);
   const [clickedButton, setClickedButton] = useState<number>(0);
   const [gpuReady, setGpuReady] = useState(false);
+
+  // Debug overlay state
+  const [debugInfo, setDebugInfo] = useState<{
+    layoutMode: string;
+    errors: string[];
+    uniforms: Record<string, number | string>;
+    visible: boolean;
+  }>({ layoutMode: 'NONE', errors: [], uniforms: {}, visible: true });
 
   const deviceRef = useRef<GPUDevice | null>(null);
   const contextRef = useRef<GPUCanvasContext | null>(null);
@@ -459,6 +468,8 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   // Click handler for Glass UI interaction
   // WebGL Overlay Setup (Glass Effects)
   const initWebGL = () => {
+    console.group('🔧 initWebGL');
+    
     // Clean up existing WebGL resources first
     if (glContextRef.current && glResourcesRef.current) {
       const oldGl = glContextRef.current;
@@ -469,13 +480,34 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
         oldGl.deleteBuffer(oldRes.buffer);
         oldGl.deleteTexture(oldRes.texture);
         if (oldRes.capTexture) oldGl.deleteTexture(oldRes.capTexture);
-      } catch (e) {}
+        console.log('✅ Cleaned up previous WebGL resources');
+      } catch (e) {
+        console.warn('⚠️ Error cleaning up WebGL:', e);
+      }
       glResourcesRef.current = null;
     }
     
-    if (!glCanvasRef.current) return;
-    const gl = glCanvasRef.current.getContext('webgl2', { alpha: true, premultipliedAlpha: false });
-    if (!gl) return;
+    if (!glCanvasRef.current) {
+      console.warn('⚠️ No glCanvasRef');
+      console.groupEnd();
+      return;
+    }
+    
+    let gl: WebGL2RenderingContext | null = null;
+    try {
+      gl = glCanvasRef.current.getContext('webgl2', { alpha: true, premultipliedAlpha: false });
+      if (!gl) {
+        console.error('❌ Failed to get WebGL2 context');
+        console.groupEnd();
+        return;
+      }
+      console.log('✅ Got WebGL2 context');
+    } catch (e) {
+      console.error('❌ WebGL2 context error:', e);
+      console.groupEnd();
+      return;
+    }
+    
     glContextRef.current = gl;
 
     const vsSource = `#version 300 es
@@ -499,6 +531,9 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     uniform highp usampler2D u_noteData;
 
     const float PI = 3.14159265359;
+    const float INNER_RADIUS = 0.3;  // From POLAR_RINGS
+    const float OUTER_RADIUS = 0.9;  // From POLAR_RINGS
+    const float CAP_SCALE_FACTOR = 0.88; // From CAP_CONFIG
 
     void main() {
         int id = gl_InstanceID;
@@ -509,10 +544,10 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
         uint note = texelFetch(u_noteData, ivec2(col, row), 0).r;
         v_hasNote = (note > 0u) ? 1.0 : 0.0;
 
-        // 2. Calculate Scale/Size
-        // Scale is derived from u_cellSize with 0.92 factor to prevent border overlap
-        float scale = min(u_cellSize.x, u_cellSize.y) * 0.92;
-        if (note == 0u) scale = 0.0; // Hide empty steps
+        // 2. Calculate Cap Scale
+        // Scale is derived from u_cellSize with CAP_SCALE_FACTOR (0.88) for pixel-perfect fit
+        float capScale = min(u_cellSize.x, u_cellSize.y) * CAP_SCALE_FACTOR;
+        if (note == 0u) capScale = 0.0; // Hide empty steps
 
         // 3. Playhead Logic
         float stepsPerPage = (u_layoutMode == 3) ? 64.0 : 32.0;
@@ -521,30 +556,33 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
         float distToPlayhead = abs(float(row) - relativePlayhead);
         distToPlayhead = min(distToPlayhead, stepsPerPage - distToPlayhead);
         float activation = 1.0 - smoothstep(0.0, 1.5, distToPlayhead);
-        scale *= 1.0 + (0.2 * activation); // Pop effect with smooth falloff
+        capScale *= 1.0 + (0.2 * activation); // Pop effect with smooth falloff
         v_active = activation;
 
         // 4. Positioning Logic
         if (u_layoutMode == 2 || u_layoutMode == 3) {
             // --- HORIZONTAL LAYOUT (32-step or 64-step) ---
-            // Position using u_offset + step index * cell size + vertex offset
-            // a_pos is in [-0.5, 0.5] range
+            // Pixel-perfect centered caps using shared constants
+            // a_pos is in [-0.5, 0.5] range, we center it at [0.5, 0.5] within each cell
             float i = float(row); // step index
-            float x = u_offset.x + a_pos.x * scale + i * u_cellSize.x;
-            float y = u_offset.y + a_pos.y * scale + float(col) * u_cellSize.y;
-
-            vec2 pos = vec2(x, y);
-            vec2 ndc = (pos / u_resolution) * 2.0 - 1.0;
+            float j = float(col); // track index
+            
+            // Calculate cell position
+            float cellX = u_offset.x + i * u_cellSize.x;
+            float cellY = u_offset.y + j * u_cellSize.y;
+            
+            // Center the cap within the cell using a_pos * capScale + cellCenter
+            vec2 centered = a_pos * capScale + vec2(cellX + u_cellSize.x * 0.5, cellY + u_cellSize.y * 0.5);
+            
+            // Convert to NDC
+            vec2 ndc = (centered / u_resolution) * 2.0 - 1.0;
             ndc.y = -ndc.y;
             gl_Position = vec4(ndc, 0.0, 1.0);
 
         } else {
             // --- CIRCULAR LAYOUT ---
-            // Use exact radii from WGSL shaders (v0.42, v0.45): inner=0.3, outer=0.9
-            // These are in normalized UV space [0,1]
+            // Use exact radii from shared constants: INNER_RADIUS=0.3, OUTER_RADIUS=0.9
             
-            float innerRadius = 0.3;
-            float outerRadius = 0.9;
             float numTracks = u_cols;
             
             // Calculate track index with inversion support
@@ -552,7 +590,8 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
             if (u_invertChannels == 0) { trackIndex = numTracks - 1.0 - trackIndex; }
             
             // Normalized radius for this track (centered in track band)
-            float normalizedRadius = innerRadius + (trackIndex + 0.5) * ((outerRadius - innerRadius) / numTracks);
+            float trackWidth = (OUTER_RADIUS - INNER_RADIUS) / numTracks;
+            float normalizedRadius = INNER_RADIUS + (trackIndex + 0.5) * trackWidth;
             
             // Full circle angle
             float totalSteps = 64.0;
@@ -564,9 +603,8 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
             vec2 normPos = center + vec2(cos(theta), sin(theta)) * normalizedRadius * 0.5;
             
             // Calculate btnW and btnH from angular arc length and radial width
-            float trackWidth = (outerRadius - innerRadius) / numTracks;
             float arcLength = normalizedRadius * anglePerStep;
-            float btnW = arcLength * 0.92;
+            float btnW = arcLength * CAP_SCALE_FACTOR;
             float btnH = trackWidth * 0.92;
             
             // Local position with rotation
@@ -635,28 +673,48 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     }
     `;
 
-    const createShader = (type: number, src: string) => {
-      const s = gl.createShader(type)!;
-      gl.shaderSource(s, src);
-      gl.compileShader(s);
-      if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
-        console.error("GL Shader Error", gl.getShaderInfoLog(s));
-        gl.deleteShader(s);
+    const createShader = (type: number, src: string, name: string) => {
+      try {
+        const s = gl!.createShader(type)!;
+        gl!.shaderSource(s, src);
+        gl!.compileShader(s);
+        if (!gl!.getShaderParameter(s, gl!.COMPILE_STATUS)) {
+          const log = gl!.getShaderInfoLog(s);
+          console.error(`❌ ${name} Shader Error:`, log);
+          gl!.deleteShader(s);
+          return null;
+        }
+        console.log(`✅ ${name} shader compiled`);
+        return s;
+      } catch (e) {
+        console.error(`❌ ${name} shader exception:`, e);
         return null;
       }
-      return s;
     };
 
-    const vs = createShader(gl.VERTEX_SHADER, vsSource);
-    const fs = createShader(gl.FRAGMENT_SHADER, fsSource);
-    if(!vs || !fs) return;
+    const vs = createShader(gl.VERTEX_SHADER, vsSource, 'Vertex');
+    const fs = createShader(gl.FRAGMENT_SHADER, fsSource, 'Fragment');
+    if(!vs || !fs) {
+      console.error('❌ Shader compilation failed');
+      console.groupEnd();
+      return;
+    }
 
-    const prog = gl.createProgram()!;
-    gl.attachShader(prog, vs);
-    gl.attachShader(prog, fs);
-    gl.linkProgram(prog);
-    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
-      console.error("GL Link Error", gl.getProgramInfoLog(prog));
+    let prog: WebGLProgram | null = null;
+    try {
+      prog = gl.createProgram()!;
+      gl.attachShader(prog, vs);
+      gl.attachShader(prog, fs);
+      gl.linkProgram(prog);
+      if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+        console.error("❌ GL Link Error:", gl.getProgramInfoLog(prog));
+        console.groupEnd();
+        return;
+      }
+      console.log('✅ Shader program linked');
+    } catch (e) {
+      console.error('❌ Program linking exception:', e);
+      console.groupEnd();
       return;
     }
 
@@ -692,13 +750,16 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
         if (currentGl) {
             currentGl.bindTexture(currentGl.TEXTURE_2D, capTex);
             currentGl.texImage2D(currentGl.TEXTURE_2D, 0, currentGl.RGBA, currentGl.RGBA, currentGl.UNSIGNED_BYTE, capImg);
+            console.log('✅ Cap texture loaded');
         }
+    };
+    capImg.onerror = () => {
+        console.warn('⚠️ Failed to load cap texture');
     };
     capImg.src = `./unlit-button.png`;
 
-        glResourcesRef.current = {
-      program: prog, vao, texture: tex, capTexture: capTex, buffer: buf,
-      uniforms: {
+    try {
+      const uniformLocs = {
         u_resolution: gl.getUniformLocation(prog, 'u_resolution'),
         u_cellSize: gl.getUniformLocation(prog, 'u_cellSize'),
         u_offset: gl.getUniformLocation(prog, 'u_offset'),
@@ -709,20 +770,54 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
         u_invertChannels: gl.getUniformLocation(prog, 'u_invertChannels'),
         u_noteData: gl.getUniformLocation(prog, 'u_noteData'),
         u_capTexture: gl.getUniformLocation(prog, 'u_capTexture'),
+      };
+      
+      // Check for null uniforms
+      const nullUniforms = Object.entries(uniformLocs)
+        .filter(([_, loc]) => loc === null)
+        .map(([name, _]) => name);
+      if (nullUniforms.length > 0) {
+        console.warn('⚠️ Null uniform locations:', nullUniforms);
       }
-    };
+      
+      glResourcesRef.current = {
+        program: prog, vao, texture: tex, capTexture: capTex, buffer: buf,
+        uniforms: uniformLocs,
+      };
+      console.log('✅ WebGL resources initialized');
+    } catch (e) {
+      console.error('❌ Error setting up uniforms:', e);
+    }
+
+    console.groupEnd();
 
     return () => {
-      gl.deleteProgram(prog);
-      gl.deleteVertexArray(vao);
-      gl.deleteBuffer(buf);
-      gl.deleteTexture(tex);
+      try {
+        gl.deleteProgram(prog);
+        gl.deleteVertexArray(vao);
+        gl.deleteBuffer(buf);
+        gl.deleteTexture(tex);
+      } catch (e) {
+        console.warn('Cleanup error:', e);
+      }
     };
   };
 
   useEffect(() => {
     return initWebGL();
   }, [shaderFile]);
+
+  // Keyboard toggle for debug overlay (press 'D' to toggle)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'd' || e.key === 'D') {
+        setDebugInfo(prev => ({ ...prev, visible: !prev.visible }));
+        console.log('🔍 Debug overlay:', debugInfo.visible ? 'OFF' : 'ON');
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [debugInfo.visible]);
 
   // Sync WebGL canvas buffer dimensions to its CSS display size on resize
   useEffect(() => {
@@ -962,6 +1057,39 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
 
         deviceRef.current = device; contextRef.current = context; uniformBufferRef.current = uniformBuffer;
 
+        // Handle canvas resizing for WebGPU
+        const resizeObserver = new ResizeObserver((entries) => {
+          for (const entry of entries) {
+            const { width, height } = entry.contentRect;
+            const canvas = canvasRef.current;
+            if (!canvas || !contextRef.current || !deviceRef.current) continue;
+            
+            // Only reconfigure if size actually changed
+            if (canvas.width !== Math.floor(width) || canvas.height !== Math.floor(height)) {
+              canvas.width = Math.floor(width);
+              canvas.height = Math.floor(height);
+              
+              // Reconfigure WebGPU context with new size
+              try {
+                contextRef.current.configure({ 
+                  device: deviceRef.current, 
+                  format: navigator.gpu.getPreferredCanvasFormat()
+                });
+                console.log(`🖥️ WebGPU canvas resized: ${canvas.width}x${canvas.height}`);
+              } catch (e) {
+                console.error('❌ WebGPU resize error:', e);
+              }
+            }
+          }
+        });
+        
+        if (canvasRef.current) {
+          resizeObserver.observe(canvasRef.current);
+        }
+        
+        // Store cleanup function
+        (deviceRef.current as any)._resizeObserver = resizeObserver;
+
         const isHighPrec = shaderFile.includes('v0.36') || shaderFile.includes('v0.37') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49');
         const packFunc = isHighPrec ? packPatternMatrixHighPrecision : packPatternMatrix;
         cellsBufferRef.current = createBufferWithData(device, packFunc(matrix, padTopChannel), GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
@@ -1030,6 +1158,11 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
         videoTextureRef.current = null; 
       }
       if (deviceRef.current) {
+        // Clean up ResizeObserver
+        const resizeObserver = (deviceRef.current as any)._resizeObserver;
+        if (resizeObserver && canvasRef.current) {
+          resizeObserver.disconnect();
+        }
         try { deviceRef.current.destroy(); } catch (e) {}
       }
       deviceRef.current = null; 
@@ -1183,118 +1316,221 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
 
     if (!gl || !res || !isOverlayShader || !matrix) return;
 
-    const { program, vao, texture, uniforms } = res;
-    const cols = padTopChannel ? (matrix.numChannels || DEFAULT_CHANNELS) + 1 : (matrix.numChannels || DEFAULT_CHANNELS);
-    const rows = matrix.numRows || DEFAULT_ROWS;
+    const errors: string[] = [];
+    const uniformVals: Record<string, number | string> = {};
 
-    gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
-    gl.clearColor(0, 0, 0, 0);
-    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-    
-    gl.useProgram(program);
-    gl.bindVertexArray(vao);
+    try {
+      const { program, vao, texture, uniforms } = res;
+      const cols = padTopChannel ? (matrix.numChannels || DEFAULT_CHANNELS) + 1 : (matrix.numChannels || DEFAULT_CHANNELS);
+      const rows = matrix.numRows || DEFAULT_ROWS;
 
-    gl.uniform2f(uniforms.u_resolution, gl.canvas.width, gl.canvas.height);
-    gl.uniform1f(uniforms.u_cols, cols);
-    gl.uniform1f(uniforms.u_rows, rows);
-    gl.uniform1f(uniforms.u_playhead, playheadRow);
-    gl.uniform1i(uniforms.u_invertChannels, invertChannels ? 1 : 0);
+      // Check for GL errors before starting
+      const preError = gl.getError();
+      if (preError !== gl.NO_ERROR) {
+        errors.push(`Pre-draw GL Error: 0x${preError.toString(16)}`);
+      }
 
-    gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, texture);
-        gl.uniform1i(uniforms.u_noteData, 0);
+      gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+      gl.clearColor(0, 0, 0, 0);
+      gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+      
+      gl.useProgram(program);
+      gl.bindVertexArray(vao);
 
-    if (res.capTexture) {
-        gl.activeTexture(gl.TEXTURE1);
-        gl.bindTexture(gl.TEXTURE_2D, res.capTexture);
-        gl.uniform1i(uniforms.u_capTexture, 1);
+      // Upload uniforms with error checking
+      // PERFORMANCE OPTIMIZATION: Use live values from ref for smooth animation
+      const livePlayheadRow = playbackStateRef?.current?.playheadRow ?? playheadRow;
+      
+      try {
+        gl.uniform2f(uniforms.u_resolution, gl.canvas.width, gl.canvas.height);
+        uniformVals['u_resolution'] = `${gl.canvas.width}x${gl.canvas.height}`;
+        
+        gl.uniform1f(uniforms.u_cols, cols);
+        uniformVals['u_cols'] = cols;
+        
+        gl.uniform1f(uniforms.u_rows, rows);
+        uniformVals['u_rows'] = rows;
+        
+        gl.uniform1f(uniforms.u_playhead, livePlayheadRow);
+        uniformVals['u_playhead'] = livePlayheadRow.toFixed(2);
+        
+        gl.uniform1i(uniforms.u_invertChannels, invertChannels ? 1 : 0);
+        uniformVals['u_invertChannels'] = invertChannels ? 1 : 0;
+      } catch (e) {
+        errors.push(`Uniform upload error: ${e}`);
+      }
+
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, texture);
+      gl.uniform1i(uniforms.u_noteData, 0);
+
+      if (res.capTexture) {
+          gl.activeTexture(gl.TEXTURE1);
+          gl.bindTexture(gl.TEXTURE_2D, res.capTexture);
+          gl.uniform1i(uniforms.u_capTexture, 1);
+      }
+
+      // Geometry & Layout Configuration using shared constants
+      let effectiveCellW = cellWidth;
+      let effectiveCellH = cellHeight;
+      let layoutMode: LayoutMode = LAYOUT_MODES.CIRCULAR;
+      let layoutModeName = 'CIRCULAR';
+
+      // Get layout mode from shader
+      layoutMode = getLayoutModeFromShader(shaderFile);
+
+      if (layoutMode === LAYOUT_MODES.HORIZONTAL_32) {
+          // Horizontal 32-step
+          const metrics = calculateHorizontalCellSize(gl.canvas.width, gl.canvas.height, 32, rows);
+          effectiveCellW = metrics.cellW;
+          effectiveCellH = metrics.cellH;
+          gl.uniform2f(uniforms.u_offset, metrics.offsetX, metrics.offsetY);
+          layoutModeName = shaderFile.includes('v0.39') ? '32-STEP (v0.39)' : '32-STEP';
+      } else if (layoutMode === LAYOUT_MODES.HORIZONTAL_64) {
+          // Horizontal 64-step
+          const metrics = calculateHorizontalCellSize(gl.canvas.width, gl.canvas.height, 64, rows);
+          effectiveCellW = metrics.cellW;
+          effectiveCellH = metrics.cellH;
+          gl.uniform2f(uniforms.u_offset, metrics.offsetX, metrics.offsetY);
+          layoutModeName = '64-STEP';
+      } else {
+          // Circular layout
+          gl.uniform2f(uniforms.u_offset, 0.0, 0.0);
+          layoutModeName = shaderFile.includes('v0.45') ? 'CIRCULAR (v0.45)' : 'CIRCULAR';
+      }
+
+      // Calculate cap scale using shared constant formula
+      const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
+      const capScale = calculateCapScale(effectiveCellW, effectiveCellH, pixelRatio);
+
+      gl.uniform2f(uniforms.u_cellSize, effectiveCellW, effectiveCellH);
+      gl.uniform1i(uniforms.u_layoutMode, layoutMode);
+
+      uniformVals['u_offset'] = `${(GRID_RECT.x * gl.canvas.width).toFixed(1)}, ${(GRID_RECT.y * gl.canvas.height).toFixed(1)}`;
+      uniformVals['u_cellSize'] = `${effectiveCellW.toFixed(1)}, ${effectiveCellH.toFixed(1)}`;
+      uniformVals['capScale'] = capScale.toFixed(1);
+      uniformVals['pixelRatio'] = pixelRatio;
+      uniformVals['GRID_RECT'] = `${GRID_RECT.x.toFixed(3)}, ${GRID_RECT.y.toFixed(3)}, ${GRID_RECT.w.toFixed(3)}, ${GRID_RECT.h.toFixed(3)}`;
+
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+
+      const stepsForMode = layoutMode === LAYOUT_MODES.HORIZONTAL_32 ? 32 : 
+                           layoutMode === LAYOUT_MODES.HORIZONTAL_64 ? 64 : 64;
+      const totalInstances = stepsForMode * cols;
+      
+      uniformVals['totalInstances'] = totalInstances;
+      uniformVals['cols'] = cols;
+      uniformVals['rows'] = rows;
+
+      gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, totalInstances);
+
+      // Check for GL errors after draw
+      const postError = gl.getError();
+      if (postError !== gl.NO_ERROR) {
+        errors.push(`Post-draw GL Error: 0x${postError.toString(16)}`);
+      }
+
+      gl.bindVertexArray(null);
+
+      // Update debug info
+      setDebugInfo(prev => ({
+        ...prev,
+        layoutMode: layoutModeName,
+        errors,
+        uniforms: uniformVals
+      }));
+
+      // Console debug output
+      console.group(`🔍 PatternDisplay Debug - Mode ${layoutMode}`);
+      console.log('Layout:', layoutModeName);
+      console.log('GRID_RECT:', GRID_RECT);
+      console.log('POLAR_RINGS:', POLAR_RINGS);
+      console.log('CAP_CONFIG:', CAP_CONFIG);
+      console.log('effectiveCellW/H:', effectiveCellW, effectiveCellH);
+      console.log('capScale:', capScale);
+      console.log('totalInstances:', totalInstances);
+      console.log('Errors:', errors.length > 0 ? errors : 'None');
+      console.groupEnd();
+
+    } catch (e) {
+      console.error('❌ drawWebGL error:', e);
+      errors.push(`Exception: ${e}`);
+      setDebugInfo(prev => ({ ...prev, errors }));
     }
-
-    // Geometry & Layout Configuration
-    let effectiveCellW = cellWidth;
-    let effectiveCellH = cellHeight;
-    let layoutMode = 1; // Default Circular
-
-    // Use unified GRID constants for consistent alignment
-    const u_offset = { x: GRID_INSET_X * gl.canvas.width, y: GRID_INSET_Y * gl.canvas.height };
-
-    if (shaderFile.includes('v0.40') || shaderFile.includes('v0.43') || shaderFile.includes('v0.46')) {
-        // Horizontal 32
-        const stepCols = 32;
-        effectiveCellW = (GRID_WIDTH * gl.canvas.width) / stepCols;
-        effectiveCellH = (GRID_HEIGHT * gl.canvas.height) / rows;
-        gl.uniform2f(uniforms.u_offset, u_offset.x, u_offset.y);
-        layoutMode = 2;
-    } else if (shaderFile.includes('v0.44')) {
-        // Horizontal 64
-        const stepCols = 64;
-        effectiveCellW = (GRID_WIDTH * gl.canvas.width) / stepCols;
-        effectiveCellH = (GRID_HEIGHT * gl.canvas.height) / rows;
-        gl.uniform2f(uniforms.u_offset, u_offset.x, u_offset.y);
-        layoutMode = 3;
-    } else if (shaderFile.includes('v0.39')) {
-        // Full Screen Horizontal
-        effectiveCellW = canvasMetrics.width / 32.0;
-        effectiveCellH = canvasMetrics.height / cols;
-        gl.uniform2f(uniforms.u_offset, 0.0, 0.0);
-        layoutMode = 2;
-    } else if (shaderFile.includes('v0.45')) {
-        // Circular with UI
-        gl.uniform2f(uniforms.u_offset, 0.0, 0.0);
-        layoutMode = 1;
-    } else {
-        // Default Circular
-        gl.uniform2f(uniforms.u_offset, 0.0, 0.0);
-        layoutMode = 1;
-    }
-
-    gl.uniform2f(uniforms.u_cellSize, effectiveCellW, effectiveCellH);
-    gl.uniform1i(uniforms.u_layoutMode, layoutMode);
-
-    gl.enable(gl.BLEND);
-    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
-
-    const stepsForMode = layoutMode === 2 ? GL_STEPS_HORIZONTAL_32 : GL_STEPS_DEFAULT;
-    const totalInstances = stepsForMode * cols;
-    gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, totalInstances);
-
-    gl.bindVertexArray(null);
   }
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-     if (e.target.files && e.target.files.length > 0) onFileSelected?.(e.target.files[0]);
+     const selectedFile = e.target.files?.[0];
+     if (selectedFile) onFileSelected?.(selectedFile);
   };
 
   const render = () => {
-    // (render function unchanged)
     const device = deviceRef.current;
     const context = contextRef.current;
     const pipeline = pipelineRef.current;
     const bindGroup = bindGroupRef.current;
-    if (!device || !context || !pipeline || !bindGroup || !uniformBufferRef.current || !cellsBufferRef.current) return;
+    const canvas = canvasRef.current;
+    if (!device || !context || !pipeline || !bindGroup || !uniformBufferRef.current || !cellsBufferRef.current || !canvas) return;
+
+    // 1. CHECK RESIZE EVERY FRAME - WebGPU canvas resize handling
+    // Get actual display size with device pixel ratio for sharp rendering
+    const targetWidth = Math.max(1, Math.floor(canvas.clientWidth * window.devicePixelRatio));
+    const targetHeight = Math.max(1, Math.floor(canvas.clientHeight * window.devicePixelRatio));
+    
+    if (canvas.width !== targetWidth || canvas.height !== targetHeight) {
+      canvas.width = targetWidth;
+      canvas.height = targetHeight;
+      
+      // Reconfigure WebGPU context with new size
+      try {
+        context.configure({ 
+          device, 
+          format: navigator.gpu.getPreferredCanvasFormat(),
+          alphaMode: 'premultiplied'
+        });
+        console.log(`🖥️ WebGPU render resize: ${targetWidth}x${targetHeight}`);
+      } catch (e) {
+        console.error('❌ WebGPU render resize error:', e);
+      }
+    }
 
     if (uniformBufferRef.current) {
       const numRows = matrix?.numRows ?? DEFAULT_ROWS;
       const rawChannels = matrix?.numChannels ?? DEFAULT_CHANNELS;
       const numChannels = padTopChannel ? rawChannels + 1 : rawChannels;
       const rowLimit = Math.max(1, numRows);
-      const tickRow = clampPlayhead(playheadRow, rowLimit);
+      
+      // PERFORMANCE OPTIMIZATION: Read from ref for high-frequency values
+      // This bypasses React's render cycle for 60fps smooth updates
+      const refState = playbackStateRef?.current;
+      const livePlayheadRow = refState?.playheadRow ?? playheadRow;
+      const liveBeatPhase = refState?.beatPhase ?? beatPhase;
+      const liveKickTrigger = refState?.kickTrigger ?? kickTrigger;
+      const liveGrooveAmount = refState?.grooveAmount ?? grooveAmount;
+      const liveTimeSec = refState?.timeSec ?? timeSec;
+      
+      const tickRow = clampPlayhead(livePlayheadRow, rowLimit);
       const computedTickOffset = tickRow - Math.floor(tickRow);
       const fractionalTick = Math.min(
         1,
         Math.max(0, Number.isFinite(computedTickOffset) ? computedTickOffset : tickOffset)
       );
-      const effectiveTime = isModuleLoaded ? timeSec : localTime;
+      const effectiveTime = isModuleLoaded ? liveTimeSec : localTime;
+
+      // Use ACTUAL canvas dimensions from DOM (not memoized metrics)
+      const actualCanvasW = canvas.width;
+      const actualCanvasH = canvas.height;
 
       // v0.39 and v0.40 Override: Ensure uniform payload reflects the auto-calculated dimensions
       let effectiveCellW = cellWidth;
       let effectiveCellH = cellHeight;
       if (shaderFile.includes('v0.21') || shaderFile.includes('v0.40') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.47') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49')) {
-          effectiveCellW = (GRID_RECT.w * canvasMetrics.width) / 32.0;
-          effectiveCellH = (GRID_RECT.h * canvasMetrics.height) / numChannels;
+          effectiveCellW = (GRID_RECT.w * actualCanvasW) / 32.0;
+          effectiveCellH = (GRID_RECT.h * actualCanvasH) / numChannels;
       } else if (shaderFile.includes('v0.39')) {
-          effectiveCellW = canvasMetrics.width / 32.0;
-          effectiveCellH = canvasMetrics.height / numChannels; // Approx
+          effectiveCellW = actualCanvasW / 32.0;
+          effectiveCellH = actualCanvasH / numChannels;
       }
 
       const uniformByteLength = fillUniformPayload(layoutTypeRef.current, {
@@ -1305,14 +1541,14 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
         isPlaying,
         cellW: effectiveCellW,
         cellH: effectiveCellH,
-        canvasW: canvasMetrics.width,
-        canvasH: canvasMetrics.height,
+        canvasW: actualCanvasW,
+        canvasH: actualCanvasH,
         tickOffset: fractionalTick,
         bpm,
         timeSec: effectiveTime,
-        beatPhase,
-        groove: Math.min(1, Math.max(0, grooveAmount)),
-        kickTrigger,
+        beatPhase: liveBeatPhase,
+        groove: Math.min(1, Math.max(0, liveGrooveAmount)),
+        kickTrigger: liveKickTrigger,
         activeChannels,
         isModuleLoaded,
         bloomIntensity: bloomIntensity ?? 1.0,
@@ -1326,8 +1562,11 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
 
     if (bezelUniformBufferRef.current) {
       const buf = bezelFloatRef.current;
-      buf[0] = canvasMetrics.width; buf[1] = canvasMetrics.height;
-      const minDim = Math.min(canvasMetrics.width, canvasMetrics.height);
+      // Use actual canvas dimensions
+      const actualCanvasW = canvas?.width || canvasMetrics.width;
+      const actualCanvasH = canvas?.height || canvasMetrics.height;
+      buf[0] = actualCanvasW; buf[1] = actualCanvasH;
+      const minDim = Math.min(actualCanvasW, actualCanvasH);
       const circularLayout = isCircularLayoutShader(shaderFile);
       buf[2] = minDim * (circularLayout ? 0.05 : 0.07);
       buf[3] = 0.98; buf[4] = 0.98; buf[5] = 0.98;
@@ -1344,7 +1583,9 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
       const uint32View = bezelUintRef.current;
       uint32View[19] = isLooping ? 1 : 0;
       uint32View[20] = 0;
-      buf[21] = playheadRow;
+      // Use live playhead from ref for smooth animation
+      const livePlayheadRow = playbackStateRef?.current?.playheadRow ?? playheadRow;
+      buf[21] = livePlayheadRow;
       uint32View[22] = clickedButton;
       device.queue.writeBuffer(bezelUniformBufferRef.current, 0, bezelBufferDataRef.current, 0, 96); // Float32Array(24) = 96 bytes
     }
@@ -1546,6 +1787,57 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
 
 
       {!webgpuAvailable && <div className="error">WebGPU not available in this browser.</div>}
+      
+      {/* Debug Overlay Panel */}
+      {debugInfo.visible && (
+        <div 
+          className="fixed top-4 right-4 bg-black/90 border border-green-500/50 rounded p-3 text-xs font-mono z-50 max-w-xs"
+          style={{ backdropFilter: 'blur(4px)' }}
+        >
+          <div className="flex justify-between items-center mb-2">
+            <span className="text-green-400 font-bold">🔍 PatternDisplay Debug</span>
+            <button 
+              onClick={() => setDebugInfo(prev => ({ ...prev, visible: false }))}
+              className="text-gray-500 hover:text-white"
+            >
+              ✕
+            </button>
+          </div>
+          
+          <div className="mb-2">
+            <span className="text-gray-400">Mode:</span>
+            <span className={`ml-2 font-bold ${
+              debugInfo.layoutMode.includes('32') ? 'text-blue-400' : 
+              debugInfo.layoutMode.includes('64') ? 'text-purple-400' : 'text-orange-400'
+            }`}>
+              {debugInfo.layoutMode}
+            </span>
+          </div>
+          
+          {debugInfo.errors.length > 0 && (
+            <div className="mb-2">
+              <div className="text-red-400 font-bold mb-1">Errors:</div>
+              {debugInfo.errors.map((err, i) => (
+                <div key={i} className="text-red-300 text-[10px] truncate">• {err}</div>
+              ))}
+            </div>
+          )}
+          
+          <div className="border-t border-gray-700 pt-2 mt-2">
+            <div className="text-gray-500 text-[10px] mb-1">Uniforms:</div>
+            {Object.entries(debugInfo.uniforms).map(([key, val]) => (
+              <div key={key} className="flex justify-between text-[10px]">
+                <span className="text-gray-400">{key}:</span>
+                <span className="text-cyan-300 ml-2">{String(val)}</span>
+              </div>
+            ))}
+          </div>
+          
+          <div className="text-[9px] text-gray-600 mt-2 pt-1 border-t border-gray-800">
+            Press 'D' to toggle
+          </div>
+        </div>
+      )}
     </div>
   );
 };

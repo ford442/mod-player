@@ -110,6 +110,7 @@ fn getNoteColor(note: u32) -> vec3<f32> {
 
 @fragment
 fn fs(in: VertexOut) -> @location(0) vec4<f32> {
+  if (in.channel >= uniforms.numChannels) { return vec4<f32>(1.0, 0.0, 0.0, 1.0); }
   let uv = in.uv;
   let aspect = uniforms.canvasW / uniforms.canvasH;
   let dimFactor = uniforms.dimFactor;
@@ -265,5 +266,13 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   } else if (pageProgress > 0.95) {
       boundaryFade = 1.0 - smoothstep(0.95, 1.0, pageProgress);
   }
+  // Kick reactive glow
+  let p = uv - 0.5;
+  let kickPulse = uniforms.kickTrigger * exp(-length(p) * 3.0) * 0.3;
+  col += vec3<f32>(0.9, 0.2, 0.4) * kickPulse * uniforms.bloomIntensity;
+  // Dithering for night mode
+  let noise = fract(sin(dot(in.uv * uniforms.timeSec, vec2<f32>(12.9898, 78.233))) * 43758.5453);
+  col += (noise - 0.5) * 0.01;
+
   return vec4<f32>(col * dimFactor * boundaryFade, 1.0);
 }

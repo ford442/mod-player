@@ -49,11 +49,12 @@ export const ChannelMeters: React.FC<ChannelMetersProps> = ({
 
     for (let i = 0; i < nCh; i++) {
       const v = currentVU && i < currentVU.length
-        ? Math.min(1, Math.max(0, currentVU[i]))
+        ? Math.min(1, Math.max(0, currentVU[i] ?? 0))
         : 0;
-      p[i] = Math.max(v, (p[i] ?? 0) * PEAK_DECAY);
+      const currentPeak = p[i] ?? 0;
+      p[i] = Math.max(v, currentPeak * PEAK_DECAY);
       newLevels.push(v);
-      newPeaks.push(p[i]);
+      newPeaks.push(p[i] ?? 0);
     }
     setLevels(newLevels);
     setPeaks(newPeaks);
@@ -87,7 +88,8 @@ export const ChannelMeters: React.FC<ChannelMetersProps> = ({
       const sliceWidth = w / bufLen;
       let x = 0;
       for (let i = 0; i < bufLen; i++) {
-        const y = (buf[i] / 255) * h;
+        const sample = buf[i] ?? 128;
+        const y = (sample / 255) * h;
         if (i === 0) ctx.moveTo(x, y);
         else ctx.lineTo(x, y);
         x += sliceWidth;
@@ -128,7 +130,9 @@ export const ChannelMeters: React.FC<ChannelMetersProps> = ({
     const container = scopeContainerRef.current;
     const canvas = scopeCanvasRef.current;
     if (!container || !canvas) return;
-    const ro = new ResizeObserver(([entry]) => {
+    const ro = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (!entry) return;
       const { width } = entry.contentRect;
       canvas.width = Math.round(width * (window.devicePixelRatio || 1));
       canvas.height = Math.round(SCOPE_HEIGHT * (window.devicePixelRatio || 1));

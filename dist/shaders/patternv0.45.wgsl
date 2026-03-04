@@ -130,7 +130,8 @@ fn neonPalette(t: f32) -> vec3<f32> {
   let b = vec3<f32>(0.5, 0.5, 0.5);
   let c = vec3<f32>(1.0, 1.0, 1.0);
   let d = vec3<f32>(0.0, 0.33, 0.67);
-  return a + b * cos(6.28318 * (c * t + d));
+  let beatDrift = uniforms.beatPhase * 0.1;
+  return a + b * cos(6.28318 * (c * (t + beatDrift) + d));
 }
 
 fn sdRoundedBox(p: vec2<f32>, b: vec2<f32>, r: f32) -> f32 {
@@ -189,6 +190,7 @@ fn pitchClassFromPacked(packed: u32) -> f32 {
 
 @fragment
 fn fs(in: VertexOut) -> @location(0) vec4<f32> {
+  if (in.channel >= uniforms.numChannels) { return vec4<f32>(1.0, 0.0, 0.0, 1.0); }
   let dimFactor = uniforms.dimFactor;
   let bloom = uniforms.bloomIntensity;
   let isPlaying = (uniforms.isPlaying == 1u);
@@ -289,6 +291,14 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   if (glow > 0.0) {
       capColor *= (1.0 + bloom);
   }
-  
+
+  // Kick reactive glow
+  let p = in.uv - 0.5;
+  let kickPulse = uniforms.kickTrigger * exp(-length(p) * 3.0) * 0.3;
+  capColor += vec3<f32>(0.9, 0.2, 0.4) * kickPulse * uniforms.bloomIntensity;
+  // Dithering for night mode
+  let noise = fract(sin(dot(in.uv * uniforms.timeSec, vec2<f32>(12.9898, 78.233))) * 43758.5453);
+  capColor += (noise - 0.5) * 0.01;
+
   return vec4<f32>(capColor * dimFactor, edge);
 }

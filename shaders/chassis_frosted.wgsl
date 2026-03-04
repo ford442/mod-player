@@ -1,6 +1,5 @@
 // chassis_frosted.wgsl
-// Frosted glass hardware chassis with modern UI controls
-// Simplified frosted background for pattern shaders
+// High-Fidelity "Polar White" Case with Frosted Crystal Buttons
 
 struct BezelUniforms {
   canvasW: f32,
@@ -22,28 +21,49 @@ struct BezelUniforms {
   volume: f32,
   pan: f32,
   bpm: f32,
-  isLooping: u32,
-  currentOrder: u32,
-  currentRow: u32,
-  clickedButton: u32,
-  gridRect: vec4<f32>, // x, y, w, h (normalized)
+  isLooping: f32,      // Changed to f32 for JS buffer safety
+  currentOrder: f32,   // Changed to f32
+  currentRow: f32,     // Changed to f32
+  clickedButton: f32,  // Changed to f32
+  _pad2: f32,
 };
 
 @group(0) @binding(0) var<uniform> bez: BezelUniforms;
 @group(0) @binding(1) var bezelSampler: sampler;
 @group(0) @binding(2) var bezelTexture: texture_2d<f32>;
 
-fn hash(p: vec2<f32>) -> f32 {
-  return fract(sin(dot(p, vec2<f32>(12.9898, 78.233))) * 43758.5453);
+// --- UTILITIES ---
+
+fn hash2(p: vec2<f32>) -> f32 {
+    return fract(sin(dot(p, vec2<f32>(12.9898, 78.233))) * 43758.5453);
 }
 
+fn noise(p: vec2<f32>) -> f32 {
+    let i = floor(p);
+    let f = fract(p);
+    let u = f * f * (3.0 - 2.0 * f);
+    return mix(mix(hash2(i + vec2<f32>(0.0, 0.0)), hash2(i + vec2<f32>(1.0, 0.0)), u.x),
+               mix(hash2(i + vec2<f32>(0.0, 1.0)), hash2(i + vec2<f32>(1.0, 1.0)), u.x), u.y);
+}
+
+// 2D SDFs
 fn sdRoundedBox(p: vec2<f32>, b: vec2<f32>, r: f32) -> f32 {
-  let q = abs(p) - b + r;
-  return length(max(q, vec2<f32>(0.0))) + min(max(q.x, q.y), 0.0) - r;
+    let q = abs(p) - b + r;
+    return length(max(q, vec2<f32>(0.0))) + min(max(q.x, q.y), 0.0) - r;
 }
 
 fn sdCircle(p: vec2<f32>, r: f32) -> f32 {
-  return length(p) - r;
+    return length(p) - r;
+}
+
+fn sdTriangle(p: vec2<f32>, r: f32) -> f32 {
+    let k = sqrt(3.0);
+    var p2 = p;
+    p2.x = abs(p2.x) - r;
+    p2.y = p2.y + r / k;
+    if (p2.x + k * p2.y > 0.0) { p2 = vec2<f32>(p2.x - k * p2.y, -k * p2.x - p2.y) / 2.0; }
+    p2.x = p2.x - clamp(p2.x, -2.0 * r, 0.0);
+    return -length(p2) * sign(p2.y);
 }
 
 fn sdBox(p: vec2<f32>, b: vec2<f32>) -> f32 {
@@ -51,31 +71,17 @@ fn sdBox(p: vec2<f32>, b: vec2<f32>) -> f32 {
     return length(max(d, vec2<f32>(0.0))) + min(max(d.x, d.y), 0.0);
 }
 
-// Frosted glass effect
-fn frostedGlass(uv: vec2<f32>, intensity: f32) -> vec3<f32> {
-    let noise = hash(uv * 200.0) * 0.1;
-    let baseColor = vec3<f32>(0.92, 0.93, 0.95);
-    return baseColor * (1.0 - noise * intensity);
-}
-
-// Subtle brushed metal texture
-fn brushedMetal(uv: vec2<f32>) -> vec3<f32> {
-    let grain = hash(uv * vec2<f32>(800.0, 50.0)) * 0.04;
-    let base = vec3<f32>(0.88, 0.89, 0.91);
-    return base - vec3<f32>(grain);
-}
+// --- TEXT/UI RENDERING ---
 
 fn drawDigit(p: vec2<f32>, digit: u32, size: f32) -> f32 {
     let segW = size * 0.15;
     let segL = size * 0.45;
     let gap = size * 0.05;
+    var segments = array<u32, 10>(0x77u, 0x24u, 0x5du, 0x6du, 0x2eu, 0x6bu, 0x7bu, 0x25u, 0x7fu, 0x6fu);
     
-    var segments = array<u32, 10>(
-        0x77u, 0x24u, 0x5du, 0x6du, 0x2eu, 
-        0x6bu, 0x7bu, 0x25u, 0x7fu, 0x6fu
-    );
-    
-    let code = select(0u, segments[digit], digit < 10u);
+    // WebGPU safe bounds
+    let safeDigit = min(digit, 9u);
+    let code = select(0u, segments[safeDigit], digit < 10u);
     var minDist = 100.0;
     
     if ((code & 0x01u) != 0u) { minDist = min(minDist, sdBox(p - vec2<f32>(0.0, -segL), vec2<f32>(segL, segW))); }
@@ -85,7 +91,6 @@ fn drawDigit(p: vec2<f32>, digit: u32, size: f32) -> f32 {
     if ((code & 0x10u) != 0u) { minDist = min(minDist, sdBox(p - vec2<f32>(-segL, segL * 0.5 + gap * 0.5), vec2<f32>(segW, segL * 0.5))); }
     if ((code & 0x20u) != 0u) { minDist = min(minDist, sdBox(p - vec2<f32>(-segL, -segL * 0.5 - gap * 0.5), vec2<f32>(segW, segL * 0.5))); }
     if ((code & 0x40u) != 0u) { minDist = min(minDist, sdBox(p, vec2<f32>(segL, segW))); }
-    
     return minDist;
 }
 
@@ -102,42 +107,46 @@ fn drawNumber(p: vec2<f32>, value: u32, numDigits: u32, digitSize: f32, spacing:
     return minDist;
 }
 
-// White Square Button Style with frosted look
-fn drawFrostedButton(uv: vec2<f32>, size: vec2<f32>, glowColor: vec3<f32>, isOn: bool, aa: f32) -> vec4<f32> {
-  let halfSize = size * 0.5;
-  let d = sdRoundedBox(uv, halfSize, 0.02);
+// --- MATERIALS ---
 
-  // Frosted glass base
-  var col = frostedGlass(uv * 5.0, 0.5);
-  
-  // Add subtle gradient
-  col *= 0.95 + 0.05 * sin(uv.y * 20.0);
+fn getChassisMaterial(uv: vec2<f32>) -> vec3<f32> {
+    let baseCol = vec3<f32>(0.94, 0.95, 0.96); 
+    let grain = noise(uv * 1500.0) * 0.03;
+    let sheen = noise(uv * 4.0) * 0.02;
+    return baseCol - vec3<f32>(grain + sheen);
+} 
 
-  var alpha = 0.0;
-  let bodyMask = 1.0 - smoothstep(0.0, aa, d);
-  
-  if (isOn) {
-      col = mix(col, vec3<f32>(1.0, 1.0, 1.0), 0.3);
-      col = mix(col, glowColor, 0.15);
-  } else {
-      col = col * 0.9;
-  }
+fn drawFrostedButton(p: vec2<f32>, size: vec2<f32>, ledColor: vec3<f32>, isOn: bool, aa: f32) -> vec4<f32> {
+    let halfSize = size * 0.5;
+    let cornerRadius = 0.015;
+    let d = sdRoundedBox(p, halfSize, cornerRadius);
 
-  if (bodyMask > 0.0) { alpha = 0.95; }
+    let alpha = 1.0 - smoothstep(0.0, aa, d);
+    if (alpha <= 0.0) { return vec4<f32>(0.0, 0.0, 0.0, 0.0); }
 
-  if (isOn) {
-      let glowDist = max(0.0, d);
-      let glow = exp(-glowDist * 15.0) * glowColor * 1.2;
-      if (d > 0.0) {
-        col = glow;
-        alpha = smoothstep(0.0, 0.3, length(glow));
-      } else {
-        col += glow * 0.3;
-      }
-  }
+    var col = vec3<f32>(0.88, 0.90, 0.95); 
+    let frostGrain = hash2(p * 600.0) * 0.05;
+    col -= vec3<f32>(frostGrain);
 
-  return vec4<f32>(col, alpha);
-}
+    let bevelW = 0.012;
+    let height = smoothstep(0.0, bevelW, -d);
+    let rim = smoothstep(bevelW * 0.5, 0.0, -d) * 0.7;
+    col += vec3<f32>(rim);
+
+    if (isOn) {
+        let coreGlow = exp(-length(p) * 6.0) * 1.5;
+        let volume = smoothstep(0.0, 1.0, height);
+        col = mix(col, ledColor, 0.5 * volume);
+        col += ledColor * coreGlow * 0.8;
+    } else {
+        col *= 0.8;
+        col -= vec3<f32>(0.1) * (1.0 - height);
+    }
+
+    return vec4<f32>(col, alpha);
+} 
+
+// --- MAIN STAGE ---
 
 struct VertOut {
   @builtin(position) position: vec4<f32>,
@@ -153,147 +162,114 @@ fn vs(@builtin(vertex_index) vertexIndex: u32) -> VertOut {
   let pos = verts[vertexIndex];
   var out: VertOut;
   out.position = vec4<f32>(pos, 0.0, 1.0);
-  out.uv = pos * 0.5 + vec2<f32>(0.5);
+  out.uv = pos * 0.5 + vec2<f32>(0.5, 0.5);
   return out;
 }
 
 @fragment
 fn fs(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
-  let p = uv - 0.5;
-  let aa = 1.0 / bez.canvasH;
-  
-  // Base brushed metal background
-  var color = brushedMetal(uv * vec2<f32>(1.0, 2.0));
-  
-  // Apply dim factor for night mode
-  let dim = max(0.15, bez.dimFactor);
-  color *= dim;
+    let p = uv - 0.5;
+    let aa = 1.5 / bez.canvasH; 
 
-  // Checkered texture overlay for retro feel
-  let checkSize = 0.02;
-  let check = step(checkSize * 0.5, fract(p.x / checkSize)) == step(checkSize * 0.5, fract(p.y / checkSize));
-  color = mix(color, color * 0.97, 0.3 * f32(check));
+    var color = getChassisMaterial(uv);
 
-  // --- DISPLAY RECESS (cutout centered exactly on gridRect) ---
-  let center = bez.gridRect.xy + bez.gridRect.zw * 0.5 - 0.5;
-  let size = bez.gridRect.zw * 0.5;
-  let dRecess = sdRoundedBox(p - center, size, 0.01);
-  
-  // Dark recessed area behind the display
-  if (dRecess < 0.0) {
-      color = mix(color, vec3<f32>(0.02, 0.02, 0.03), 0.9);
-  }
-  
-  // Recess border highlight
-  let recessBorder = smoothstep(0.0, aa * 2.0, abs(dRecess));
-  if (dRecess > 0.0 && dRecess < 0.015) {
-      color = mix(color, vec3<f32>(0.6, 0.6, 0.65), 0.3);
-  }
+    let recessBox = sdRoundedBox(p - vec2<f32>(0.0, 0.40), vec2<f32>(0.36, 0.12), 0.02);
+    let recessMask = smoothstep(aa, -aa, recessBox);
+    let shadow = smoothstep(0.06, 0.0, recessBox);
+    
+    let colRecess = vec3<f32>(0.12, 0.13, 0.15);
+    color = mix(color, colRecess, recessMask);
+    color *= 1.0 - (shadow * 0.35 * (1.0 - recessMask)); 
 
-  // --- CONTROLS ---
-  
-  // Volume and pan are handled by the pattern shader overlay
-  // We just provide the chassis background
+    let displayY = 0.45;
+    let sliderRightX = 0.42;
+    let sliderY = -0.2;
+    let volPos = vec2<f32>(0.08, 0.415);
+    let volDim = vec2<f32>(0.09, 0.006);
 
-  // --- NIGHT MODE DIMMING ---
-  let uvFactor = (1.0 - dim) * 1.5;
+    let dVolTrack = sdRoundedBox(p - volPos, volDim, 0.003);
+    if (dVolTrack < 0.0) { color = vec3<f32>(0.2, 0.2, 0.2); }
+    
+    let volNorm = clamp(bez.volume, 0.0, 1.0);
+    let volHandleX = volPos.x + (volNorm - 0.5) * (volDim.x * 2.0 * 0.9);
+    let dVolHandle = sdCircle(p - vec2<f32>(volHandleX, volPos.y), 0.02);
+    if (dVolHandle < 0.0) { color = mix(color, vec3<f32>(0.3, 0.9, 0.5), smoothstep(aa, -aa, dVolHandle)); }
 
-  // --- EMISSIVE UI ELEMENTS ---
-  
-  // LED indicators (small status lights)
-  let ledColorBase = vec3<f32>(0.0, 0.8, 0.4);
-  let ledColor = ledColorBase + (ledColorBase * uvFactor);
-  
-  // Play indicator LED
-  let playLedPos = vec2<f32>(-0.48, 0.48);
-  let dPlayLed = sdCircle(p - playLedPos, 0.012);
-  if (dPlayLed < 0.0) {
-      let isPlaying = bez.isPlaying > 0.5;
-      let ledGlow = exp(-length(p - playLedPos) * 30.0);
-      if (isPlaying) {
-          color = mix(color, ledColor, smoothstep(aa, -aa, dPlayLed));
-          color += ledColor * ledGlow * 2.0;
-      } else {
-          color = mix(color, vec3<f32>(0.2, 0.2, 0.2), smoothstep(aa, -aa, dPlayLed));
-      }
-  }
+    let dPanTrack = sdRoundedBox(p - vec2<f32>(sliderRightX, sliderY), vec2<f32>(0.008, 0.1), 0.003);
+    if (dPanTrack < 0.0) { color = vec3<f32>(0.2, 0.2, 0.2); }
+    
+    let panNorm = clamp(bez.pan, -1.0, 1.0);
+    let panHandleY = sliderY + panNorm * 0.09;
+    let dPanHandle = sdCircle(p - vec2<f32>(sliderRightX, panHandleY), 0.02);
+    if (dPanHandle < 0.0) { color = mix(color, vec3<f32>(0.4, 0.6, 1.0), smoothstep(aa, -aa, dPanHandle)); }
 
-  // Loop indicator LED
-  let loopLedPos = vec2<f32>(-0.45, 0.48);
-  let dLoopLed = sdCircle(p - loopLedPos, 0.012);
-  if (dLoopLed < 0.0) {
-      let isLooping = bez.isLooping == 1u;
-      let loopColor = vec3<f32>(0.8, 0.4, 0.0);
-      let loopLedColor = loopColor + (loopColor * uvFactor);
-      if (isLooping) {
-          let ledGlow = exp(-length(p - loopLedPos) * 30.0);
-          color = mix(color, loopLedColor, smoothstep(aa, -aa, dLoopLed));
-          color += loopLedColor * ledGlow * 2.0;
-      } else {
-          color = mix(color, vec3<f32>(0.2, 0.2, 0.2), smoothstep(aa, -aa, dLoopLed));
-      }
-  }
+    let lcdColor = vec3<f32>(0.4, 0.9, 1.0); 
+    let bpmValue = u32(bez.bpm);
+    let dBPM = drawNumber(p - vec2<f32>(0.0, displayY), bpmValue, 3u, 0.012, 0.015);
+    if (dBPM < 0.0) { color = mix(color, lcdColor, smoothstep(aa, 0.0, dBPM)); }
 
-  // BPM display (small digital readout)
-  let bpmDisplayPos = vec2<f32>(0.42, 0.45);
-  let bpmValue = u32(bez.bpm);
-  let dBPM = drawNumber(p - bpmDisplayPos, bpmValue, 3u, 0.008, 0.012);
-  if (dBPM < 0.0) {
-      let bpmColor = vec3<f32>(0.3, 0.85, 1.0) + (vec3<f32>(0.3, 0.85, 1.0) * uvFactor);
-      let mask = smoothstep(aa, 0.0, dBPM);
-      color = mix(color, bpmColor, mask);
-  }
+    let posY = displayY - 0.04;
+    let lcdAmber = vec3<f32>(1.0, 0.7, 0.2);
+    
+    let dRow = drawNumber(p - vec2<f32>(0.10, posY), u32(bez.currentRow), 2u, 0.01, 0.012);
+    if (dRow < 0.0) { color = mix(color, lcdAmber, smoothstep(aa, 0.0, dRow)); }
+    
+    let dOrd = drawNumber(p - vec2<f32>(-0.10, posY), u32(bez.currentOrder), 2u, 0.01, 0.012);
+    if (dOrd < 0.0) { color = mix(color, lcdAmber, smoothstep(aa, 0.0, dOrd)); }
 
-  // Position display
-  let posDisplayPos = vec2<f32>(0.42, 0.40);
-  let orderValue = bez.currentOrder;
-  let rowValue = bez.currentRow;
-  let dOrder = drawNumber(p - posDisplayPos, orderValue, 2u, 0.006, 0.008);
-  let dRow = drawNumber(p - (posDisplayPos + vec2<f32>(0.03, 0.0)), rowValue, 2u, 0.006, 0.008);
-  
-  let posColor = vec3<f32>(1.0, 0.7, 0.2) + (vec3<f32>(1.0, 0.7, 0.2) * uvFactor);
-  if (dOrder < 0.0) {
-      color = mix(color, posColor, smoothstep(aa, 0.0, dOrder) * 0.8);
-  }
-  if (dRow < 0.0) {
-      color = mix(color, posColor, smoothstep(aa, 0.0, dRow) * 0.8);
-  }
+    let btnSize = vec2<f32>(0.09, 0.09);
+    let smBtnSize = vec2<f32>(0.07, 0.06);
+    let iconCol = vec3<f32>(0.15, 0.15, 0.15); 
 
-  // --- CORNER SCREWS (mechanical aesthetic) ---
-  let screwRadius = 0.015;
-  let screwInset = 0.46;
-  let screws = array<vec2<f32>, 4>(
-      vec2<f32>(-screwInset, -screwInset),
-      vec2<f32>(screwInset, -screwInset),
-      vec2<f32>(-screwInset, screwInset),
-      vec2<f32>(screwInset, screwInset)
-  );
-  
-  for (var i = 0u; i < 4u; i = i + 1u) {
-      let dScrew = sdCircle(p - screws[i], screwRadius);
-      if (dScrew < 0.02) {
-          // Screw head
-          let screwColor = vec3<f32>(0.75, 0.75, 0.78);
-          let screwShadow = vec3<f32>(0.4, 0.4, 0.42);
-          let sd = smoothstep(0.0, aa, dScrew);
-          color = mix(screwColor, screwShadow, sd * 0.5);
-          
-          // Screw slot
-          let slotW = screwRadius * 1.2;
-          let slotH = screwRadius * 0.15;
-          let dSlot = sdBox(p - screws[i], vec2<f32>(slotW, slotH));
-          if (dSlot < 0.0) {
-              color = vec3<f32>(0.2, 0.2, 0.22);
-          }
-      }
-  }
+    let ledPurple = vec3<f32>(0.8, 0.4, 1.0);
+    let ledAmber = vec3<f32>(1.0, 0.6, 0.1);
+    let ledGreen = vec3<f32>(0.2, 1.0, 0.4);
+    let ledRed = vec3<f32>(1.0, 0.2, 0.3);
+    let ledBlue = vec3<f32>(0.3, 0.6, 1.0);
 
-  // --- BEZEL EDGE HIGHLIGHT ---
-  let edgeDist = max(abs(p.x), abs(p.y));
-  if (edgeDist > 0.48 && edgeDist < 0.495) {
-      let edgeAlpha = smoothstep(0.495, 0.48, edgeDist);
-      color = mix(color, vec3<f32>(0.95, 0.95, 0.97), edgeAlpha * 0.3);
-  }
+    let pLoop = p - vec2<f32>(-0.26, 0.42);
+    let loopOn = (bez.isLooping > 0.5) || (bez.clickedButton > 0.5 && bez.clickedButton < 1.5);
+    let btnLoop = drawFrostedButton(pLoop, btnSize, ledPurple, loopOn, aa);
+    color = mix(color, btnLoop.rgb, btnLoop.a);
+    let dIconLoop = abs(length(pLoop) - 0.018) - 0.004;
+    color = mix(color, iconCol, smoothstep(aa, 0.0, -dIconLoop) * btnLoop.a);
 
-  return vec4<f32>(color, 1.0);
+    let pOpen = p - vec2<f32>(0.26, 0.42);
+    let openOn = (bez.clickedButton > 1.5 && bez.clickedButton < 2.5);
+    let btnOpen = drawFrostedButton(pOpen, btnSize, ledAmber, openOn, aa);
+    color = mix(color, btnOpen.rgb, btnOpen.a);
+    let folderBody = sdBox(pOpen - vec2<f32>(0.0, -0.005), vec2<f32>(0.02, 0.014));
+    let folderTab = sdBox(pOpen - vec2<f32>(-0.01, 0.015), vec2<f32>(0.008, 0.004));
+    let folder = min(folderBody, folderTab);
+    color = mix(color, iconCol, smoothstep(aa, 0.0, -folder) * btnOpen.a);
+
+    let pPrev = p - vec2<f32>(-0.12, 0.32);
+    let prevOn = (bez.clickedButton > 4.5 && bez.clickedButton < 5.5);
+    let btnPrev = drawFrostedButton(pPrev, smBtnSize, ledBlue, prevOn, aa);
+    color = mix(color, btnPrev.rgb, btnPrev.a);
+    let iconPrev = sdTriangle((pPrev) * vec2<f32>(-1.0, 1.0) * 3.5, 0.01);
+    color = mix(color, iconCol, smoothstep(aa, 0.0, -iconPrev) * btnPrev.a);
+
+    let pNext = p - vec2<f32>(0.12, 0.32);
+    let nextOn = (bez.clickedButton > 5.5 && bez.clickedButton < 6.5);
+    let btnNext = drawFrostedButton(pNext, smBtnSize, ledBlue, nextOn, aa);
+    color = mix(color, btnNext.rgb, btnNext.a);
+    let iconNext = sdTriangle((pNext) * vec2<f32>(1.0, 1.0) * 3.5, 0.01);
+    color = mix(color, iconCol, smoothstep(aa, 0.0, -iconNext) * btnNext.a);
+
+    let pPlay = p - vec2<f32>(-0.44, -0.45);
+    let playOn = (bez.isPlaying > 0.5) || (bez.clickedButton > 2.5 && bez.clickedButton < 3.5);
+    let btnPlay = drawFrostedButton(pPlay, btnSize, ledGreen, playOn, aa);
+    color = mix(color, btnPlay.rgb, btnPlay.a);
+    let iconPlay = sdTriangle((pPlay) * vec2<f32>(1.0, -1.0) * 1.5, 0.02);
+    color = mix(color, iconCol, smoothstep(aa, 0.0, -iconPlay) * btnPlay.a);
+
+    let pStop = p - vec2<f32>(-0.34, -0.45);
+    let stopOn = (bez.isPlaying < 0.5) || (bez.clickedButton > 3.5 && bez.clickedButton < 4.5);
+    let btnStop = drawFrostedButton(pStop, btnSize, ledRed, stopOn, aa);
+    color = mix(color, btnStop.rgb, btnStop.a);
+    let iconStop = sdBox(pStop, vec2<f32>(0.015, 0.015));
+    color = mix(color, iconCol, smoothstep(aa, 0.0, -iconStop) * btnStop.a);
+
+    return vec4<f32>(color, 1.0);
 }

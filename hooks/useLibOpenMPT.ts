@@ -88,6 +88,24 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
   // Sync isPlayingRef with the latest React state every render
   isPlayingRef.current = isPlaying;
 
+  // PERFORMANCE OPTIMIZATION: Mutable ref for high-frequency playback data
+  // This prevents React re-renders 60 times/second - PatternDisplay reads directly from this ref
+  const playbackStateRef = useRef<{
+    playheadRow: number;
+    currentOrder: number;
+    timeSec: number;
+    beatPhase: number;
+    kickTrigger: number;
+    grooveAmount: number;
+  }>({
+    playheadRow: 0,
+    currentOrder: 0,
+    timeSec: 0,
+    beatPhase: 0,
+    kickTrigger: 0,
+    grooveAmount: 0.5
+  });
+
   // Helpers
   const getPatternMatrix = useCallback((modPtr: number, patternIndex: number, orderIndex: number): PatternMatrix => {
     const lib = libopenmptRef.current;
@@ -215,7 +233,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
     setTotalPatternRows(totalRows);
 
     // Initial state
-    setSequencerMatrix(matrices[0]);
+    setSequencerMatrix(matrices[0] ?? null);
     setSequencerCurrentRow(0);
     setSequencerGlobalRow(0);
     setChannelStates(new Array(numChannels).fill({ volume: 0, pan: 128, freq: 0, trigger: 0, noteAge: 0, activeEffect: 0, effectValue: 0, isMuted: 0 }));
@@ -300,10 +318,24 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
     //   setActiveChannels(active);
     // }
 
-    setBeatPhase((time * 2) % 1);
+    // Calculate beat phase
+    const beatPhaseValue = (time * 2) % 1;
+    setBeatPhase(beatPhaseValue);
+    
+    // PERFORMANCE OPTIMIZATION: Update mutable ref directly
+    // PatternDisplay reads from this ref - avoids 60fps React re-renders
+    playbackStateRef.current = {
+      playheadRow: row + (time % 1), // Include fractional part for smooth scrolling
+      currentOrder: order,
+      timeSec: time,
+      beatPhase: beatPhaseValue,
+      kickTrigger: kickTrigger, // Use existing kick trigger value
+      grooveAmount: grooveAmount
+    };
+    
     lastUpdateTimeRef.current = performance.now() / 1000;
     animationFrameHandle.current = requestAnimationFrame(updateUI);
-  }, [isPlaying, activeEngine, sequencerMatrix]);
+  }, [isPlaying, activeEngine, sequencerMatrix, kickTrigger, grooveAmount]);
 
   const stopMusic = useCallback((destroy: boolean = false) => {
     isPlayingRef.current = false;
@@ -455,10 +487,16 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
             // Update channel VU data
             const numCh = data.numChannels;
             for (let c = 0; c < numCh && c < channelStatesRef.current.length; c++) {
+              const existing = channelStatesRef.current[c];
               channelStatesRef.current[c] = {
-                ...channelStatesRef.current[c],
                 volume: data.channelVU[c] || 0,
+                pan: existing?.pan ?? 128,
+                freq: existing?.freq ?? 0,
                 trigger: (data.channelVU[c] || 0) > 0.5 ? 1 : 0,
+                noteAge: existing?.noteAge ?? 0,
+                activeEffect: existing?.activeEffect ?? 0,
+                effectValue: existing?.effectValue ?? 0,
+                isMuted: existing?.isMuted ?? 0,
               };
             }
 
@@ -468,19 +506,25 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
               const pd = data.patternData;
               const rows = pd.rows.map((row) =>
                 Array.from({ length: pd.numChannels }, (_, c): import('../types').PatternCell => {
-                  const hasNote = row.notes[c] > 0;
-                  const hasInst = row.instruments[c] > 0;
-                  const hasEffect = row.effCmds[c] > 0 || row.effVals[c] > 0;
+                  const noteVal = row.notes[c];
+                  const instVal = row.instruments[c];
+                  const volCmdVal = row.volCmds[c];
+                  const volVal = row.volVals[c];
+                  const effCmdVal = row.effCmds[c];
+                  const effVal = row.effVals[c];
+                  const hasNote = (noteVal ?? 0) > 0;
+                  const hasInst = (instVal ?? 0) > 0;
+                  const hasEffect = (effCmdVal ?? 0) > 0 || (effVal ?? 0) > 0;
                   const type = hasNote ? 'note' : hasInst ? 'instrument' : hasEffect ? 'effect' : 'empty';
                   return {
                     type,
                     text: '',
-                    note: row.notes[c] || undefined,
-                    inst: row.instruments[c] || undefined,
-                    volCmd: row.volCmds[c] || undefined,
-                    volVal: row.volVals[c] || undefined,
-                    effCmd: row.effCmds[c] || undefined,
-                    effVal: row.effVals[c] || undefined,
+                    note: noteVal && noteVal > 0 ? noteVal : undefined,
+                    inst: instVal && instVal > 0 ? instVal : undefined,
+                    volCmd: volCmdVal && volCmdVal > 0 ? volCmdVal : undefined,
+                    volVal: volVal && volVal > 0 ? volVal : undefined,
+                    effCmd: effCmdVal && effCmdVal > 0 ? effCmdVal : undefined,
+                    effVal: effVal && effVal > 0 ? effVal : undefined,
                   };
                 })
               );
@@ -682,7 +726,11 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
             let str = '';
             if (!ptr) return str;
             const heap = lib.HEAPU8;
-            for (let i = 0; heap[ptr + i] !== 0; i++) str += String.fromCharCode(heap[ptr + i]);
+            for (let i = 0; ; i++) {
+              const byte = heap[ptr + i];
+              if (byte === undefined || byte === 0) break;
+              str += String.fromCharCode(byte);
+            }
             return str;
           };
         }
@@ -808,6 +856,9 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
     totalPatternRows, playbackSeconds, playbackRowFraction, channelStates, beatPhase, grooveAmount, kickTrigger, activeChannels,
     isLooping, setIsLooping, seekToStep: seekToStepWrapper, panValue, setPanValue,
     activeEngine, isWorkletSupported, toggleAudioEngine, syncDebug,
-    analyserNode: analyserRef.current
+    analyserNode: analyserRef.current,
+    // PERFORMANCE OPTIMIZATION: Export ref for high-frequency updates
+    // PatternDisplay reads directly from this to avoid React re-renders
+    playbackStateRef
   };
 }

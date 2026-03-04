@@ -1,12 +1,10 @@
 // patternv0.40.wgsl
 // Horizontal Paged Grid Shader (Time = X, Channels = Y)
-// Base: v0.39 (Horizontal Layout)
-// Adapted for Square Bezel Layout (bezel-square.png) with Hardware Layering like v0.38
 
 struct Uniforms {
   numRows: u32,
   numChannels: u32,
-  playheadRow: f32,
+  playheadRow: f32, // CRITICAL FIX: Changed from u32 to f32
   isPlaying: u32,
   cellW: f32,
   cellH: f32,
@@ -24,7 +22,7 @@ struct Uniforms {
   bloomThreshold: f32,
   invertChannels: u32,
   dimFactor: f32,
-  gridRect: vec4<f32>,  // x, y, w, h (normalized)
+  gridRect: vec4<f32>, 
 };
 
 @group(0) @binding(0) var<storage, read> cells: array<u32>;
@@ -56,34 +54,20 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
   let row = instanceIndex / numChannels;
   let channel = instanceIndex % numChannels;
 
-  // Horizontal Layout: X = Row (Time), Y = Channel
-  // Static Paged Grid: We only render active page of 32 steps.
-  
   let stepsPerPage = 32.0;
+  // Use floor on the float, then multiply to get the page start
   let pageStart = floor(uniforms.playheadRow / stepsPerPage) * stepsPerPage;
-  
-  // Calculate row local to current page (0..31)
   let localRow = f32(row) - pageStart;
   
-  // X Position based on local row
   let px = localRow * uniforms.cellW;
   let py = f32(channel) * uniforms.cellH;
   
-  // If this instance is NOT in the current page, we move it off-screen to clip it
   var isVisible = 1.0;
   if (localRow < 0.0 || localRow >= stepsPerPage) {
       isVisible = 0.0;
   }
   
-  // Use gridRect for precise positioning within bezel area
-  // gridRect is in normalized coordinates (0-1)
-  // Note: channel 0 is the header row, channels 1+ are the actual pattern data
-  
-  // Calculate effective channel index (0 = header, 1-N = pattern channels)
   let effectiveChannel = f32(channel);
-  
-  // For Y positioning, account for the header row if present
-  // If numChannels includes header (padTopChannel), subtract 1 from data channels
   let hasHeader = uniforms.numChannels > 1u && uniforms.gridRect.y > 0.15;
   let dataChannels = f32(uniforms.numChannels) - select(0.0, 1.0, hasHeader);
   let channelIndex = select(effectiveChannel, effectiveChannel - 1.0, hasHeader && effectiveChannel > 0.0);
@@ -91,19 +75,22 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
   let gridX = uniforms.gridRect.x + (localRow / stepsPerPage) * uniforms.gridRect.z;
   let gridY = uniforms.gridRect.y + (channelIndex / max(1.0, dataChannels)) * uniforms.gridRect.w;
   
-  // Convert to clip space (-1 to 1)
   let cellWidth = uniforms.gridRect.z / stepsPerPage;
   let cellHeight = uniforms.gridRect.w / max(1.0, dataChannels);
   
   let clipX = gridX * 2.0 - 1.0 + quad[vertexIndex].x * cellWidth * 2.0;
   let clipY = 1.0 - (gridY * 2.0) - quad[vertexIndex].y * cellHeight * 2.0;
   
-  // Collapse if not visible
-  let finalPos = select(vec4<f32>(0.0), vec4<f32>(clipX, clipY, 0.0, 1.0), isVisible > 0.5);
+  let finalPos = select(vec4<f32>(0.0, 0.0, 0.0, 0.0), vec4<f32>(clipX, clipY, 0.0, 1.0), isVisible > 0.5);
 
   let idx = instanceIndex * 2u;
-  let a = cells[idx];
-  let b = cells[idx + 1u];
+  var a = 0u;
+  var b = 0u;
+  // Bounds check safety
+  if (idx + 1u < arrayLength(&cells)) {
+      a = cells[idx];
+      b = cells[idx + 1u];
+  }
 
   var out: VertexOut;
   out.position = finalPos;
@@ -115,19 +102,18 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
   return out;
 }
 
-// --- FRAGMENT SHADER (Precision Interface) ---
-
 fn neonPalette(t: f32) -> vec3<f32> {
     let a = vec3<f32>(0.5, 0.5, 0.5);
     let b = vec3<f32>(0.5, 0.5, 0.5);
     let c = vec3<f32>(1.0, 1.0, 1.0);
     let d = vec3<f32>(0.0, 0.33, 0.67);
-    return a + b * cos(6.28318 * (c * t + d));
+    let beatDrift = uniforms.beatPhase * 0.1;
+    return a + b * cos(6.28318 * (c * (t + beatDrift) + d));
 }
 
 fn sdRoundedBox(p: vec2<f32>, b: vec2<f32>, r: f32) -> f32 {
     let q = abs(p) - b + r;
-    return length(max(q, vec2<f32>(0.0))) + min(max(q.x, q.y), 0.0) - r;
+    return length(max(q, vec2<f32>(0.0, 0.0))) + min(max(q.x, q.y), 0.0) - r;
 }
 
 struct FragmentConstants {
@@ -148,31 +134,24 @@ fn getFragmentConstants() -> FragmentConstants {
 
 @fragment
 fn fs(in: VertexOut) -> @location(0) vec4<f32> {
+  if (in.channel >= uniforms.numChannels) { return vec4<f32>(1.0, 0.0, 0.0, 1.0); }
   let fs = getFragmentConstants();
   let uv = in.uv;
-  let p = uv - 0.5;
+  let p = uv - vec2<f32>(0.5, 0.5);
   let aa = fwidth(p.y) * 0.75;
 
-  // --- HEADER ROW (Channel 0) ---
   if (in.channel == 0u) {
-      // Header for channel indices or status
       var col = fs.bgColor * 0.8;
       return vec4<f32>(col, 1.0);
   }
 
-  // --- PATTERN GRID ---
-  // Simple machine slots
   let dBox = sdRoundedBox(p, vec2<f32>(0.45, 0.40), 0.05);
   var col = fs.bgColor;
   
-  // Inset shadow
   col *= smoothstep(0.0, 0.1, dBox + 0.5);
 
-  let playheadStep = uniforms.playheadRow; 
-  let distToPlayhead = abs(f32(in.row) - playheadStep);
-  let playheadGlow = 1.0 - smoothstep(0.0, 1.2, distToPlayhead);
+  let onPlayhead = (in.row == u32(uniforms.playheadRow));
   
-  // Active Note
   let note = (in.packedA >> 24) & 255u;
   let hasNote = note > 0u;
   
@@ -183,17 +162,19 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
       col += noteCol * glow * 1.5;
   }
   
-  // Playhead Highlight (Horizontal glow matching caps)
-  if (playheadGlow > 0.0) {
-      // Additive highlight that transitions smoothly
-      col += vec3<f32>(0.2, 0.2, 0.25) * playheadGlow * 0.8;
+  if (onPlayhead) {
+      col += vec3<f32>(0.2, 0.2, 0.25) * 0.8;
   }
 
-  // Border
   col = mix(col, fs.borderColor, smoothstep(0.0, aa, dBox));
-
-  // Apply Dim Factor (Dark Mode)
   col *= uniforms.dimFactor;
+
+  // Kick reactive glow
+  let kickPulse = uniforms.kickTrigger * exp(-length(p) * 3.0) * 0.3;
+  col += vec3<f32>(0.9, 0.2, 0.4) * kickPulse * uniforms.bloomIntensity;
+  // Dithering for night mode
+  let noise = fract(sin(dot(in.uv * uniforms.timeSec, vec2<f32>(12.9898, 78.233))) * 43758.5453);
+  col += (noise - 0.5) * 0.01;
 
   return vec4<f32>(col, 1.0);
 }

@@ -1,60 +1,40 @@
 #!/usr/bin/env bash
 # =======================================================================
-# build-wasm.sh  –  Self-contained OpenMPT Web Worklet build (2026)
-#
-# What it does:
-#   1. Sources Emscripten (emsdk) from well-known locations or $PATH.
-#   2. Clones the latest libopenmpt from GitHub into vendor/libopenmpt.
-#   3. Builds libopenmpt for Emscripten (make CONFIG=emscripten).
-#   4. Compiles the C++ AudioWorklet source → public/worklets/.
-#
-# Requirements:
-#   - Emscripten 5.0+ (emsdk) already installed / activated, OR available
-#     at one of the candidate paths listed below.
-#   - git, make in PATH.
-#   - No system libopenmpt needed; this script clones it fresh every run.
+# build-wasm.sh  –  OpenMPT WASM AudioWorklet Build Script
 #
 # Usage:
-#   bash ./build-wasm.sh [--debug]
+#   ./build-wasm.sh [--debug]
 #
 # Output:
-#   public/worklets/openmpt-worklet.js   (Emscripten glue + module factory)
+#   public/worklets/openmpt-worklet.js   (Emscripten glue)
 #   public/worklets/openmpt-worklet.wasm (WebAssembly binary)
-#   public/worklets/openmpt-worklet.aw.js (AudioWorklet thread bootstrap)
+#   public/worklets/openmpt-worklet.aw.js (AudioWorklet bootstrap)
+#
+# Requirements:
+#   - Emscripten 3.1+ (emsdk) installed
+#   - git, make in PATH
 # =======================================================================
 
 set -e
 
-echo "🔨 Downloading & building libopenmpt (this only runs once)..."
-wget -q https://lib.openmpt.org/files/libopenmpt/src/libopenmpt-0.8.4+release.makefile.tar.gz -O libopenmpt.tar.gz
-tar xzf libopenmpt.tar.gz
-
-echo "🔨 Building libopenmpt for Emscripten..."
-cd libopenmpt-0.8.4+release.makefile
-make CONFIG=emscripten -j2
-cd ..
-
-echo "✅ libopenmpt ready!"
-
-echo "=== OpenMPT Web Worklet Build (2026) ==="
+echo "=== OpenMPT WASM AudioWorklet Build ==="
 
 # ── 1. Source emsdk ─────────────────────────────────────────────────
-# Prioritize local codepit emsdk over system emsdk for newer version
-EMSDK_CANDIDATES=(
-    "/workspaces/codepit/emsdk/emsdk_env.sh"   # GitHub Codespace (newer)
-    "/content/build_space/emsdk/emsdk_env.sh"  # Colab
-    "$HOME/emsdk/emsdk_env.sh"
-    "/usr/local/emsdk/emsdk_env.sh"
-    "$(dirname "$0")/emsdk/emsdk_env.sh"
-)
-for f in "${EMSDK_CANDIDATES[@]}"; do
-    if [ -f "$f" ]; then
-        echo "Sourcing emsdk from $f..."
-        # shellcheck disable=SC1090
-        source "$f"
-        break
-    fi
-done
+if ! command -v emcc &>/dev/null; then
+    EMSDK_CANDIDATES=(
+        "/opt/emsdk/emsdk_env.sh"
+        "/workspaces/codepit/emsdk/emsdk_env.sh"
+        "$HOME/emsdk/emsdk_env.sh"
+        "/usr/local/emsdk/emsdk_env.sh"
+    )
+    for f in "${EMSDK_CANDIDATES[@]}"; do
+        if [ -f "$f" ]; then
+            echo "Sourcing emsdk from $f..."
+            source "$f"
+            break
+        fi
+    done
+fi
 
 if ! command -v emcc &>/dev/null; then
     echo "❌ emcc not found. Please activate emsdk first:" >&2
@@ -62,26 +42,45 @@ if ! command -v emcc &>/dev/null; then
     exit 1
 fi
 
-# Set cache to user-writable location
 export EM_CACHE="${HOME}/.emscripten_cache"
 mkdir -p "$EM_CACHE"
 
 echo "📦 Emscripten: $(emcc --version | head -1)"
 
-# ── 2. Clean and prepare directories ────────────────────────────────
+# ── 2. Download libopenmpt ──────────────────────────────────────────
+LIBOPENMPT_VERSION="0.8.4"
+LIBOPENMPT_DIR="libopenmpt-${LIBOPENMPT_VERSION}+release.makefile"
+
+if [ ! -d "$LIBOPENMPT_DIR" ]; then
+    echo "🔨 Downloading libopenmpt ${LIBOPENMPT_VERSION}..."
+    wget -q "https://lib.openmpt.org/files/libopenmpt/src/${LIBOPENMPT_DIR}.tar.gz" -O libopenmpt.tar.gz
+    tar xzf libopenmpt.tar.gz
+    rm libopenmpt.tar.gz
+fi
+
+# ── 3. Build libopenmpt ─────────────────────────────────────────────
+if [ ! -f "$LIBOPENMPT_DIR/bin/libopenmpt.a" ]; then
+    echo "🔨 Building libopenmpt..."
+    cd "$LIBOPENMPT_DIR"
+    make CONFIG=emscripten -j2
+    cd ..
+fi
+
+echo "✅ libopenmpt ready!"
+
+# ── 4. Clean and prepare output directories ─────────────────────────
 rm -rf public/worklets
 mkdir -p public/worklets
 
-# ── 3. Compile the custom AudioWorklet ──────────────────────────────
-echo "Compiling custom AudioWorklet..."
+# ── 5. Compile AudioWorklet ─────────────────────────────────────────
+echo "Compiling AudioWorklet..."
 
-# Debug vs release flags
 DEBUG_FLAGS="-O3 -DNDEBUG"
 if [[ "${1:-}" == "--debug" ]]; then
     DEBUG_FLAGS="-O0 -g -DDEBUG -sASSERTIONS=2"
-    echo "🔧 Building in DEBUG mode"
+    echo "🔧 DEBUG mode"
 else
-    echo "🔧 Building in RELEASE mode"
+    echo "🔧 RELEASE mode"
 fi
 
 emcc \
@@ -101,8 +100,8 @@ emcc \
     -s EXPORTED_RUNTIME_METHODS="['ccall','cwrap','UTF8ToString','stringToUTF8','lengthBytesUTF8','getValue','setValue']" \
     -s EXPORTED_FUNCTIONS="['_init_audio','_load_module','_resume_audio','_suspend_audio','_seek_order_row','_set_loop','_set_volume','_poll_position','_get_audio_context','_get_worklet_node','_cleanup_audio','_get_num_channels','_get_num_orders','_get_order_pattern','_get_pattern_num_rows','_get_pattern_row_channel_command','_malloc','_free']" \
     \
-    -I./libopenmpt-0.8.4+release.makefile/include \
-    -L./libopenmpt-0.8.4+release.makefile/bin \
+    -I"./${LIBOPENMPT_DIR}/include" \
+    -L"./${LIBOPENMPT_DIR}/bin" \
     -lopenmpt \
     \
     cpp/openmpt_wrapper.cpp \
@@ -113,5 +112,5 @@ emcc \
     -o public/worklets/openmpt-worklet.js \
     --no-entry
 
-echo "✅ Build completed successfully!"
+echo "✅ Build complete!"
 ls -la public/worklets/
