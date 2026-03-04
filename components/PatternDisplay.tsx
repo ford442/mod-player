@@ -608,7 +608,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
             float btnH = trackWidth * 0.92;
             
             // Local position with rotation
-            vec2 localPos = a_pos * vec2(btnW, btnH) * scale;
+            vec2 localPos = a_pos * vec2(btnW, btnH);
             float rotAng = theta + 1.570796;
             float cA = cos(rotAng); float sA = sin(rotAng);
             float rotX = localPos.x * cA - localPos.y * sA;
