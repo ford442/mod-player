@@ -188,11 +188,13 @@ fn drawFrostedGlassCap(uv: vec2<f32>, size: vec2<f32>, color: vec3<f32>, isOn: b
 
 @fragment
 fn fs(in: VertexOut) -> @location(0) vec4<f32> {
-  if (in.channel >= uniforms.numChannels) { return vec4<f32>(1.0, 0.0, 0.0, 1.0); }
-  let fs = getFragmentConstants();
+  // Compute derivatives in uniform control flow (before any early returns)
   let uv = in.uv;
   let p = uv - 0.5;
   let aa = fwidth(p.y) * 0.33;
+  
+  if (in.channel >= uniforms.numChannels) { return vec4<f32>(1.0, 0.0, 0.0, 1.0); }
+  let fs = getFragmentConstants();
   let bloom = uniforms.bloomIntensity;
   let kick = uniforms.kickTrigger;
   let beat = uniforms.beatPhase;
