@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useMemo } from 'react';
+import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react';
 import { ChannelShadowState, PatternMatrix } from '../types';
 import {
   GRID_RECT,
@@ -371,6 +371,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const glCanvasRef = useRef<HTMLCanvasElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [webgpuAvailable, setWebgpuAvailable] = useState(true);
   const [localTime, setLocalTime] = useState(0);
@@ -427,6 +428,10 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   const channelBufferDataRef = useRef<ArrayBuffer | null>(null);
   const channelDataViewRef = useRef<DataView | null>(null);
 
+  // Canvas sizing state - stores actual buffer dimensions
+  const canvasSizeRef = useRef({ width: 0, height: 0, dpr: 1 });
+  const resizeTimeoutRef = useRef<number | null>(null);
+
   // Use effective values if passed, otherwise default
   const numChannels = matrix?.numChannels ?? DEFAULT_CHANNELS;
 
@@ -438,24 +443,20 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   const isHorizontal = shaderFile.includes('v0.13') || shaderFile.includes('v0.14') || shaderFile.includes('v0.16') || shaderFile.includes('v0.17') || shaderFile.includes('v0.21') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40');
   
   const canvasMetrics = useMemo(() => {
-    // Get device pixel ratio for high-DPI displays
-    const dpr = Math.min(window.devicePixelRatio || 1, 2); // Cap at 2x for performance
-    
     // Force specific resolutions for certain chassis to match background images
-    if (shaderFile.includes('v0.27') || shaderFile.includes('v0.28')) return { width: 1024 * dpr, height: 1008 * dpr, dpr };
-    if (shaderFile.includes('v0.21') || shaderFile.includes('v0.37') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.47') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49')) return { width: 1024 * dpr, height: 1024 * dpr, dpr };
+    if (shaderFile.includes('v0.27') || shaderFile.includes('v0.28')) return { width: 1024, height: 1008 };
+    if (shaderFile.includes('v0.21') || shaderFile.includes('v0.37') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.47') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49')) return { width: 1024, height: 1024 };
 
     if (isHorizontal) {
-       return { width: 1024 * dpr, height: 1024 * dpr, dpr }; // Square for horizontal layouts usually
+       return { width: 1024, height: 1024 }; // Square for horizontal layouts usually
     }
     // Circular layouts often benefit from square
-    if (shaderFile.includes('v0.25') || shaderFile.includes('v0.30') || shaderFile.includes('v0.35')) return { width: 1024 * dpr, height: 1024 * dpr, dpr };
+    if (shaderFile.includes('v0.25') || shaderFile.includes('v0.30') || shaderFile.includes('v0.35')) return { width: 1024, height: 1024 };
 
     // Standard waterfall
     return {
-      width: Math.max(800, numChannels * cellWidth) * dpr,
-      height: 600 * dpr,
-      dpr
+      width: Math.max(800, numChannels * cellWidth),
+      height: 600
     };
   }, [shaderFile, isHorizontal, numChannels, cellWidth]);
 
@@ -823,27 +824,123 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [debugInfo.visible]);
 
-  // Sync WebGL canvas buffer dimensions to its CSS display size on resize
-  useEffect(() => {
-    let rafId: number;
-    const syncGLCanvasSize = () => {
-      cancelAnimationFrame(rafId);
-      rafId = requestAnimationFrame(() => {
-        const canvas = glCanvasRef.current;
-        if (!canvas) return;
-        if (canvas.width !== canvas.clientWidth || canvas.height !== canvas.clientHeight) {
-          canvas.width = canvas.clientWidth;
-          canvas.height = canvas.clientHeight;
+  // === UNIFIED CANVAS RESIZE HANDLING ===
+  // This function properly syncs canvas buffer size with CSS display size * devicePixelRatio
+  const syncCanvasSize = useCallback((canvas: HTMLCanvasElement, glCanvas: HTMLCanvasElement | null) => {
+    const dpr = Math.min(window.devicePixelRatio || 1, 2); // Cap at 2x for performance
+    const container = containerRef.current;
+    if (!container) return;
+
+    // Get the container's content box size
+    const containerRect = container.getBoundingClientRect();
+    const containerWidth = containerRect.width;
+    const containerHeight = containerRect.height;
+
+    // Calculate target dimensions maintaining aspect ratio
+    const aspectRatio = canvasMetrics.width / canvasMetrics.height;
+    let displayWidth = containerWidth;
+    let displayHeight = containerHeight;
+
+    // Fit within container while preserving aspect ratio
+    const containerAspect = containerWidth / containerHeight;
+    if (containerAspect > aspectRatio) {
+      // Container is wider - constrain by height
+      displayWidth = containerHeight * aspectRatio;
+    } else {
+      // Container is taller - constrain by width
+      displayHeight = containerWidth / aspectRatio;
+    }
+
+    // Round to avoid sub-pixel rendering issues
+    displayWidth = Math.floor(displayWidth);
+    displayHeight = Math.floor(displayHeight);
+
+    // Calculate buffer size (display size * DPR)
+    const bufferWidth = Math.max(1, Math.floor(displayWidth * dpr));
+    const bufferHeight = Math.max(1, Math.floor(displayHeight * dpr));
+
+    // Only update if dimensions changed
+    if (canvas.width !== bufferWidth || canvas.height !== bufferHeight) {
+      canvas.width = bufferWidth;
+      canvas.height = bufferHeight;
+      canvasSizeRef.current = { width: bufferWidth, height: bufferHeight, dpr };
+      console.log(`🖥️ Canvas resized: ${displayWidth}x${displayHeight} (buffer: ${bufferWidth}x${bufferHeight}, DPR: ${dpr})`);
+    }
+
+    // Sync WebGL overlay canvas
+    if (glCanvas) {
+      if (glCanvas.width !== bufferWidth || glCanvas.height !== bufferHeight) {
+        glCanvas.width = bufferWidth;
+        glCanvas.height = bufferHeight;
+      }
+    }
+  }, [canvasMetrics]);
+
+  // Debounced resize handler
+  const handleResize = useCallback(() => {
+    const canvas = canvasRef.current;
+    const glCanvas = glCanvasRef.current;
+    if (!canvas) return;
+
+    // Debounce to avoid excessive reconfiguration
+    if (resizeTimeoutRef.current !== null) {
+      window.clearTimeout(resizeTimeoutRef.current);
+    }
+
+    resizeTimeoutRef.current = window.setTimeout(() => {
+      syncCanvasSize(canvas, glCanvas);
+      
+      // Reconfigure WebGPU context if available
+      if (contextRef.current && deviceRef.current) {
+        try {
+          contextRef.current.configure({
+            device: deviceRef.current,
+            format: navigator.gpu.getPreferredCanvasFormat(),
+            alphaMode: 'premultiplied'
+          });
+          console.log('🔄 WebGPU context reconfigured after resize');
+        } catch (e) {
+          console.error('❌ WebGPU context reconfiguration failed:', e);
         }
+      }
+      
+      resizeTimeoutRef.current = null;
+    }, 100); // 100ms debounce
+  }, [syncCanvasSize]);
+
+  // Set up ResizeObserver for container
+  useEffect(() => {
+    const container = containerRef.current;
+    const canvas = canvasRef.current;
+    if (!container || !canvas) return;
+
+    // Initial sync
+    syncCanvasSize(canvas, glCanvasRef.current);
+
+    // Set up ResizeObserver on the container (not the canvas)
+    const resizeObserver = new ResizeObserver(() => {
+      // Use requestAnimationFrame to batch resize handling
+      requestAnimationFrame(() => {
+        handleResize();
       });
+    });
+
+    resizeObserver.observe(container);
+
+    // Also listen to window resize for DPR changes
+    const handleWindowResize = () => {
+      handleResize();
     };
-    syncGLCanvasSize();
-    window.addEventListener('resize', syncGLCanvasSize);
+    window.addEventListener('resize', handleWindowResize);
+
     return () => {
-      window.removeEventListener('resize', syncGLCanvasSize);
-      cancelAnimationFrame(rafId);
+      resizeObserver.disconnect();
+      window.removeEventListener('resize', handleWindowResize);
+      if (resizeTimeoutRef.current !== null) {
+        window.clearTimeout(resizeTimeoutRef.current);
+      }
     };
-  }, []);
+  }, [handleResize, syncCanvasSize]);
 
   // === WEBGL2 DATA UPLOAD ===
   useEffect(() => {
@@ -1004,7 +1101,13 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
 
         const context = canvas.getContext('webgpu') as GPUCanvasContext;
         const format = navigator.gpu.getPreferredCanvasFormat();
-        context.configure({ device, format });
+        
+        // Initial configuration - will be updated by resize handler
+        context.configure({ 
+          device, 
+          format,
+          alphaMode: 'premultiplied'
+        });
 
         textureResourcesRef.current = null;
         bezelTextureResourcesRef.current = null;
@@ -1061,56 +1164,6 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
 
         deviceRef.current = device; contextRef.current = context; uniformBufferRef.current = uniformBuffer;
 
-        // Handle canvas resizing for WebGPU with DPI awareness
-        const resizeObserver = new ResizeObserver((entries) => {
-          for (const entry of entries) {
-            const { width, height } = entry.contentRect;
-            const canvas = canvasRef.current;
-            if (!canvas || !contextRef.current || !deviceRef.current) continue;
-            
-            // Account for device pixel ratio for crisp rendering on high-DPI displays
-            const dpr = Math.min(window.devicePixelRatio || 1, 2); // Cap at 2x for performance
-            const displayWidth = Math.floor(width * dpr);
-            const displayHeight = Math.floor(height * dpr);
-            
-            // Only reconfigure if size actually changed
-            if (canvas.width !== displayWidth || canvas.height !== displayHeight) {
-              canvas.width = displayWidth;
-              canvas.height = displayHeight;
-              
-              // Set the CSS size to match the display size
-              canvas.style.width = `${width}px`;
-              canvas.style.height = `${height}px`;
-              
-              // Reconfigure WebGPU context with new size
-              try {
-                contextRef.current.configure({ 
-                  device: deviceRef.current, 
-                  format: navigator.gpu.getPreferredCanvasFormat(),
-                  alphaMode: 'premultiplied'
-                });
-                console.log(`🖥️ WebGPU canvas resized: ${canvas.width}x${canvas.height} (DPR: ${dpr})`);
-              } catch (e) {
-                console.error('❌ WebGPU resize error:', e);
-              }
-            }
-          }
-        });
-        
-        if (canvasRef.current) {
-          resizeObserver.observe(canvasRef.current);
-          // Trigger initial resize
-          const rect = canvasRef.current.getBoundingClientRect();
-          const dpr = Math.min(window.devicePixelRatio || 1, 2);
-          canvasRef.current.width = Math.floor(rect.width * dpr);
-          canvasRef.current.height = Math.floor(rect.height * dpr);
-          canvasRef.current.style.width = `${rect.width}px`;
-          canvasRef.current.style.height = `${rect.height}px`;
-        }
-        
-        // Store cleanup function
-        (deviceRef.current as any)._resizeObserver = resizeObserver;
-
         const isHighPrec = shaderFile.includes('v0.36') || shaderFile.includes('v0.37') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49');
         const packFunc = isHighPrec ? packPatternMatrixHighPrecision : packPatternMatrix;
         cellsBufferRef.current = createBufferWithData(device, packFunc(matrix, padTopChannel), GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
@@ -1133,6 +1186,13 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
         }
 
         refreshBindGroup(device);
+        
+        // Trigger initial resize to set correct canvas dimensions
+        const glCanvas = glCanvasRef.current;
+        if (canvas && glCanvas) {
+          syncCanvasSize(canvas, glCanvas);
+        }
+        
         setGpuReady(true);
       } catch (error) { console.error('Failed to initialize WebGPU pattern display', error); if (!cancelled) setWebgpuAvailable(false); }
     };
@@ -1179,18 +1239,13 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
         videoTextureRef.current = null; 
       }
       if (deviceRef.current) {
-        // Clean up ResizeObserver
-        const resizeObserver = (deviceRef.current as any)._resizeObserver;
-        if (resizeObserver && canvasRef.current) {
-          resizeObserver.disconnect();
-        }
         try { deviceRef.current.destroy(); } catch (e) {}
       }
       deviceRef.current = null; 
       contextRef.current = null;
       glContextRef.current = null;
     };
-  }, [shaderFile]);
+  }, [shaderFile, syncCanvasSize]);
 
   useEffect(() => {
     const device = deviceRef.current;
@@ -1494,26 +1549,14 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     const canvas = canvasRef.current;
     if (!device || !context || !pipeline || !bindGroup || !uniformBufferRef.current || !cellsBufferRef.current || !canvas) return;
 
-    // 1. CHECK RESIZE EVERY FRAME - WebGPU canvas resize handling
-    // Get actual display size with device pixel ratio for sharp rendering
-    const targetWidth = Math.max(1, Math.floor(canvas.clientWidth * window.devicePixelRatio));
-    const targetHeight = Math.max(1, Math.floor(canvas.clientHeight * window.devicePixelRatio));
+    // Use cached canvas size from resize handler
+    const { width: canvasWidth, height: canvasHeight } = canvasSizeRef.current;
     
-    if (canvas.width !== targetWidth || canvas.height !== targetHeight) {
-      canvas.width = targetWidth;
-      canvas.height = targetHeight;
-      
-      // Reconfigure WebGPU context with new size
-      try {
-        context.configure({ 
-          device, 
-          format: navigator.gpu.getPreferredCanvasFormat(),
-          alphaMode: 'premultiplied'
-        });
-        console.log(`🖥️ WebGPU render resize: ${targetWidth}x${targetHeight}`);
-      } catch (e) {
-        console.error('❌ WebGPU render resize error:', e);
-      }
+    // Verify canvas dimensions match our cached values
+    if (canvas.width !== canvasWidth || canvas.height !== canvasHeight) {
+      // Canvas was resized but our handler hasn't updated yet - skip this frame
+      // The resize handler will update on next animation frame
+      return;
     }
 
     if (uniformBufferRef.current) {
@@ -1745,7 +1788,18 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   }, [isModuleLoaded, isPlaying, gpuReady]);
 
   return (
-    <div className={`pattern-display relative ${padTopChannel && !shaderFile.includes('v0.40') && !shaderFile.includes('v0.43') && !shaderFile.includes('v0.44') ? 'p-8 rounded-xl bg-[#18181a] shadow-2xl border border-[#333]' : ''}`}>
+    <div 
+      ref={containerRef}
+      className={`pattern-display relative ${padTopChannel && !shaderFile.includes('v0.40') && !shaderFile.includes('v0.43') && !shaderFile.includes('v0.44') ? 'p-8 rounded-xl bg-[#18181a] shadow-2xl border border-[#333]' : ''}`}
+      style={{
+        width: '100%',
+        height: '100%',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        overflow: 'hidden',
+      }}
+    >
       <input type="file" ref={fileInputRef} onChange={handleFileChange} className="hidden" accept=".mod,.xm,.it,.s3m,.mptm" />
       {padTopChannel && (
           <>
@@ -1780,28 +1834,35 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
         onClick={handleCanvasClick}
         className={`${padTopChannel && !shaderFile.includes('v0.40') && !shaderFile.includes('v0.43') && !shaderFile.includes('v0.44') ? 'rounded bg-black shadow-inner border border-black/50' : ''} cursor-pointer`}
         style={{
-          maxWidth: '100%',
-          maxHeight: '100%',
+          // CSS display size - will be controlled by container
           width: 'auto',
           height: 'auto',
-          objectFit: 'contain',
+          maxWidth: '100%',
+          maxHeight: '100%',
+          // Maintain aspect ratio
           aspectRatio: `${canvasMetrics.width} / ${canvasMetrics.height}`,
+          objectFit: 'contain',
           position: 'relative',
-          
         }}
       />
       <canvas
           ref={glCanvasRef}
           width={canvasMetrics.width}
           height={canvasMetrics.height}
-          className="absolute top-0 left-0"
+          className="absolute top-0 left-0 pointer-events-none"
           style={{
-              width: '100%',
-              height: '100%',
-              objectFit: 'contain',
-              aspectRatio: `${canvasMetrics.width} / ${canvasMetrics.height}`,
-              zIndex: 2,
-              pointerEvents: 'none',
+            width: 'auto',
+            height: 'auto',
+            maxWidth: '100%',
+            maxHeight: '100%',
+            aspectRatio: `${canvasMetrics.width} / ${canvasMetrics.height}`,
+            objectFit: 'contain',
+            zIndex: 2,
+            // Center the overlay canvas
+            position: 'absolute',
+            top: '50%',
+            left: '50%',
+            transform: 'translate(-50%, -50%)',
           }}
       />
       
