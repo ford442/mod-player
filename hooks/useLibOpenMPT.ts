@@ -108,6 +108,15 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
     timestamp: 0
   });
 
+  // Drift compensation tracking
+  const driftRef = useRef<{ accumulated: number; lastAudioTime: number }>({
+    accumulated: 0,
+    lastAudioTime: 0
+  });
+
+  // Pending seek tracking for synchronization
+  const pendingSeekRef = useRef<{ targetStep: number; acknowledged: boolean; seekTime: number } | null>(null);
+
   // Helpers
   const getPatternMatrix = useCallback((modPtr: number, patternIndex: number, orderIndex: number): PatternMatrix => {
     const lib = libopenmptRef.current;
@@ -269,7 +278,16 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
 
       const audioCtx = audioContextRef.current;
       if (audioCtx && lastWorkletUpdateRef.current > 0) {
-        const elapsed = audioCtx.currentTime - lastWorkletUpdateRef.current;
+        const audioTime = audioCtx.currentTime;
+        const elapsed = audioTime - lastWorkletUpdateRef.current;
+        
+        // Drift compensation
+        if (driftRef.current.lastAudioTime > 0) {
+          const timeDelta = audioTime - driftRef.current.lastAudioTime;
+          driftRef.current.accumulated += timeDelta;
+        }
+        driftRef.current.lastAudioTime = audioTime;
+        
         time = workletTimeRef.current + Math.max(0, elapsed);
       }
     } else {
@@ -278,6 +296,15 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
       order = lib._openmpt_module_get_current_order(modPtr);
       row = lib._openmpt_module_get_current_row(modPtr);
       time = lib._openmpt_module_get_position_seconds(modPtr);
+    }
+
+    // Check for pending seek - skip update if seek is very recent
+    if (pendingSeekRef.current && !pendingSeekRef.current.acknowledged) {
+      const timeSinceSeek = performance.now() - pendingSeekRef.current.seekTime;
+      if (timeSinceSeek < 50) {
+        animationFrameHandle.current = requestAnimationFrame(updateUI);
+        return;
+      }
     }
 
     // Update Pattern Matrix if needed
@@ -348,6 +375,13 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
   }, []);
 
   const seekToStepWrapper = (step: number) => {
+    // Set pending seek for synchronization
+    pendingSeekRef.current = {
+      targetStep: step,
+      acknowledged: false,
+      seekTime: performance.now()
+    };
+    
     // Main thread update (for UI immediate response)
     const lib = libopenmptRef.current;
     const modPtr = currentModulePtr.current;
@@ -379,6 +413,13 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
     } else if (activeEngine === 'worklet' && audioWorkletNodeRef.current) {
       audioWorkletNodeRef.current.port.postMessage({ type: 'seek', order: targetOrder, row: targetRow });
     }
+    
+    // Mark seek as acknowledged after a short delay
+    setTimeout(() => {
+      if (pendingSeekRef.current?.targetStep === step) {
+        pendingSeekRef.current.acknowledged = true;
+      }
+    }, 50);
   };
 
   const play = useCallback(async () => {
