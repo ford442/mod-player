@@ -9,7 +9,7 @@ echo "=========================================="
 echo ""
 
 # Configuration
-INPUT_DIR="/mnt/okcomputer/mod-player-main"
+INPUT_DIR="/mnt/okcomputer/mod-player"
 OUTPUT_DIR="/mnt/okcomputer/output"
 COMPONENTS_DIR="$INPUT_DIR/components"
 
