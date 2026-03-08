@@ -36,10 +36,10 @@ Thumbs.db
 /dist/worklets/openmpt-native.js
 /dist/worklets/openmpt-native.wasm
 /dist/worklets/openmpt-native.aw.js
-/public/worklets/openmpt-worklet.js
+# openmpt-worklet.js and libopenmpt-audioworklet.js are tracked JS files
+# (the C++ WASM build outputs .wasm and .aw.js — those remain ignored)
 /public/worklets/openmpt-worklet.wasm
 /public/worklets/openmpt-worklet.aw.js
-/dist/worklets/openmpt-worklet.js
 /dist/worklets/openmpt-worklet.wasm
 /dist/worklets/openmpt-worklet.aw.js
 
