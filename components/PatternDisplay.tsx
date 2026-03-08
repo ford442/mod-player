@@ -497,14 +497,6 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
       glResourcesRef.current = null;
     }
     
-    // Also clear the canvas element itself if it exists
-    if (glCanvasRef.current) {
-      const ctx = glCanvasRef.current.getContext('2d');
-      if (ctx) {
-        ctx.clearRect(0, 0, glCanvasRef.current.width, glCanvasRef.current.height);
-      }
-    }
-    
     if (!glCanvasRef.current) {
       console.warn('⚠️ No glCanvasRef');
       console.groupEnd();
