@@ -485,11 +485,24 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
         oldGl.deleteBuffer(oldRes.buffer);
         oldGl.deleteTexture(oldRes.texture);
         if (oldRes.capTexture) oldGl.deleteTexture(oldRes.capTexture);
-        console.log('✅ Cleaned up previous WebGL resources');
+        
+        // Clear the canvas to prevent ghosting from previous shader mode
+        oldGl.clearColor(0, 0, 0, 0);
+        oldGl.clear(oldGl.COLOR_BUFFER_BIT | oldGl.DEPTH_BUFFER_BIT);
+        
+        console.log('✅ Cleaned up previous WebGL resources and cleared canvas');
       } catch (e) {
         console.warn('⚠️ Error cleaning up WebGL:', e);
       }
       glResourcesRef.current = null;
+    }
+    
+    // Also clear the canvas element itself if it exists
+    if (glCanvasRef.current) {
+      const ctx = glCanvasRef.current.getContext('2d');
+      if (ctx) {
+        ctx.clearRect(0, 0, glCanvasRef.current.width, glCanvasRef.current.height);
+      }
     }
     
     if (!glCanvasRef.current) {
