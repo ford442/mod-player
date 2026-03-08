@@ -97,13 +97,15 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
     beatPhase: number;
     kickTrigger: number;
     grooveAmount: number;
+    timestamp: number; // For drift calculation
   }>({
     playheadRow: 0,
     currentOrder: 0,
     timeSec: 0,
     beatPhase: 0,
     kickTrigger: 0,
-    grooveAmount: 0.5
+    grooveAmount: 0.5,
+    timestamp: 0
   });
 
   // Helpers
@@ -309,7 +311,8 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
       timeSec: time,
       beatPhase: beatPhaseValue,
       kickTrigger: kickTrigger, // Use existing kick trigger value
-      grooveAmount: grooveAmount
+      grooveAmount: grooveAmount,
+      timestamp: performance.now()
     };
 
     lastUpdateTimeRef.current = performance.now() / 1000;

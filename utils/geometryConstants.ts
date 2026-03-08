@@ -1,130 +1,71 @@
-/**
- * Shared Geometry Constants - Ultimate Source of Truth
- * 
- * These values are used across:
- * - PatternDisplay.tsx (WebGL overlay positioning)
- * - All WGSL shaders (grid rendering)
- * - Polar chassis shader (ring positioning)
- * 
- * Changing any value here updates all modes instantly.
- */
+// Shared geometry constants for shader layouts
 
-/** Grid rectangle in normalized coordinates (0-1) */
+// Grid rectangle for pattern display (normalized coordinates)
 export const GRID_RECT = {
-  x: 160 / 1024,  // 0.15625
-  y: 180 / 1024,  // 0.17578125
-  w: 705 / 1024,  // 0.6884765625
-  h: 685 / 1024   // 0.6689453125
-} as const;
+  x: 0.05,  // Left margin
+  y: 0.15,  // Top margin  
+  w: 0.9,   // Width
+  h: 0.7    // Height
+};
 
-/** Pixel dimensions at 1024x1024 reference resolution */
-export const GRID_RECT_PIXELS = {
-  x: 160,
-  y: 180,
-  w: 705,
-  h: 685,
-  right: 865,   // x + w
-  bottom: 865   // y + h
-} as const;
-
-/** Polar ring configuration for circular modes */
+// Polar ring dimensions for circular layouts
 export const POLAR_RINGS = {
-  innerRadius: 0.3,      // Normalized distance from center
-  outerRadius: 0.9,      // Normalized distance from center
-  trackCount: 8,         // Number of concentric tracks
-  segmentCount: 64,      // Steps per ring
-  trackGap: 0.02,        // Gap between tracks (normalized)
-  segmentGap: 0.05       // Angular gap between segments
-} as const;
+  INNER_RADIUS: 0.3,
+  OUTER_RADIUS: 0.9
+};
 
-/** Layout mode identifiers */
+// Cap/button configuration
+export const CAP_CONFIG = {
+  CAP_SCALE_FACTOR: 0.88
+};
+
+// Layout modes matching shader constants
 export const LAYOUT_MODES = {
   CIRCULAR: 1,
   HORIZONTAL_32: 2,
   HORIZONTAL_64: 3
-} as const;
+};
 
-/** Cap rendering configuration */
-export const CAP_CONFIG = {
-  scaleFactor: 0.88,     // Cap size relative to cell (prevents border overlap)
-  minScale: 0.85,        // Minimum cap scale for visibility
-  popEffectScale: 1.2,   // Scale multiplier on playhead hit
-  cornerRadius: 0.08,    // Rounded corner amount
-  glowIntensity: 1.5     // Bloom multiplier
-} as const;
+export type LayoutMode = typeof LAYOUT_MODES[keyof typeof LAYOUT_MODES];
 
-/** Chassis uniform values shared with WGSL */
-export const CHASSIS_UNIFORMS = {
-  gridInsetX: GRID_RECT.x,
-  gridInsetY: GRID_RECT.y,
-  gridWidth: GRID_RECT.w,
-  gridHeight: GRID_RECT.h,
-  polarInner: POLAR_RINGS.innerRadius,
-  polarOuter: POLAR_RINGS.outerRadius
-} as const;
-
-/** WebGL/WebGPU canvas configuration */
-export const CANVAS_CONFIG = {
-  referenceWidth: 1024,
-  referenceHeight: 1024,
-  devicePixelRatio: typeof window !== 'undefined' ? Math.min(window.devicePixelRatio, 2) : 1
-} as const;
-
-/**
- * Calculate cell dimensions for horizontal layouts
- */
+// Calculate horizontal cell size based on canvas dimensions
 export function calculateHorizontalCellSize(
   canvasWidth: number,
   canvasHeight: number,
-  stepCount: 32 | 64,
-  channelCount: number
+  steps: number,
+  numChannels: number
 ): { cellW: number; cellH: number; offsetX: number; offsetY: number } {
-  const gridW = GRID_RECT.w * canvasWidth;
-  const gridH = GRID_RECT.h * canvasHeight;
+  const gridW = canvasWidth * GRID_RECT.w;
+  const gridH = canvasHeight * GRID_RECT.h;
   
-  return {
-    cellW: gridW / stepCount,
-    cellH: gridH / channelCount,
-    offsetX: GRID_RECT.x * canvasWidth,
-    offsetY: GRID_RECT.y * canvasHeight
-  };
+  const cellW = gridW / steps;
+  const cellH = gridH / numChannels;
+  
+  const offsetX = canvasWidth * GRID_RECT.x;
+  const offsetY = canvasHeight * GRID_RECT.y;
+  
+  return { cellW, cellH, offsetX, offsetY };
 }
 
-/**
- * Calculate polar ring radius for a given track index
- */
-export function calculatePolarRadius(trackIndex: number, totalTracks: number): number {
-  const trackWidth = (POLAR_RINGS.outerRadius - POLAR_RINGS.innerRadius) / totalTracks;
-  return POLAR_RINGS.innerRadius + (trackIndex + 0.5) * trackWidth;
+// Calculate cap scale for pixel-perfect button sizing
+export function calculateCapScale(cellW: number, cellH: number, pixelRatio: number): number {
+  return Math.min(cellW, cellH) * CAP_CONFIG.CAP_SCALE_FACTOR * pixelRatio;
 }
 
-/**
- * Calculate cap scale based on cell size and device pixel ratio
- */
-export function calculateCapScale(
-  cellWidth: number,
-  cellHeight: number,
-  pixelRatio: number = CANVAS_CONFIG.devicePixelRatio
-): number {
-  return Math.min(cellWidth, cellHeight) * CAP_CONFIG.scaleFactor * pixelRatio;
-}
-
-/** Type for layout mode values */
-export type LayoutMode = typeof LAYOUT_MODES[keyof typeof LAYOUT_MODES];
-
-/** Shader file to layout mode mapping */
+// Determine layout mode from shader filename
 export function getLayoutModeFromShader(shaderFile: string): LayoutMode {
-  if (shaderFile.includes('v0.44')) {
-    return LAYOUT_MODES.HORIZONTAL_64;
-  }
-  if (
-    shaderFile.includes('v0.40') ||
-    shaderFile.includes('v0.43') ||
-    shaderFile.includes('v0.46') ||
-    shaderFile.includes('v0.39')
-  ) {
+  if (shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || 
+      shaderFile.includes('v0.42') || shaderFile.includes('v0.43') ||
+      shaderFile.includes('v0.44')) {
     return LAYOUT_MODES.HORIZONTAL_32;
   }
-  // Default to circular for all other shaders
+  
+  if (shaderFile.includes('v0.45') || shaderFile.includes('v0.46') ||
+      shaderFile.includes('v0.47') || shaderFile.includes('v0.48') ||
+      shaderFile.includes('v0.49')) {
+    return LAYOUT_MODES.CIRCULAR;
+  }
+  
+  // Default to circular for most shaders
   return LAYOUT_MODES.CIRCULAR;
 }
