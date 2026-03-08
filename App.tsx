@@ -281,7 +281,7 @@ function App() {
               onMediaAdd={handleMediaAdd}
               onRemoteMediaSelect={handleRemoteMediaSelect}
               remoteMediaList={[
-                { id: '1', kind: 'video', url: 'clouds.mp4', fileName: 'Clouds Demo (MP4)' }
+                { id: '1', kind: 'video', url: 'clouds.mp4', fileName: 'Clouds Demo (MP4)', mimeType: 'video/mp4' }
               ]}
             />
           </div>
@@ -452,7 +452,7 @@ function App() {
           onMediaAdd={handleMediaAdd}
           onRemoteMediaSelect={handleRemoteMediaSelect}
           remoteMediaList={[
-             { id: '1', kind: 'video', url: 'clouds.mp4', fileName: 'Clouds Demo (MP4)' }
+             { id: '1', kind: 'video', url: 'clouds.mp4', fileName: 'Clouds Demo (MP4)', mimeType: 'video/mp4' }
           ]}
         />
 
