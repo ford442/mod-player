@@ -766,9 +766,21 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     capImg.onerror = () => {
         console.warn('⚠️ Failed to load cap texture');
     };
-    // Use BASE_URL for subdirectory-safe asset loading
-    const BASE_URL = import.meta.env.BASE_URL.endsWith('/') ? import.meta.env.BASE_URL : `${import.meta.env.BASE_URL}/`;
-    capImg.src = `${BASE_URL}unlit-button.png`;
+    // Runtime base URL detection for subdirectory deployment (e.g., /xm-player/)
+    const detectRuntimeBase = (): string => {
+      const viteBase = import.meta.env.BASE_URL;
+      if (viteBase && viteBase !== '/') {
+        return viteBase.endsWith('/') ? viteBase : `${viteBase}/`;
+      }
+      const pathSegments = window.location.pathname.split('/').filter(Boolean);
+      if (pathSegments.length > 0) {
+        return `/${pathSegments[0]}/`;
+      }
+      return '/';
+    };
+    const runtimeBase = detectRuntimeBase();
+    capImg.src = `${runtimeBase}unlit-button.png`;
+    console.log('[WebGL] Cap texture URL:', `${runtimeBase}unlit-button.png`, '(base:', runtimeBase, ')');
 
     try {
       const uniformLocs = {
@@ -1033,7 +1045,23 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   
   const ensureButtonTexture = async (device: GPUDevice) => {
     if (textureResourcesRef.current) return;
-    const textureUrl = shaderFile.includes('v0.30') ? `./unlit-button-2.png` : 'https://test.1ink.us/xm-player/unlit-button.png';
+    // Runtime base URL detection for subdirectory deployment
+    const detectRuntimeBase = (): string => {
+      const viteBase = import.meta.env.BASE_URL;
+      if (viteBase && viteBase !== '/') {
+        return viteBase.endsWith('/') ? viteBase : `${viteBase}/`;
+      }
+      const pathSegments = window.location.pathname.split('/').filter(Boolean);
+      if (pathSegments.length > 0) {
+        return `/${pathSegments[0]}/`;
+      }
+      return '/';
+    };
+    const runtimeBase = detectRuntimeBase();
+    const textureUrl = shaderFile.includes('v0.30') 
+      ? `${runtimeBase}unlit-button-2.png` 
+      : `${runtimeBase}unlit-button.png`;
+    console.log('[WebGPU] Loading button texture:', textureUrl);
     let bitmap: ImageBitmap;
     try {
       const img = new Image();

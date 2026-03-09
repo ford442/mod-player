@@ -16,13 +16,26 @@ const DEFAULT_ROWS = 64;
 const DEFAULT_CHANNELS = 4;
 // Use BASE_URL for proper subdirectory deployment support
 const DEFAULT_MODULE_URL = `./7DAYS.XM`;
-// Use Vite's BASE_URL for correct subdirectory resolution (e.g., /xm-player/)
-// Ensure trailing slash consistency for proper URL construction
-const BASE_URL = import.meta.env.BASE_URL.endsWith('/') 
-  ? import.meta.env.BASE_URL 
-  : `${import.meta.env.BASE_URL}/`;
-const WORKLET_URL = `${BASE_URL}worklets/openmpt-worklet.js`;
-console.log('[AudioWorklet] Worklet URL resolved:', WORKLET_URL, '(BASE_URL:', import.meta.env.BASE_URL, ')');
+
+// Runtime base URL detection for subdirectory deployment (e.g., /xm-player/)
+// Vite's BASE_URL may be '/' at build time, so we detect actual path from window.location
+const detectRuntimeBase = (): string => {
+  const viteBase = import.meta.env.BASE_URL;
+  // If Vite base is explicitly set (not root), use it
+  if (viteBase && viteBase !== '/') {
+    return viteBase.endsWith('/') ? viteBase : `${viteBase}/`;
+  }
+  // Otherwise detect from current URL path
+  const pathSegments = window.location.pathname.split('/').filter(Boolean);
+  if (pathSegments.length > 0) {
+    return `/${pathSegments[0]}/`;
+  }
+  return '/';
+};
+
+const RUNTIME_BASE_URL = detectRuntimeBase();
+const WORKLET_URL = `${RUNTIME_BASE_URL}worklets/openmpt-worklet.js`;
+console.log('[AudioWorklet] Worklet URL resolved:', WORKLET_URL, '(Vite BASE_URL:', import.meta.env.BASE_URL, ', Runtime base:', RUNTIME_BASE_URL, ')');
 // const SAMPLE_RATE = 44100;
 
 // TIMING FIX: Maximum allowed drift before correction (in seconds)
@@ -914,7 +927,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
         // Note: enabling this requires building the wasm engine using
         // ./scripts/build-wasm.sh (Emscripten SDK must be installed).
         try {
-          const nativeGlueUrl = `${BASE_URL}worklets/openmpt-native.js`;
+          const nativeGlueUrl = `${RUNTIME_BASE_URL}worklets/openmpt-native.js`;
           console.log('[INIT] Probing for native engine at:', nativeGlueUrl);
           const probeResp = await fetch(nativeGlueUrl, { method: 'HEAD' });
           if (probeResp.ok) {
