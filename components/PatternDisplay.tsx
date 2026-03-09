@@ -782,12 +782,15 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
         u_capTexture: gl.getUniformLocation(prog, 'u_capTexture'),
       };
       
+      // Log shader info for debugging
+      console.log(`[WebGL] Shader: ${shaderFile}, Layout: ${getLayoutType(shaderFile)}`);
+      
       // Check for null uniforms
       const nullUniforms = Object.entries(uniformLocs)
         .filter(([_, loc]) => loc === null)
         .map(([name, _]) => name);
       if (nullUniforms.length > 0) {
-        console.warn('⚠️ Null uniform locations:', nullUniforms);
+        console.warn(`[WebGL] Missing uniforms in ${shaderFile}:`, nullUniforms);
       }
       
       glResourcesRef.current = {
