@@ -15,7 +15,7 @@ interface SyncDebugInfo {
 const DEFAULT_ROWS = 64;
 const DEFAULT_CHANNELS = 4;
 // Use BASE_URL for proper subdirectory deployment support
-const DEFAULT_MODULE_URL = `./7DAYS.XM`;
+const DEFAULT_MODULE_URL = `${import.meta.env.BASE_URL}4-mat_madness.mod`;
 
 // Runtime base URL detection for subdirectory deployment (e.g., /xm-player/)
 // Vite's BASE_URL may be '/' at build time, so we detect actual path from window.location
@@ -709,22 +709,28 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
           }
 
           console.log('[PLAY] Creating AudioWorkletNode...');
-          // allocate or reuse a shared WASM memory buffer and pass it into the worklet
+          // Shared WASM memory requires cross-origin isolation (COOP/COEP headers).
+          // In production without those headers SharedArrayBuffer is unavailable and
+          // new WebAssembly.Memory({ shared: true }) throws a TypeError, killing play().
+          // The JS AudioWorklet engine manages its own memory, so shared memory is
+          // optional here (only needed for the native C++/Wasm engine).
           let wasmMemory = wasmMemoryRef.current;
-          if (!wasmMemory) {
+          const processorOptions: Record<string, unknown> = {};
+          if (!wasmMemory && window.crossOriginIsolated) {
             console.log('[PLAY] Allocating shared WASM.Memory for worklet (16MB)');
             wasmMemory = new WebAssembly.Memory({
               initial: 256, // 256 pages = 16 MB
               maximum: 256,
-              shared: true // required for any threaded/Emscripten use
+              shared: true
             });
             wasmMemoryRef.current = wasmMemory;
           }
+          if (wasmMemory) processorOptions.memory = wasmMemory;
           const node = new AudioWorkletNode(ctx, 'openmpt-processor', {
             numberOfInputs: 0,
             numberOfOutputs: 1,
             outputChannelCount: [2],
-            processorOptions: { memory: wasmMemory }
+            processorOptions
           });
           console.log('[PLAY] AudioWorkletNode created:', node);
 
