@@ -2,7 +2,6 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { LibOpenMPT, ModuleInfo, PatternMatrix, ChannelShadowState } from '../types';
 import { OpenMPTWorkletEngine } from '../audio-worklet/OpenMPTWorkletEngine';
 import type { WorkletPositionData } from '../audio-worklet/types';
-import { withBase } from '../src/lib/paths';
 
 interface SyncDebugInfo {
   mode: string;
