@@ -879,13 +879,21 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
 
         // AudioWorklet support check - API only, no early addModule()
         console.log("[INIT] Testing AudioWorklet support...");
-        const AudioCtxClass = (window as any).AudioContext || (window as any).webkitAudioContext;
-        if (AudioCtxClass && !!AudioCtxClass.prototype.audioWorklet) {
-          setIsWorkletSupported(true);
-          setActiveEngine('worklet');
-          console.log('✅ [INIT] AudioWorklet support confirmed via API check');
-        } else {
-          console.warn("⚠️ [INIT] AudioWorklet not available");
+        try {
+          const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+          const hasWorklet = 'audioWorklet' in audioCtx;
+          await audioCtx.close();
+          if (hasWorklet) {
+            setIsWorkletSupported(true);
+            setActiveEngine('worklet');
+            console.log('✅ [INIT] AudioWorklet support confirmed via API check');
+          } else {
+            console.warn("⚠️ [INIT] AudioWorklet not available");
+            setIsWorkletSupported(false);
+            setStatus("Error: AudioWorklet not supported in this browser.");
+          }
+        } catch (e) {
+          console.warn("⚠️ [INIT] AudioWorklet not available:", e);
           setIsWorkletSupported(false);
           setStatus("Error: AudioWorklet not supported in this browser.");
         }

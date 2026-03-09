@@ -785,12 +785,19 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
       // Log shader info for debugging
       console.log(`[WebGL] Shader: ${shaderFile}, Layout: ${getLayoutType(shaderFile)}`);
       
-      // Check for null uniforms
+      // Check for null uniforms - some are optional depending on shader
+      const requiredUniforms = ['u_resolution', 'u_noteData']; // Always required
       const nullUniforms = Object.entries(uniformLocs)
-        .filter(([_, loc]) => loc === null)
+        .filter(([name, loc]) => loc === null && requiredUniforms.includes(name))
+        .map(([name, _]) => name);
+      const optionalNull = Object.entries(uniformLocs)
+        .filter(([name, loc]) => loc === null && !requiredUniforms.includes(name))
         .map(([name, _]) => name);
       if (nullUniforms.length > 0) {
-        console.warn(`[WebGL] Missing uniforms in ${shaderFile}:`, nullUniforms);
+        console.warn(`[WebGL] Missing REQUIRED uniforms in ${shaderFile}:`, nullUniforms);
+      }
+      if (optionalNull.length > 0) {
+        console.log(`[WebGL] Optional uniforms not in ${shaderFile}:`, optionalNull);
       }
       
       glResourcesRef.current = {
