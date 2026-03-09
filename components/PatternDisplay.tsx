@@ -437,6 +437,8 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
 
   // Some older shaders have a reserved header/ring channel (index 0)
   // v0.16, v0.17, v0.21, v0.38, v0.39, v0.40, v0.42, v0.43, v0.44, v0.45, v0.46 need padding
+  const isOverlayActive = shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46');
+
   const padTopChannel = shaderFile.includes('v0.16') || shaderFile.includes('v0.17') || shaderFile.includes('v0.21') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.49');
 
   // Specific canvas sizing for different layouts
@@ -845,9 +847,14 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
         gl.deleteVertexArray(vao);
         gl.deleteBuffer(buf);
         gl.deleteTexture(tex);
+        if (capTex) gl.deleteTexture(capTex);
+        // Clear canvas so caps don't ghost when switching shaders
+        gl.clearColor(0, 0, 0, 0);
+        gl.clear(gl.COLOR_BUFFER_BIT);
       } catch (e) {
         console.warn('Cleanup error:', e);
       }
+      glResourcesRef.current = null;
     };
   };
 
@@ -987,7 +994,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
 
   // === WEBGL2 DATA UPLOAD ===
   useEffect(() => {
-    if (!shaderFile.includes('v0.38') && !shaderFile.includes('v0.39') && !shaderFile.includes('v0.40') && !shaderFile.includes('v0.43') && !shaderFile.includes('v0.44') && !shaderFile.includes('v0.45') && !shaderFile.includes('v0.46')) return;
+    if (!isOverlayActive) return;
 
     const gl = glContextRef.current;
     const res = glResourcesRef.current;
@@ -1961,6 +1968,8 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
             top: '50%',
             left: '50%',
             transform: 'translate(-50%, -50%)',
+            // Hide when the current shader doesn't use WebGL caps overlay
+            display: isOverlayActive ? 'block' : 'none',
           }}
       />
       
