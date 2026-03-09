@@ -160,12 +160,17 @@ function App() {
 
   // Register PWA service worker
   useEffect(() => {
-    if ('serviceWorker' in navigator) {
+    if ('serviceWorker' in navigator && import.meta.env.PROD) {
       const swUrl = `${import.meta.env.BASE_URL}sw.js`;
       const scope = import.meta.env.BASE_URL || '/';
-      navigator.serviceWorker.register(swUrl, { scope }).catch((err) => {
+      console.log('[PWA] Registering service worker:', { swUrl, scope });
+      navigator.serviceWorker.register(swUrl, { scope }).then((reg) => {
+        console.log('[PWA] Service worker registered:', reg.scope);
+      }).catch((err) => {
         console.warn('[PWA] Service worker registration failed:', err);
       });
+    } else {
+      console.log('[PWA] Skipping SW registration (dev mode or not supported)');
     }
   }, []);
 
