@@ -800,7 +800,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
       const variantUniforms = ['u_layoutMode', 'u_invertChannels', 'u_cellSize', 'u_offset', 'u_capTexture'];
       
       const nullUniforms = Object.entries(uniformLocs)
-        .filter(([name, loc]) => loc === null)
+        .filter(([, loc]) => loc === null)
         .map(([name, _]) => name);
       
       const missingCore = nullUniforms.filter(name => coreUniforms.includes(name));
@@ -1450,7 +1450,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
       
       // Helper to safely set uniforms (handles null locations from GLSL optimization)
       const setUniform = <T extends (loc: WebGLUniformLocation | null, ...args: any[]) => void>(
-        name: string, 
+        _name: string, 
         location: WebGLUniformLocation | null, 
         setter: T, 
         ...args: Parameters<T> extends [any, ...infer R] ? R : never
@@ -1484,7 +1484,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
         
         // Track if any core uniforms are missing
         if (!hasResolution || !hasCols || !hasRows || !hasPlayhead) {
-          const missing = ['u_resolution', 'u_cols', 'u_rows', 'u_playhead'].filter((name, i) => 
+          const missing = ['u_resolution', 'u_cols', 'u_rows', 'u_playhead'].filter((_, i) => 
             ![hasResolution, hasCols, hasRows, hasPlayhead][i]
           );
           errors.push(`Missing core uniforms (shader may fail): ${missing.join(', ')}`);
