@@ -1,7 +1,7 @@
 import type { MediaItem } from '../types';
 
 // Adjust this path to match where you drop your files on the FTP
-const REMOTE_MEDIA_BASE_URL = './media/'; 
+const REMOTE_MEDIA_BASE_URL = `${import.meta.env.BASE_URL}media/`;
 
 export const fetchRemoteMedia = async (): Promise<MediaItem[]> => {
   try {
