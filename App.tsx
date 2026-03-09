@@ -161,9 +161,13 @@ function App() {
   // Register PWA service worker
   useEffect(() => {
     if ('serviceWorker' in navigator && import.meta.env.PROD) {
-      const swUrl = `${import.meta.env.BASE_URL}sw.js`;
-      const scope = import.meta.env.BASE_URL || '/';
-      console.log('[PWA] Registering service worker:', { swUrl, scope });
+      // Detect actual base path from current location
+      const pathSegments = window.location.pathname.split('/').filter(Boolean);
+      const detectedBase = pathSegments.length > 0 ? `/${pathSegments[0]}/` : '/';
+      const baseUrl = import.meta.env.BASE_URL !== '/' ? import.meta.env.BASE_URL : detectedBase;
+      const swUrl = `${baseUrl}sw.js`;
+      const scope = baseUrl;
+      console.log('[PWA] Registering service worker:', { swUrl, scope, baseEnv: import.meta.env.BASE_URL, detectedBase });
       navigator.serviceWorker.register(swUrl, { scope }).then((reg) => {
         console.log('[PWA] Service worker registered:', reg.scope);
       }).catch((err) => {
