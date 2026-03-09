@@ -17,7 +17,12 @@ const DEFAULT_CHANNELS = 4;
 // Use BASE_URL for proper subdirectory deployment support
 const DEFAULT_MODULE_URL = `./7DAYS.XM`;
 // Use Vite's BASE_URL for correct subdirectory resolution (e.g., /xm-player/)
-const WORKLET_URL = `${import.meta.env.BASE_URL}worklets/openmpt-worklet.js`;
+// Ensure trailing slash consistency for proper URL construction
+const BASE_URL = import.meta.env.BASE_URL.endsWith('/') 
+  ? import.meta.env.BASE_URL 
+  : `${import.meta.env.BASE_URL}/`;
+const WORKLET_URL = `${BASE_URL}worklets/openmpt-worklet.js`;
+console.log('[AudioWorklet] Worklet URL resolved:', WORKLET_URL, '(BASE_URL:', import.meta.env.BASE_URL, ')');
 // const SAMPLE_RATE = 44100;
 
 // TIMING FIX: Maximum allowed drift before correction (in seconds)
@@ -677,11 +682,15 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
         try {
           // Load the worklet module only once per AudioContext
           if (ctx.audioWorklet && !workletLoadedRef.current) {
-            console.log('[PLAY] Loading worklet module from:', WORKLET_URL);
-            console.log('[PLAY] Loading worklet from:', WORKLET_URL);
+            console.log('[PLAY] ==================================================');
+            console.log('[PLAY] Loading AudioWorklet module...');
+            console.log('[PLAY] Resolved URL:', WORKLET_URL);
+            console.log('[PLAY] BASE_URL:', import.meta.env.BASE_URL);
+            console.log('[PLAY] AudioContext state:', ctx.state);
+            console.log('[PLAY] ==================================================');
             await ctx.audioWorklet.addModule(WORKLET_URL);
             workletLoadedRef.current = true;
-            console.log('[PLAY] openmpt-processor loaded successfully');
+            console.log('[PLAY] ✅ AudioWorklet module loaded successfully');
           } else {
             console.log('[PLAY] Worklet module already loaded (skipping addModule)');
           }
@@ -877,23 +886,26 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
         libopenmptRef.current = lib;
         setIsReady(true);
 
-        // AudioWorklet support check - API only, no early addModule()
-        console.log("[INIT] Testing AudioWorklet support...");
+        // AudioWorklet support check - API only, NO early addModule() probe
+        // The actual worklet module is loaded only during playback via addModule()
+        console.log("[INIT] Testing AudioWorklet support (API-level only)...");
         try {
-          const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
-          const hasWorklet = 'audioWorklet' in audioCtx;
-          await audioCtx.close();
+          // Simple API capability check without creating AudioContext or loading modules
+          const hasWorklet = typeof window !== 'undefined' && 
+            'AudioContext' in window && 
+            'audioWorklet' in AudioContext.prototype;
+          
           if (hasWorklet) {
             setIsWorkletSupported(true);
             setActiveEngine('worklet');
-            console.log('✅ [INIT] AudioWorklet support confirmed via API check');
+            console.log('✅ [INIT] AudioWorklet API available (module will load at playback time)');
           } else {
-            console.warn("⚠️ [INIT] AudioWorklet not available");
+            console.warn("⚠️ [INIT] AudioWorklet API not available in this browser");
             setIsWorkletSupported(false);
             setStatus("Error: AudioWorklet not supported in this browser.");
           }
         } catch (e) {
-          console.warn("⚠️ [INIT] AudioWorklet not available:", e);
+          console.warn("⚠️ [INIT] AudioWorklet API check failed:", e);
           setIsWorkletSupported(false);
           setStatus("Error: AudioWorklet not supported in this browser.");
         }
@@ -902,7 +914,8 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
         // Note: enabling this requires building the wasm engine using
         // ./scripts/build-wasm.sh (Emscripten SDK must be installed).
         try {
-          const nativeGlueUrl = `${import.meta.env.BASE_URL}worklets/openmpt-native.js`;
+          const nativeGlueUrl = `${BASE_URL}worklets/openmpt-native.js`;
+          console.log('[INIT] Probing for native engine at:', nativeGlueUrl);
           const probeResp = await fetch(nativeGlueUrl, { method: 'HEAD' });
           if (probeResp.ok) {
             console.log('[INIT] Native C++/Wasm AudioWorklet engine available');
@@ -912,6 +925,8 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
             setIsNativeWorkletAvailable(true);
             setActiveEngine('native-worklet');
             console.log('[INIT] Native engine initialized');
+          } else {
+            console.log('[INIT] Native engine not found (status:', probeResp.status, ')');
           }
         } catch (nativeErr) {
           console.log('[INIT] Native C++/Wasm engine not available (using JS fallback):', nativeErr);
