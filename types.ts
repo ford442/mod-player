@@ -92,9 +92,22 @@ export interface LibOpenMPT {
     order: number,
     row: number
   ) => void;
+  _openmpt_module_read_float_stereo: (
+    modPtr: number,
+    sampleRate: number,
+    count: number,
+    leftPtr: number,
+    rightPtr: number
+  ) => number;
+  _openmpt_module_set_render_param: (
+    modPtr: number,
+    param: number,
+    value: number
+  ) => void;
   UTF8ToString: (ptr: number) => string;
   stringToUTF8: (str: string) => number;
   HEAPU8: Uint8Array;
+  HEAPF32: Float32Array;
 }
 
 export type AudioEngine = 'worklet' | 'native-worklet' | 'scriptprocessor';
