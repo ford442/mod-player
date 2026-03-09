@@ -766,7 +766,9 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     capImg.onerror = () => {
         console.warn('⚠️ Failed to load cap texture');
     };
-    capImg.src = `./unlit-button.png`;
+    // Use BASE_URL for subdirectory-safe asset loading
+    const BASE_URL = import.meta.env.BASE_URL.endsWith('/') ? import.meta.env.BASE_URL : `${import.meta.env.BASE_URL}/`;
+    capImg.src = `${BASE_URL}unlit-button.png`;
 
     try {
       const uniformLocs = {
@@ -785,19 +787,33 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
       // Log shader info for debugging
       console.log(`[WebGL] Shader: ${shaderFile}, Layout: ${getLayoutType(shaderFile)}`);
       
-      // Check for null uniforms - some are optional depending on shader
-      const requiredUniforms = ['u_resolution', 'u_noteData']; // Always required
+      // Uniform Contract Audit for inline GLSL shader:
+      // The inline VS declares: u_resolution, u_cellSize, u_offset, u_cols, u_rows, 
+      //   u_playhead, u_invertChannels, u_layoutMode, u_noteData
+      // The inline FS declares: u_capTexture
+      // ALL uniforms are used in drawWebGL(), but GLSL compilers may optimize some out
+      // based on driver-specific dead code elimination.
+      
+      // Core uniforms that MUST exist for the shader to render anything meaningful
+      const coreUniforms = ['u_resolution', 'u_noteData', 'u_cols', 'u_rows', 'u_playhead'];
+      // Layout-variant uniforms that may be optimized out depending on code path taken
+      const variantUniforms = ['u_layoutMode', 'u_invertChannels', 'u_cellSize', 'u_offset', 'u_capTexture'];
+      
       const nullUniforms = Object.entries(uniformLocs)
-        .filter(([name, loc]) => loc === null && requiredUniforms.includes(name))
+        .filter(([name, loc]) => loc === null)
         .map(([name, _]) => name);
-      const optionalNull = Object.entries(uniformLocs)
-        .filter(([name, loc]) => loc === null && !requiredUniforms.includes(name))
-        .map(([name, _]) => name);
-      if (nullUniforms.length > 0) {
-        console.warn(`[WebGL] Missing REQUIRED uniforms in ${shaderFile}:`, nullUniforms);
+      
+      const missingCore = nullUniforms.filter(name => coreUniforms.includes(name));
+      const missingVariant = nullUniforms.filter(name => variantUniforms.includes(name));
+      
+      if (missingCore.length > 0) {
+        // This is a real problem - core uniforms should never be optimized out
+        console.error(`[WebGL] ❌ Missing CORE uniforms in ${shaderFile}:`, missingCore);
+        console.error(`[WebGL] This indicates a serious shader/source mismatch!`);
       }
-      if (optionalNull.length > 0) {
-        console.log(`[WebGL] Optional uniforms not in ${shaderFile}:`, optionalNull);
+      if (missingVariant.length > 0) {
+        // These may be optimized out by GLSL compiler - expected behavior, log at debug level
+        console.log(`[WebGL] Variant uniforms optimized out in ${shaderFile} (driver-specific):`, missingVariant);
       }
       
       glResourcesRef.current = {
@@ -1432,30 +1448,58 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
       // PERFORMANCE OPTIMIZATION: Use live values from ref for smooth animation
       const livePlayheadRow = playbackStateRef?.current?.playheadRow ?? playheadRow;
       
+      // Helper to safely set uniforms (handles null locations from GLSL optimization)
+      const setUniform = <T extends (loc: WebGLUniformLocation | null, ...args: any[]) => void>(
+        name: string, 
+        location: WebGLUniformLocation | null, 
+        setter: T, 
+        ...args: Parameters<T> extends [any, ...infer R] ? R : never
+      ) => {
+        if (location !== null) {
+          (setter as any)(location, ...args);
+          return true;
+        } else {
+          // Uniform was optimized out by GLSL compiler - this is driver-specific behavior
+          return false;
+        }
+      };
+      
       try {
-        gl.uniform2f(uniforms.u_resolution, gl.canvas.width, gl.canvas.height);
-        uniformVals['u_resolution'] = `${gl.canvas.width}x${gl.canvas.height}`;
+        // Core uniforms - shader won't work without these
+        const hasResolution = setUniform('u_resolution', uniforms.u_resolution, gl.uniform2f.bind(gl), gl.canvas.width, gl.canvas.height);
+        if (hasResolution) uniformVals['u_resolution'] = `${gl.canvas.width}x${gl.canvas.height}`;
         
-        gl.uniform1f(uniforms.u_cols, cols);
-        uniformVals['u_cols'] = cols;
+        const hasCols = setUniform('u_cols', uniforms.u_cols, gl.uniform1f.bind(gl), cols);
+        if (hasCols) uniformVals['u_cols'] = cols;
         
-        gl.uniform1f(uniforms.u_rows, rows);
-        uniformVals['u_rows'] = rows;
+        const hasRows = setUniform('u_rows', uniforms.u_rows, gl.uniform1f.bind(gl), rows);
+        if (hasRows) uniformVals['u_rows'] = rows;
         
-        gl.uniform1f(uniforms.u_playhead, livePlayheadRow);
-        uniformVals['u_playhead'] = livePlayheadRow.toFixed(2);
+        const hasPlayhead = setUniform('u_playhead', uniforms.u_playhead, gl.uniform1f.bind(gl), livePlayheadRow);
+        if (hasPlayhead) uniformVals['u_playhead'] = livePlayheadRow.toFixed(2);
         
-        gl.uniform1i(uniforms.u_invertChannels, invertChannels ? 1 : 0);
-        uniformVals['u_invertChannels'] = invertChannels ? 1 : 0;
+        // Variant uniforms - may be optimized out
+        const hasInvert = setUniform('u_invertChannels', uniforms.u_invertChannels, gl.uniform1i.bind(gl), invertChannels ? 1 : 0);
+        if (hasInvert) uniformVals['u_invertChannels'] = invertChannels ? 1 : 0;
+        
+        // Track if any core uniforms are missing
+        if (!hasResolution || !hasCols || !hasRows || !hasPlayhead) {
+          const missing = ['u_resolution', 'u_cols', 'u_rows', 'u_playhead'].filter((name, i) => 
+            ![hasResolution, hasCols, hasRows, hasPlayhead][i]
+          );
+          errors.push(`Missing core uniforms (shader may fail): ${missing.join(', ')}`);
+        }
       } catch (e) {
         errors.push(`Uniform upload error: ${e}`);
       }
 
+      // Note data texture (always binding - uniform may be null but texture still needed)
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, texture);
-      gl.uniform1i(uniforms.u_noteData, 0);
+      setUniform('u_noteData', uniforms.u_noteData, gl.uniform1i.bind(gl), 0);
 
-      if (res.capTexture) {
+      // Cap texture (optional visual enhancement)
+      if (res.capTexture && uniforms.u_capTexture !== null) {
           gl.activeTexture(gl.TEXTURE1);
           gl.bindTexture(gl.TEXTURE_2D, res.capTexture);
           gl.uniform1i(uniforms.u_capTexture, 1);
@@ -1475,18 +1519,24 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
           const metrics = calculateHorizontalCellSize(gl.canvas.width, gl.canvas.height, 32, rows);
           effectiveCellW = metrics.cellW;
           effectiveCellH = metrics.cellH;
-          gl.uniform2f(uniforms.u_offset, metrics.offsetX, metrics.offsetY);
+          if (uniforms.u_offset !== null) {
+            gl.uniform2f(uniforms.u_offset, metrics.offsetX, metrics.offsetY);
+          }
           layoutModeName = shaderFile.includes('v0.39') ? '32-STEP (v0.39)' : '32-STEP';
       } else if (layoutMode === LAYOUT_MODES.HORIZONTAL_64) {
           // Horizontal 64-step
           const metrics = calculateHorizontalCellSize(gl.canvas.width, gl.canvas.height, 64, rows);
           effectiveCellW = metrics.cellW;
           effectiveCellH = metrics.cellH;
-          gl.uniform2f(uniforms.u_offset, metrics.offsetX, metrics.offsetY);
+          if (uniforms.u_offset !== null) {
+            gl.uniform2f(uniforms.u_offset, metrics.offsetX, metrics.offsetY);
+          }
           layoutModeName = '64-STEP';
       } else {
           // Circular layout
-          gl.uniform2f(uniforms.u_offset, 0.0, 0.0);
+          if (uniforms.u_offset !== null) {
+            gl.uniform2f(uniforms.u_offset, 0.0, 0.0);
+          }
           layoutModeName = shaderFile.includes('v0.45') ? 'CIRCULAR (v0.45)' : 'CIRCULAR';
       }
 
@@ -1494,8 +1544,13 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
       const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
       const capScale = calculateCapScale(effectiveCellW, effectiveCellH, pixelRatio);
 
-      gl.uniform2f(uniforms.u_cellSize, effectiveCellW, effectiveCellH);
-      gl.uniform1i(uniforms.u_layoutMode, layoutMode);
+      // Variant uniforms - may be optimized out by GLSL compiler
+      if (uniforms.u_cellSize !== null) {
+        gl.uniform2f(uniforms.u_cellSize, effectiveCellW, effectiveCellH);
+      }
+      if (uniforms.u_layoutMode !== null) {
+        gl.uniform1i(uniforms.u_layoutMode, layoutMode);
+      }
 
       uniformVals['u_offset'] = `${(GRID_RECT.x * gl.canvas.width).toFixed(1)}, ${(GRID_RECT.y * gl.canvas.height).toFixed(1)}`;
       uniformVals['u_cellSize'] = `${effectiveCellW.toFixed(1)}, ${effectiveCellH.toFixed(1)}`;
