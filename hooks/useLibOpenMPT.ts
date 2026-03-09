@@ -14,8 +14,8 @@ interface SyncDebugInfo {
 // Constants
 const DEFAULT_ROWS = 64;
 const DEFAULT_CHANNELS = 4;
-// Use BASE_URL for proper subdirectory deployment support
-const DEFAULT_MODULE_URL = `${import.meta.env.BASE_URL}4-mat_madness.mod`;
+// Use './' so the URL resolves relative to the page, correct in any deployment path
+const DEFAULT_MODULE_URL = './4-mat_madness.mod';
 
 // Runtime base URL detection for subdirectory deployment (e.g., /xm-player/)
 // Vite's BASE_URL may be '/' at build time, so we detect actual path from window.location

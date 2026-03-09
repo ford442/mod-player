@@ -38,11 +38,29 @@ def upload_directory(sftp_client, local_path, remote_path):
             # If it's a directory, recurse into it.
             upload_directory(sftp_client, local_item_path, remote_item_path)
 
+def build_project():
+    """
+    Builds the Vite project with the correct base path for the deployment subdirectory.
+    VITE_APP_BASE_PATH must match REMOTE_DIRECTORY's last segment (e.g. /xm-player/).
+    """
+    import subprocess
+    base_segment = REMOTE_DIRECTORY.rstrip('/').split('/')[-1]
+    base_path = f"/{base_segment}/"
+    env = os.environ.copy()
+    env["VITE_APP_BASE_PATH"] = base_path
+    print(f"Building project with VITE_APP_BASE_PATH={base_path} ...")
+    result = subprocess.run(["npm", "run", "build"], env=env, cwd=os.path.dirname(os.path.abspath(__file__)))
+    if result.returncode != 0:
+        raise RuntimeError("npm run build failed — aborting deploy")
+    print("Build complete ✅")
+
 def main():
     """
     Main function to connect to the server and start the upload process.
     """
     password = 'GoogleBez12!' # getpass.getpass(f"Enter password for {USERNAME}@{HOSTNAME}: ")
+
+    build_project()
 
     transport = None
     sftp = None
@@ -73,8 +91,5 @@ def main():
         print("Connection closed.")
 
 if __name__ == "__main__":
-    if not os.path.exists(LOCAL_DIRECTORY):
-        print(f"Error: Local directory '{LOCAL_DIRECTORY}' not found. Did you run 'npm run build' first?")
-    else:
-        main()
+    main()
 
