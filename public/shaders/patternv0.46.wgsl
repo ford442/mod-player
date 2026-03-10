@@ -1,13 +1,14 @@
 // patternv0.46.wgsl
-// Circular 64-Step – Chassis Background + Radial Playhead Glow
+// Circular 64-Step – Transparent Chassis Overlay + Radial Playhead Glow
 //
-// This shader draws ONLY the background chassis housing for each cell and a
-// radial playhead highlight wash (ambient LED glow leaking through the chassis
-// at the active step angle, with an exponential trailing sweep).
-// Frosted glass caps and note data are rendered by the WebGL2 overlay.
+// This shader renders TRANSPARENT cells that sit on top of the bezel.wgsl
+// hardware photo background.  The cell body is alpha=0 so the bezel shows
+// through everywhere.  Only the playhead glow and trailing sweep add any
+// colour, as a semi-transparent wash of light across the ring at the active
+// step angle.
 //
 // Architecture: Per-instance instanced rendering (one quad per step × channel).
-// The fragment uses in.row to compute playhead proximity.
+// Alpha blending is enabled by PatternDisplay.tsx for this shader.
 
 struct Uniforms {
   numRows: u32,
@@ -29,12 +30,9 @@ struct Uniforms {
   bloomIntensity: f32,
   bloomThreshold: f32,
   invertChannels: u32,
-  // dimFactor added to match PatternDisplay.tsx uniform payload layout
   dimFactor: f32,
 };
 
-// Bindings kept for interface compatibility.
-// cells/channels are read in the vertex stage only for layout; not used here.
 @group(0) @binding(0) var<storage, read> cells: array<u32>;
 @group(0) @binding(1) var<uniform> uniforms: Uniforms;
 @group(0) @binding(2) var<storage, read> rowFlags: array<u32>;
@@ -62,7 +60,7 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
   let row         = instanceIndex / numChannels;
   let channel     = instanceIndex % numChannels;
 
-  // Cull instances outside the current 64-step page to prevent z-fighting
+  // Cull instances outside current 64-step page
   let pageStart = u32(uniforms.playheadRow / 64.0) * 64u;
   let isVisible = row >= pageStart && row < pageStart + 64u;
 
@@ -109,80 +107,68 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
   return out;
 }
 
-fn sdRoundedBox(p: vec2<f32>, b: vec2<f32>, r: f32) -> f32 {
-  let q = abs(p) - b + r;
-  return length(max(q, vec2<f32>(0.0))) + min(max(q.x, q.y), 0.0) - r;
-}
-
 @fragment
 fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   let uv = in.uv;
   let p  = uv - vec2<f32>(0.5);
-  let aa = fwidth(p.y) * 0.5;
 
   if (in.channel >= uniforms.numChannels) { return vec4<f32>(0.0); }
 
   // Clip UI strip at bottom of canvas
   if (in.position.y > uniforms.canvasH * 0.88) { discard; }
 
-  // ── Playhead proximity (smooth, wraps around 64-step page) ────────────────
-  let totalSteps    = 64.0;
-  let playheadStep  = uniforms.playheadRow - floor(uniforms.playheadRow / totalSteps) * totalSteps;
-  let rowF          = f32(in.row % 64u);
-  let rowDistRaw    = abs(rowF - playheadStep);
-  let rowDist       = min(rowDistRaw, totalSteps - rowDistRaw);
+  // ── Playhead proximity ────────────────────────────────────────────────────
+  let totalSteps   = 64.0;
+  let playheadStep = uniforms.playheadRow - floor(uniforms.playheadRow / totalSteps) * totalSteps;
+  let rowF         = f32(in.row % 64u);
+  let rowDistRaw   = abs(rowF - playheadStep);
+  let rowDist      = min(rowDistRaw, totalSteps - rowDistRaw);
+  let playheadHit  = 1.0 - smoothstep(0.0, 2.0, rowDist);
 
-  // Primary: bright band at the active step (all rings glow together → radial line)
-  let playheadHit   = 1.0 - smoothstep(0.0, 2.0, rowDist);
-
-  // ── Trailing sweep: steps recently passed emit residual glow ──────────────
-  // stepsBehind = how many steps BEHIND the playhead this instance is (0..63)
-  let stepsBehind   = fract((playheadStep - rowF) / totalSteps) * totalSteps;
-  let trailGlow     = select(
+  // ── Trailing sweep ────────────────────────────────────────────────────────
+  let stepsBehind = fract((playheadStep - rowF) / totalSteps) * totalSteps;
+  let trailGlow   = select(
     0.0,
     exp(-stepsBehind * 0.40),
     stepsBehind > 0.001 && stepsBehind < 14.0
   );
 
-  // ── Housing base colour ───────────────────────────────────────────────────
-  // Dark rounded housing for each cell; this is what shows between the caps.
-  let bgColor = vec3<f32>(0.06, 0.07, 0.09);
-  var finalColor = bgColor;
+  // ── Transparent base — bezel.png shows through ────────────────────────────
+  var glowColor = vec3<f32>(0.0);
+  var glowAlpha = 0.0;
 
-  // Subtle rounded housing mask: slightly brighter centre to suggest depth
-  let dHousing = sdRoundedBox(p, vec2<f32>(0.46), 0.06);
-  let housingFade = 1.0 - smoothstep(-0.08, 0.0, dHousing);
-  finalColor += vec3<f32>(0.012) * housingFade;
-
-  // ── Ambient LED leak – radial playhead wash ───────────────────────────────
-  // Simulates light from the active step's LED leaking up through the chassis
-  // around the ring, forming a soft radial glow arc at the playhead angle.
+  // Playhead wash: soft blue ambient wash that sweeps around the ring
   let kickBoost = 1.0 + uniforms.kickTrigger * 0.5;
   let playBlue  = vec3<f32>(0.06, 0.32, 0.95);
 
-  // Global wash: all rings at the playhead step glow uniformly
-  finalColor += playBlue * playheadHit * 0.65 * kickBoost;
-
-  // Centre hotspot: brighter at the button centre, fades toward edges
-  let centreDist = length(p);
-  let centreGlow = exp(-centreDist * centreDist * 6.0) * playheadHit;
-  finalColor += playBlue * centreGlow * 0.50 * kickBoost;
-
-  // ── Trailing sweep (warm-to-cool residual glow) ───────────────────────────
-  finalColor += vec3<f32>(0.03, 0.16, 0.50) * trailGlow * 0.40;
-
-  // ── Edge brightening at playhead (radial line accent) ─────────────────────
-  // When directly on the playhead, the physical rim of the housing catches more
-  // ambient light – gives the "radial line" a crisp bright edge.
-  if (rowDist < 0.5) {
-    let rimFrac = 1.0 - rowDist * 2.0;
-    let edgeGlow = (1.0 - smoothstep(0.02, 0.18, -dHousing)) * rimFrac * 0.40;
-    finalColor += vec3<f32>(0.2, 0.55, 1.0) * edgeGlow;
+  if (playheadHit > 0.01) {
+    // Radial falloff within the cell (brighter at centre)
+    let centreDist  = length(p);
+    let centreBoost = exp(-centreDist * centreDist * 5.0);
+    let wash        = playheadHit * (0.65 + centreBoost * 0.35) * kickBoost;
+    glowColor += playBlue * wash;
+    glowAlpha  = max(glowAlpha, playheadHit * 0.72);
   }
 
-  // ── Noise / dither ────────────────────────────────────────────────────────
-  let noise = fract(sin(dot(in.uv * uniforms.timeSec, vec2<f32>(12.9898, 78.233))) * 43758.5453);
-  finalColor += (noise - 0.5) * 0.007;
+  // Trailing sweep (warm residual glow)
+  if (trailGlow > 0.01) {
+    glowColor += vec3<f32>(0.03, 0.16, 0.50) * trailGlow * 0.45;
+    glowAlpha  = max(glowAlpha, trailGlow * 0.38);
+  }
 
-  return vec4<f32>(clamp(finalColor, vec3<f32>(0.0), vec3<f32>(2.0)) * uniforms.dimFactor, 1.0);
+  // ── Edge accent at exact playhead position ────────────────────────────────
+  if (rowDist < 0.5) {
+    let rimFrac  = 1.0 - rowDist * 2.0;
+    let edgeDist = length(p) - 0.44; // distance from cell boundary
+    let edgeGlow = smoothstep(0.05, 0.0, abs(edgeDist)) * rimFrac * 0.5;
+    glowColor += vec3<f32>(0.2, 0.55, 1.0) * edgeGlow;
+    glowAlpha  = max(glowAlpha, edgeGlow * 0.6);
+  }
+
+  // Apply dimFactor
+  glowColor *= uniforms.dimFactor;
+  glowAlpha *= uniforms.dimFactor;
+
+  // Completely transparent when not near playhead — bezel shows through
+  return vec4<f32>(glowColor, clamp(glowAlpha, 0.0, 1.0));
 }
