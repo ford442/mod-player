@@ -52,9 +52,11 @@ const shouldUseBackgroundPass = (shaderFile: string) => {
 
 const getBackgroundShaderFile = (shaderFile: string): string => {
   if (shaderFile.includes('v0.23') || shaderFile.includes('v0.24')) return 'chassis_video.wgsl';
-  // Use the new frosted shader for the latest layout
-  if (shaderFile.includes('v0.21') || shaderFile.includes('v0.40') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.47') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49')) return 'chassis_frosted.wgsl';
-  
+  // Horizontal layouts: procedural frosted chassis (opaque white panel)
+  if (shaderFile.includes('v0.21') || shaderFile.includes('v0.40') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44')) return 'chassis_frosted.wgsl';
+  // Circular layouts: actual hardware bezel photo (bezel.png) so the dark inner
+  // circle and white frame show through the transparent pattern cells
+  if (shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.47') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49')) return 'bezel.wgsl';
   if (shaderFile.includes('v0.37') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39')) return 'chassisv0.37.wgsl';
   if (shaderFile.includes('v0.27') || shaderFile.includes('v0.28') || shaderFile.includes('v0.30') || shaderFile.includes('v0.31') || shaderFile.includes('v0.32') || shaderFile.includes('v0.33') || shaderFile.includes('v0.34') || shaderFile.includes('v0.35') || shaderFile.includes('v0.36')) return 'chassisv0.1.wgsl';
   return 'bezel.wgsl';
