@@ -73,7 +73,11 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
   const libopenmptRef = useRef<LibOpenMPT | null>(null);
   const currentModulePtr = useRef<number>(0);
   const audioContextRef = useRef<AudioContext | null>(null);
-  // ScriptProcessor removed to avoid hiss/timing instability
+  // ScriptProcessorNode fallback when AudioWorklet WASM init fails (Chrome < 116)
+  const scriptProcessorRef = useRef<ScriptProcessorNode | null>(null);
+  const spLeftBufPtr = useRef<number>(0);
+  const spRightBufPtr = useRef<number>(0);
+  const spFallbackTriggered = useRef<boolean>(false);
   const audioWorkletNodeRef = useRef<AudioWorkletNode | null>(null);
   // Shared WASM memory supplied to the worklet; allocated once on main thread
   const wasmMemoryRef = useRef<WebAssembly.Memory | null>(null);
@@ -434,6 +438,21 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
       audioWorkletNodeRef.current = null;
     }
 
+    // Cleanup ScriptProcessorNode fallback
+    if (scriptProcessorRef.current) {
+      scriptProcessorRef.current.disconnect();
+      scriptProcessorRef.current = null;
+    }
+    if (spLeftBufPtr.current && libopenmptRef.current) {
+      libopenmptRef.current._free(spLeftBufPtr.current);
+      spLeftBufPtr.current = 0;
+    }
+    if (spRightBufPtr.current && libopenmptRef.current) {
+      libopenmptRef.current._free(spRightBufPtr.current);
+      spRightBufPtr.current = 0;
+    }
+    spFallbackTriggered.current = false;
+
     // TIMING FIX: Reset timing refs on stop
     audioClockStartRef.current = 0;
     workletTimeAtStartRef.current = 0;
@@ -766,7 +785,65 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
               }
             } else if (type === 'error') {
               console.error("[PLAY] Worklet error:", message);
-              setStatus("Worklet error: " + message);
+              // Detect WASM init failure and fall back to ScriptProcessorNode
+              if ((message?.includes('Lib init failed') || message?.includes('WASM library init timeout'))
+                  && !spFallbackTriggered.current) {
+                spFallbackTriggered.current = true;
+                console.warn('[PLAY] Worklet WASM init failed — falling back to ScriptProcessorNode');
+                try { node.disconnect(); } catch (_e) { /* ignore */ }
+                audioWorkletNodeRef.current = null;
+
+                const lib = libopenmptRef.current;
+                const modPtr = currentModulePtr.current;
+                if (lib && modPtr) {
+                  const SP_BUFFER = 4096;
+                  const spNode = ctx.createScriptProcessor(SP_BUFFER, 0, 2);
+                  const leftPtr = lib._malloc(4 * SP_BUFFER);
+                  const rightPtr = lib._malloc(4 * SP_BUFFER);
+                  spLeftBufPtr.current = leftPtr;
+                  spRightBufPtr.current = rightPtr;
+                  // Best-quality interpolation
+                  lib._openmpt_module_set_render_param(modPtr, 2, 8);
+
+                  spNode.onaudioprocess = (audioEvt) => {
+                    const outL = audioEvt.outputBuffer.getChannelData(0);
+                    const outR = audioEvt.outputBuffer.getChannelData(1);
+                    const mPtr = currentModulePtr.current;
+                    const mLib = libopenmptRef.current;
+                    if (!mLib || !mPtr) { outL.fill(0); outR.fill(0); return; }
+
+                    const written = mLib._openmpt_module_read_float_stereo(
+                      mPtr, ctx.sampleRate, SP_BUFFER, leftPtr, rightPtr
+                    );
+                    if (written > 0) {
+                      outL.set(new Float32Array(mLib.HEAPF32.buffer, leftPtr, written));
+                      outR.set(new Float32Array(mLib.HEAPF32.buffer, rightPtr, written));
+                      if (written < SP_BUFFER) { outL.fill(0, written); outR.fill(0, written); }
+                    } else {
+                      outL.fill(0); outR.fill(0);
+                    }
+
+                    // Update position refs for UI
+                    workletOrderRef.current = mLib._openmpt_module_get_current_order(mPtr);
+                    workletRowRef.current = mLib._openmpt_module_get_current_row(mPtr);
+                    workletTimeRef.current = mLib._openmpt_module_get_position_seconds(mPtr);
+                    lastWorkletUpdateRef.current = ctx.currentTime;
+                  };
+
+                  spNode.connect(analyserRef.current!);
+                  scriptProcessorRef.current = spNode;
+
+                  isPlayingRef.current = true;
+                  setIsPlaying(true);
+                  setStatus("Playing (ScriptProcessor fallback)...");
+                  if (animationFrameHandle.current) cancelAnimationFrame(animationFrameHandle.current);
+                  animationFrameHandle.current = requestAnimationFrame(updateUI);
+                } else {
+                  setStatus("Error: no module loaded for ScriptProcessor fallback");
+                }
+              } else if (!spFallbackTriggered.current) {
+                setStatus("Worklet error: " + message);
+              }
             } else if (type === 'loaded') {
               // Module is now loaded inside the worklet – safe to start the UI.
               // This deferred start avoids the ~1-2 s off-timing caused by WASM
