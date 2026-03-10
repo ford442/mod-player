@@ -118,14 +118,16 @@ export class OpenMPTWorkletEngine extends MiniEventEmitter<EngineEventMap> {
         this.setState('initializing');
 
         try {
-            // Dynamically import the Emscripten glue code
-            // Try new filename first (build-wasm.sh output), fall back to legacy name.
+            // Dynamically import the Emscripten glue code.
+            // IMPORTANT: Use absolute paths rooted at BASE_URL so the browser
+            // fetches from /worklets/, not from /assets/ (where the Vite bundle lives).
+            // The /* @vite-ignore */ comment prevents Vite from rewriting these imports.
             let glueModule: Record<string, unknown>;
             try {
-                const newUrl = `./openmpt-worklet.js`;
+                const newUrl = `${import.meta.env.BASE_URL}worklets/openmpt-worklet.js`;
                 glueModule = await import(/* @vite-ignore */ newUrl) as Record<string, unknown>;
             } catch {
-                const legacyUrl = `./openmpt-native.js`;
+                const legacyUrl = `${import.meta.env.BASE_URL}worklets/openmpt-native.js`;
                 glueModule = await import(/* @vite-ignore */ legacyUrl) as Record<string, unknown>;
             }
             const createModule = (glueModule.default || glueModule['createOpenMPTModule']) as CreateOpenMPTModule;
