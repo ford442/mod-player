@@ -808,10 +808,14 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
       // ALL uniforms are used in drawWebGL(), but GLSL compilers may optimize some out
       // based on driver-specific dead code elimination.
       
-      // Core uniforms that MUST exist for the shader to render anything meaningful
-      const coreUniforms = ['u_resolution', 'u_noteData', 'u_cols', 'u_rows', 'u_playhead'];
+      // Core uniforms that MUST exist for the shader to render anything meaningful.
+      // NOTE: u_rows is declared in the VS but never contributes to any output
+      // computation (row indexing uses gl_InstanceID / u_cols exclusively), so
+      // GLSL compilers legally eliminate it.  Keep it in variantUniforms so a
+      // null location is treated as "driver-optimised out", not a fatal mismatch.
+      const coreUniforms = ['u_resolution', 'u_noteData', 'u_cols', 'u_playhead'];
       // Layout-variant uniforms that may be optimized out depending on code path taken
-      const variantUniforms = ['u_layoutMode', 'u_invertChannels', 'u_cellSize', 'u_offset', 'u_capTexture'];
+      const variantUniforms = ['u_layoutMode', 'u_invertChannels', 'u_cellSize', 'u_offset', 'u_capTexture', 'u_rows'];
       
       const nullUniforms = Object.entries(uniformLocs)
         .filter(([, loc]) => loc === null)
@@ -1517,10 +1521,10 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
         const hasInvert = setUniform('u_invertChannels', uniforms.u_invertChannels, gl.uniform1i.bind(gl), invertChannels ? 1 : 0);
         if (hasInvert) uniformVals['u_invertChannels'] = invertChannels ? 1 : 0;
         
-        // Track if any core uniforms are missing
-        if (!hasResolution || !hasCols || !hasRows || !hasPlayhead) {
-          const missing = ['u_resolution', 'u_cols', 'u_rows', 'u_playhead'].filter((_, i) => 
-            ![hasResolution, hasCols, hasRows, hasPlayhead][i]
+        // Track if any core uniforms are missing (u_rows intentionally excluded — see initWebGL comment)
+        if (!hasResolution || !hasCols || !hasPlayhead) {
+          const missing = ['u_resolution', 'u_cols', 'u_playhead'].filter((_, i) =>
+            ![hasResolution, hasCols, hasPlayhead][i]
           );
           errors.push(`Missing core uniforms (shader may fail): ${missing.join(', ')}`);
         }
