@@ -1184,7 +1184,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
         textureResourcesRef.current = null;
         bezelTextureResourcesRef.current = null;
 
-        const shaderBase = './';
+        const shaderBase = import.meta.env.BASE_URL;
         const shaderSource = await fetch(`${shaderBase}shaders/${shaderFile}`).then(res => res.text());
         if (cancelled) return;
         const module = device.createShaderModule({ code: shaderSource });
