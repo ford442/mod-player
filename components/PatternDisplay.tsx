@@ -42,8 +42,8 @@ const isSinglePassCompositeShader = (shaderFile: string) => {
 };
 
 const isCircularLayoutShader = (shaderFile: string) => {
-  // v0.39 and v0.40 are NOT circular (they're horizontal). v0.38 IS circular. v0.45 IS circular. v0.46 IS circular.
-  return shaderFile.includes('v0.25') || shaderFile.includes('v0.26') || shaderFile.includes('v0.35') || shaderFile.includes('v0.37') || shaderFile.includes('v0.38') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.47') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49');
+  // v0.39 and v0.40 are NOT circular (they're horizontal). v0.38 IS circular. v0.45+ ARE circular.
+  return shaderFile.includes('v0.25') || shaderFile.includes('v0.26') || shaderFile.includes('v0.35') || shaderFile.includes('v0.37') || shaderFile.includes('v0.38') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.47') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49') || shaderFile.includes('v0.50');
 };
 
 const shouldUseBackgroundPass = (shaderFile: string) => {
@@ -56,13 +56,13 @@ const getBackgroundShaderFile = (shaderFile: string): string => {
   if (shaderFile.includes('v0.21') || shaderFile.includes('v0.40') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44')) return 'chassis_frosted.wgsl';
   // Circular layouts: actual hardware bezel photo (bezel.png) so the dark inner
   // circle and white frame show through the transparent pattern cells
-  if (shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.47') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49')) return 'bezel.wgsl';
+  if (shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.47') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49') || shaderFile.includes('v0.50')) return 'bezel.wgsl';
   if (shaderFile.includes('v0.37') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39')) return 'chassisv0.37.wgsl';
   if (shaderFile.includes('v0.27') || shaderFile.includes('v0.28') || shaderFile.includes('v0.30') || shaderFile.includes('v0.31') || shaderFile.includes('v0.32') || shaderFile.includes('v0.33') || shaderFile.includes('v0.34') || shaderFile.includes('v0.35') || shaderFile.includes('v0.36')) return 'chassisv0.1.wgsl';
   return 'bezel.wgsl';
 };
 const shouldEnableAlphaBlending = (shaderFile: string) => {
-  return shaderFile.includes("v0.35") || shaderFile.includes("v0.38") || shaderFile.includes("v0.40") || shaderFile.includes("v0.42") || shaderFile.includes("v0.43") || shaderFile.includes("v0.44") || shaderFile.includes("v0.45") || shaderFile.includes("v0.46") || shaderFile.includes("v0.47") || shaderFile.includes("v0.48") || shaderFile.includes("v0.49");
+  return shaderFile.includes("v0.35") || shaderFile.includes("v0.38") || shaderFile.includes("v0.40") || shaderFile.includes("v0.42") || shaderFile.includes("v0.43") || shaderFile.includes("v0.44") || shaderFile.includes("v0.45") || shaderFile.includes("v0.46") || shaderFile.includes("v0.47") || shaderFile.includes("v0.48") || shaderFile.includes("v0.49") || shaderFile.includes("v0.50");
 };
 
 

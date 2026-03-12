@@ -25,6 +25,7 @@ const SHADER_GROUPS = {
     { id: 'patternv0.21.wgsl', label: 'v0.21 (Wall)' },
   ],
   CIRCULAR: [
+    { id: 'patternv0.50.wgsl', label: 'v0.50 (Vibrant Note Colors + Blue LED)' },
     { id: 'patternv0.49.wgsl', label: 'v0.49 (Trap Frosted Glass)' },
     { id: 'patternv0.48.wgsl', label: 'v0.48 (Trap Frosted Disc)' },
     { id: 'patternv0.47.wgsl', label: 'v0.47 (Trap Frosted)' },
