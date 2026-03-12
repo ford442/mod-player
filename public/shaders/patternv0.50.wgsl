@@ -7,7 +7,8 @@
 // Per-step layering:
 //   1. HOUSING (BEHINDS) — Solid dark-metallic body lit with vibrant neonPalette
 //                          colours driven by real note pitch (purple, teal, green,
-//                          orange, red, cyan).  Activity from velocity + noteAge.
+//                          orange, red, cyan).  Activity from v0.48's distance-based
+//                          energy sweep + trail + noteAge + tickOffset sub-step.
 //   2. CAP — Full-height frosted acrylic glass (0.88 × 0.88) in the same vibrant
 //            hue as the housing.  LED-under-glass model with white bevel rim.
 //   3. DEPRESSION — On playhead hit: cap scales 4 % smaller + top inner-shadow.
@@ -241,15 +242,30 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   if (hasNote && !isMuted) {
     // Get vibrant colour from pitch class (purple, teal, green, orange, red, cyan)
     let pitchHue = pitchClassFromIndex(note);
-    noteHue = neonPalette(pitchHue);
+    let baseColor = neonPalette(pitchHue);
+    // Instrument brightness variation (from v0.48)
+    let instBand   = inst & 15u;
+    let instBright = 0.85 + select(0.0, f32(instBand) / 15.0, instBand > 0u) * 0.15;
+    noteHue = baseColor * instBright;
 
-    // Activity level: note lingering + trigger flash + playhead hit
-    let linger    = exp(-ch.noteAge * 0.9);
-    let flash     = f32(ch.trigger) * 2.5;
-    let volScale  = clamp(ch.volume, 0.0, 1.5);
-    actGlow = clamp(linger * 1.3 + flash, 0.0, 1.0) * volScale;
-    let hitBoost = playheadHit * 3.0;
-    let totalGlow = max(actGlow, hitBoost);
+    // ── Distance-based energy sweep (from v0.48) ──────────────────────────
+    // Uses tickOffset for sub-step smooth animation
+    let d        = fract((f32(in.row) + uniforms.tickOffset - uniforms.playheadRow) / totalSteps) * totalSteps;
+    let coreDist = min(d, totalSteps - d);
+    let energy   = 0.03 / (coreDist + 0.001);
+    let trail    = exp(-7.0 * max(0.0, -d));
+    let activeVal = clamp(pow(energy, 1.3) + trail, 0.0, 1.0);
+
+    // Note lingering + trigger flash
+    let linger   = exp(-ch.noteAge * 1.2);
+    let flash    = f32(ch.trigger) * 1.2;
+    let strike   = playheadHit * 3.5;
+    let beatBoost = 1.0 + kick * 0.5;
+    let volScale = clamp(ch.volume, 0.0, 1.2);
+
+    // Combined glow: distance energy + lingering + flash + strike (from v0.48)
+    actGlow = clamp((activeVal * 0.9 + flash + strike + linger * 2.5) * volScale * beatBoost, 0.0, 3.0);
+    let totalGlow = max(actGlow, playheadHit * 3.0);
 
     // Housing tint: metallic dark → vibrant note hue, minimum 10% when note present
     housingColor = mix(metalDark, noteHue, clamp(totalGlow + 0.10, 0.0, 1.0));
@@ -267,10 +283,10 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     ledColor     = vec3<f32>(0.04, 0.04, 0.06);
     ledIntensity = 0.05;
   } else {
-    // Note present: use the vibrant neonPalette colour
-    ledColor     = noteHue;
-    // Intensity: minimum 0.38 so cap is visible + activity boost
-    ledIntensity = max(0.38 + actGlow * 0.65, playheadHit * 1.7 + actGlow);
+    // Note present: vibrant neonPalette colour boosted by bloom (from v0.48)
+    ledColor     = noteHue * max(actGlow, 0.12) * (1.0 + bloom * 8.0);
+    // Intensity: minimum 0.38 so cap always visible + activity boost
+    ledIntensity = max(0.38 + clamp(actGlow, 0.0, 1.0) * 0.65, playheadHit * 1.7 + clamp(actGlow, 0.0, 1.0));
   }
 
   // ── 3. DEPRESSION — Cap scales smaller on playhead hit ─────────────────────
@@ -280,6 +296,12 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
 
   let cap      = drawGlassCap(p, capSize, ledColor, ledIntensity, aa);
   finalColor   = mix(finalColor, cap.rgb, cap.a);
+
+  // Blue→orange beat-sync pulse on active steps with notes (from v0.48)
+  if (playheadHit > 0.5 && hasNote && !isMuted) {
+    let pulseColor = mix(vec3<f32>(0.15, 0.5, 1.0), vec3<f32>(1.0, 0.55, 0.1), 0.5 + 0.5 * sin(beat * 6.2832));
+    finalColor += pulseColor * playheadHit * 0.15;
+  }
 
   // Top inner-shadow when actively pressed
   if (playheadHit > 0.2) {
