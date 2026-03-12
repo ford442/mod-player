@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react';
-import { ChannelShadowState, PatternMatrix } from '../types';
+import { ChannelShadowState, PatternMatrix, PlaybackState } from '../types';
 import {
   GRID_RECT,
   POLAR_RINGS,
@@ -199,14 +199,7 @@ interface PatternDisplayProps {
   dimFactor?: number;
   analyserNode?: AnalyserNode | null;
   // PERFORMANCE OPTIMIZATION: Ref for high-frequency updates (avoids React re-renders)
-  playbackStateRef?: React.MutableRefObject<{
-    playheadRow: number;
-    currentOrder: number;
-    timeSec: number;
-    beatPhase: number;
-    kickTrigger: number;
-    grooveAmount: number;
-  }>;
+  playbackStateRef?: React.MutableRefObject<PlaybackState>;
 }
 
 const clampPlayhead = (value: number, numRows: number) => {
