@@ -1,0 +1,31 @@
+{
+  "name": "fix-modplayer-issues",
+  "description": "Apply all critical fixes to mod-player app (AudioWorklet, WebGPU shaders, error handling)",
+  "type": "sequential",
+  "steps": [
+    {
+      "name": "fix-worklet",
+      "description": "Create proper AudioWorklet processor file",
+      "command": "mkdir -p public/worklets && cp /mnt/kimi/upload/openmpt-worklet.js public/worklets/openmpt-worklet.js 2>/dev/null || cat > public/worklets/openmpt-worklet.js << 'EOF'\n// [Worklet content from uploaded file]\nEOF",
+      "verify": "test -f public/worklets/openmpt-worklet.js && grep -q 'OpenMPTProcessor' public/worklets/openmpt-worklet.js"
+    },
+    {
+      "name": "patch-hooks",
+      "description": "Update useLibOpenMPT.ts with fixed worklet URL and error handling",
+      "command": "cp /mnt/kimi/upload/useLibOpenMPT.patched.ts hooks/useLibOpenMPT.ts",
+      "verify": "grep -q 'worklets/openmpt-worklet.js' hooks/useLibOpenMPT.ts"
+    },
+    {
+      "name": "patch-display",
+      "description": "Update PatternDisplay.tsx with shader error handling",
+      "command": "cp /mnt/kimi/upload/PatternDisplay.patched.tsx components/PatternDisplay.tsx",
+      "verify": "grep -q 'getCompilationInfo' components/PatternDisplay.tsx"
+    },
+    {
+      "name": "verify-structure",
+      "description": "Verify all files are in place",
+      "command": "ls -la public/worklets/openmpt-worklet.js hooks/useLibOpenMPT.ts components/PatternDisplay.tsx",
+      "verify": "exit 0"
+    }
+  ]
+}
