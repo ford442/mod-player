@@ -1,0 +1,303 @@
+// hooks/useGPUBuffers.ts
+// GPU buffer management (uniform, storage, packed data)
+
+import { useRef, useCallback, useEffect } from 'react';
+import { PatternMatrix, ChannelShadowState } from '../types';
+import { LayoutType } from '../utils/shaderConfig';
+
+const DEFAULT_ROWS = 64;
+const DEFAULT_CHANNELS = 4;
+
+const EMPTY_CHANNEL: ChannelShadowState = {
+  volume: 1.0,
+  pan: 0.5,
+  freq: 440,
+  trigger: 0,
+  noteAge: 1000,
+  activeEffect: 0,
+  effectValue: 0,
+  isMuted: 0
+};
+
+const alignTo = (val: number, align: number) => Math.floor((val + align - 1) / align) * align;
+
+// Parse helpers for pattern packing
+const parsePackedB = (text: string) => {
+  let volType = 0, volValue = 0;
+  let effCode = 0, effParam = 0;
+  
+  const volMatch = text.match(/v(\d{1,3})/i);
+  if (volMatch?.[1]) {
+    volType = 1;
+    const v = Math.min(255, Math.round((parseInt(volMatch[1], 10) / 64) * 255));
+    volValue = isFinite(v) ? v : 0;
+  }
+  
+  const panMatch = text.match(/p(\d{1,3})/i);
+  if (panMatch?.[1]) {
+    volType = 2;
+    const p = Math.min(255, Math.round((parseInt(panMatch[1], 10) / 64) * 255));
+    volValue = isFinite(p) ? p : 0;
+  }
+  
+  const effMatch = text.match(/([A-Za-z])[ ]*([0-9A-Fa-f]{2})/);
+  if (effMatch?.[1] && effMatch[2]) {
+    effCode = effMatch[1].toUpperCase().charCodeAt(0) & 0xff;
+    effParam = parseInt(effMatch[2], 16) & 0xff;
+  } else {
+    const effNum = text.match(/([0-9])[ ]*([0-9A-Fa-f]{2})/);
+    if (effNum?.[1] && effNum[2]) {
+      effCode = ('0'.charCodeAt(0) + (parseInt(effNum[1], 10) & 0xf)) & 0xff;
+      effParam = parseInt(effNum[2], 16) & 0xff;
+    }
+  }
+  
+  return ((volType & 0xff) << 24) | ((volValue & 0xff) << 16) | 
+         ((effCode & 0xff) << 8) | (effParam & 0xff);
+};
+
+export const packPatternMatrix = (matrix: PatternMatrix | null, padTopChannel = false): Uint32Array => {
+  const rawChannels = matrix?.numChannels ?? DEFAULT_CHANNELS;
+  const numRows = matrix?.numRows ?? DEFAULT_ROWS;
+  const numChannels = padTopChannel ? rawChannels + 1 : rawChannels;
+  const packed = new Uint32Array(numRows * numChannels * 2);
+
+  if (!matrix) return packed;
+
+  const { rows } = matrix;
+  const startCol = padTopChannel ? 1 : 0;
+
+  for (let r = 0; r < numRows; r++) {
+    const rowCells = rows[r] || [];
+    for (let c = 0; c < rawChannels; c++) {
+      const offset = (r * numChannels + (c + startCol)) * 2;
+      const cell = rowCells[c];
+      if (!cell || !cell.text) continue;
+
+      const text = cell.text.trim();
+      const upper = text.toUpperCase();
+      const notePart = upper.slice(0, 3).padEnd(3, '\0');
+      const instMatch = text.match(/(\d{1,3})$/);
+      const instByte = instMatch?.[1] ? Math.min(255, parseInt(instMatch[1], 10)) : 0;
+      const n0 = notePart.charCodeAt(0) & 0xff;
+      const n1 = notePart.charCodeAt(1) & 0xff;
+      const n2 = notePart.charCodeAt(2) & 0xff;
+
+      packed[offset] = (n0 << 24) | (n1 << 16) | (n2 << 8) | instByte;
+      packed[offset + 1] = parsePackedB(text) >>> 0;
+    }
+  }
+  return packed;
+};
+
+export const packPatternMatrixHighPrecision = (matrix: PatternMatrix | null, padTopChannel = false): Uint32Array => {
+  const rawChannels = matrix?.numChannels ?? DEFAULT_CHANNELS;
+  const numRows = matrix?.numRows ?? DEFAULT_ROWS;
+  const numChannels = padTopChannel ? rawChannels + 1 : rawChannels;
+  const packed = new Uint32Array(numRows * numChannels * 2);
+
+  if (!matrix) return packed;
+
+  const { rows } = matrix;
+  const startCol = padTopChannel ? 1 : 0;
+
+  for (let r = 0; r < numRows; r++) {
+    const rowCells = rows[r] || [];
+    for (let c = 0; c < rawChannels; c++) {
+      const offset = (r * numChannels + (c + startCol)) * 2;
+      const cell = rowCells[c];
+      if (!cell) continue;
+
+      const note = cell.note || 0;
+      const inst = cell.inst || 0;
+      const volCmd = cell.volCmd || 0;
+      const volVal = cell.volVal || 0;
+      const effCmd = cell.effCmd || 0;
+      const effVal = cell.effVal || 0;
+      // activeEffect is decoded from effCmd/effVal, stored in high byte for GPU
+      const activeEffect = (cell as any).activeEffect || 0;
+
+      packed[offset] = ((note & 0xFF) << 24) | ((inst & 0xFF) << 16) | 
+                       ((volCmd & 0xFF) << 8) | (volVal & 0xFF);
+      // packedB: [activeEffect(8) | Unused(8) | effCmd(8) | effVal(8)]
+      packed[offset + 1] = ((activeEffect & 0xFF) << 24) | ((effCmd & 0xFF) << 8) | (effVal & 0xFF);
+    }
+  }
+  return packed;
+};
+
+export const createBufferWithData = (
+  device: GPUDevice,
+  data: ArrayBufferView | ArrayBuffer,
+  usage: GPUBufferUsageFlags
+): GPUBuffer => {
+  const byteLength = data instanceof ArrayBuffer ? data.byteLength : data.byteLength;
+  const buffer = device.createBuffer({
+    size: Math.max(16, byteLength),
+    usage,
+    mappedAtCreation: true,
+  });
+  const dst = new Uint8Array(buffer.getMappedRange());
+  if (data instanceof ArrayBuffer) {
+    dst.set(new Uint8Array(data));
+  } else {
+    dst.set(new Uint8Array(data.buffer, data.byteOffset, data.byteLength));
+  }
+  buffer.unmap();
+  return buffer;
+};
+
+export const buildRowFlags = (numRows: number): Uint32Array => {
+  const flags = new Uint32Array(numRows);
+  for (let r = 0; r < numRows; r++) {
+    let f = 0;
+    if (r % 4 === 0) f |= 1;
+    if (r % 16 === 0) f |= 2;
+    flags[r] = f;
+  }
+  return flags;
+};
+
+export const fillChannelStates = (
+  channels: ChannelShadowState[],
+  count: number,
+  view: DataView,
+  padTopChannel = false
+): void => {
+  const startIdx = padTopChannel ? 1 : 0;
+
+  for (let i = 0; i < count; i++) {
+    const ch = channels[i] || EMPTY_CHANNEL;
+    const offset = (startIdx + i) * 32;
+    view.setFloat32(offset, ch.volume ?? 0, true);
+    view.setFloat32(offset + 4, ch.pan ?? 0, true);
+    view.setFloat32(offset + 8, ch.freq ?? 0, true);
+    view.setUint32(offset + 12, (ch.trigger ?? 0) >>> 0, true);
+    view.setFloat32(offset + 16, ch.noteAge ?? 0, true);
+    view.setUint32(offset + 20, (ch.activeEffect ?? 0) >>> 0, true);
+    view.setFloat32(offset + 24, ch.effectValue ?? 0, true);
+    view.setUint32(offset + 28, (ch.isMuted ?? 0) >>> 0, true);
+  }
+};
+
+export interface UseGPUBuffersOptions {
+  device: GPUDevice | null;
+  matrix: PatternMatrix | null;
+  channels: ChannelShadowState[];
+  layoutType: LayoutType;
+  padTopChannel: boolean;
+  isHighPrecision: boolean;
+}
+
+export interface GPUBuffers {
+  cellsBuffer: GPUBuffer | null;
+  uniformBuffer: GPUBuffer | null;
+  rowFlagsBuffer: GPUBuffer | null;
+  channelsBuffer: GPUBuffer | null;
+  refreshBindGroup: () => void;
+}
+
+export function useGPUBuffers({
+  device,
+  matrix,
+  channels,
+  layoutType,
+  padTopChannel,
+  isHighPrecision
+}: UseGPUBuffersOptions): GPUBuffers {
+  const cellsBufferRef = useRef<GPUBuffer | null>(null);
+  const uniformBufferRef = useRef<GPUBuffer | null>(null);
+  const rowFlagsBufferRef = useRef<GPUBuffer | null>(null);
+  const channelsBufferRef = useRef<GPUBuffer | null>(null);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      cellsBufferRef.current?.destroy();
+      uniformBufferRef.current?.destroy();
+      rowFlagsBufferRef.current?.destroy();
+      channelsBufferRef.current?.destroy();
+    };
+  }, []);
+
+  // Create/update cells buffer when matrix changes
+  useEffect(() => {
+    if (!device) return;
+
+    // Destroy old buffer
+    if (cellsBufferRef.current) {
+      cellsBufferRef.current.destroy();
+    }
+
+    const packFunc = isHighPrecision ? packPatternMatrixHighPrecision : packPatternMatrix;
+    cellsBufferRef.current = createBufferWithData(
+      device,
+      packFunc(matrix, padTopChannel),
+      GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
+    );
+
+    // Update row flags for extended layout
+    if (layoutType === 'extended') {
+      const numRows = matrix?.numRows ?? DEFAULT_ROWS;
+      const flags = buildRowFlags(numRows);
+      
+      if (!rowFlagsBufferRef.current || rowFlagsBufferRef.current.size < flags.byteLength) {
+        rowFlagsBufferRef.current?.destroy();
+        rowFlagsBufferRef.current = createBufferWithData(device, flags, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
+      } else {
+        device.queue.writeBuffer(rowFlagsBufferRef.current, 0, flags.buffer, flags.byteOffset, flags.byteLength);
+      }
+    }
+  }, [device, matrix, layoutType, padTopChannel, isHighPrecision]);
+
+  // Create/update channels buffer
+  useEffect(() => {
+    if (!device || layoutType !== 'extended') return;
+
+    const count = Math.max(1, matrix?.numChannels ?? DEFAULT_CHANNELS);
+    const totalCount = padTopChannel ? count + 1 : count;
+    const requiredSize = totalCount * 32;
+
+    const buffer = new ArrayBuffer(requiredSize);
+    const view = new DataView(buffer);
+    fillChannelStates(channels, count, view, padTopChannel);
+
+    if (!channelsBufferRef.current || channelsBufferRef.current.size < requiredSize) {
+      channelsBufferRef.current?.destroy();
+      channelsBufferRef.current = createBufferWithData(device, buffer, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
+    } else {
+      device.queue.writeBuffer(channelsBufferRef.current, 0, buffer, 0, requiredSize);
+    }
+  }, [device, channels, matrix?.numChannels, layoutType, padTopChannel]);
+
+  // Initialize uniform buffer
+  useEffect(() => {
+    if (!device) return;
+
+    const uniformSize = layoutType === 'extended' ? 96 : (layoutType === 'texture' ? 64 : 32);
+    uniformBufferRef.current = device.createBuffer({
+      size: alignTo(uniformSize, 256),
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
+    });
+
+    return () => {
+      uniformBufferRef.current?.destroy();
+      uniformBufferRef.current = null;
+    };
+  }, [device, layoutType]);
+
+  const refreshBindGroup = useCallback(() => {
+    // This is called when bind group needs to be recreated
+    // The actual bind group creation happens in the main component
+  }, []);
+
+  return {
+    cellsBuffer: cellsBufferRef.current,
+    uniformBuffer: uniformBufferRef.current,
+    rowFlagsBuffer: rowFlagsBufferRef.current,
+    channelsBuffer: channelsBufferRef.current,
+    refreshBindGroup
+  };
+}
+
+export default useGPUBuffers;
