@@ -175,8 +175,8 @@ export interface SyncDebugInfo {
 // Window extensions
 declare global {
   interface Window {
-    libopenmptReady: Promise<LibOpenMPT>;
-    libopenmpt: LibOpenMPT;
+
+
     _libopenmptReject?: (reason: Error) => void;
     webkitAudioContext?: typeof AudioContext;
   }

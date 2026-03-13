@@ -1,3 +1,4 @@
+
 // hooks/useRenderLoop.ts
 // Render loop management (requestAnimationFrame + command encoder)
 
@@ -14,7 +15,7 @@ export interface UseRenderLoopOptions {
   targetFPS?: number;
 }
 
-export function useRenderLoop({ isActive, onRender, targetFPS = 60 }: UseRenderLoopOptions) {
+export function useRenderLoop({ isActive, onRender,   }: UseRenderLoopOptions) {
   const animationFrameRef = useRef<number | undefined>(undefined);
   const lastTimeRef = useRef<number>(0);
   const renderRef = useRef<(() => void)>();
@@ -36,7 +37,7 @@ export function useRenderLoop({ isActive, onRender, targetFPS = 60 }: UseRenderL
   useEffect(() => {
     let isCancelled = false;
     
-    const loop = (time: number) => {
+    const loop = (_time: number) => {
       if (isCancelled || !isActive) return;
       
       animationFrameRef.current = requestAnimationFrame(loop);

@@ -278,7 +278,7 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   let uv = in.uv;
   let p = uv - 0.5;
   let aa = fwidth(p.y) * 0.33;
-  
+
   if (in.channel >= uniforms.numChannels) { return vec4<f32>(1.0, 0.0, 0.0, 1.0); }
   let fs = getFragmentConstants();
   let bloom = uniforms.bloomIntensity;
