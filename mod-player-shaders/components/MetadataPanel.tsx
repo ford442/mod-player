@@ -155,7 +155,7 @@ export const MetadataPanel: React.FC<MetadataPanelProps> = ({
                     key={idx}
                     className="px-3 py-2 hover:bg-gray-800/50 transition-colors flex items-center gap-3"
                   >
-                    <span className="text-xs font-mono text-gray-500 w-8">{idx + 1:02d}</span>
+                    <span className="text-xs font-mono text-gray-500 w-8">{(idx + 1).toString().padStart(2, "0")}</span>
                     <span className="text-sm text-gray-300 truncate flex-1" title={name}>
                       {name || `<no name>`}
                     </span>
@@ -181,7 +181,7 @@ export const MetadataPanel: React.FC<MetadataPanelProps> = ({
                     key={idx}
                     className="px-3 py-2 hover:bg-gray-800/50 transition-colors flex items-center gap-3"
                   >
-                    <span className="text-xs font-mono text-gray-500 w-8">{idx + 1:02d}</span>
+                    <span className="text-xs font-mono text-gray-500 w-8">{(idx + 1).toString().padStart(2, "0")}</span>
                     <span className="text-sm text-gray-300 truncate flex-1" title={name}>
                       {name || `<no name>`}
                     </span>
@@ -218,7 +218,7 @@ export const MetadataPanel: React.FC<MetadataPanelProps> = ({
                       text-xs font-mono w-8
                       ${isCurrent ? 'text-cyan-400 font-bold' : 'text-gray-500'}
                     `}>
-                      {orderIdx + 1:02d}
+                      {(orderIdx + 1).toString().padStart(2, "0")}
                     </span>
                     <span className="text-xs text-gray-400">→</span>
                     <span className={`
