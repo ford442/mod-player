@@ -14,6 +14,12 @@ import { useLibOpenMPT } from './hooks/useLibOpenMPT';
 import { usePlaylist } from './hooks/usePlaylist';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import type { MediaItem } from './types';
+import { 
+  DEFAULT_BLOOM_PRESET, 
+  DEFAULT_COLOR_SCHEME, 
+  type BloomPreset, 
+  type ColorScheme 
+} from './types/bloomPresets';
 
 // Shader Definitions
 const SHADER_GROUPS = {
@@ -50,6 +56,10 @@ function App() {
   const [is3DMode, setIs3DMode] = useState<boolean>(false);
   const [isDarkMode, setIsDarkMode] = useState<boolean>(false);
   const [viewMode, setViewMode] = useState<'device' | 'wall'>('device');
+
+  // Bloom and Color Scheme State
+  const [bloomPreset, setBloomPreset] = useState<BloomPreset>(DEFAULT_BLOOM_PRESET);
+  const [colorScheme, setColorScheme] = useState<ColorScheme>(DEFAULT_COLOR_SCHEME);
 
   const {
     isReady,
@@ -291,6 +301,9 @@ function App() {
               analyserNode={analyserNode}
               // PERFORMANCE OPTIMIZATION: Pass ref for high-frequency updates
               playbackStateRef={playbackStateRef}
+              // Bloom settings from preset
+              bloomIntensity={bloomPreset.intensity}
+              bloomThreshold={bloomPreset.threshold}
             />
           </div>
         }
@@ -314,6 +327,10 @@ function App() {
               remoteMediaList={[
                 { id: '1', kind: 'video', url: 'clouds.mp4', fileName: 'Clouds Demo (MP4)', mimeType: 'video/mp4' }
               ]}
+              bloomPreset={bloomPreset}
+              onBloomPresetChange={setBloomPreset}
+              colorScheme={colorScheme}
+              onColorSchemeChange={setColorScheme}
             />
           </div>
         }
@@ -454,6 +471,9 @@ function App() {
              analyserNode={analyserNode}
              // PERFORMANCE OPTIMIZATION: Pass ref for high-frequency updates
              playbackStateRef={playbackStateRef}
+             // Bloom settings from preset
+             bloomIntensity={bloomPreset.intensity}
+             bloomThreshold={bloomPreset.threshold}
            />
 
            <MediaOverlay
@@ -485,6 +505,10 @@ function App() {
           remoteMediaList={[
              { id: '1', kind: 'video', url: 'clouds.mp4', fileName: 'Clouds Demo (MP4)', mimeType: 'video/mp4' }
           ]}
+          bloomPreset={bloomPreset}
+          onBloomPresetChange={setBloomPreset}
+          colorScheme={colorScheme}
+          onColorSchemeChange={setColorScheme}
         />
 
         {/* Seek Bar */}
