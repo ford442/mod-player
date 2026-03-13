@@ -13,7 +13,7 @@ interface MetadataOverlayProps {
  */
 export const MetadataOverlay: React.FC<MetadataOverlayProps> = ({
   metadata,
-  currentOrder,
+
   isPlaying,
 }) => {
   if (!metadata) return null;

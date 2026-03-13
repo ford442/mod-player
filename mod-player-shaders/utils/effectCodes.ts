@@ -37,143 +37,124 @@
  * @param effVal - The effect parameter byte (0-255)
  * @returns The activeEffect ID (0-15, where 0 = no effect)
  */
-export const decodeEffectCode = (effCmd: number | undefined, effVal: number | undefined): number => {
+export const decodeEffectCode = (effCmd: any, effVal: number | undefined): number => {
   if (!effCmd || effCmd === 0) return 0;
 
   const cmd = typeof effCmd === 'string' ? effCmd.charCodeAt(0) : effCmd;
   const val = effVal ?? 0;
 
-  // Map effect command to activeEffect ID
   switch (cmd) {
-    // 0xy - Arpeggio
-    case 0x30: // '0'
-    case 0x00:
-      return 4;
-
-    // 1xy - Portamento Up
-    case 0x31: // '1'
-      return 6;
-
-    // 2xy - Portamento Down
-    case 0x32: // '2'
-      return 7;
-
-    // 3xy - Portamento to Note (Tone Portamento)
-    case 0x33: // '3'
-      return 2;
-
-    // 4xy - Vibrato
-    case 0x34: // '4'
+    // --- 1: VIBRATO (FT2: 4 / 0x4) ---
+    // Modulates pitch up and down
+    case 0x4:
+    case 52: // '4'
       return 1;
 
-    // 7xy - Tremolo
-    case 0x37: // '7'
+    // --- 2: PORTAMENTO TO NOTE (FT2: 3 / 0x3) ---
+    // Glides pitch to the target note
+    case 0x3:
+    case 51: // '3'
+    case 0x5: // Tone porta + Vol slide
+    case 53: // '5'
+      return 2;
+
+    // --- 3: TREMOLO (FT2: 7 / 0x7) ---
+    // Modulates volume up and down
+    case 0x7:
+    case 55: // '7'
       return 3;
 
-    // 8xx - Set Panning
-    case 0x38: // '8'
-      return 9;
+    // --- 4: ARPEGGIO (FT2: 0 / 0x0) ---
+    // Rapidly cycles between 3 notes
+    case 0x0:
+    case 48: // '0'
+      // Arpeggio with val 0 is usually nothing, but still an arpeggio command
+      return 4;
 
-    // 9xx - Sample Offset
-    case 0x39: // '9'
-      return 10;
-
-    // Axy - Volume Slide
-    case 0x41: // 'A'
-    case 0x61: // 'a'
-      return 8;
-
-    // Fxx - Set Speed/BPM
-    case 0x46: // 'F'
-    case 0x66: // 'f'
-      return 11;
-
-    // Hxy - Global Volume Slide
-    case 0x48: // 'H'
-    case 0x68: // 'h'
-      return 15;
-
-    // Pxy - Panning Slide
-    case 0x50: // 'P'
-    case 0x70: // 'p'
-      return 14;
-
-    // Rxy - Retrigger
-    case 0x52: // 'R'
-    case 0x72: // 'r'
+    // --- 5: RETRIGGER NOTE (FT2: R / 0x12) ---
+    // Rapidly restarts the note
+    case 0x12:
+    case 82: // 'R'
+    case 114: // 'r'
       return 5;
 
-    // E commands (special)
-    case 0x45: // 'E'
-    case 0x65: // 'e'
-      // E-subcommands (high nibble of value)
-      const subcmd = (val >> 4) & 0x0F;
-      switch (subcmd) {
-        case 0x0C: // ECx - Note Cut
+    // Extended command E9x (Retrigger)
+    case 0xE:
+    case 69: // 'E'
+    case 101: // 'e'
+      {
+        const effectStr = effCmd.toString(16).toUpperCase();
+        if (effectStr === 'E9' || effectStr === 'e9' || (val >= 0x90 && val <= 0x9F)) {
+          return 5;
+        }
+
+        // --- 12: NOTE CUT (FT2: ECx) ---
+        // Silences note after x ticks
+        if (effectStr === 'EC' || effectStr === 'ec' || (val >= 0xC0 && val <= 0xCF)) {
           return 12;
-        case 0x0D: // EDx - Note Delay
+        }
+
+        // --- 13: NOTE DELAY (FT2: EDx) ---
+        // Waits x ticks before playing note
+        if (effectStr === 'ED' || effectStr === 'ed' || (val >= 0xD0 && val <= 0xDF)) {
           return 13;
-        default:
-          return 0;
+        }
       }
+      break;
 
-    default:
-      return 0;
+    // --- 6: PORTAMENTO UP (FT2: 1 / 0x1) ---
+    // Slides pitch up
+    case 0x1:
+    case 49: // '1'
+      return 6;
+
+    // --- 7: PORTAMENTO DOWN (FT2: 2 / 0x2) ---
+    // Slides pitch down
+    case 0x2:
+    case 50: // '2'
+      return 7;
+
+    // --- 8: VOLUME SLIDE (FT2: A / 0xA) ---
+    // Glides volume up or down
+    case 0xA:
+    case 65: // 'A'
+    case 97: // 'a'
+      return 8;
+
+    // --- 9: SET PANNING (FT2: 8 / 0x8) ---
+    // Positions sound in stereo field
+    case 0x8:
+    case 56: // '8'
+    case 0X8E: // '8E' - Panning envelope
+      return 9;
+
+    // --- 10: SAMPLE OFFSET (FT2: 9 / 0x9) ---
+    // Starts playing from middle of sample
+    case 0x9:
+    case 57: // '9'
+      return 10;
+
+    // --- 11: SET SPEED/BPM (FT2: F / 0xF) ---
+    // Changes playback speed
+    case 0xF:
+    case 70: // 'F'
+    case 102: // 'f'
+      return 11;
+
+    // --- 14: PANNING SLIDE (FT2: P / 0x10) ---
+    // Moves sound left/right over time
+    case 0x10:
+    case 80: // 'P'
+    case 112: // 'p'
+      return 14;
+
+    // --- 15: GLOBAL VOLUME SLIDE (FT2: H / 0x11) ---
+    // Changes overall module volume
+    case 0x11:
+    case 72: // 'H'
+    case 104: // 'h'
+      return 15;
   }
-};
 
-/**
- * Gets a human-readable name for an effect ID
- * @param effectId - The activeEffect ID (0-15)
- * @returns Human-readable effect name
- */
-export const getEffectName = (effectId: number): string => {
-  const names: Record<number, string> = {
-    0: 'None',
-    1: 'Vibrato',
-    2: 'Portamento',
-    3: 'Tremolo',
-    4: 'Arpeggio',
-    5: 'Retrigger',
-    6: 'Portamento Up',
-    7: 'Portamento Down',
-    8: 'Volume Slide',
-    9: 'Set Panning',
-    10: 'Sample Offset',
-    11: 'Set Speed/BPM',
-    12: 'Note Cut',
-    13: 'Note Delay',
-    14: 'Panning Slide',
-    15: 'Global Volume Slide',
-  };
-  return names[effectId] ?? 'Unknown';
+  return 0;
 };
-
-/**
- * Gets a color suggestion for shader visualization
- * @param effectId - The activeEffect ID (0-15)
- * @returns RGB color array [r, g, b] (0-1 range)
- */
-export const getEffectColor = (effectId: number): [number, number, number] => {
-  const colors: Record<number, [number, number, number]> = {
-    0: [0.5, 0.5, 0.5],      // Gray (no effect)
-    1: [0.2, 0.6, 1.0],      // Vibrato - Blue
-    2: [0.4, 0.4, 0.9],      // Portamento - Indigo
-    3: [0.3, 0.7, 0.9],      // Tremolo - Light Blue
-    4: [0.8, 0.2, 0.8],      // Arpeggio - Magenta
-    5: [0.7, 0.3, 0.7],      // Retrigger - Purple
-    6: [0.2, 0.8, 0.4],      // Portamento Up - Green
-    7: [0.3, 0.7, 0.3],      // Portamento Down - Teal
-    8: [0.9, 0.8, 0.2],      // Volume Slide - Yellow
-    9: [1.0, 0.6, 0.2],      // Set Panning - Orange
-    10: [1.0, 0.4, 0.2],     // Sample Offset - Red-Orange
-    11: [1.0, 0.3, 0.3],     // Set Speed - Red
-    12: [1.0, 1.0, 1.0],     // Note Cut - White
-    13: [0.9, 0.9, 0.9],     // Note Delay - Light Gray
-    14: [1.0, 0.7, 0.4],     // Panning Slide - Peach
-    15: [0.9, 0.9, 0.2],     // Global Volume Slide - Yellow-Green
-  };
-  return colors[effectId] ?? [0.5, 0.5, 0.5];
-};
-
-export default decodeEffectCode;
