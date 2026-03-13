@@ -2,7 +2,7 @@
 // Uniform buffer payload filling - extracted from PatternDisplay
 
 import { LayoutType } from './shaderConfig';
-import { GRID_RECT } from './geometryConstants';
+import { GRID_RECT } from '../../utils/geometryConstants';
 
 interface UniformParams {
   numRows: number;

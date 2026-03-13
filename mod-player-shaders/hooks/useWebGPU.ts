@@ -100,7 +100,7 @@ export function useWebGPU({ canvasRef, onReady }: UseWebGPUOptions): WebGPUState
     return () => {
       cancelled = true;
       if (deviceRef.current) {
-        try { deviceRef.current.destroy(); } catch (e) {}
+        try { deviceRef.current.destroy(); } catch (e) { console.warn(e); }
         deviceRef.current = null;
       }
     };
