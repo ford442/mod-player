@@ -314,4 +314,9 @@ export class BloomPostProcessor {
     // thresholdBuffer: [threshold, knee]
     this.device.queue.writeBuffer(this.thresholdBuffer, 0, new Float32Array([threshold, knee, 0.0, 0.0]));
   }
+
+  // Apply a bloom preset with all parameters
+  public applyPreset(preset: { intensity: number; threshold: number; knee: number }, sceneIntensity: number = 1.0) {
+    this.updateUniforms(preset.intensity, preset.threshold, preset.knee, sceneIntensity);
+  }
 }
