@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 
 /**
  * Shader debugging utility to help identify which shader/background is loaded
