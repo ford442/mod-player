@@ -715,7 +715,17 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
 
     // Only compile if using a glass shader
     const isOverlayShader = shaderFile.includes('v0.21') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.47') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49') || shaderFile.includes('v0.50');
-    if (!isOverlayShader) return;
+    if (!isOverlayShader) {
+      // Clear the canvas to prevent ghosting when switching to non-overlay shaders
+      if (glContextRef.current && glCanvasRef.current) {
+        const gl = glContextRef.current;
+        gl.clearColor(0, 0, 0, 0);
+        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+      }
+      console.log('🔧 Shader does not use WebGL2 overlay, canvas cleared');
+      console.groupEnd();
+      return;
+    }
 
     const fsSource = `#version 300 es
     precision highp float;
