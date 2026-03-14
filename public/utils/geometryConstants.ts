@@ -118,6 +118,7 @@ export function getLayoutModeFromShader(shaderFile: string): LayoutMode {
     return LAYOUT_MODES.HORIZONTAL_64;
   }
   if (
+    shaderFile.includes('v0.21') ||
     shaderFile.includes('v0.40') ||
     shaderFile.includes('v0.43') ||
     shaderFile.includes('v0.46') ||
