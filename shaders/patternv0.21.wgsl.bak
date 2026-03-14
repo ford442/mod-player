@@ -1,7 +1,6 @@
-// patternv0.39.wgsl
-// Horizontal Paged Grid Shader (Time = X, Channels = Y)
-// Base: v0.21 (Precision Interface)
-// Adapted for WebGL2 Glass Overlay + Square Bezel Layout (1024x1024)
+// Horizontal Pattern Grid Shader (Time = X, Channels = Y)
+// V0.21: "Precision Interface" - Sharpened details, larger cells, fwidth-based AA
+// Updated: Square bezel alignment with gridRect uniform
 
 struct Uniforms {
   numRows: u32,
@@ -23,6 +22,8 @@ struct Uniforms {
   bloomIntensity: f32,
   bloomThreshold: f32,
   invertChannels: u32,
+  dimFactor: f32,
+  gridRect: vec4<f32>,  // x, y, w, h (normalized)
 };
 
 @group(0) @binding(0) var<storage, read> cells: array<u32>;
@@ -43,6 +44,7 @@ struct VertexOut {
   @location(4) @interpolate(flat) packedB: u32,
 };
 
+// --- VERTEX SHADER ---
 @vertex
 fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instanceIndex: u32) -> VertexOut {
   var quad = array<vec2<f32>, 6>(
@@ -72,25 +74,23 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
   if (localRow < 0.0 || localRow >= stepsPerPage) {
       isVisible = 0.0;
   }
+
+  // Use gridRect for precise positioning within bezel area
+  // gridRect is in normalized coordinates (0-1)
+  let gridX = uniforms.gridRect.x + (localRow / stepsPerPage) * uniforms.gridRect.z;
+  let gridY = uniforms.gridRect.y + (f32(channel) / f32(numChannels)) * uniforms.gridRect.w;
   
-  // Standard quad expansion
-  // Note: if invisible, we can just collapse quad or move off screen
-  let worldX = px + quad[vertexIndex].x * uniforms.cellW;
-  let worldY = py + quad[vertexIndex].y * uniforms.cellH;
-
-  // Use top-left origin for logic, but clip space is -1..1
-  let clipX = (worldX / uniforms.canvasW) * 2.0 - 1.0;
-  let clipY = 1.0 - (worldY / uniforms.canvasH) * 2.0;
-
-  // Collapse if not visible
-  let finalPos = select(vec4<f32>(0.0), vec4<f32>(clipX, clipY, 0.0, 1.0), isVisible > 0.5);
+  // Convert to clip space (-1 to 1)
+  let clipX = gridX * 2.0 - 1.0 + quad[vertexIndex].x * (uniforms.gridRect.z / stepsPerPage) * 2.0;
+  let clipY = 1.0 - (gridY * 2.0) - quad[vertexIndex].y * (uniforms.gridRect.w / f32(numChannels)) * 2.0;
 
   let idx = instanceIndex * 2u;
   let a = cells[idx];
   let b = cells[idx + 1u];
 
   var out: VertexOut;
-  out.position = finalPos;
+  // Collapse if not visible
+  out.position = select(vec4<f32>(0.0), vec4<f32>(clipX, clipY, 0.0, 1.0), isVisible > 0.5);
   out.row = row;
   out.channel = channel;
   out.uv = quad[vertexIndex];
@@ -99,9 +99,10 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
   return out;
 }
 
-// --- FRAGMENT SHADER (Precision Interface with Frosted Caps) ---
+// --- FRAGMENT SHADER ---
 
 fn neonPalette(t: f32) -> vec3<f32> {
+    // Precise, colder spectrum
     let a = vec3<f32>(0.5, 0.5, 0.5);
     let b = vec3<f32>(0.5, 0.5, 0.5);
     let c = vec3<f32>(1.0, 1.0, 1.0);
@@ -122,7 +123,7 @@ fn pitchClassFromPacked(packed: u32) -> f32 {
     let c0 = toUpperAscii((packed >> 24) & 255u);
     var semitone: i32 = 0;
     var valid = true;
-    switch c0 {
+    switch (c0) {
         case 65u: { semitone = 9; }
         case 66u: { semitone = 11; }
         case 67u: { semitone = 0; }
@@ -164,11 +165,11 @@ struct FragmentConstants {
 
 fn getFragmentConstants() -> FragmentConstants {
     var c: FragmentConstants;
-    c.bgColor = vec3<f32>(0.10, 0.11, 0.13);
-    c.ledOnColor = vec3<f32>(0.0, 0.85, 0.95);
-    c.ledOffColor = vec3<f32>(0.08, 0.12, 0.15);
-    c.borderColor = vec3<f32>(0.0, 0.0, 0.0);
-    c.housingSize = vec2<f32>(0.96, 0.96);
+    c.bgColor = vec3<f32>(0.10, 0.11, 0.13); // Deep technical grey
+    c.ledOnColor = vec3<f32>(0.0, 0.85, 0.95); // Precision Cyan
+    c.ledOffColor = vec3<f32>(0.08, 0.12, 0.15); // Dark blue-grey
+    c.borderColor = vec3<f32>(0.0, 0.0, 0.0); // Pure black gap
+    c.housingSize = vec2<f32>(0.96, 0.96); // Maximized cell usage (Bigger Display)
     return c;
 }
 
@@ -177,38 +178,54 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   let fs = getFragmentConstants();
   let uv = in.uv;
   let p = uv - 0.5;
+
+  // Calculate Pixel-Perfect AA width based on derivatives
   let aa = fwidth(p.y) * 0.75;
 
-  // --- HEADER ROW (Channel 0) ---
+  // --- TOP ROW: INDICATORS ---
   if (in.channel == 0u) {
-      // Header for channel indices or status
-      var col = fs.bgColor * 0.8;
+      var col = fs.bgColor * 0.5;
+
+      let onPlayhead = (in.row == uniforms.playheadRow);
+      let ledSize = vec2<f32>(0.3, 0.3);
+      let dLed = sdRoundedBox(p, ledSize, 0.05);
+
+      // Dark "off" state
+      var ledCol = fs.ledOffColor;
+
+      // Sharp LED rendering (Base Plastic)
+      let ledMask = 1.0 - smoothstep(-aa, aa, dLed);
+      col = mix(col, ledCol, ledMask);
+
+      // BLEND: Additive Glow for "On" state
+      if (onPlayhead) {
+         let glowIntensity = exp(-dLed * 5.0);
+         // Add bright core + soft bloom
+         col += fs.ledOnColor * ledMask * 1.5;
+         col += fs.ledOnColor * glowIntensity * 0.8;
+      } else if (in.row % 4u == 0u) {
+         // Faint marker for beats
+         col += vec3<f32>(0.2, 0.2, 0.25) * ledMask * 0.3;
+      }
+
       return vec4<f32>(col, 1.0);
   }
 
-  // --- PATTERN GRID ---
-  // Housing (Cell Body)
+  // --- PATTERN ROWS ---
+  // Housing (Cell Body) - Larger and sharper
   let dHousing = sdRoundedBox(p, fs.housingSize * 0.5, 0.04);
   let housingMask = 1.0 - smoothstep(0.0, aa * 2.0, dHousing);
-  
-  var col = fs.bgColor;
-  
-  // Inset shadow
-  col *= smoothstep(0.0, 0.1, dHousing + 0.5);
 
-  let onPlayhead = (in.row == uniforms.playheadRow);
-  
-  // Get note and effect data
-  let note = (in.packedA >> 24) & 255u;
-  let inst = in.packedA & 255u;
-  let effCode = (in.packedB >> 8) & 255u;
-  let effParam = in.packedB & 255u;
-  let hasNote = (note >= 65u && note <= 71u);
-  let hasEffect = (effParam > 0u);
-  
-  // Get channel state for note activity
-  let ch = channels[in.channel];
-  
+  var finalColor = fs.bgColor;
+
+  // Subtle Gradient for "machined" look
+  finalColor += vec3<f32>(0.03) * (0.5 - uv.y);
+
+  // Bevel Highlight (Top Edge)
+  if (dHousing < 0.0 && dHousing > -0.04) {
+      finalColor += vec3<f32>(0.15) * smoothstep(0.0, -0.1, p.y);
+  }
+
   // --- BUTTON TEXTURE OVERLAY ---
   let btnScale = 1.05;
   let btnUV = (uv - 0.5) * btnScale + 0.5;
@@ -221,35 +238,55 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   }
   if (inButton > 0.5) {
       // Darken texture for "stealth" look
-      col = mix(col, btnColor * 0.6, 0.9);
+      finalColor = mix(finalColor, btnColor * 0.6, 0.9);
   }
 
-  // --- FROSTED CAPS (Top and Bottom Lights) ---
+  // --- DATA VISUALIZATION ---
+  let tiledUV = btnUV;
+  let x = tiledUV.x;
+  let y = tiledUV.y;
+
+  let noteChar = (in.packedA >> 24) & 255u;
+  let inst = in.packedA & 255u;
+  let effCode = (in.packedB >> 8) & 255u;
+  let effParam = in.packedB & 255u;
+  let hasNote = (noteChar >= 65u && noteChar <= 71u);
+  let hasEffect = (effParam > 0u);
+  let ch = channels[in.channel];
+
   if (inButton > 0.5) {
       // Refined masks using AA sharpness for perfectly symmetrical caps
-      let mainButtonXMask = smoothstep(0.13 - aa, 0.13 + aa, btnUV.x) - smoothstep(0.86 - aa, 0.86 + aa, btnUV.x);
+      let mainButtonXMask = smoothstep(0.13 - aa, 0.13 + aa, x) - smoothstep(0.86 - aa, 0.86 + aa, x);
 
-      // 1. TOP CAP: Activity/Note indicator (The "Frosted Glass" effect)
+      // 1. Top Indicator (The Blue "Cap")
       // Widened the Y range to make it a block rather than a slit, matching button width
-      let topLightMask = (smoothstep(0.05 - aa, 0.05 + aa, btnUV.y) - smoothstep(0.18 - aa, 0.18 + aa, btnUV.y)) * mainButtonXMask;
+      let topLightMask = (smoothstep(0.05 - aa, 0.05 + aa, y) - smoothstep(0.18 - aa, 0.18 + aa, y)) * mainButtonXMask;
 
       // 2. Main Button Body (Centered with equal 0.04 gap from caps)
-      let mainButtonYMask = smoothstep(0.22 - aa, 0.22 + aa, btnUV.y) - smoothstep(0.78 - aa, 0.78 + aa, btnUV.y);
+      let mainButtonYMask = smoothstep(0.22 - aa, 0.22 + aa, y) - smoothstep(0.78 - aa, 0.78 + aa, y);
       let mainButtonMask = mainButtonYMask * mainButtonXMask;
 
-      // 3. BOTTOM CAP: Effect indicator (Symmetrical to top cap)
-      let bottomLightMask = (smoothstep(0.82 - aa, 0.82 + aa, btnUV.y) - smoothstep(0.95 - aa, 0.95 + aa, btnUV.y)) * mainButtonXMask;
+      // 3. Bottom Indicator Cap (Symmetrical to top cap)
+      let bottomLightMask = (smoothstep(0.82 - aa, 0.82 + aa, y) - smoothstep(0.95 - aa, 0.95 + aa, y)) * mainButtonXMask;
 
       if (ch.isMuted == 1u) {
-          col *= 0.3;
+          finalColor *= 0.3;
       }
 
-      // TOP LIGHT: Note Activity (Additive glow - the "frosted cap")
-      if (hasNote || step(0.1, exp(-ch.noteAge * 2.0)) > 0.5) {
+      // TOP LIGHT: Activity (Additive)
+      if (step(0.1, exp(-ch.noteAge * 2.0)) > 0.5) {
+          let topGlow = vec3<f32>(0.0, 0.9, 1.0);
+          // Additive blend
+          finalColor += topGlow * topLightMask * 1.5;
+      }
+
+      // MAIN LIGHT: Note (Additive + Subsurface)
+      if (hasNote) {
           let pitchHue = pitchClassFromPacked(in.packedA);
           let base_note_color = neonPalette(pitchHue);
           let instBand = inst & 15u;
           let instBrightness = 0.8 + (select(0.0, f32(instBand) / 15.0, instBand > 0u)) * 0.2;
+
           var noteColor = base_note_color * instBrightness;
 
           // Flash intensity based on trigger
@@ -259,45 +296,36 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
           let activeLevel = exp(-ch.noteAge * 3.0);
           let lightAmount = (activeLevel * 0.8 + flash) * clamp(ch.volume, 0.0, 1.2);
 
-          // 1. Additive Core Bloom on top cap
-          col += noteColor * topLightMask * lightAmount * 2.0;
+          // 1. Additive Core Bloom
+          finalColor += noteColor * mainButtonMask * lightAmount * 2.0;
 
-          // 2. Main button body glow
-          col += noteColor * mainButtonMask * lightAmount * 1.5;
-
-          // 3. Subsurface Scattering (Tint the housing)
+          // 2. Tasteful Subsurface Scattering (Tint the housing)
+          // This makes the grey plastic look like it's glowing from inside
           let subsurface = noteColor * housingMask * lightAmount * 0.15;
-          col += subsurface;
-      } else {
-          // Idle state - subtle frosted cap
-          col += vec3<f32>(0.0, 0.3, 0.4) * topLightMask * 0.3;
+          finalColor += subsurface;
       }
 
       // BOTTOM LIGHT: Effect (Additive)
       if (hasEffect) {
           let effectColor = effectColorFromCode(effCode, vec3<f32>(0.9, 0.8, 0.2));
           let strength = clamp(f32(effParam) / 255.0, 0.2, 1.0);
-          col += effectColor * bottomLightMask * strength * 2.5;
+          finalColor += effectColor * bottomLightMask * strength * 2.5;
           // Slight subsurface for effect too
-          col += effectColor * housingMask * strength * 0.05;
+          finalColor += effectColor * housingMask * strength * 0.05;
       }
 
       // Row 0 Proximity (Playhead) Blink
       let rowDist = abs(i32(in.row) - i32(uniforms.playheadRow));
       if (rowDist == 0 && !hasNote) {
           // Additive white glance on empty active cell
-          col += vec3<f32>(0.15, 0.2, 0.25) * mainButtonMask;
+          finalColor += vec3<f32>(0.15, 0.2, 0.25) * mainButtonMask;
       }
   }
 
-  // Playhead Highlight (Vertical Line across active column)
-  if (onPlayhead) {
-      // Additive highlight
-      col += vec3<f32>(0.2, 0.2, 0.25) * 0.8;
+  // --- 1px BORDER GAP ---
+  if (housingMask < 0.5) {
+      return vec4<f32>(fs.borderColor * uniforms.dimFactor, 1.0);
   }
 
-  // Border
-  col = mix(col, fs.borderColor, smoothstep(0.0, aa, dHousing));
-
-  return vec4<f32>(col, 1.0);
+  return vec4<f32>(finalColor * uniforms.dimFactor, 1.0);
 }
