@@ -273,6 +273,7 @@ function App() {
         patternDisplayContent={
           <div className="scale-75 origin-center">
             <PatternDisplay
+              key={shader3D} // Force remount when shader changes to ensure clean WebGPU initialization
               matrix={sequencerMatrix}
               playheadRow={playbackRowFraction}
               isPlaying={isPlaying}
@@ -443,6 +444,7 @@ function App() {
         {/* Main Display Area */}
         <div className={`relative rounded-xl overflow-hidden shadow-2xl mb-6 border ${isDarkMode ? 'bg-black border-gray-800' : 'bg-white border-gray-300'}`}>
            <PatternDisplay
+             key={shaderFile} // Force remount when shader changes
              matrix={sequencerMatrix}
              playheadRow={playbackRowFraction}
              isPlaying={isPlaying}
