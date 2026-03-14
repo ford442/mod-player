@@ -623,92 +623,79 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
 
     void main() {
         int id = gl_InstanceID;
-        int col = id % int(u_cols); // Track Index
-        int row = id / int(u_cols); // Step Index
+        // u_cols = numChannels; texture is stored as width=channels, height=steps
+        int trackIndex = id % int(u_cols); // 0 to numChannels-1
+        int stepIndex  = id / int(u_cols); // 0 to stepsForMode-1
 
-        // 1. Check for Note Data
-        uint note = texelFetch(u_noteData, ivec2(col, row), 0).r;
+        // 1. Check for Note Data (texture: x=channel, y=step)
+        uint note = texelFetch(u_noteData, ivec2(trackIndex, stepIndex), 0).r;
         v_hasNote = (note > 0u) ? 1.0 : 0.0;
 
-        // 2. Calculate Cap Scale
-        // Scale is derived from u_cellSize with CAP_SCALE_FACTOR (0.88) for pixel-perfect fit
-        float capScale = min(u_cellSize.x, u_cellSize.y) * CAP_SCALE_FACTOR;
-        if (note == 0u) capScale = 0.0; // Hide empty steps
-
-        // 3. Playhead Logic
+        // 2. Playhead Logic
         float stepsPerPage = (u_layoutMode == 3) ? 64.0 : 32.0;
         float relativePlayhead = mod(u_playhead, stepsPerPage);
 
-        float distToPlayhead = abs(float(row) - relativePlayhead);
+        float distToPlayhead = abs(float(stepIndex) - relativePlayhead);
         distToPlayhead = min(distToPlayhead, stepsPerPage - distToPlayhead);
         float activation = 1.0 - smoothstep(0.0, 1.5, distToPlayhead);
-        capScale *= 1.0 + (0.2 * activation); // Pop effect with smooth falloff
         v_active = activation;
 
-        // 4. Positioning Logic
+        // 3. Positioning Logic
         if (u_layoutMode == 2 || u_layoutMode == 3) {
             // --- HORIZONTAL LAYOUT (32-step or 64-step) ---
-            // Pixel-perfect centered caps using shared constants
-            // a_pos is in [-0.5, 0.5] range, we center it at [0.5, 0.5] within each cell
-            float i = float(row); // step index
-            float j = float(col); // track index
-            
-            // Calculate cell position
-            float cellX = u_offset.x + i * u_cellSize.x;
-            float cellY = u_offset.y + j * u_cellSize.y;
-            
-            // Center the cap within the cell using a_pos * capScale + cellCenter
+            // Steps run along X, channels run along Y
+            float capScale = min(u_cellSize.x, u_cellSize.y) * CAP_SCALE_FACTOR;
+            if (note == 0u) capScale = 0.0;
+            capScale *= 1.0 + (0.2 * activation);
+
+            float cellX = u_offset.x + float(stepIndex)  * u_cellSize.x;
+            float cellY = u_offset.y + float(trackIndex) * u_cellSize.y;
+
             vec2 centered = a_pos * capScale + vec2(cellX + u_cellSize.x * 0.5, cellY + u_cellSize.y * 0.5);
-            
-            // Convert to NDC
             vec2 ndc = (centered / u_resolution) * 2.0 - 1.0;
             ndc.y = -ndc.y;
             gl_Position = vec4(ndc, 0.0, 1.0);
 
         } else {
             // --- CIRCULAR LAYOUT ---
-            // Use exact radii from shared constants: INNER_RADIUS=0.3, OUTER_RADIUS=0.9
-            
+            // Use pixel-space radii (based on minDim) to match the WGSL background shader
+            // and prevent elliptical stretching on non-square viewports.
             float numTracks = u_cols;
-            
-            // Calculate track index with inversion support
-            float trackIndex = float(col);
-            if (u_invertChannels == 0) { trackIndex = numTracks - 1.0 - trackIndex; }
-            
-            // Normalized radius for this track (centered in track band)
-            float trackWidth = (OUTER_RADIUS - INNER_RADIUS) / numTracks;
-            float normalizedRadius = INNER_RADIUS + (trackIndex + 0.5) * trackWidth;
-            
-            // Full circle angle
+            float trackIndexF = float(trackIndex);
+            if (u_invertChannels == 0) { trackIndexF = numTracks - 1.0 - trackIndexF; }
+
+            float minDim = min(u_resolution.x, u_resolution.y);
+            vec2 center = u_resolution * 0.5;
+
+            // Mirror the WGSL: maxRadius = minDim*0.45, minRadius = minDim*0.15
+            float maxRadius = minDim * 0.45;
+            float minRadius = minDim * 0.15;
+            float ringDepth = (maxRadius - minRadius) / numTracks;
+            float pixelRadius = minRadius + trackIndexF * ringDepth;
+
             float totalSteps = 64.0;
             float anglePerStep = (2.0 * PI) / totalSteps;
-            float theta = -1.570796 + float(row) * anglePerStep;
-            
-            // Convert polar to cartesian in normalized space [0,1]
-            vec2 center = vec2(0.5, 0.5);
-            vec2 normPos = center + vec2(cos(theta), sin(theta)) * normalizedRadius * 0.5;
-            
-            // Calculate btnW and btnH from angular arc length and radial width
-            float arcLength = normalizedRadius * anglePerStep;
+            float theta = -1.570796 + float(stepIndex) * anglePerStep;
+
+            // Pixel-space arc length → no aspect-ratio distortion
+            float arcLength = pixelRadius * anglePerStep;
             float btnW = arcLength * CAP_SCALE_FACTOR;
-            float btnH = trackWidth * 0.92;
-            
-            // Local position with rotation
-            vec2 localPos = a_pos * vec2(btnW, btnH);
+            float btnH = ringDepth * 0.92;
+
+            float capScale = (note > 0u) ? (1.0 + 0.2 * activation) : 0.0;
+            vec2 localPos = a_pos * vec2(btnW, btnH) * capScale;
+
             float rotAng = theta + 1.570796;
             float cA = cos(rotAng); float sA = sin(rotAng);
             float rotX = localPos.x * cA - localPos.y * sA;
             float rotY = localPos.x * sA + localPos.y * cA;
-            
-            // Map to pixel space for NDC conversion
-            vec2 pixelPos = normPos * u_resolution + vec2(rotX, rotY) * u_resolution;
-            
+
+            vec2 pixelPos = center + vec2(cos(theta), sin(theta)) * pixelRadius + vec2(rotX, rotY);
             vec2 ndc = (pixelPos / u_resolution) * 2.0 - 1.0;
             ndc.y = -ndc.y;
             gl_Position = vec4(ndc, 0.0, 1.0);
         }
 
-        // Pass standard UV (0-1) for texture mapping
         v_uv = a_pos + 0.5;
     }
     `;
@@ -1573,7 +1560,10 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
 
     try {
       const { program, vao, texture, uniforms } = res;
-      const cols = padTopChannel ? (matrix.numChannels || DEFAULT_CHANNELS) + 1 : (matrix.numChannels || DEFAULT_CHANNELS);
+      // ALWAYS match texture dimensions: width = numChannels, height = stepsForMode
+      // u_cols drives instance unrolling in the vertex shader (trackIndex = id % u_cols)
+      const numChannelsForGL = padTopChannel ? (matrix.numChannels || DEFAULT_CHANNELS) + 1 : (matrix.numChannels || DEFAULT_CHANNELS);
+      const cols = numChannelsForGL;
       const rows = matrix.numRows || DEFAULT_ROWS;
 
       // Check for GL errors before starting
