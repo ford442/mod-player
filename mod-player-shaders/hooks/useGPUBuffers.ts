@@ -22,6 +22,30 @@ const EMPTY_CHANNEL: ChannelShadowState = {
 const alignTo = (val: number, align: number) => Math.floor((val + align - 1) / align) * align;
 
 // Parse helpers for pattern packing
+// Helper to convert note text (like "C-4", "F#5") to numeric note value
+const encodeNoteText = (notePart: string): number => {
+  // Note mapping: C=1, C#=2, D=3, D#=4, E=5, F=6, F#=7, G=8, G#=9, A=10, A#=11, B=12
+  const noteMap: Record<string, number> = {
+    'C-': 1, 'C#': 2, 'DB': 2, 'D-': 3, 'D#': 4, 'EB': 4, 'E-': 5,
+    'F-': 6, 'F#': 7, 'GB': 7, 'G-': 8, 'G#': 9, 'AB': 9, 'A-': 10,
+    'A#': 11, 'BB': 11, 'B-': 12
+  };
+  
+  if (notePart.length < 2) return 0;
+  
+  const key = notePart.slice(0, 2).toUpperCase();
+  const octaveChar = notePart.charAt(2);
+  
+  if (key === 'OFF' || key === '---') return 255; // Note off
+  if (key === 'CUT' || key === '===') return 254; // Note cut
+  
+  const noteBase = noteMap[key] || 0;
+  const octave = (octaveChar >= '0' && octaveChar <= '9') ? parseInt(octaveChar, 10) : 0;
+  
+  // Return MIDI note number (C-0 = 12, C-4 = 60, etc.)
+  return noteBase > 0 ? (octave + 1) * 12 + noteBase : 0;
+};
+
 const parsePackedB = (text: string) => {
   let volType = 0, volValue = 0;
   let effCode = 0, effParam = 0;
@@ -72,19 +96,42 @@ export const packPatternMatrix = (matrix: PatternMatrix | null, padTopChannel = 
     for (let c = 0; c < rawChannels; c++) {
       const offset = (r * numChannels + (c + startCol)) * 2;
       const cell = rowCells[c];
-      if (!cell || !cell.text) continue;
-
-      const text = cell.text.trim();
-      const upper = text.toUpperCase();
-      const notePart = upper.slice(0, 3).padEnd(3, '\0');
-      const instMatch = text.match(/(\d{1,3})$/);
-      const instByte = instMatch?.[1] ? Math.min(255, parseInt(instMatch[1], 10)) : 0;
-      const n0 = notePart.charCodeAt(0) & 0xff;
-      const n1 = notePart.charCodeAt(1) & 0xff;
-      const n2 = notePart.charCodeAt(2) & 0xff;
-
-      packed[offset] = (n0 << 24) | (n1 << 16) | (n2 << 8) | instByte;
-      packed[offset + 1] = parsePackedB(text) >>> 0;
+      
+      // FIXED: Always write data for every cell position
+      let note = 0;
+      let inst = 0;
+      let volCmd = 0;
+      let volVal = 0;
+      let effCmd = 0;
+      let effVal = 0;
+      
+      if (cell) {
+        // First try numeric fields (from getPatternMatrix)
+        if (cell.note && cell.note > 0) {
+          note = cell.note;
+          inst = cell.inst || 0;
+          volCmd = cell.volCmd || 0;
+          volVal = cell.volVal || 0;
+          effCmd = cell.effCmd || 0;
+          effVal = cell.effVal || 0;
+        }
+        // Fall back to parsing text if available
+        else if (cell.text && cell.text.trim()) {
+          const text = cell.text.trim();
+          const upper = text.toUpperCase();
+          const notePart = upper.slice(0, 3).padEnd(3, '\0');
+          const instMatch = text.match(/(\d{1,3})$/);
+          inst = instMatch?.[1] ? Math.min(255, parseInt(instMatch[1], 10)) : 0;
+          note = encodeNoteText(notePart);
+          packed[offset + 1] = parsePackedB(text) >>> 0;
+        }
+      }
+      
+      // Always write packed data for this cell position
+      packed[offset] = ((note & 0xFF) << 24) | ((inst & 0xFF) << 16) | ((volCmd & 0xFF) << 8) | (volVal & 0xFF);
+      if (!cell?.text) {
+        packed[offset + 1] = ((effCmd & 0xFF) << 8) | (effVal & 0xFF);
+      }
     }
   }
   return packed;
@@ -101,28 +148,53 @@ export const packPatternMatrixHighPrecision = (matrix: PatternMatrix | null, pad
   const { rows } = matrix;
   const startCol = padTopChannel ? 1 : 0;
 
+  // DEBUG: Track how many notes we pack
+  let notesPacked = 0;
+  let totalCells = 0;
+
   for (let r = 0; r < numRows; r++) {
     const rowCells = rows[r] || [];
     for (let c = 0; c < rawChannels; c++) {
       const offset = (r * numChannels + (c + startCol)) * 2;
       const cell = rowCells[c];
-      if (!cell) continue;
+      totalCells++;
+      
+      // FIXED: Always write data for every cell position (don't skip null cells)
+      let note = 0;
+      let inst = 0;
+      let volCmd = 0;
+      let volVal = 0;
+      let effCmd = 0;
+      let effVal = 0;
+      
+      if (cell) {
+        // Get note value - handle both numeric and text representations
+        if (cell.note && cell.note > 0) {
+          note = cell.note;
+        } else if (cell.text && cell.text.trim()) {
+          // Parse note from text (e.g., "C-4", "F#5")
+          const text = cell.text.trim().toUpperCase();
+          note = encodeNoteText(text.slice(0, 3));
+        }
+        
+        inst = cell.inst || 0;
+        volCmd = cell.volCmd || 0;
+        volVal = cell.volVal || 0;
+        effCmd = cell.effCmd || 0;
+        effVal = cell.effVal || 0;
+        
+        if (note > 0) notesPacked++;
+      }
 
-      const note = cell.note || 0;
-      const inst = cell.inst || 0;
-      const volCmd = cell.volCmd || 0;
-      const volVal = cell.volVal || 0;
-      const effCmd = cell.effCmd || 0;
-      const effVal = cell.effVal || 0;
-      // activeEffect is decoded from effCmd/effVal, stored in high byte for GPU
-      const activeEffect = (cell as any).activeEffect || 0;
-
-      packed[offset] = ((note & 0xFF) << 24) | ((inst & 0xFF) << 16) | 
-                       ((volCmd & 0xFF) << 8) | (volVal & 0xFF);
-      // packedB: [activeEffect(8) | Unused(8) | effCmd(8) | effVal(8)]
-      packed[offset + 1] = ((activeEffect & 0xFF) << 24) | ((effCmd & 0xFF) << 8) | (effVal & 0xFF);
+      // ALWAYS write packed data for this cell position
+      packed[offset] = ((note & 0xFF) << 24) | ((inst & 0xFF) << 16) | ((volCmd & 0xFF) << 8) | (volVal & 0xFF);
+      packed[offset + 1] = ((effCmd & 0xFF) << 8) | (effVal & 0xFF);
     }
   }
+  
+  // DEBUG: Log packing statistics
+  console.log(`[packPatternMatrixHighPrecision] Packed ${notesPacked} notes into ${totalCells} cells (${numRows} rows x ${numChannels} channels)`);
+  
   return packed;
 };
 
