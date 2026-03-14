@@ -28,7 +28,7 @@ interface ControlsProps {
 
 export const Controls: React.FC<ControlsProps> = ({
   isReady,
-  isPlaying,
+  isPlaying: _isPlaying,
   isModuleLoaded,
   onFileSelected,
   onPlay,
