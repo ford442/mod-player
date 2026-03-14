@@ -52,12 +52,9 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
   let row = instanceIndex / numChannels;
   let channel = instanceIndex % numChannels;
 
-  // CRITICAL FIX: Cull instances not in current 64-step page to prevent alpha/z-fighting
+  // Cull instances not in current 64-step page to prevent alpha/z-fighting
   let pageStart = u32(uniforms.playheadRow / 64.0) * 64u;
-  var isVisible = 1.0;
-  if (row < pageStart || row >= pageStart + 64u) {
-      isVisible = 0.0;
-  }
+  var isVisible = (row >= pageStart && row < pageStart + 64u);
 
   let invertedChannel = numChannels - 1u - channel;
   let ringIndex = select(invertedChannel, channel, (uniforms.invertChannels == 1u));
@@ -105,7 +102,8 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
       b = cells[idx + 1u];
   }
 
-  let finalPos = select(vec4<f32>(0.0, 0.0, 0.0, 0.0), vec4<f32>(clipX, clipY, 0.0, 1.0), isVisible > 0.5);
+  // Move invisible instances off-screen instead of using w=0 (which creates degenerate triangles at origin)
+  let finalPos = select(vec4<f32>(2.0, 2.0, 0.0, 1.0), vec4<f32>(clipX, clipY, 0.0, 1.0), isVisible);
 
   var out: VertexOut;
   out.position = finalPos;
@@ -331,6 +329,6 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   let noise = fract(sin(dot(in.uv * uniforms.timeSec, vec2<f32>(12.9898, 78.233))) * 43758.5453);
   finalColor += (noise - 0.5) * 0.01;
 
-  if (housingMask < 0.5) { return vec4<f32>(fs.borderColor, 0.0); }
-  return vec4<f32>(finalColor, 1.0);
+  if (housingMask < 0.01) { discard; }
+  return vec4<f32>(finalColor, housingMask);
 }
