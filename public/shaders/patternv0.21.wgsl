@@ -5,7 +5,7 @@
 struct Uniforms {
   numRows: u32,
   numChannels: u32,
-  playheadRow: u32,
+  playheadRow: f32,
   isPlaying: u32,
   cellW: f32,
   cellH: f32,
@@ -85,8 +85,12 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
   let clipY = 1.0 - (gridY * 2.0) - quad[vertexIndex].y * (uniforms.gridRect.w / f32(numChannels)) * 2.0;
 
   let idx = instanceIndex * 2u;
-  let a = cells[idx];
-  let b = cells[idx + 1u];
+  var a = 0u;
+  var b = 0u;
+  if (idx + 1u < arrayLength(&cells)) {
+      a = cells[idx];
+      b = cells[idx + 1u];
+  }
 
   var out: VertexOut;
   // Collapse if not visible
@@ -186,7 +190,7 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   if (in.channel == 0u) {
       var col = fs.bgColor * 0.5;
 
-      let onPlayhead = (in.row == uniforms.playheadRow);
+      let onPlayhead = (f32(in.row) == uniforms.playheadRow);
       let ledSize = vec2<f32>(0.3, 0.3);
       let dLed = sdRoundedBox(p, ledSize, 0.05);
 
@@ -250,9 +254,12 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   let inst = in.packedA & 255u;
   let effCode = (in.packedB >> 8) & 255u;
   let effParam = in.packedB & 255u;
-  let hasNote = (noteChar >= 65u && noteChar <= 71u);
+  let hasNote = (noteChar >= 65u && noteChar <= 71u) || (noteChar > 0u && noteChar < 128u);
   let hasEffect = (effParam > 0u);
-  let ch = channels[in.channel];
+  var ch = ChannelState(0.0, 0.0, 0.0, 0u, 1000.0, 0u, 0.0, 0u);
+  if (in.channel < arrayLength(&channels)) {
+      ch = channels[in.channel];
+  }
 
   if (inButton > 0.5) {
       // Refined masks using AA sharpness for perfectly symmetrical caps

@@ -6,7 +6,7 @@
 struct Uniforms {
   numRows: u32,
   numChannels: u32,
-  playheadRow: u32,
+  playheadRow: f32,
   isPlaying: u32,
   cellW: f32,
   cellH: f32,
@@ -23,6 +23,8 @@ struct Uniforms {
   bloomIntensity: f32,
   bloomThreshold: f32,
   invertChannels: u32,
+  dimFactor: f32,
+  gridRect: vec4<f32>,
 };
 
 @group(0) @binding(0) var<storage, read> cells: array<u32>;
@@ -58,14 +60,10 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
   // Static Paged Grid: We only render active page of 32 steps.
   
   let stepsPerPage = 32.0;
-  let pageStart = floor(f32(uniforms.playheadRow) / stepsPerPage) * stepsPerPage;
+  let pageStart = floor(uniforms.playheadRow / stepsPerPage) * stepsPerPage;
   
   // Calculate row local to current page (0..31)
   let localRow = f32(row) - pageStart;
-  
-  // X Position based on local row
-  let px = localRow * uniforms.cellW;
-  let py = f32(channel) * uniforms.cellH;
   
   // If this instance is NOT in the current page, we move it off-screen to clip it
   var isVisible = 1.0;
@@ -73,24 +71,26 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
       isVisible = 0.0;
   }
   
-  // Standard quad expansion
-  // Note: if invisible, we can just collapse quad or move off screen
-  let worldX = px + quad[vertexIndex].x * uniforms.cellW;
-  let worldY = py + quad[vertexIndex].y * uniforms.cellH;
-
-  // Use top-left origin for logic, but clip space is -1..1
-  let clipX = (worldX / uniforms.canvasW) * 2.0 - 1.0;
-  let clipY = 1.0 - (worldY / uniforms.canvasH) * 2.0;
-
-  // Collapse if not visible
-  let finalPos = select(vec4<f32>(0.0), vec4<f32>(clipX, clipY, 0.0, 1.0), isVisible > 0.5);
+  // Use gridRect for precise positioning within bezel area
+  // gridRect is in normalized coordinates (0-1)
+  let gridX = uniforms.gridRect.x + (localRow / stepsPerPage) * uniforms.gridRect.z;
+  let gridY = uniforms.gridRect.y + (f32(channel) / f32(numChannels)) * uniforms.gridRect.w;
+  
+  // Convert to clip space (-1 to 1)
+  let clipX = gridX * 2.0 - 1.0 + quad[vertexIndex].x * (uniforms.gridRect.z / stepsPerPage) * 2.0;
+  let clipY = 1.0 - (gridY * 2.0) - quad[vertexIndex].y * (uniforms.gridRect.w / f32(numChannels)) * 2.0;
 
   let idx = instanceIndex * 2u;
-  let a = cells[idx];
-  let b = cells[idx + 1u];
+  var a = 0u;
+  var b = 0u;
+  if (idx + 1u < arrayLength(&cells)) {
+      a = cells[idx];
+      b = cells[idx + 1u];
+  }
 
   var out: VertexOut;
-  out.position = finalPos;
+  // Collapse if not visible
+  out.position = select(vec4<f32>(0.0), vec4<f32>(clipX, clipY, 0.0, 1.0), isVisible > 0.5);
   out.row = row;
   out.channel = channel;
   out.uv = quad[vertexIndex];
@@ -196,18 +196,21 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   // Inset shadow
   col *= smoothstep(0.0, 0.1, dHousing + 0.5);
 
-  let onPlayhead = (in.row == uniforms.playheadRow);
+  let onPlayhead = (f32(in.row) == uniforms.playheadRow);
   
   // Get note and effect data
   let note = (in.packedA >> 24) & 255u;
   let inst = in.packedA & 255u;
   let effCode = (in.packedB >> 8) & 255u;
   let effParam = in.packedB & 255u;
-  let hasNote = (note >= 65u && note <= 71u);
+  let hasNote = (note >= 65u && note <= 71u) || (note > 0u && note < 128u);
   let hasEffect = (effParam > 0u);
   
-  // Get channel state for note activity
-  let ch = channels[in.channel];
+  // Get channel state for note activity with bounds check
+  var ch = ChannelState(0.0, 0.0, 0.0, 0u, 1000.0, 0u, 0.0, 0u);
+  if (in.channel < arrayLength(&channels)) {
+      ch = channels[in.channel];
+  }
   
   // --- BUTTON TEXTURE OVERLAY ---
   let btnScale = 1.05;
@@ -230,15 +233,15 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
       let mainButtonXMask = smoothstep(0.13 - aa, 0.13 + aa, btnUV.x) - smoothstep(0.86 - aa, 0.86 + aa, btnUV.x);
 
       // 1. TOP CAP: Activity/Note indicator (The "Frosted Glass" effect)
-      // Widened the Y range to make it a block rather than a slit, matching button width
-      let topLightMask = (smoothstep(0.05 - aa, 0.05 + aa, btnUV.y) - smoothstep(0.18 - aa, 0.18 + aa, btnUV.y)) * mainButtonXMask;
+      // Exactly 15% height at top
+      let topLightMask = (smoothstep(0.05 - aa, 0.05 + aa, btnUV.y) - smoothstep(0.20 - aa, 0.20 + aa, btnUV.y)) * mainButtonXMask;
 
-      // 2. Main Button Body (Centered with equal 0.04 gap from caps)
+      // 2. Main Button Body (Centered with equal gap from caps)
       let mainButtonYMask = smoothstep(0.22 - aa, 0.22 + aa, btnUV.y) - smoothstep(0.78 - aa, 0.78 + aa, btnUV.y);
       let mainButtonMask = mainButtonYMask * mainButtonXMask;
 
-      // 3. BOTTOM CAP: Effect indicator (Symmetrical to top cap)
-      let bottomLightMask = (smoothstep(0.82 - aa, 0.82 + aa, btnUV.y) - smoothstep(0.95 - aa, 0.95 + aa, btnUV.y)) * mainButtonXMask;
+      // 3. BOTTOM CAP: Effect indicator (Symmetrical to top cap, exactly 15% height)
+      let bottomLightMask = (smoothstep(0.80 - aa, 0.80 + aa, btnUV.y) - smoothstep(0.95 - aa, 0.95 + aa, btnUV.y)) * mainButtonXMask;
 
       if (ch.isMuted == 1u) {
           col *= 0.3;
@@ -253,40 +256,40 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
           var noteColor = base_note_color * instBrightness;
 
           // Flash intensity based on trigger
-          let flash = f32(ch.trigger) * 0.8;
+          let flash = f32(ch.trigger) * 0.5;
 
           // Calculate additive light amount
           let activeLevel = exp(-ch.noteAge * 3.0);
           let lightAmount = (activeLevel * 0.8 + flash) * clamp(ch.volume, 0.0, 1.2);
 
-          // 1. Additive Core Bloom on top cap
-          col += noteColor * topLightMask * lightAmount * 2.0;
+          // 1. Additive Core Bloom on top cap - REDUCED intensity
+          col += noteColor * topLightMask * lightAmount * 0.8;
 
-          // 2. Main button body glow
-          col += noteColor * mainButtonMask * lightAmount * 1.5;
+          // 2. Main button body glow - VERY SUBTLE (was filling entire cell)
+          col += noteColor * mainButtonMask * lightAmount * 0.15;
 
-          // 3. Subsurface Scattering (Tint the housing)
-          let subsurface = noteColor * housingMask * lightAmount * 0.15;
+          // 3. Subsurface Scattering (Tint the housing) - REDUCED
+          let subsurface = noteColor * housingMask * lightAmount * 0.08;
           col += subsurface;
       } else {
           // Idle state - subtle frosted cap
-          col += vec3<f32>(0.0, 0.3, 0.4) * topLightMask * 0.3;
+          col += vec3<f32>(0.0, 0.3, 0.4) * topLightMask * 0.15;
       }
 
-      // BOTTOM LIGHT: Effect (Additive)
+      // BOTTOM LIGHT: Effect (Additive) - REDUCED intensity
       if (hasEffect) {
           let effectColor = effectColorFromCode(effCode, vec3<f32>(0.9, 0.8, 0.2));
           let strength = clamp(f32(effParam) / 255.0, 0.2, 1.0);
-          col += effectColor * bottomLightMask * strength * 2.5;
+          col += effectColor * bottomLightMask * strength * 1.2;
           // Slight subsurface for effect too
-          col += effectColor * housingMask * strength * 0.05;
+          col += effectColor * housingMask * strength * 0.03;
       }
 
-      // Row 0 Proximity (Playhead) Blink
+      // Row 0 Proximity (Playhead) Blink - ONLY on caps
       let rowDist = abs(i32(in.row) - i32(uniforms.playheadRow));
       if (rowDist == 0 && !hasNote) {
-          // Additive white glance on empty active cell
-          col += vec3<f32>(0.15, 0.2, 0.25) * mainButtonMask;
+          // Additive white glance on empty active cell - only on caps
+          col += vec3<f32>(0.15, 0.2, 0.25) * (topLightMask + bottomLightMask) * 0.5;
       }
   }
 
@@ -298,6 +301,9 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
 
   // Border
   col = mix(col, fs.borderColor, smoothstep(0.0, aa, dHousing));
+
+  // Apply dim factor
+  col *= uniforms.dimFactor;
 
   return vec4<f32>(col, 1.0);
 }
