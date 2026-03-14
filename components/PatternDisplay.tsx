@@ -1352,25 +1352,32 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     };
     init();
     return () => {
-      cancelled = true; 
+      cancelled = true;
       setGpuReady(false);
-      
-      // Clean up WebGL resources first
-      if (glContextRef.current && glResourcesRef.current) {
+
+      // Clean up WebGL resources and clear the overlay canvas to prevent ghosting
+      if (glContextRef.current) {
         const gl = glContextRef.current;
-        const res = glResourcesRef.current;
+        // Clear the canvas first to prevent ghost images during shader switch
         try {
-          gl.deleteProgram(res.program);
-          gl.deleteVertexArray(res.vao);
-          gl.deleteBuffer(res.buffer);
-          gl.deleteTexture(res.texture);
-          if (res.capTexture) gl.deleteTexture(res.capTexture);
+          gl.clearColor(0, 0, 0, 0);
+          gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
         } catch (e) {}
-        glResourcesRef.current = null;
+        if (glResourcesRef.current) {
+          const res = glResourcesRef.current;
+          try {
+            gl.deleteProgram(res.program);
+            gl.deleteVertexArray(res.vao);
+            gl.deleteBuffer(res.buffer);
+            gl.deleteTexture(res.texture);
+            if (res.capTexture) gl.deleteTexture(res.capTexture);
+          } catch (e) {}
+          glResourcesRef.current = null;
+        }
       }
-      
+
       // Clean up WebGPU resources
-      bindGroupRef.current = null; 
+      bindGroupRef.current = null;
       pipelineRef.current = null;
       if (bezelUniformBufferRef.current) { 
         try { bezelUniformBufferRef.current.destroy(); } catch (e) {}
@@ -1934,10 +1941,12 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
       bezelData[3] = 0.92; bezelData[4] = 0.93; bezelData[5] = 0.95; // surface
       bezelData[6] = 0.88; bezelData[7] = 0.89; bezelData[8] = 0.91; // bezel
       bezelData[9] = 0.015; // screwRadius
-      bezelData[10] = 0; // recessKind
-      bezelData[11] = 1.0; // recessOuterScale
-      bezelData[12] = 1.0; // recessInnerScale
-      bezelData[13] = 0.02; // recessCorner
+      // Recess configuration: match shader geometry for proper bezel alignment
+      const isCircShader = isCircularLayoutShader(shaderFile);
+      bezelData[10] = isCircShader ? 0.0 : 1.0; // recessKind: 0=circular, 1=rounded-rect
+      bezelData[11] = isCircShader ? 0.95 : 1.0; // recessOuterScale
+      bezelData[12] = isCircShader ? 0.32 : 0.0; // recessInnerScale (matches minRadius/maxRadius ratio)
+      bezelData[13] = isCircShader ? 0.0 : 0.02; // recessCorner
       bezelData[14] = dimFactor ?? 1.0;
       bezelData[15] = isPlaying ? 1.0 : 0.0;
       bezelData[16] = 1.0; // volume
@@ -1988,6 +1997,25 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     }
     pass.end();
     device.queue.submit([encoder.finish()]);
+
+    // Update debug info from WebGPU render path (so it shows even without WebGL overlay)
+    if (!isOverlayActive) {
+      const layoutModeName = isCircularLayoutShader(shaderFile) ? 'CIRCULAR (WebGPU)' :
+        isHorizontal ? 'HORIZONTAL (WebGPU)' : 'STANDARD (WebGPU)';
+      setDebugInfo(prev => ({
+        ...prev,
+        layoutMode: layoutModeName,
+        uniforms: {
+          shader: shaderFile,
+          numRows: matrix?.numRows ?? DEFAULT_ROWS,
+          numChannels,
+          totalInstances,
+          playheadRow: (playbackStateRef?.current?.playheadRow ?? playheadRow).toFixed(2),
+        },
+        errors: [],
+      }));
+    }
+
     drawWebGL();
   };
 
