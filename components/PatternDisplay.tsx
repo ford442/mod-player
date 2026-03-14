@@ -511,7 +511,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
 
   // Some older shaders have a reserved header/ring channel (index 0)
   // v0.16, v0.17, v0.21, v0.38, v0.39, v0.40, v0.42, v0.43, v0.44, v0.45, v0.46 need padding
-  const isOverlayActive = shaderFile.includes('v0.21') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.50');
+  const isOverlayActive = shaderFile.includes('v0.21') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.47') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49') || shaderFile.includes('v0.50');
 
   const padTopChannel = shaderFile.includes('v0.16') || shaderFile.includes('v0.17') || shaderFile.includes('v0.21') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.49') || shaderFile.includes('v0.50');
 
@@ -714,7 +714,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     `;
 
     // Only compile if using a glass shader
-    const isOverlayShader = shaderFile.includes('v0.21') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46');
+    const isOverlayShader = shaderFile.includes('v0.21') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.47') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49') || shaderFile.includes('v0.50');
     if (!isOverlayShader) return;
 
     const fsSource = `#version 300 es
@@ -1547,7 +1547,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   const drawWebGL = () => {
     const gl = glContextRef.current;
     const res = glResourcesRef.current;
-    const isOverlayShader = shaderFile.includes('v0.21') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46');
+    const isOverlayShader = shaderFile.includes('v0.21') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.47') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49') || shaderFile.includes('v0.50');
 
     if (!gl || !res || !isOverlayShader || !matrix) return;
 
@@ -1634,30 +1634,51 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
       }
 
       // Geometry & Layout Configuration using shared constants
+      // CRITICAL: Must match WebGPU render() logic exactly for alignment
       let effectiveCellW = cellWidth;
       let effectiveCellH = cellHeight;
+      let offsetX = 0;
+      let offsetY = 0;
       let layoutMode: LayoutMode = LAYOUT_MODES.CIRCULAR;
       let layoutModeName = 'CIRCULAR';
 
       // Get layout mode from shader
       layoutMode = getLayoutModeFromShader(shaderFile);
 
+      // Use cols (channels) for row count in cell calculation since rows are steps in horizontal mode
+      const channelCount = cols;
+
       if (layoutMode === LAYOUT_MODES.HORIZONTAL_32) {
-          // Horizontal 32-step
-          const metrics = calculateHorizontalCellSize(gl.canvas.width, gl.canvas.height, 32, rows);
-          effectiveCellW = metrics.cellW;
-          effectiveCellH = metrics.cellH;
-          if (uniforms.u_offset !== null) {
-            gl.uniform2f(uniforms.u_offset, metrics.offsetX, metrics.offsetY);
+          // Horizontal 32-step layouts
+          if (shaderFile.includes('v0.39')) {
+            // v0.39: Full canvas, no GRID_RECT (matches render() logic)
+            effectiveCellW = gl.canvas.width / 32.0;
+            effectiveCellH = gl.canvas.height / channelCount;
+            offsetX = 0;
+            offsetY = 0;
+            layoutModeName = '32-STEP (v0.39)';
+          } else {
+            // v0.21, v0.40, v0.42, v0.43, v0.46: Use GRID_RECT (matches render() logic)
+            const metrics = calculateHorizontalCellSize(gl.canvas.width, gl.canvas.height, 32, channelCount);
+            effectiveCellW = metrics.cellW;
+            effectiveCellH = metrics.cellH;
+            offsetX = metrics.offsetX;
+            offsetY = metrics.offsetY;
+            layoutModeName = '32-STEP';
           }
-          layoutModeName = shaderFile.includes('v0.39') ? '32-STEP (v0.39)' : '32-STEP';
+          if (uniforms.u_offset !== null) {
+            gl.uniform2f(uniforms.u_offset, offsetX, offsetY);
+          }
       } else if (layoutMode === LAYOUT_MODES.HORIZONTAL_64) {
-          // Horizontal 64-step
-          const metrics = calculateHorizontalCellSize(gl.canvas.width, gl.canvas.height, 64, rows);
+          // Horizontal 64-step layouts (v0.44, v0.45, v0.47, v0.48, v0.49, v0.50)
+          // All use GRID_RECT for consistent bezel alignment
+          const metrics = calculateHorizontalCellSize(gl.canvas.width, gl.canvas.height, 64, channelCount);
           effectiveCellW = metrics.cellW;
           effectiveCellH = metrics.cellH;
+          offsetX = metrics.offsetX;
+          offsetY = metrics.offsetY;
           if (uniforms.u_offset !== null) {
-            gl.uniform2f(uniforms.u_offset, metrics.offsetX, metrics.offsetY);
+            gl.uniform2f(uniforms.u_offset, offsetX, offsetY);
           }
           layoutModeName = '64-STEP';
       } else {
@@ -1665,7 +1686,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
           if (uniforms.u_offset !== null) {
             gl.uniform2f(uniforms.u_offset, 0.0, 0.0);
           }
-          layoutModeName = shaderFile.includes('v0.45') ? 'CIRCULAR (v0.45)' : 'CIRCULAR';
+          layoutModeName = 'CIRCULAR';
       }
 
       // Calculate cap scale using shared constant formula
@@ -1680,7 +1701,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
         gl.uniform1i(uniforms.u_layoutMode, layoutMode);
       }
 
-      uniformVals['u_offset'] = `${(GRID_RECT.x * gl.canvas.width).toFixed(1)}, ${(GRID_RECT.y * gl.canvas.height).toFixed(1)}`;
+      uniformVals['u_offset'] = `${offsetX.toFixed(1)}, ${offsetY.toFixed(1)}`;
       uniformVals['u_cellSize'] = `${effectiveCellW.toFixed(1)}, ${effectiveCellH.toFixed(1)}`;
       uniformVals['capScale'] = capScale.toFixed(1);
       uniformVals['pixelRatio'] = pixelRatio;
@@ -1810,7 +1831,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
         numRows,
         numChannels,
         playheadRow: tickRow,
-        playheadRowAsFloat: shaderFile.includes('v0.40') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.47') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49') || shaderFile.includes('v0.50'),
+        playheadRowAsFloat: shaderFile.includes('v0.21') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.47') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49') || shaderFile.includes('v0.50'),
         isPlaying,
         cellW: effectiveCellW,
         cellH: effectiveCellH,
