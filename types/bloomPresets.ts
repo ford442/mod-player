@@ -77,8 +77,8 @@ export const COLOR_SCHEMES: ColorScheme[] = [
 ];
 
 // Default selections
-export const DEFAULT_BLOOM_PRESET = BLOOM_PRESETS[1]; // Standard
-export const DEFAULT_COLOR_SCHEME = COLOR_SCHEMES[1]; // Golden Ratio
+export const DEFAULT_BLOOM_PRESET: BloomPreset = BLOOM_PRESETS[1]!; // Standard
+export const DEFAULT_COLOR_SCHEME: ColorScheme = COLOR_SCHEMES[1]!; // Golden Ratio
 
 // Helper to get preset by name
 export function getBloomPreset(name: string): BloomPreset {
