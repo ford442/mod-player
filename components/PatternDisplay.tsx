@@ -1926,7 +1926,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     // Render background pass for all shaders that are not self-compositing
     const needsBackground = !isSinglePassCompositeShader(shaderFile);
     if (bezelPipelineRef.current && bezelBindGroupRef.current && needsBackground && bezelUniformBufferRef.current) {
-      const bezelData = new Float32Array(24);
+      const bezelData = bezelFloatRef.current;
       bezelData[0] = canvasMetrics.width;
       bezelData[1] = canvasMetrics.height;
       bezelData[2] = 0; // bezelWidth
@@ -1943,7 +1943,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
       bezelData[16] = 1.0; // volume
       bezelData[17] = 0.5; // pan
       bezelData[18] = bpm ?? 120.0;
-      const bezelUint = new Uint32Array(bezelData.buffer);
+      const bezelUint = bezelUintRef.current;
       bezelUint[19] = isLooping ? 1 : 0;
       bezelUint[20] = 0; // currentOrder (could pass if needed)
       bezelUint[21] = Math.floor(playheadRow);
@@ -1954,7 +1954,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
       bezelData[22] = GRID_RECT.w;
       bezelData[23] = GRID_RECT.h;
       
-      device.queue.writeBuffer(bezelUniformBufferRef.current, 0, bezelData);
+      device.queue.writeBuffer(bezelUniformBufferRef.current, 0, bezelBufferDataRef.current, 0, 96); // Float32Array(24) = 96 bytes
 
       pass.setPipeline(bezelPipelineRef.current);
       pass.setBindGroup(0, bezelBindGroupRef.current);
