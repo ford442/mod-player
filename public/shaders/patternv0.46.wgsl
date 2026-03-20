@@ -114,8 +114,7 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
 
   if (in.channel >= uniforms.numChannels) { return vec4<f32>(0.0); }
 
-  // Clip UI strip at bottom of canvas
-  if (in.position.y > uniforms.canvasH * 0.88) { discard; }
+  // NOTE: Early discard moved to after derivative computation to avoid undefined behavior in fwidth()
 
   // ── Playhead proximity ────────────────────────────────────────────────────
   let totalSteps   = 64.0;
@@ -124,6 +123,9 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   let rowDistRaw   = abs(rowF - playheadStep);
   let rowDist      = min(rowDistRaw, totalSteps - rowDistRaw);
   let playheadHit  = 1.0 - smoothstep(0.0, 2.0, rowDist);
+
+  // Clip UI strip at bottom of canvas — SAFE HERE after derivatives computed
+  if (in.position.y > uniforms.canvasH * 0.88) { discard; }
 
   // ── Trailing sweep ────────────────────────────────────────────────────────
   let stepsBehind = fract((playheadStep - rowF) / totalSteps) * totalSteps;
