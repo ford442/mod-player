@@ -387,7 +387,12 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
 
     let hasNote = (note > 0u);
     let hasExpression = (volCmd > 0u) || (effCmd > 0u);
-    let ch = channels[in.channel];
+
+    // Bounds check for channel state array access
+    var ch = ChannelState(0.0, 0.0, 0.0, 0u, 1000.0, 0u, 0.0, 0u);
+    if (in.channel < arrayLength(&channels)) {
+      ch = channels[in.channel];
+    }
     let isMuted = (ch.isMuted == 1u);
 
     // --- THREE-EMITTER SYSTEM ---

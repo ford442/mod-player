@@ -361,7 +361,12 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     // Fixed: numeric note values 1-120, not ASCII A-G (65-71)
     let hasNote = (noteChar > 0u) && (noteChar <= 120u);
     let hasEffect = (effParam > 0u);
-    let ch = channels[in.channel];
+
+    // Bounds check for channel state array access
+    var ch = ChannelState(0.0, 0.0, 0.0, 0u, 1000.0, 0u, 0.0, 0u);
+    if (in.channel < arrayLength(&channels)) {
+      ch = channels[in.channel];
+    }
     let isMuted = (ch.isMuted == 1u);
 
     // COMPONENT 1: ACTIVITY LIGHT (Blue indicator for trap)
