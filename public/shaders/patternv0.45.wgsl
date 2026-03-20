@@ -160,32 +160,13 @@ fn sdTriangle(p: vec2<f32>, r: f32) -> f32 {
     return -length(p2) * sign(p2.y);
 }
 
-fn toUpperAscii(code: u32) -> u32 {
-  return select(code, code - 32u, (code >= 97u) & (code <= 122u));
-}
-
+// Correct pitch class from raw OpenMPT note value (1–120).
+// OpenMPT: note 1 = C-0, note 2 = C#0 … note 12 = B-0, note 13 = C-1, …
+// (note - 1) % 12  →  0=C, 1=C#, 2=D, 3=D#, 4=E, 5=F, 6=F#, 7=G, 8=G#, 9=A, 10=A#, 11=B
 fn pitchClassFromPacked(packed: u32) -> f32 {
-  let c0 = toUpperAscii((packed >> 24) & 255u);
-  var semitone: i32 = 0;
-  var valid = true;
-  switch (c0) {
-    case 65u: { semitone = 9; }
-    case 66u: { semitone = 11; }
-    case 67u: { semitone = 0; }
-    case 68u: { semitone = 2; }
-    case 69u: { semitone = 4; }
-    case 70u: { semitone = 5; }
-    case 71u: { semitone = 7; }
-    default: { valid = false; }
-  }
-  if (!valid) { return 0.0; }
-  let c1 = toUpperAscii((packed >> 16) & 255u);
-  if ((c1 == 35u) || (c1 == 43u)) {
-    semitone = (semitone + 1) % 12;
-  } else if (c1 == 66u) {
-    semitone = (semitone + 11) % 12;
-  }
-  return f32(semitone) / 12.0;
+  let note = (packed >> 24) & 255u;
+  if (note == 0u || note > 120u) { return 0.0; }
+  return f32((note - 1u) % 12u) / 12.0;
 }
 
 @fragment
@@ -243,61 +224,107 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   
   var capColor = vec3<f32>(0.15, 0.16, 0.18); // Inactive plastic
   var glow = 0.0;
-  
-  let noteChar = (in.packedA >> 24) & 255u;
-  let hasNote = (noteChar >= 65u && noteChar <= 122u); // Simple check
-  
-  let playheadStep = uniforms.playheadRow - floor(uniforms.playheadRow / 64.0) * 64.0;
-  let rowDistRaw = abs(f32(in.row % 64u) - playheadStep);
-  let rowDist = min(rowDistRaw, 64.0 - rowDistRaw);
+  let p = uv - 0.5;
+
+  // Unpack all fields (OpenMPT numeric encoding)
+  let note   = (in.packedA >> 24) & 255u;
+  let volCmd = (in.packedA >>  8) & 255u;
+  let effCmd = (in.packedB >>  8) & 255u;
+
+  let hasNote   = (note > 0u) && (note <= 120u);   // regular note
+  let isNoteOff = (note == 121u);                   // --- note-off
+  let isNoteCut = (note == 122u) || (note == 123u); // === note-cut/fade
+  let hasVol    = (volCmd > 0u);
+  let hasEffect = (effCmd > 0u);
+
+  let playheadStep     = uniforms.playheadRow - floor(uniforms.playheadRow / 64.0) * 64.0;
+  let rowDistRaw       = abs(f32(in.row % 64u) - playheadStep);
+  let rowDist          = min(rowDistRaw, 64.0 - rowDistRaw);
   let playheadActivation = 1.0 - smoothstep(0.0, 1.5, rowDist);
-  if (hasNote) {
-      let pitchHue = pitchClassFromPacked(in.packedA);
-      let baseCol = neonPalette(pitchHue);
-      capColor = mix(capColor, baseCol, 0.4);
-      
-      // Highlight if active row
-      if (playheadActivation > 0.0) {
-          glow = playheadActivation;
-          capColor = mix(capColor, vec3<f32>(1.0), 0.5);
-      }
-      
-      // Trigger flash
-      let ch = channels[in.channel];
-      if (ch.trigger > 0u && playheadActivation > 0.5) {
-          glow += 1.0;
-          capColor += vec3<f32>(0.5);
-      }
-  }
-  
-  // Playhead Highlight Line
-  if (playheadActivation > 0.0) {
-      capColor += vec3<f32>(0.1, 0.1, 0.15) * playheadActivation;
-      if (isPlaying && playheadActivation > 0.5) {
-          glow += 0.2;
-      }
-  }
-  
-  // Frosted Effect
-  let edge = smoothstep(0.0, 0.1, -dBox);
-  let light = vec3<f32>(0.5, -0.8, 1.0);
-  let n = normalize(vec3<f32>((uv.x - 0.5), (uv.y - 0.5), 0.5));
-  let diff = max(0.0, dot(n, normalize(light)));
-  
-  capColor *= (0.5 + 0.5 * diff);
-  capColor += vec3<f32>(glow * 0.5);
-  
-  // Bloom boost
-  if (glow > 0.0) {
-      capColor *= (1.0 + bloom);
+  let onPlayhead       = rowDist < 1.5;
+
+  // Channel live state
+  var chTrigger = false;
+  if (in.channel < arrayLength(&channels)) {
+    let ch = channels[in.channel];
+    chTrigger = (ch.trigger > 0u) && onPlayhead;
   }
 
+  if (hasNote) {
+      let pitchHue = pitchClassFromPacked(in.packedA);
+      let baseCol  = neonPalette(pitchHue);
+      capColor = mix(capColor, baseCol * 0.55, 0.5);
+
+      if (playheadActivation > 0.0) {
+          glow     = playheadActivation;
+          capColor = mix(capColor, baseCol, playheadActivation * 0.6);
+      }
+      if (chTrigger) {
+          glow    += 1.0;
+          capColor = mix(capColor, baseCol * 1.4 + 0.3, 0.5);
+      }
+
+      // ── Blue note-on indicator (top-left micro-LED) ──────────────
+      let ledNoteOn = vec2<f32>(-0.30, -0.30);
+      let dLedOn    = length(p - ledNoteOn) - 0.07;
+      if (dLedOn < 0.0) {
+          let ledCol = select(
+            vec3<f32>(0.05, 0.10, 0.22),
+            vec3<f32>(0.25, 0.55, 1.00),
+            chTrigger || (playheadActivation > 0.5)
+          );
+          return vec4<f32>(ledCol * dimFactor, 1.0);
+      }
+  } else if (isNoteOff) {
+      capColor = mix(capColor, vec3<f32>(0.45, 0.05, 0.05), 0.55);
+  } else if (isNoteCut) {
+      capColor = mix(capColor, vec3<f32>(0.60, 0.20, 0.02), 0.45);
+  }
+
+  // ── Amber volume indicator (top-right micro-LED) ─────────────────
+  let ledVol  = vec2<f32>(0.30, -0.30);
+  let dLedVol = length(p - ledVol) - 0.07;
+  if (dLedVol < 0.0) {
+      let ledCol = select(
+        vec3<f32>(0.18, 0.12, 0.02),
+        vec3<f32>(1.00, 0.65, 0.10),
+        hasVol
+      );
+      let ledGlow = select(0.0, bloom * 0.8, hasVol && onPlayhead);
+      return vec4<f32>((ledCol + ledGlow) * dimFactor, 1.0);
+  }
+
+  // ── Effect indicator (bottom-centre micro-LED) ────────────────────
+  let ledEff  = vec2<f32>(0.0, 0.30);
+  let dLedEff = length(p - ledEff) - 0.06;
+  if (dLedEff < 0.0) {
+      let ledCol = select(
+        vec3<f32>(0.08, 0.12, 0.08),
+        vec3<f32>(0.30, 0.95, 0.40),
+        hasEffect
+      );
+      return vec4<f32>(ledCol * dimFactor, 1.0);
+  }
+
+  // Playhead highlight
+  if (playheadActivation > 0.0) {
+      capColor += vec3<f32>(0.08, 0.08, 0.12) * playheadActivation;
+      if (isPlaying && playheadActivation > 0.5) { glow += 0.2; }
+  }
+
+  // Frosted surface shading
+  let edge  = smoothstep(0.0, 0.1, -dBox);
+  let nrm   = normalize(vec3<f32>(p.x, p.y, 0.5));
+  let light = normalize(vec3<f32>(0.5, -0.8, 1.0));
+  let diff  = max(0.0, dot(nrm, light));
+  capColor *= (0.5 + 0.5 * diff);
+  capColor += vec3<f32>(glow * 0.5);
+  if (glow > 0.0) { capColor *= (1.0 + bloom); }
+
   // Kick reactive glow
-  let p = in.uv - 0.5;
   let kickPulse = uniforms.kickTrigger * exp(-length(p) * 3.0) * 0.3;
   capColor += vec3<f32>(0.9, 0.2, 0.4) * kickPulse * uniforms.bloomIntensity;
-  // Dithering for night mode
-  let noise = fract(sin(dot(in.uv * uniforms.timeSec, vec2<f32>(12.9898, 78.233))) * 43758.5453);
+  let noise = fract(sin(dot(uv * uniforms.timeSec, vec2<f32>(12.9898, 78.233))) * 43758.5453);
   capColor += (noise - 0.5) * 0.01;
 
   return vec4<f32>(capColor * dimFactor, edge);
