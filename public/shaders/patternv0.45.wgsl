@@ -214,14 +214,11 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
       return vec4<f32>(col * dimFactor, 1.0);
   }
 
-  // Frosted Cap Shape
+  // Frosted Cap Shape — use for alpha masking, not early discard
   let dBox = sdRoundedBox(uv - 0.5, vec2<f32>(0.42), 0.1);
   let isCap = dBox < 0.0;
-  
-  if (!isCap) {
-      discard;
-  }
-  
+  let capEdge = smoothstep(0.0, 0.08, -dBox);
+
   var capColor = vec3<f32>(0.15, 0.16, 0.18); // Inactive plastic
   var glow = 0.0;
   let p = uv - 0.5;
