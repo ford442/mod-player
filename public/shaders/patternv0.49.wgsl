@@ -283,16 +283,16 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   let kick = uniforms.kickTrigger;
   let beat = uniforms.beatPhase;
 
-  // Hardware Layering: Discard pixels over UI
-  if (in.position.y > uniforms.canvasH * 0.88) {
-    discard;
-  }
-
-  // Smooth playhead position
+  // Smooth playhead position — compute BEFORE any early discard
   let playheadStep = uniforms.playheadRow - floor(uniforms.playheadRow / 64.0) * 64.0;
   let rowDistRaw = abs(f32(in.row % 64u) - playheadStep);
   let rowDist = min(rowDistRaw, 64.0 - rowDistRaw);
   let playheadActivation = 1.0 - smoothstep(0.0, 1.5, rowDist);
+
+  // Hardware Layering: Discard pixels over UI — SAFE HERE after playheadActivation computed
+  if (in.position.y > uniforms.canvasH * 0.88) {
+    discard;
+  }
 
   // CHANNEL 0 is the Indicator Ring (padTopChannel shifts music to 1-32)
   if (in.channel == 0u) {
@@ -339,7 +339,11 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     let hasNote = (note > 0u);
     let hasExpression = (volCmd > 0u) || (effCmd > 0u);
 
-    let ch = channels[in.channel];
+    // Bounds check for channel state array access
+    var ch = ChannelState(0.0, 0.0, 0.0, 0u, 1000.0, 0u, 0.0, 0u);
+    if (in.channel < arrayLength(&channels)) {
+      ch = channels[in.channel];
+    }
     let isMuted = (ch.isMuted == 1u);
 
     // --- THREE-EMITTER SYSTEM ---
