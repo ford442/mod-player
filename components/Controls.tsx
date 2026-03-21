@@ -1,6 +1,7 @@
 import React from 'react';
 import { UploadIcon } from './icons';
 import type { MediaItem } from '../types';
+import { BLOOM_PRESETS, COLOR_SCHEMES, type BloomPreset, type ColorScheme } from '../types/bloomPresets';
 
 interface ControlsProps {
   isReady: boolean;
@@ -18,10 +19,16 @@ interface ControlsProps {
   setPan?: (p: number) => void;
   onRemoteMediaSelect?: (item: MediaItem) => void;
   remoteMediaList?: MediaItem[];
+  // Bloom and color scheme selection
+  bloomPreset?: BloomPreset;
+  onBloomPresetChange?: (preset: BloomPreset) => void;
+  colorScheme?: ColorScheme;
+  onColorSchemeChange?: (scheme: ColorScheme) => void;
 }
 
 export const Controls: React.FC<ControlsProps> = ({
   isReady,
+  isPlaying: _isPlaying,
   isModuleLoaded,
   onFileSelected,
   onPlay,
@@ -35,6 +42,11 @@ export const Controls: React.FC<ControlsProps> = ({
   onMediaAdd,
   onRemoteMediaSelect,
   remoteMediaList = [],
+  // Bloom and color scheme
+  bloomPreset,
+  onBloomPresetChange,
+  colorScheme,
+  onColorSchemeChange,
 }) => {
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -124,6 +136,52 @@ export const Controls: React.FC<ControlsProps> = ({
           🔄 Loop
         </button>
       </div>
+
+      {/* Bloom Preset Dropdown */}
+      {onBloomPresetChange && (
+        <div className="flex items-center gap-2">
+          <label className="text-sm text-gray-400 flex items-center gap-2">
+            <span className="hidden md:inline">💡 Bloom:</span>
+            <select
+              className="bg-gray-700 text-white text-sm px-2 py-1 rounded border border-gray-600 focus:border-blue-500 outline-none"
+              value={bloomPreset?.name ?? 'Standard'}
+              onChange={(e) => {
+                const preset = BLOOM_PRESETS.find(p => p.name === e.target.value);
+                if (preset) onBloomPresetChange(preset);
+              }}
+            >
+              {BLOOM_PRESETS.map(preset => (
+                <option key={preset.name} value={preset.name} title={preset.description}>
+                  {preset.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+      )}
+
+      {/* Color Scheme Dropdown */}
+      {onColorSchemeChange && (
+        <div className="flex items-center gap-2">
+          <label className="text-sm text-gray-400 flex items-center gap-2">
+            <span className="hidden md:inline">🎨 Colors:</span>
+            <select
+              className="bg-gray-700 text-white text-sm px-2 py-1 rounded border border-gray-600 focus:border-blue-500 outline-none"
+              value={colorScheme?.name ?? 'Golden Ratio'}
+              onChange={(e) => {
+                const scheme = COLOR_SCHEMES.find(s => s.name === e.target.value);
+                if (scheme) onColorSchemeChange(scheme);
+              }}
+            >
+              {COLOR_SCHEMES.map(scheme => (
+                <option key={scheme.name} value={scheme.name} title={scheme.description}>
+                  {scheme.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+      )}
 
       {/* Volume and Pan Controls */}
       {setVolume && volume !== undefined && (
