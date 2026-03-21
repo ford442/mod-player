@@ -639,110 +639,91 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
 
     void main() {
         int id = gl_InstanceID;
-        int col = id % int(u_cols); // Track Index
-        int row = id / int(u_cols); // Step Index
+        // u_cols = numChannels; texture is stored as width=channels, height=steps
+        int trackIndex = id % int(u_cols); // 0 to numChannels-1
+        int stepIndex  = id / int(u_cols); // 0 to stepsForMode-1
 
-        // 1. Check for Note Data
-        uint note = texelFetch(u_noteData, ivec2(col, row), 0).r;
+        // 1. Check for Note Data (texture: x=channel, y=step)
+        uint note = texelFetch(u_noteData, ivec2(trackIndex, stepIndex), 0).r;
         v_hasNote = (note > 0u) ? 1.0 : 0.0;
 
-        // 2. Calculate Cap Scale
-        // Scale is derived from u_cellSize with CAP_SCALE_FACTOR (0.88) for pixel-perfect fit
-        float capScale = min(u_cellSize.x, u_cellSize.y) * CAP_SCALE_FACTOR;
-        if (note == 0u) capScale = 0.0; // Hide empty steps
-
-        // 3. Playhead Logic
+        // 2. Playhead Logic
         float stepsPerPage = (u_layoutMode == 3) ? 64.0 : 32.0;
         float relativePlayhead = mod(u_playhead, stepsPerPage);
 
-        float distToPlayhead = abs(float(row) - relativePlayhead);
+        float distToPlayhead = abs(float(stepIndex) - relativePlayhead);
         distToPlayhead = min(distToPlayhead, stepsPerPage - distToPlayhead);
         float activation = 1.0 - smoothstep(0.0, 1.5, distToPlayhead);
-        capScale *= 1.0 + (0.2 * activation); // Pop effect with smooth falloff
         v_active = activation;
 
-        // 4. Positioning Logic
+        // 3. Positioning Logic
         if (u_layoutMode == 2 || u_layoutMode == 3) {
             // --- HORIZONTAL LAYOUT (32-step or 64-step) ---
-            // Pixel-perfect centered caps using shared constants
-            // a_pos is in [-0.5, 0.5] range, we center it at [0.5, 0.5] within each cell
-            float i = float(row); // step index
-            float j = float(col); // track index
-            
-            // Calculate cell position
-            float cellX = u_offset.x + i * u_cellSize.x;
-            float cellY = u_offset.y + j * u_cellSize.y;
-            
-            // Center the cap within the cell using a_pos * capScale + cellCenter
+            // Steps run along X, channels run along Y
+            float capScale = min(u_cellSize.x, u_cellSize.y) * CAP_SCALE_FACTOR;
+            if (note == 0u) capScale = 0.0;
+            capScale *= 1.0 + (0.2 * activation);
+
+            float cellX = u_offset.x + float(stepIndex)  * u_cellSize.x;
+            float cellY = u_offset.y + float(trackIndex) * u_cellSize.y;
+
             vec2 centered = a_pos * capScale + vec2(cellX + u_cellSize.x * 0.5, cellY + u_cellSize.y * 0.5);
-            
-            // Convert to NDC
             vec2 ndc = (centered / u_resolution) * 2.0 - 1.0;
             ndc.y = -ndc.y;
             gl_Position = vec4(ndc, 0.0, 1.0);
 
         } else {
             // --- CIRCULAR LAYOUT ---
-            // Must match WGSL v0.46 pixel-space calculations exactly.
-            // WGSL uses: center = (canvasW/2, canvasH/2), minDim = min(canvasW, canvasH)
-            //            maxRadius = minDim * 0.45, minRadius = minDim * 0.15
-            //            ringDepth = (maxRadius - minRadius) / numChannels
-            //            radius = minRadius + ringIndex * ringDepth
-            //            btnW = circumference/64 * 0.95, btnH = ringDepth * 0.95
+<<<<<<< claude/fix-patterndisplay-key-prop-dyakq
+            // Use pixel-space radii (based on minDim) to match the WGSL background shader
+            // and prevent elliptical stretching on non-square viewports.
 
             float numTracks = u_cols;
-
-            // Calculate track index with inversion support (matches WGSL invertedChannel logic)
-            float trackIndex = float(col);
-            if (u_invertChannels == 0) { trackIndex = numTracks - 1.0 - trackIndex; }
+            float trackIndexF = float(trackIndex);
+            if (u_invertChannels == 0) { trackIndexF = numTracks - 1.0 - trackIndexF; }
 
             // Pixel-space radii matching WGSL v0.46 exactly
             float minDim = min(u_resolution.x, u_resolution.y);
             float maxRadius = minDim * 0.45;
             float minRadius = minDim * 0.15;
             float ringDepth = (maxRadius - minRadius) / numTracks;
+            
+            // Center in the ring (matches WGSL positioning)
+            float pixelRadius = minRadius + trackIndexF * ringDepth + ringDepth * 0.5;
 
-            // WGSL uses inner edge of ring for position: radius = minRadius + ringIndex * ringDepth
-            // Cap center should be at mid-ring: radius + ringDepth/2
-            float radius = minRadius + trackIndex * ringDepth + ringDepth * 0.5;
-
-            // Full circle angle
             float totalSteps = 64.0;
             float anglePerStep = (2.0 * PI) / totalSteps;
-            float theta = -1.570796 + float(row % 64) * anglePerStep;
+            float theta = -1.570796 + float(stepIndex) * anglePerStep;
 
-            // Pixel-space center (matches WGSL: center = canvasW*0.5, canvasH*0.5)
-            vec2 center = vec2(u_resolution.x * 0.5, u_resolution.y * 0.5);
-
-            // Button sizes matching WGSL v0.46 scale factors (0.95 for both)
-            float circumference = 2.0 * PI * radius;
+            // Button sizing using shared cap scale
+            float circumference = 2.0 * PI * pixelRadius;
             float arcLength = circumference / totalSteps;
-            float btnW = arcLength * 0.95;
-            float btnH = ringDepth * 0.95;
+            float btnW = arcLength * CAP_SCALE_FACTOR;
+            float btnH = ringDepth * 0.92;
 
-            // Hide empty steps and apply playhead pop effect (circular variant)
-            if (note == 0u) { btnW = 0.0; btnH = 0.0; }
+            // Playhead pop effect
             float circPlayhead = mod(u_playhead, totalSteps);
-            float circDist = abs(float(row % 64) - circPlayhead);
+            float circDist = abs(float(stepIndex) - circPlayhead);
             circDist = min(circDist, totalSteps - circDist);
             float circActivation = 1.0 - smoothstep(0.0, 1.5, circDist);
-            float popScale = 1.0 + 0.2 * circActivation;
+            float popScale = (v_hasNote > 0.5) ? (1.0 + 0.2 * circActivation) : 0.0;
             btnW *= popScale;
             btnH *= popScale;
             v_active = circActivation;
 
-            // Local position with rotation (a_pos is in [-0.5, 0.5])
+            // Local position with rotation
             vec2 localPos = a_pos * vec2(btnW, btnH);
             float rotAng = theta + 1.570796;
             float cA = cos(rotAng); float sA = sin(rotAng);
             float rotX = localPos.x * cA - localPos.y * sA;
             float rotY = localPos.x * sA + localPos.y * cA;
 
-            // World position in pixels (matches WGSL: worldX = center.x + cos(theta)*radius + rotX)
-            float worldX = center.x + cos(theta) * radius + rotX;
-            float worldY = center.y + sin(theta) * radius + rotY;
+            // World position in pixels
+            vec2 center = u_resolution * 0.5;
+            float worldX = center.x + cos(theta) * pixelRadius + rotX;
+            float worldY = center.y + sin(theta) * pixelRadius + rotY;
 
-            // Convert to NDC (matches WGSL: clipX = (worldX/canvasW)*2-1, clipY = 1-(worldY/canvasH)*2)
+            // Convert to NDC
             vec2 ndc = vec2(
                 (worldX / u_resolution.x) * 2.0 - 1.0,
                 1.0 - (worldY / u_resolution.y) * 2.0
@@ -750,7 +731,6 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
             gl_Position = vec4(ndc, 0.0, 1.0);
         }
 
-        // Pass standard UV (0-1) for texture mapping
         v_uv = a_pos + 0.5;
     }
     `;
@@ -1393,25 +1373,32 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     };
     init();
     return () => {
-      cancelled = true; 
+      cancelled = true;
       setGpuReady(false);
-      
-      // Clean up WebGL resources first
-      if (glContextRef.current && glResourcesRef.current) {
+
+      // Clean up WebGL resources and clear the overlay canvas to prevent ghosting
+      if (glContextRef.current) {
         const gl = glContextRef.current;
-        const res = glResourcesRef.current;
+        // Clear the canvas first to prevent ghost images during shader switch
         try {
-          gl.deleteProgram(res.program);
-          gl.deleteVertexArray(res.vao);
-          gl.deleteBuffer(res.buffer);
-          gl.deleteTexture(res.texture);
-          if (res.capTexture) gl.deleteTexture(res.capTexture);
+          gl.clearColor(0, 0, 0, 0);
+          gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
         } catch (e) {}
-        glResourcesRef.current = null;
+        if (glResourcesRef.current) {
+          const res = glResourcesRef.current;
+          try {
+            gl.deleteProgram(res.program);
+            gl.deleteVertexArray(res.vao);
+            gl.deleteBuffer(res.buffer);
+            gl.deleteTexture(res.texture);
+            if (res.capTexture) gl.deleteTexture(res.capTexture);
+          } catch (e) {}
+          glResourcesRef.current = null;
+        }
       }
-      
+
       // Clean up WebGPU resources
-      bindGroupRef.current = null; 
+      bindGroupRef.current = null;
       pipelineRef.current = null;
       if (bezelUniformBufferRef.current) { 
         try { bezelUniformBufferRef.current.destroy(); } catch (e) {}
@@ -1605,7 +1592,10 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
 
     try {
       const { program, vao, texture, uniforms } = res;
-      const cols = padTopChannel ? (matrix.numChannels || DEFAULT_CHANNELS) + 1 : (matrix.numChannels || DEFAULT_CHANNELS);
+      // ALWAYS match texture dimensions: width = numChannels, height = stepsForMode
+      // u_cols drives instance unrolling in the vertex shader (trackIndex = id % u_cols)
+      const numChannelsForGL = padTopChannel ? (matrix.numChannels || DEFAULT_CHANNELS) + 1 : (matrix.numChannels || DEFAULT_CHANNELS);
+      const cols = numChannelsForGL;
       const rows = matrix.numRows || DEFAULT_ROWS;
 
       // Check for GL errors before starting
@@ -1973,10 +1963,12 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
       bezelData[3] = 0.92; bezelData[4] = 0.93; bezelData[5] = 0.95; // surface
       bezelData[6] = 0.88; bezelData[7] = 0.89; bezelData[8] = 0.91; // bezel
       bezelData[9] = 0.015; // screwRadius
-      bezelData[10] = 0; // recessKind
-      bezelData[11] = 1.0; // recessOuterScale
-      bezelData[12] = 1.0; // recessInnerScale
-      bezelData[13] = 0.02; // recessCorner
+      // Recess configuration: match shader geometry for proper bezel alignment
+      const isCircShader = isCircularLayoutShader(shaderFile);
+      bezelData[10] = isCircShader ? 0.0 : 1.0; // recessKind: 0=circular, 1=rounded-rect
+      bezelData[11] = isCircShader ? 0.95 : 1.0; // recessOuterScale
+      bezelData[12] = isCircShader ? 0.32 : 0.0; // recessInnerScale (matches minRadius/maxRadius ratio)
+      bezelData[13] = isCircShader ? 0.0 : 0.02; // recessCorner
       bezelData[14] = dimFactor ?? 1.0;
       bezelData[15] = isPlaying ? 1.0 : 0.0;
       bezelData[16] = 1.0; // volume
@@ -2027,6 +2019,25 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     }
     pass.end();
     device.queue.submit([encoder.finish()]);
+
+    // Update debug info from WebGPU render path (so it shows even without WebGL overlay)
+    if (!isOverlayActive) {
+      const layoutModeName = isCircularLayoutShader(shaderFile) ? 'CIRCULAR (WebGPU)' :
+        isHorizontal ? 'HORIZONTAL (WebGPU)' : 'STANDARD (WebGPU)';
+      setDebugInfo(prev => ({
+        ...prev,
+        layoutMode: layoutModeName,
+        uniforms: {
+          shader: shaderFile,
+          numRows: matrix?.numRows ?? DEFAULT_ROWS,
+          numChannels,
+          totalInstances,
+          playheadRow: (playbackStateRef?.current?.playheadRow ?? playheadRow).toFixed(2),
+        },
+        errors: [],
+      }));
+    }
+
     drawWebGL();
   };
 
