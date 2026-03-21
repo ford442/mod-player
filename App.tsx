@@ -14,6 +14,12 @@ import { useLibOpenMPT } from './hooks/useLibOpenMPT';
 import { usePlaylist } from './hooks/usePlaylist';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import type { MediaItem } from './types';
+import { 
+  DEFAULT_BLOOM_PRESET, 
+  DEFAULT_COLOR_SCHEME, 
+  type BloomPreset, 
+  type ColorScheme 
+} from './types/bloomPresets';
 
 // Shader Definitions
 const SHADER_GROUPS = {
@@ -25,7 +31,7 @@ const SHADER_GROUPS = {
     { id: 'patternv0.21.wgsl', label: 'v0.21 (Wall)' },
   ],
   CIRCULAR: [
-    { id: 'patternv0.50.wgsl', label: 'v0.50 (Vibrant Note Colors + Blue LED)' },
+    { id: 'patternv0.50.wgsl', label: 'v0.50 (Trap Frosted Lens)' },
     { id: 'patternv0.49.wgsl', label: 'v0.49 (Trap Frosted Glass)' },
     { id: 'patternv0.48.wgsl', label: 'v0.48 (Trap Frosted Disc)' },
     { id: 'patternv0.47.wgsl', label: 'v0.47 (Trap Frosted)' },
@@ -51,6 +57,10 @@ function App() {
   const [is3DMode, setIs3DMode] = useState<boolean>(false);
   const [isDarkMode, setIsDarkMode] = useState<boolean>(false);
   const [viewMode, setViewMode] = useState<'device' | 'wall'>('device');
+
+  // Bloom and Color Scheme State
+  const [bloomPreset, setBloomPreset] = useState<BloomPreset>(DEFAULT_BLOOM_PRESET);
+  const [colorScheme, setColorScheme] = useState<ColorScheme>(DEFAULT_COLOR_SCHEME);
 
   const {
     isReady,
@@ -263,6 +273,7 @@ function App() {
         patternDisplayContent={
           <div className="scale-75 origin-center">
             <PatternDisplay
+              key={shader3D}
               matrix={sequencerMatrix}
               playheadRow={playbackRowFraction}
               isPlaying={isPlaying}
@@ -292,6 +303,9 @@ function App() {
               analyserNode={analyserNode}
               // PERFORMANCE OPTIMIZATION: Pass ref for high-frequency updates
               playbackStateRef={playbackStateRef}
+              // Bloom settings from preset
+              bloomIntensity={bloomPreset.intensity}
+              bloomThreshold={bloomPreset.threshold}
             />
           </div>
         }
@@ -315,6 +329,10 @@ function App() {
               remoteMediaList={[
                 { id: '1', kind: 'video', url: 'clouds.mp4', fileName: 'Clouds Demo (MP4)', mimeType: 'video/mp4' }
               ]}
+              bloomPreset={bloomPreset}
+              onBloomPresetChange={setBloomPreset}
+              colorScheme={colorScheme}
+              onColorSchemeChange={setColorScheme}
             />
           </div>
         }
@@ -426,6 +444,7 @@ function App() {
         {/* Main Display Area */}
         <div className={`relative rounded-xl overflow-hidden shadow-2xl mb-6 border ${isDarkMode ? 'bg-black border-gray-800' : 'bg-white border-gray-300'}`}>
            <PatternDisplay
+             key={shaderFile}
              matrix={sequencerMatrix}
              playheadRow={playbackRowFraction}
              isPlaying={isPlaying}
@@ -455,6 +474,9 @@ function App() {
              analyserNode={analyserNode}
              // PERFORMANCE OPTIMIZATION: Pass ref for high-frequency updates
              playbackStateRef={playbackStateRef}
+             // Bloom settings from preset
+             bloomIntensity={bloomPreset.intensity}
+             bloomThreshold={bloomPreset.threshold}
            />
 
            <MediaOverlay
@@ -486,6 +508,10 @@ function App() {
           remoteMediaList={[
              { id: '1', kind: 'video', url: 'clouds.mp4', fileName: 'Clouds Demo (MP4)', mimeType: 'video/mp4' }
           ]}
+          bloomPreset={bloomPreset}
+          onBloomPresetChange={setBloomPreset}
+          colorScheme={colorScheme}
+          onColorSchemeChange={setColorScheme}
         />
 
         {/* Seek Bar */}

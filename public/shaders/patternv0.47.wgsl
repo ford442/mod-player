@@ -1,5 +1,6 @@
 // patternv0.47.wgsl
-// Trap Frosted - Circular Layout with Translucent Glass Caps + Blue/Orange Lighting
+// Trap Frosted - Improved Translucency with Visible Diode Shape
+// Circular Layout with Translucent Glass Caps + Blue/Orange Lighting
 // Based on v0.30 (disc layout with ASCII-packed note data)
 
 struct Uniforms {
@@ -119,6 +120,10 @@ fn sdRoundedBox(p: vec2<f32>, b: vec2<f32>, r: f32) -> f32 {
   return length(max(q, vec2<f32>(0.0))) + min(max(q.x, q.y), 0.0) - r;
 }
 
+fn sdCircle(p: vec2<f32>, r: f32) -> f32 {
+  return length(p) - r;
+}
+
 fn toUpperAscii(code: u32) -> u32 {
   return select(code, code - 32u, (code >= 97u) & (code <= 122u));
 }
@@ -178,8 +183,44 @@ fn getFragmentConstants() -> FragmentConstants {
   return c;
 }
 
-// --- TRANSLUCENT FROSTED GLASS CAP ---
-fn drawFrostedGlassCap(uv: vec2<f32>, size: vec2<f32>, color: vec3<f32>, isOn: bool, aa: f32, noteGlow: f32) -> vec4<f32> {
+// --- EMITTER DIODE SHAPE ---
+// Draws the actual LED emitter that shows through the glass cap
+fn drawEmitterDiode(uv: vec2<f32>, intensity: f32, color: vec3<f32>, isOn: bool) -> vec4<f32> {
+    // Diode is a small rounded rectangle positioned at the bottom of the cap
+    let diodeSize = vec2<f32>(0.35, 0.18);
+    let diodePos = vec2<f32>(0.0, 0.22); // Positioned toward bottom
+
+    let p = uv - diodePos;
+    let dDiode = sdRoundedBox(p, diodeSize * 0.5, 0.08);
+
+    // Diode has a smaller "die" inside it
+    let dieSize = vec2<f32>(0.18, 0.09);
+    let dDie = sdRoundedBox(p, dieSize * 0.5, 0.04);
+
+    // Base diode housing (darker)
+    let diodeMask = 1.0 - smoothstep(0.0, 0.02, dDiode);
+    let dieMask = 1.0 - smoothstep(0.0, 0.01, dDie);
+
+    var diodeColor = vec3<f32>(0.08, 0.08, 0.1); // Dark housing
+
+    if (isOn) {
+        // The die glows with the note color
+        let dieGlow = color * (1.0 + intensity * 3.0);
+        let housingGlow = color * 0.15 * intensity;
+
+        diodeColor = mix(housingGlow, dieGlow, dieMask);
+
+        // Add a hotspot in the center of the die
+        let hotspot = exp(-length(p / vec2<f32>(0.08, 0.04)) * 2.0) * intensity;
+        diodeColor += color * hotspot * 0.5;
+    }
+
+    return vec4<f32>(diodeColor, diodeMask);
+}
+
+// --- ENHANCED TRANSLUCENT FROSTED GLASS CAP ---
+// Shows the diode shape underneath with proper translucency
+fn drawFrostedGlassCap(uv: vec2<f32>, size: vec2<f32>, color: vec3<f32>, isOn: bool, aa: f32, noteGlow: f32, diodeColor: vec3<f32>, diodeIntensity: f32) -> vec4<f32> {
     let p = uv;
     let dBox = sdRoundedBox(p, size * 0.5, 0.08);
 
@@ -187,33 +228,74 @@ fn drawFrostedGlassCap(uv: vec2<f32>, size: vec2<f32>, color: vec3<f32>, isOn: b
         return vec4<f32>(0.0);
     }
 
-    let n = normalize(vec3<f32>(p.x * 2.0 / size.x, p.y * 2.0 / size.y, 0.35));
+    // Draw the emitter diode underneath
+    let diode = drawEmitterDiode(uv, diodeIntensity, diodeColor, isOn);
+
+    // Glass surface normal for reflections
+    let n = normalize(vec3<f32>(p.x * 2.0 / size.x, p.y * 2.0 / size.y, 0.4));
     let viewDir = vec3<f32>(0.0, 0.0, 1.0);
-    let fresnel = pow(1.0 - abs(dot(n, viewDir)), 2.5);
+    let fresnel = pow(1.0 - abs(dot(n, viewDir)), 2.0);
     let radial = length(p / (size * 0.5));
 
-    let thickness = 0.12;
-    let subsurface = exp(-thickness * 3.5) * noteGlow * (1.0 - radial * 0.4);
+    // Glass thickness varies - thicker at edges
+    let edgeThickness = 0.15 + radial * 0.08;
+    let centerThickness = 0.08;
+    let thickness = mix(centerThickness, edgeThickness, radial);
+
+    // Subsurface scattering - light travels through the glass
+    // Illumination is concentrated above the emitter (negative Y is up in UV space)
+    let emitterPos = vec2<f32>(0.0, 0.22);
+    let distFromEmitter = length(uv - emitterPos);
+    let lightTravel = exp(-distFromEmitter * 4.0) * noteGlow;
+
+    // Light concentrates upward from the emitter
+    let upwardBias = smoothstep(0.0, -0.3, uv.y - emitterPos.y);
+    let subsurface = lightTravel * upwardBias * (1.0 - radial * 0.3);
 
     let bgColor = vec3<f32>(0.04, 0.04, 0.05);
-    let glassColor = mix(bgColor * 0.2, color, 0.8);
 
+    // Glass tint varies with light passing through
+    let litTint = mix(vec3<f32>(0.95, 0.95, 1.0), color, noteGlow * 0.3);
+    let glassBaseColor = mix(bgColor * 0.15, litTint, 0.85);
+
+    // Edge alpha with anti-aliasing
     let edgeAlpha = smoothstep(0.0, aa * 2.0, -dBox);
-    let alpha = edgeAlpha * (0.7 + 0.3 * fresnel);
 
-    let light = vec3<f32>(0.5, -0.8, 1.0);
-    let diff = max(0.0, dot(n, normalize(light)));
-    let litGlassColor = glassColor * (0.55 + 0.45 * diff);
+    // Glass is more transparent where the diode is visible
+    let diodeVisibility = diode.a * 0.6; // Diode shows through at 60%
+    let baseAlpha = 0.75 + 0.25 * fresnel;
+    let alpha = mix(baseAlpha, 0.35, diodeVisibility) * edgeAlpha;
 
-    var finalColor = mix(bgColor, litGlassColor, alpha);
-    finalColor += subsurface * color * 3.5;
+    // Directional lighting from top-left
+    let lightDir = vec3<f32>(0.4, -0.7, 0.6);
+    let diff = max(0.0, dot(n, normalize(lightDir)));
+    let spec = pow(max(0.0, dot(reflect(-normalize(lightDir), n), viewDir)), 32.0);
 
+    let litGlassColor = glassBaseColor * (0.5 + 0.5 * diff) + vec3<f32>(spec * 0.3);
+
+    // Start with background
+    var finalColor = bgColor;
+
+    // Layer the diode underneath
+    let diodeBlend = diode.a * (1.0 - alpha * 0.7); // Diode visible through glass
+    finalColor = mix(finalColor, diode.rgb, diodeBlend);
+
+    // Apply glass layer
+    finalColor = mix(finalColor, litGlassColor, alpha);
+
+    // Add subsurface glow from light passing through
+    finalColor += subsurface * color * 2.5;
+
+    // Inner glow when on - concentrated above the diode
     if (isOn) {
-        let innerGlow = (1.0 - radial) * noteGlow * 0.4;
+        let glowCenter = vec2<f32>(0.0, -0.1); // Above the diode
+        let glowDist = length(uv - glowCenter);
+        let innerGlow = (1.0 - smoothstep(0.0, 0.4, glowDist)) * noteGlow * 0.35;
         finalColor += color * innerGlow;
     }
 
-    finalColor += fresnel * color * noteGlow * 0.3;
+    // Fresnel rim highlight
+    finalColor += fresnel * vec3<f32>(0.9, 0.95, 1.0) * 0.15;
 
     return vec4<f32>(finalColor, edgeAlpha);
 }
@@ -243,7 +325,7 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     let indSize = vec2<f32>(0.3, 0.3);
     // Blue/Orange: indicator uses warm orange
     let indColor = mix(vec3<f32>(0.15), fs.ledOnColor * 1.3, playheadActivation);
-    let indLed = drawFrostedGlassCap(p, indSize, indColor, onPlayhead, aa, playheadActivation * 1.5);
+    let indLed = drawFrostedGlassCap(p, indSize, indColor, onPlayhead, aa, playheadActivation * 1.5, indColor, playheadActivation);
 
     var col = indLed.rgb;
     var alpha = indLed.a;
@@ -272,13 +354,19 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
 
   if (inButton > 0.5) {
     let noteChar = (in.packedA >> 24) & 255u;
-    let inst = in.packedA & 255u;
+    let inst = (in.packedA >> 16) & 255u;  // Fixed: bits 16-23, not 0-7
     let effCode = (in.packedB >> 8) & 255u;
     let effParam = in.packedB & 255u;
 
-    let hasNote = (noteChar >= 65u && noteChar <= 71u);
+    // Fixed: numeric note values 1-120, not ASCII A-G (65-71)
+    let hasNote = (noteChar > 0u) && (noteChar <= 120u);
     let hasEffect = (effParam > 0u);
-    let ch = channels[in.channel];
+
+    // Bounds check for channel state array access
+    var ch = ChannelState(0.0, 0.0, 0.0, 0u, 1000.0, 0u, 0.0, 0u);
+    if (in.channel < arrayLength(&channels)) {
+      ch = channels[in.channel];
+    }
     let isMuted = (ch.isMuted == 1u);
 
     // COMPONENT 1: ACTIVITY LIGHT (Blue indicator for trap)
@@ -289,7 +377,7 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     // Blue accent for trap palette
     let topColor = vec3<f32>(0.15, 0.5, 1.0) * select(0.0, 1.5 + bloom, isActive);
 
-    let topLed = drawFrostedGlassCap(topUV, topSize, topColor, isActive, aa, select(0.0, 1.0, isActive));
+    let topLed = drawFrostedGlassCap(topUV, topSize, topColor, isActive, aa, select(0.0, 1.0, isActive), topColor, select(0.0, 1.0, isActive));
     finalColor = mix(finalColor, topLed.rgb, topLed.a);
 
     // COMPONENT 2: MAIN NOTE LIGHT
@@ -304,10 +392,13 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
       let pitchHue = pitchClassFromPacked(in.packedA);
       let baseColor = neonPalette(pitchHue);
       let instBand = inst & 15u;
-      let instBright = 0.8 + (select(0.0, f32(instBand) / 15.0, instBand > 0u)) * 0.2;
+      let instBright = 0.85 + (select(0.0, f32(instBand) / 15.0, instBand > 0u)) * 0.15;
       noteColor = baseColor * instBright;
 
-      let flash = f32(ch.trigger) * 0.8;
+      let linger = exp(-ch.noteAge * 1.2);
+      let strike = playheadActivation * 3.5;
+      let flash = f32(ch.trigger) * 1.2;
+
       let totalSteps = 64.0;
       let d = fract((f32(in.row) + uniforms.tickOffset - uniforms.playheadRow) / totalSteps) * totalSteps;
       let coreDist = min(d, totalSteps - d);
@@ -317,52 +408,48 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
 
       // Beat-reactive: brighter pulse on kick
       let beatBoost = 1.0 + kick * 0.5;
-      lightAmount = (activeVal * 0.9 + flash) * clamp(ch.volume, 0.0, 1.2) * beatBoost;
+      lightAmount = (activeVal * 0.9 + flash + strike + (linger * 2.5)) * clamp(ch.volume, 0.0, 1.2) * beatBoost;
       if (isMuted) { lightAmount *= 0.2; }
       noteGlow = lightAmount;
     }
 
-    let displayColor = noteColor * max(lightAmount, 0.1) * (1.0 + bloom * 8.0);
+    let displayColor = noteColor * max(lightAmount, 0.12) * (1.0 + bloom * 8.0);
     let isLit = (lightAmount > 0.05);
-    let mainPad = drawFrostedGlassCap(mainUV, mainSize, displayColor, isLit, aa, noteGlow);
+    let mainPad = drawFrostedGlassCap(mainUV, mainSize, displayColor, isLit, aa, noteGlow, displayColor, noteGlow);
     finalColor = mix(finalColor, mainPad.rgb, mainPad.a);
 
-    // Brighter LED pulse when playhead is on this step
+    // Playhead pulse
     if (playheadActivation > 0.5 && hasNote) {
       let pulseColor = mix(vec3<f32>(0.15, 0.5, 1.0), vec3<f32>(1.0, 0.55, 0.1), 0.5 + 0.5 * sin(beat * 6.2832));
       finalColor += pulseColor * playheadActivation * 0.15;
     }
 
-    // COMPONENT 3: EFFECT LIGHT (Orange pill for trap)
+    // COMPONENT 3: EFFECT INDICATOR (Orange pill)
     let botUV = btnUV - vec2<f32>(0.5, 0.85);
     let botSize = vec2<f32>(0.25, 0.12);
-
     var effColor = vec3<f32>(0.0);
     var isEffOn = false;
 
-    if (hasEffect) {
+    if (effCode > 0u && hasEffect) {
       effColor = effectColorFromCode(effCode, vec3<f32>(1.0, 0.55, 0.1));
-      let strength = clamp(f32(effParam) / 255.0, 0.2, 1.0);
       if (!isMuted) {
-        effColor *= strength * (1.0 + bloom * 3.5);
+        effColor *= (1.0 + bloom * 3.5);
         isEffOn = true;
       }
     }
 
-    let botLed = drawFrostedGlassCap(botUV, botSize, effColor, isEffOn, aa, select(0.0, 0.7, isEffOn));
+    let botLed = drawFrostedGlassCap(botUV, botSize, effColor, isEffOn, aa, select(0.0, 0.7, isEffOn), effColor, select(0.0, 0.7, isEffOn));
     finalColor = mix(finalColor, botLed.rgb, botLed.a);
   }
 
   // Kick reactive glow
   let kickPulse = uniforms.kickTrigger * exp(-length(p) * 3.0) * 0.3;
   finalColor += vec3<f32>(0.9, 0.2, 0.4) * kickPulse * uniforms.bloomIntensity;
+
   // Dithering for night mode
   let noise = fract(sin(dot(in.uv * uniforms.timeSec, vec2<f32>(12.9898, 78.233))) * 43758.5453);
   finalColor += (noise - 0.5) * 0.01;
 
-  if (housingMask < 0.5) {
-    return vec4<f32>(fs.borderColor, 0.0);
-  }
-
+  if (housingMask < 0.5) { return vec4<f32>(fs.borderColor, 0.0); }
   return vec4<f32>(finalColor, 1.0);
 }

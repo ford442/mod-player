@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { LibOpenMPT, ModuleInfo, PatternMatrix, ChannelShadowState } from '../types';
+import { LibOpenMPT, ModuleInfo, PatternMatrix, ChannelShadowState, PlaybackState } from '../types';
 import { OpenMPTWorkletEngine } from '../audio-worklet/OpenMPTWorkletEngine';
 import type { WorkletPositionData } from '../audio-worklet/types';
 
@@ -128,16 +128,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
 
   // PERFORMANCE OPTIMIZATION: Mutable ref for high-frequency playback data
   // This prevents React re-renders 60 times/second - PatternDisplay reads directly from this ref
-  const playbackStateRef = useRef<{
-    playheadRow: number;
-    currentOrder: number;
-    timeSec: number;
-    beatPhase: number;
-    kickTrigger: number;
-    grooveAmount: number;
-    // TIMING FIX: Add timestamp for drift detection
-    lastUpdateTimestamp: number;
-  }>({
+  const playbackStateRef = useRef<PlaybackState>({
     playheadRow: 0,
     currentOrder: 0,
     timeSec: 0,
@@ -616,10 +607,11 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
 
           // Listen for position updates from the native engine
           engine.on('position', (data: WorkletPositionData) => {
+            const now = ctx.currentTime;
             workletOrderRef.current = data.currentOrder;
             workletRowRef.current = data.currentRow;
             workletTimeRef.current = data.positionMs / 1000;
-            lastWorkletUpdateRef.current = ctx.currentTime;
+            lastWorkletUpdateRef.current = now;
 
             // TIMING FIX: Update BPM ref from worklet
             if (data.bpm && data.bpm > 0) {
@@ -757,11 +749,12 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
             const { type, order, row, positionSeconds, message, bpm } = e.data;
             
             if (type === 'position') {
+              const now = ctx.currentTime;
               workletOrderRef.current = order;
               workletRowRef.current = row;
               workletTimeRef.current = positionSeconds;
               // TIMING FIX: Use audio context time for consistency
-              lastWorkletUpdateRef.current = ctx.currentTime;
+              lastWorkletUpdateRef.current = now;
               
               // TIMING FIX: Update BPM ref from worklet
               if (bpm && bpm > 0) {

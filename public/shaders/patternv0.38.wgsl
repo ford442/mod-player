@@ -238,7 +238,10 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     let effCmd = (in.packedB >> 8) & 255u;
     let effVal = in.packedB & 255u;
 
-    let hasNote = (note > 0u);
+    // OpenMPT numeric encoding: 1-120 = regular notes, 121 = OFF, 122 = CUT, 123 = FADE
+    let hasNote    = (note > 0u) && (note <= 120u);
+    let isNoteOff  = (note == 121u);
+    let isNoteCut  = (note == 122u) || (note == 123u);
     let hasExpression = (volCmd > 0u) || (effCmd > 0u);
     let ch = channels[in.channel];
     let isMuted = (ch.isMuted == 1u);
@@ -246,7 +249,7 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     let topUV = btnUV - vec2(0.5, 0.16);
     let topSize = vec2(0.20, 0.20);
     let isDataPresent = hasExpression && !isMuted;
-    let topColorBase = vec3(0.0, 0.9, 1.0);
+    let topColorBase = vec3(1.0, 0.65, 0.10); // amber = volume/expression indicator
     let topColor = topColorBase * select(0.0, 1.5 + bloom, isDataPresent);
     let topLed = drawChromeIndicator(topUV, topSize, topColor, isDataPresent, aa);
     finalColor = mix(finalColor, topLed.rgb, topLed.a);
@@ -257,7 +260,14 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     var noteColor = vec3(0.2);
     var lightAmount = 0.0;
 
-    if (hasNote) {
+    // Note-off / note-cut: show as dim red/orange main indicator
+    if (isNoteOff) {
+      noteColor = vec3(0.45, 0.05, 0.05);
+      lightAmount = 0.6;
+    } else if (isNoteCut) {
+      noteColor = vec3(0.60, 0.20, 0.02);
+      lightAmount = 0.5;
+    } else if (hasNote) {
       let pitchHue = pitchClassFromIndex(note);
       let baseColor = neonPalette(pitchHue);
       let instBand = inst & 15u;

@@ -119,6 +119,7 @@ export interface PlaybackState {
   beatPhase: number;
   kickTrigger: number;
   grooveAmount: number;
+  lastUpdateTimestamp: number;
 }
 
 export interface MediaItem {

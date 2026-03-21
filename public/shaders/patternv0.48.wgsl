@@ -1,5 +1,6 @@
 // patternv0.48.wgsl
-// Trap Frosted - Circular Layout with Translucent Glass Caps + Blue/Orange Lighting
+// Three-Emitter LED Indicator System - Blue Note-On, Steady Note Color, Amber Control
+// Circular Layout with Unified Glass Cap Lens
 // Based on v0.36 (disc layout with direct Note/Instr/Vol/Effect integer data)
 // PackedA: [Note(8) | Instr(8) | VolCmd(8) | VolVal(8)]
 // PackedB: [Unused(16) | EffCmd(8) | EffVal(8)]
@@ -121,6 +122,10 @@ fn sdRoundedBox(p: vec2<f32>, b: vec2<f32>, r: f32) -> f32 {
   return length(max(q, vec2<f32>(0.0))) + min(max(q.x, q.y), 0.0) - r;
 }
 
+fn sdCircle(p: vec2<f32>, r: f32) -> f32 {
+  return length(p) - r;
+}
+
 fn pitchClassFromIndex(note: u32) -> f32 {
   if (note == 0u) { return 0.0; }
   let semi = (note - 1u) % 12u;
@@ -146,44 +151,119 @@ fn getFragmentConstants() -> FragmentConstants {
   return c;
 }
 
-// --- TRANSLUCENT FROSTED GLASS CAP ---
-fn drawFrostedGlassCap(uv: vec2<f32>, size: vec2<f32>, color: vec3<f32>, isOn: bool, aa: f32, noteGlow: f32) -> vec4<f32> {
-    let p = uv;
-    let dBox = sdRoundedBox(p, size * 0.5, 0.08);
+// --- UNIFIED THREE-EMITTER GLASS LENS ---
+// Draws a glass cap that covers all three emitters (blue, note, amber)
+// The lens refracts and diffuses light from the three sources below
+fn drawThreeEmitterLens(
+  uv: vec2<f32>,
+  size: vec2<f32>,
+  topColor: vec3<f32>,
+  topIntensity: f32,
+  midColor: vec3<f32>,
+  midIntensity: f32,
+  botColor: vec3<f32>,
+  botIntensity: f32,
+  aa: f32
+) -> vec4<f32> {
+  let p = uv;
+  let dBox = sdRoundedBox(p, size * 0.5, 0.08);
 
-    if (dBox > 0.0) {
-        return vec4<f32>(0.0);
-    }
+  if (dBox > 0.0) {
+    return vec4<f32>(0.0);
+  }
 
-    let n = normalize(vec3<f32>(p.x * 2.0 / size.x, p.y * 2.0 / size.y, 0.35));
-    let viewDir = vec3<f32>(0.0, 0.0, 1.0);
-    let fresnel = pow(1.0 - abs(dot(n, viewDir)), 2.5);
-    let radial = length(p / (size * 0.5));
+  // Emitter positions within the lens
+  let topPos = vec2<f32>(0.0, -0.28);   // Top: Blue note-on
+  let midPos = vec2<f32>(0.0, 0.0);      // Middle: Note color
+  let botPos = vec2<f32>(0.0, 0.28);     // Bottom: Amber control
 
-    let thickness = 0.12;
-    let subsurface = exp(-thickness * 3.5) * noteGlow * (1.0 - radial * 0.4);
+  // Calculate distance to each emitter for light propagation
+  let distTop = length(uv - topPos);
+  let distMid = length(uv - midPos);
+  let distBot = length(uv - botPos);
 
-    let bgColor = vec3<f32>(0.04, 0.04, 0.05);
-    let glassColor = mix(bgColor * 0.2, color, 0.8);
+  // Glass surface normal for reflections
+  let n = normalize(vec3<f32>(p.x * 2.0 / size.x, p.y * 2.0 / size.y, 0.4));
+  let viewDir = vec3<f32>(0.0, 0.0, 1.0);
+  let fresnel = pow(1.0 - abs(dot(n, viewDir)), 2.0);
+  let radial = length(p / (size * 0.5));
 
-    let edgeAlpha = smoothstep(0.0, aa * 2.0, -dBox);
-    let alpha = edgeAlpha * (0.7 + 0.3 * fresnel);
+  // Glass thickness varies - thicker at edges
+  let edgeThickness = 0.15 + radial * 0.08;
+  let centerThickness = 0.08;
+  let thickness = mix(centerThickness, edgeThickness, radial);
 
-    let light = vec3<f32>(0.5, -0.8, 1.0);
-    let diff = max(0.0, dot(n, normalize(light)));
-    let litGlassColor = glassColor * (0.55 + 0.45 * diff);
+  // Background
+  let bgColor = vec3<f32>(0.04, 0.04, 0.05);
 
-    var finalColor = mix(bgColor, litGlassColor, alpha);
-    finalColor += subsurface * color * 3.5;
+  // Calculate light contribution from each emitter
+  // Light diffuses outward from each emitter position
 
-    if (isOn) {
-        let innerGlow = (1.0 - radial) * noteGlow * 0.4;
-        finalColor += color * innerGlow;
-    }
+  // Top emitter (Blue) - diffuses downward
+  let topGlow = exp(-distTop * 5.0) * topIntensity;
+  let topDownwardBias = smoothstep(0.0, 0.4, uv.y - topPos.y);
+  let topContribution = topGlow * topDownwardBias * topColor;
 
-    finalColor += fresnel * color * noteGlow * 0.3;
+  // Middle emitter (Note color) - diffuses uniformly
+  let midGlow = exp(-distMid * 4.0) * midIntensity;
+  let midContribution = midGlow * midColor;
 
-    return vec4<f32>(finalColor, edgeAlpha);
+  // Bottom emitter (Amber) - diffuses upward
+  let botGlow = exp(-distBot * 5.0) * botIntensity;
+  let botUpwardBias = smoothstep(0.0, 0.4, botPos.y - uv.y);
+  let botContribution = botGlow * botUpwardBias * botColor;
+
+  // Combine all light contributions
+  var totalLight = vec3<f32>(0.0);
+  totalLight += topContribution * 2.5;
+  totalLight += midContribution * 3.0;
+  totalLight += botContribution * 2.5;
+
+  // Glass tint varies with light passing through
+  var litTint = vec3<f32>(0.95, 0.95, 1.0);
+  if (topIntensity > 0.0) { litTint = mix(litTint, topColor, topIntensity * 0.25); }
+  if (midIntensity > 0.0) { litTint = mix(litTint, midColor, midIntensity * 0.3); }
+  if (botIntensity > 0.0) { litTint = mix(litTint, botColor, botIntensity * 0.25); }
+
+  let glassBaseColor = mix(bgColor * 0.15, litTint, 0.85);
+
+  // Edge alpha with anti-aliasing
+  let edgeAlpha = smoothstep(0.0, aa * 2.0, -dBox);
+
+  // Glass alpha varies with emitter intensity (brighter = more transparent)
+  let totalIntensity = topIntensity + midIntensity + botIntensity;
+  let baseAlpha = 0.75 + 0.25 * fresnel;
+  let alpha = mix(baseAlpha, 0.45, totalIntensity * 0.5) * edgeAlpha;
+
+  // Directional lighting from top-left
+  let lightDir = vec3<f32>(0.4, -0.7, 0.6);
+  let diff = max(0.0, dot(n, normalize(lightDir)));
+  let spec = pow(max(0.0, dot(reflect(-normalize(lightDir), n), viewDir)), 32.0);
+
+  let litGlassColor = glassBaseColor * (0.5 + 0.5 * diff) + vec3<f32>(spec * 0.3);
+
+  // Start with background
+  var finalColor = bgColor;
+
+  // Apply the combined light through the glass
+  finalColor += totalLight * 0.8;
+
+  // Apply glass layer
+  finalColor = mix(finalColor, litGlassColor, alpha);
+
+  // Add emitter hot spots where the actual LEDs are
+  let topHotspot = exp(-distTop * 12.0) * topIntensity;
+  let midHotspot = exp(-distMid * 10.0) * midIntensity;
+  let botHotspot = exp(-distBot * 12.0) * botIntensity;
+
+  finalColor += topColor * topHotspot * 1.5;
+  finalColor += midColor * midHotspot * 1.2;
+  finalColor += botColor * botHotspot * 1.5;
+
+  // Fresnel rim highlight
+  finalColor += fresnel * vec3<f32>(0.9, 0.95, 1.0) * 0.15;
+
+  return vec4<f32>(finalColor, edgeAlpha);
 }
 
 @fragment
@@ -192,7 +272,7 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   let uv = in.uv;
   let p = uv - 0.5;
   let aa = fwidth(p.y) * 0.33;
-  
+
   if (in.channel >= uniforms.numChannels) { return vec4<f32>(1.0, 0.0, 0.0, 1.0); }
   let fs = getFragmentConstants();
   let bloom = uniforms.bloomIntensity;
@@ -209,10 +289,13 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   if (in.channel == 0u) {
     let onPlayhead = playheadActivation > 0.5;
     let indSize = vec2<f32>(0.3, 0.3);
+    // Simple indicator - no three-emitter here, just status
     let indColor = mix(vec3<f32>(0.15), fs.ledOnColor * 1.3, playheadActivation);
-    let indLed = drawFrostedGlassCap(p, indSize, indColor, onPlayhead, aa, playheadActivation * 1.5);
-    var col = indLed.rgb;
-    var alpha = indLed.a;
+    // Use basic glass cap for indicator
+    let dBox = sdRoundedBox(p, indSize * 0.5, 0.08);
+    let edgeAlpha = smoothstep(0.0, aa * 2.0, -dBox);
+    var col = mix(vec3<f32>(0.04), indColor, playheadActivation * 0.8);
+    var alpha = edgeAlpha;
     if (playheadActivation > 0.0) {
       let beatPulse = 1.0 + kick * 0.6 + (0.5 + 0.5 * sin(beat * 6.2832)) * 0.2;
       let glow = fs.ledOnColor * (bloom * 5.0) * exp(-length(p) * 3.5) * playheadActivation * beatPulse;
@@ -247,87 +330,80 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     let hasNote = (note > 0u);
     let hasExpression = (volCmd > 0u) || (effCmd > 0u);
 
-    let ch = channels[in.channel];
+    // Bounds check for channel state array access
+    var ch = ChannelState(0.0, 0.0, 0.0, 0u, 1000.0, 0u, 0.0, 0u);
+    if (in.channel < arrayLength(&channels)) {
+      ch = channels[in.channel];
+    }
     let isMuted = (ch.isMuted == 1u);
 
-    // COMPONENT 1: DATA LIGHT (Blue accent for trap)
-    let topUV = btnUV - vec2<f32>(0.5, 0.16);
-    let topSize = vec2<f32>(0.20, 0.20);
-    let isDataPresent = hasExpression && !isMuted;
-    let topColorBase = vec3<f32>(0.15, 0.5, 1.0);
-    let topColor = topColorBase * select(0.0, 1.5 + bloom, isDataPresent);
-    let topLed = drawFrostedGlassCap(topUV, topSize, topColor, isDataPresent, aa, select(0.0, 1.0, isDataPresent));
-    finalColor = mix(finalColor, topLed.rgb, topLed.a);
+    // --- THREE-EMITTER SYSTEM ---
 
-    // COMPONENT 2: NOTE LIGHT
-    let mainUV = btnUV - vec2<f32>(0.5, 0.5);
-    let mainSize = vec2<f32>(0.55, 0.45);
-    var noteColor = vec3<f32>(0.15);
-    var lightAmount = 0.0;
-    var noteGlow = 0.0;
+    // EMITTER 1 (TOP): Blue Note-On Indicator
+    // Lights up when note is triggered or playhead is on this step
+    let blueColor = vec3<f32>(0.15, 0.5, 1.0);
+    var topIntensity = 0.0;
+    if (!isMuted) {
+      if (ch.trigger > 0u) {
+        topIntensity = 1.0 + bloom;
+      } else if (playheadActivation > 0.5) {
+        topIntensity = playheadActivation * 0.6;
+      }
+    }
 
+    // EMITTER 2 (MIDDLE): Steady Note Color
+    // Shows pitch color whenever there's a note
+    var midColor = vec3<f32>(0.15);
+    var midIntensity = 0.12; // Base dim glow
     if (hasNote) {
       let pitchHue = pitchClassFromIndex(note);
       let baseColor = neonPalette(pitchHue);
       let instBand = inst & 15u;
       let instBright = 0.85 + (select(0.0, f32(instBand) / 15.0, instBand > 0u)) * 0.15;
-      noteColor = baseColor * instBright;
+      midColor = baseColor * instBright;
 
-      let linger = exp(-ch.noteAge * 1.2);
-      let strike = playheadActivation * 3.5;
-      let flash = f32(ch.trigger) * 1.2;
-
-      let totalSteps = 64.0;
-      let d = fract((f32(in.row) + uniforms.tickOffset - uniforms.playheadRow) / totalSteps) * totalSteps;
-      let coreDist = min(d, totalSteps - d);
-      let energy = 0.03 / (coreDist + 0.001);
-      let trail = exp(-7.0 * max(0.0, -d));
-      let activeVal = clamp(pow(energy, 1.3) + trail, 0.0, 1.0);
-
-      // Beat-reactive: brighter pulse on kick
-      let beatBoost = 1.0 + kick * 0.5;
-      lightAmount = (activeVal * 0.9 + flash + strike + (linger * 2.5)) * clamp(ch.volume, 0.0, 1.2) * beatBoost;
-      if (isMuted) { lightAmount *= 0.2; }
-      noteGlow = lightAmount;
+      // Steady indication - doesn't blink, just shows note presence
+      midIntensity = 0.6 + bloom * 2.0;
+      if (isMuted) { midIntensity *= 0.3; }
     }
 
-    let displayColor = noteColor * max(lightAmount, 0.12) * (1.0 + bloom * 8.0);
-    let isLit = (lightAmount > 0.05);
-    let mainPad = drawFrostedGlassCap(mainUV, mainSize, displayColor, isLit, aa, noteGlow);
-    finalColor = mix(finalColor, mainPad.rgb, mainPad.a);
-
-    // Brighter LED pulse when playhead is on this step
-    if (playheadActivation > 0.5 && hasNote) {
-      let pulseColor = mix(vec3<f32>(0.15, 0.5, 1.0), vec3<f32>(1.0, 0.55, 0.1), 0.5 + 0.5 * sin(beat * 6.2832));
-      finalColor += pulseColor * playheadActivation * 0.15;
+    // EMITTER 3 (BOTTOM): Amber Control Message Indicator
+    // Lights up when there's an effect or volume command
+    let amberColor = vec3<f32>(1.0, 0.55, 0.1);
+    var botIntensity = 0.0;
+    if (!isMuted && hasExpression) {
+      botIntensity = 0.8 + bloom;
     }
 
-    // COMPONENT 3: EFFECT LIGHT (Orange pill for trap)
-    let botUV = btnUV - vec2<f32>(0.5, 0.85);
-    let botSize = vec2<f32>(0.25, 0.12);
-    var effColor = vec3<f32>(0.0);
-    var isEffOn = false;
+    // --- RENDER UNIFIED GLASS LENS ---
+    let lensUV = btnUV - vec2<f32>(0.5, 0.5);
+    let lensSize = vec2<f32>(0.55, 0.75);
 
-    if (effCmd > 0u) {
-      effColor = neonPalette(f32(effCmd) / 32.0);
-      let strength = clamp(f32(effVal) / 255.0, 0.2, 1.0);
-      if (!isMuted) {
-        effColor *= strength * (1.0 + bloom * 3.5);
-        isEffOn = true;
-      }
-    } else if (volCmd > 0u) {
-      effColor = vec3<f32>(1.0, 0.55, 0.1);
-      if (!isMuted) { effColor *= 0.6; isEffOn = true; }
+    let lens = drawThreeEmitterLens(
+      lensUV, lensSize,
+      blueColor, topIntensity,
+      midColor, midIntensity,
+      amberColor, botIntensity,
+      aa
+    );
+
+    finalColor = mix(finalColor, lens.rgb, lens.a);
+
+    // Add external glow when active
+    if (topIntensity > 0.0 || botIntensity > 0.0 || midIntensity > 0.5) {
+      let totalActivity = topIntensity + botIntensity + (midIntensity - 0.12);
+      let glowColor = mix(midColor, blueColor, topIntensity * 0.5);
+      let glowColor2 = mix(glowColor, amberColor, botIntensity * 0.5);
+      let externalGlow = glowColor2 * totalActivity * bloom * 2.0 * exp(-length(p) * 4.0);
+      finalColor += externalGlow;
     }
-
-    let botLed = drawFrostedGlassCap(botUV, botSize, effColor, isEffOn, aa, select(0.0, 0.7, isEffOn));
-    finalColor = mix(finalColor, botLed.rgb, botLed.a);
   }
 
   // Kick reactive glow
   let kickPulse = uniforms.kickTrigger * exp(-length(p) * 3.0) * 0.3;
   finalColor += vec3<f32>(0.9, 0.2, 0.4) * kickPulse * uniforms.bloomIntensity;
-  // Dithering for night mode
+
+  // Dithering
   let noise = fract(sin(dot(in.uv * uniforms.timeSec, vec2<f32>(12.9898, 78.233))) * 43758.5453);
   finalColor += (noise - 0.5) * 0.01;
 
