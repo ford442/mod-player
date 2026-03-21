@@ -17,14 +17,16 @@ const DEFAULT_CHANNELS = 4;
 // Define which shaders support the WebGL frosted caps overlay.
 // Standalone visualizer shaders (v0.47-v0.50) are excluded — they are
 // self-contained WebGPU experiences and caps create visual clutter.
+// Full-screen quad shaders (v0.43, v0.44) are excluded — they render their
+// own frosted glass caps in the fragment shader, and their scrolling grid
+// layout (X=channels, Y=time) is incompatible with the WebGL overlay's
+// instanced positioning (X=time, Y=channels).
 const WEBGL_HYBRID_SHADERS = new Set([
   'patternv0.21.wgsl',
   'patternv0.38.wgsl',
   'patternv0.39.wgsl',
   'patternv0.40.wgsl',
   'patternv0.42.wgsl',
-  'patternv0.43.wgsl',
-  'patternv0.44.wgsl',
   'patternv0.46.wgsl',
 ]);
 
@@ -681,44 +683,70 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
 
         } else {
             // --- CIRCULAR LAYOUT ---
-            // Use exact radii from shared constants: INNER_RADIUS=0.3, OUTER_RADIUS=0.9
-            
+            // Must match WGSL v0.46 pixel-space calculations exactly.
+            // WGSL uses: center = (canvasW/2, canvasH/2), minDim = min(canvasW, canvasH)
+            //            maxRadius = minDim * 0.45, minRadius = minDim * 0.15
+            //            ringDepth = (maxRadius - minRadius) / numChannels
+            //            radius = minRadius + ringIndex * ringDepth
+            //            btnW = circumference/64 * 0.95, btnH = ringDepth * 0.95
+
             float numTracks = u_cols;
-            
-            // Calculate track index with inversion support
+
+            // Calculate track index with inversion support (matches WGSL invertedChannel logic)
             float trackIndex = float(col);
             if (u_invertChannels == 0) { trackIndex = numTracks - 1.0 - trackIndex; }
-            
-            // Normalized radius for this track (centered in track band)
-            float trackWidth = (OUTER_RADIUS - INNER_RADIUS) / numTracks;
-            float normalizedRadius = INNER_RADIUS + (trackIndex + 0.5) * trackWidth;
-            
+
+            // Pixel-space radii matching WGSL v0.46 exactly
+            float minDim = min(u_resolution.x, u_resolution.y);
+            float maxRadius = minDim * 0.45;
+            float minRadius = minDim * 0.15;
+            float ringDepth = (maxRadius - minRadius) / numTracks;
+
+            // WGSL uses inner edge of ring for position: radius = minRadius + ringIndex * ringDepth
+            // Cap center should be at mid-ring: radius + ringDepth/2
+            float radius = minRadius + trackIndex * ringDepth + ringDepth * 0.5;
+
             // Full circle angle
             float totalSteps = 64.0;
             float anglePerStep = (2.0 * PI) / totalSteps;
-            float theta = -1.570796 + float(row) * anglePerStep;
-            
-            // Convert polar to cartesian in normalized space [0,1]
-            vec2 center = vec2(0.5, 0.5);
-            vec2 normPos = center + vec2(cos(theta), sin(theta)) * normalizedRadius * 0.5;
-            
-            // Calculate btnW and btnH from angular arc length and radial width
-            float arcLength = normalizedRadius * anglePerStep;
-            float btnW = arcLength * CAP_SCALE_FACTOR;
-            float btnH = trackWidth * 0.92;
-            
-            // Local position with rotation
+            float theta = -1.570796 + float(row % 64) * anglePerStep;
+
+            // Pixel-space center (matches WGSL: center = canvasW*0.5, canvasH*0.5)
+            vec2 center = vec2(u_resolution.x * 0.5, u_resolution.y * 0.5);
+
+            // Button sizes matching WGSL v0.46 scale factors (0.95 for both)
+            float circumference = 2.0 * PI * radius;
+            float arcLength = circumference / totalSteps;
+            float btnW = arcLength * 0.95;
+            float btnH = ringDepth * 0.95;
+
+            // Hide empty steps and apply playhead pop effect (circular variant)
+            if (note == 0u) { btnW = 0.0; btnH = 0.0; }
+            float circPlayhead = mod(u_playhead, totalSteps);
+            float circDist = abs(float(row % 64) - circPlayhead);
+            circDist = min(circDist, totalSteps - circDist);
+            float circActivation = 1.0 - smoothstep(0.0, 1.5, circDist);
+            float popScale = 1.0 + 0.2 * circActivation;
+            btnW *= popScale;
+            btnH *= popScale;
+            v_active = circActivation;
+
+            // Local position with rotation (a_pos is in [-0.5, 0.5])
             vec2 localPos = a_pos * vec2(btnW, btnH);
             float rotAng = theta + 1.570796;
             float cA = cos(rotAng); float sA = sin(rotAng);
             float rotX = localPos.x * cA - localPos.y * sA;
             float rotY = localPos.x * sA + localPos.y * cA;
-            
-            // Map to pixel space for NDC conversion
-            vec2 pixelPos = normPos * u_resolution + vec2(rotX, rotY) * u_resolution;
-            
-            vec2 ndc = (pixelPos / u_resolution) * 2.0 - 1.0;
-            ndc.y = -ndc.y;
+
+            // World position in pixels (matches WGSL: worldX = center.x + cos(theta)*radius + rotX)
+            float worldX = center.x + cos(theta) * radius + rotX;
+            float worldY = center.y + sin(theta) * radius + rotY;
+
+            // Convert to NDC (matches WGSL: clipX = (worldX/canvasW)*2-1, clipY = 1-(worldY/canvasH)*2)
+            vec2 ndc = vec2(
+                (worldX / u_resolution.x) * 2.0 - 1.0,
+                1.0 - (worldY / u_resolution.y) * 2.0
+            );
             gl_Position = vec4(ndc, 0.0, 1.0);
         }
 
@@ -1679,7 +1707,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
             offsetY = 0;
             layoutModeName = '32-STEP (v0.39)';
           } else {
-            // v0.21, v0.40, v0.42, v0.43, v0.46: Use GRID_RECT (matches render() logic)
+            // v0.21, v0.40, v0.42, v0.46: Use GRID_RECT (matches render() logic)
             const metrics = calculateHorizontalCellSize(gl.canvas.width, gl.canvas.height, 32, channelCount);
             effectiveCellW = metrics.cellW;
             effectiveCellH = metrics.cellH;
