@@ -1,8 +1,22 @@
 // patternv0.50.wgsl
-// Three-Emitter LED Indicator System with Unified Lens Cap
-// Top: Blue Note-On | Middle: Steady Note Color | Bottom: Amber Control
-// Based on v0.49 (circular layout with padTopChannel=true)
-// Note: Requires padTopChannel=true in PatternDisplay to shift music channels 1-32.
+// Frosted Glass Circular – Vibrant Note Colours + Blue LED Indicator + Full-Height Caps
+//
+// Hybrid composition combining v0.48 (vibrant note-data colours from neonPalette)
+// and v0.49 (blue LED indicator ring, solid housing, frosted glass caps).
+//
+// Per-step layering:
+//   1. HOUSING (BEHINDS) — Solid dark-metallic body lit with vibrant neonPalette
+//                          colours driven by real note pitch (purple, teal, green,
+//                          orange, red, cyan).  Activity from v0.48's distance-based
+//                          energy sweep + trail + noteAge + tickOffset sub-step.
+//   2. CAP — Full-height frosted acrylic glass (0.88 × 0.88) in the same vibrant
+//            hue as the housing.  LED-under-glass model with white bevel rim.
+//   3. DEPRESSION — On playhead hit: cap scales 4 % smaller + top inner-shadow.
+//
+// Channel 0: Blue LED indicator ring shows playhead proximity (from v0.49).
+//
+// Background: bezel.wgsl (hardware photo with dark centre + white frame).
+// Transparent gaps + centre circle allow bezel to show through.
 
 struct Uniforms {
   numRows: u32,
@@ -37,11 +51,11 @@ struct ChannelState { volume: f32, pan: f32, freq: f32, trigger: u32, noteAge: f
 
 struct VertexOut {
   @builtin(position) position: vec4<f32>,
-  @location(0) @interpolate(flat) row: u32,
-  @location(1) @interpolate(flat) channel: u32,
-  @location(2) @interpolate(linear) uv: vec2<f32>,
-  @location(3) @interpolate(flat) packedA: u32,
-  @location(4) @interpolate(flat) packedB: u32,
+  @location(0) @interpolate(flat)   row:     u32,
+  @location(1) @interpolate(flat)   channel: u32,
+  @location(2) @interpolate(linear) uv:      vec2<f32>,
+  @location(3) @interpolate(flat)   packedA: u32,
+  @location(4) @interpolate(flat)   packedB: u32,
 };
 
 @vertex
@@ -52,38 +66,33 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
   );
 
   let numChannels = uniforms.numChannels;
-  let row = instanceIndex / numChannels;
-  let channel = instanceIndex % numChannels;
+  let row         = instanceIndex / numChannels;
+  let channel     = instanceIndex % numChannels;
 
   let invertedChannel = numChannels - 1u - channel;
-  let ringIndex = select(invertedChannel, channel, (uniforms.invertChannels == 1u));
+  let ringIndex = select(invertedChannel, channel, uniforms.invertChannels == 1u);
 
-  let center = vec2<f32>(uniforms.canvasW * 0.5, uniforms.canvasH * 0.5);
-  let minDim = min(uniforms.canvasW, uniforms.canvasH);
-
+  let center    = vec2<f32>(uniforms.canvasW * 0.5, uniforms.canvasH * 0.5);
+  let minDim    = min(uniforms.canvasW, uniforms.canvasH);
   let maxRadius = minDim * 0.45;
   let minRadius = minDim * 0.15;
   let ringDepth = (maxRadius - minRadius) / f32(numChannels);
+  let radius    = minRadius + f32(ringIndex) * ringDepth;
 
-  let radius = minRadius + f32(ringIndex) * ringDepth;
-
-  let totalSteps = 64.0;
+  let totalSteps   = 64.0;
   let anglePerStep = 6.2831853 / totalSteps;
-  let theta = -1.570796 + f32(row % 64u) * anglePerStep;
+  let theta        = -1.570796 + f32(row % 64u) * anglePerStep;
 
   let circumference = 2.0 * 3.14159265 * radius;
-  let arcLength = circumference / totalSteps;
+  let arcLength     = circumference / totalSteps;
+  let btnW          = arcLength * 0.95;
+  let btnH          = ringDepth * 0.95;
 
-  let btnW = arcLength * 0.95;
-  let btnH = ringDepth * 0.95;
-
-  let lp = quad[vertexIndex];
+  let lp       = quad[vertexIndex];
   let localPos = (lp - 0.5) * vec2<f32>(btnW, btnH);
 
   let rotAng = theta + 1.570796;
-  let cA = cos(rotAng);
-  let sA = sin(rotAng);
-
+  let cA = cos(rotAng); let sA = sin(rotAng);
   let rotX = localPos.x * cA - localPos.y * sA;
   let rotY = localPos.x * sA + localPos.y * cA;
 
@@ -94,25 +103,27 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
   let clipY = 1.0 - (worldY / uniforms.canvasH) * 2.0;
 
   let idx = instanceIndex * 2u;
-  let a = cells[idx];
-  let b = cells[idx + 1u];
+  let a   = cells[idx];
+  let b   = cells[idx + 1u];
 
   var out: VertexOut;
   out.position = vec4<f32>(clipX, clipY, 0.0, 1.0);
-  out.row = row;
-  out.channel = channel;
-  out.uv = lp;
-  out.packedA = a;
-  out.packedB = b;
+  out.row      = row;
+  out.channel  = channel;
+  out.uv       = lp;
+  out.packedA  = a;
+  out.packedB  = b;
   return out;
 }
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 fn neonPalette(t: f32) -> vec3<f32> {
   let a = vec3<f32>(0.5, 0.5, 0.5);
   let b = vec3<f32>(0.5, 0.5, 0.5);
   let c = vec3<f32>(1.0, 1.0, 1.0);
   let d = vec3<f32>(0.0, 0.33, 0.67);
-  let beatDrift = uniforms.beatPhase * 0.1;
+  let beatDrift = uniforms.beatPhase * 0.08;
   return a + b * cos(6.28318 * (c * (t + beatDrift) + d));
 }
 
