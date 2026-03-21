@@ -14,6 +14,22 @@ import {
 const DEFAULT_ROWS = 64;
 const DEFAULT_CHANNELS = 4;
 
+// Define which shaders support the WebGL frosted caps overlay.
+// Standalone visualizer shaders (v0.47-v0.50) are excluded — they are
+// self-contained WebGPU experiences and caps create visual clutter.
+// Full-screen quad shaders (v0.43, v0.44) are excluded — they render their
+// own frosted glass caps in the fragment shader, and their scrolling grid
+// layout (X=channels, Y=time) is incompatible with the WebGL overlay's
+// instanced positioning (X=time, Y=channels).
+const WEBGL_HYBRID_SHADERS = new Set([
+  'patternv0.21.wgsl',
+  'patternv0.38.wgsl',
+  'patternv0.39.wgsl',
+  'patternv0.40.wgsl',
+  'patternv0.42.wgsl',
+  'patternv0.46.wgsl',
+]);
+
 const EMPTY_CHANNEL: ChannelShadowState = {
   
   volume: 1.0, pan: 0.5, freq: 440, trigger: 0, noteAge: 1000,
@@ -43,7 +59,7 @@ const isSinglePassCompositeShader = (shaderFile: string) => {
 
 const isCircularLayoutShader = (shaderFile: string) => {
   // v0.39 and v0.40 are NOT circular (they're horizontal). v0.38 IS circular. v0.45 IS circular. v0.46 IS circular.
-  return shaderFile.includes('v0.25') || shaderFile.includes('v0.26') || shaderFile.includes('v0.35') || shaderFile.includes('v0.37') || shaderFile.includes('v0.38') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.47') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49') || shaderFile.includes('v0.50');
+  return shaderFile.includes('v0.25') || shaderFile.includes('v0.26') || shaderFile.includes('v0.35') || shaderFile.includes('v0.37') || shaderFile.includes('v0.38') || shaderFile.includes('v0.42') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.47') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49') || shaderFile.includes('v0.50');
 };
 
 const shouldUseBackgroundPass = (shaderFile: string) => {
@@ -658,41 +674,60 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
 
         } else {
             // --- CIRCULAR LAYOUT ---
+<<<<<<< claude/fix-patterndisplay-key-prop-dyakq
             // Use pixel-space radii (based on minDim) to match the WGSL background shader
             // and prevent elliptical stretching on non-square viewports.
+
             float numTracks = u_cols;
             float trackIndexF = float(trackIndex);
             if (u_invertChannels == 0) { trackIndexF = numTracks - 1.0 - trackIndexF; }
 
+            // Pixel-space radii matching WGSL v0.46 exactly
             float minDim = min(u_resolution.x, u_resolution.y);
-            vec2 center = u_resolution * 0.5;
-
-            // Mirror the WGSL: maxRadius = minDim*0.45, minRadius = minDim*0.15
             float maxRadius = minDim * 0.45;
             float minRadius = minDim * 0.15;
             float ringDepth = (maxRadius - minRadius) / numTracks;
-            float pixelRadius = minRadius + trackIndexF * ringDepth;
+            
+            // Center in the ring (matches WGSL positioning)
+            float pixelRadius = minRadius + trackIndexF * ringDepth + ringDepth * 0.5;
 
             float totalSteps = 64.0;
             float anglePerStep = (2.0 * PI) / totalSteps;
             float theta = -1.570796 + float(stepIndex) * anglePerStep;
 
-            // Pixel-space arc length → no aspect-ratio distortion
-            float arcLength = pixelRadius * anglePerStep;
+            // Button sizing using shared cap scale
+            float circumference = 2.0 * PI * pixelRadius;
+            float arcLength = circumference / totalSteps;
             float btnW = arcLength * CAP_SCALE_FACTOR;
             float btnH = ringDepth * 0.92;
 
-            float capScale = (note > 0u) ? (1.0 + 0.2 * activation) : 0.0;
-            vec2 localPos = a_pos * vec2(btnW, btnH) * capScale;
+            // Playhead pop effect
+            float circPlayhead = mod(u_playhead, totalSteps);
+            float circDist = abs(float(stepIndex) - circPlayhead);
+            circDist = min(circDist, totalSteps - circDist);
+            float circActivation = 1.0 - smoothstep(0.0, 1.5, circDist);
+            float popScale = (v_hasNote > 0.5) ? (1.0 + 0.2 * circActivation) : 0.0;
+            btnW *= popScale;
+            btnH *= popScale;
+            v_active = circActivation;
 
+            // Local position with rotation
+            vec2 localPos = a_pos * vec2(btnW, btnH);
             float rotAng = theta + 1.570796;
             float cA = cos(rotAng); float sA = sin(rotAng);
             float rotX = localPos.x * cA - localPos.y * sA;
             float rotY = localPos.x * sA + localPos.y * cA;
 
-            vec2 pixelPos = center + vec2(cos(theta), sin(theta)) * pixelRadius + vec2(rotX, rotY);
-            vec2 ndc = (pixelPos / u_resolution) * 2.0 - 1.0;
-            ndc.y = -ndc.y;
+            // World position in pixels
+            vec2 center = u_resolution * 0.5;
+            float worldX = center.x + cos(theta) * pixelRadius + rotX;
+            float worldY = center.y + sin(theta) * pixelRadius + rotY;
+
+            // Convert to NDC
+            vec2 ndc = vec2(
+                (worldX / u_resolution.x) * 2.0 - 1.0,
+                1.0 - (worldY / u_resolution.y) * 2.0
+            );
             gl_Position = vec4(ndc, 0.0, 1.0);
         }
 
@@ -700,9 +735,8 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     }
     `;
 
-    // Only compile if using a glass shader
-    const isOverlayShader = shaderFile.includes('v0.21') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.47') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49') || shaderFile.includes('v0.50');
-    if (!isOverlayShader) {
+    // Only compile if using a hybrid shader that needs WebGL caps
+    if (!WEBGL_HYBRID_SHADERS.has(shaderFile)) {
       // Clear the canvas to prevent ghosting when switching to non-overlay shaders
       if (glContextRef.current && glCanvasRef.current) {
         const gl = glContextRef.current;
@@ -1253,7 +1287,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
         textureResourcesRef.current = null;
         bezelTextureResourcesRef.current = null;
 
-        const shaderBase = './';
+        const shaderBase = import.meta.env.BASE_URL;
         const shaderSource = await fetch(`${shaderBase}shaders/${shaderFile}`).then(res => res.text());
         if (cancelled) return;
         const module = device.createShaderModule({ code: shaderSource });
@@ -1305,7 +1339,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
 
         deviceRef.current = device; contextRef.current = context; uniformBufferRef.current = uniformBuffer;
 
-        const isHighPrec = shaderFile.includes('v0.36') || shaderFile.includes('v0.37') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.47') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49') || shaderFile.includes('v0.50');
+        const isHighPrec = shaderFile.includes('v0.36') || shaderFile.includes('v0.37') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.47') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49') || shaderFile.includes('v0.50');
         const packFunc = isHighPrec ? packPatternMatrixHighPrecision : packPatternMatrix;
         cellsBufferRef.current = createBufferWithData(device, packFunc(matrix, padTopChannel), GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
 
@@ -1403,7 +1437,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     console.log(`[PatternDisplay] Updating cells buffer: matrix=${matrix ? 'yes' : 'null'}, rows=${matrix?.numRows}, channels=${matrix?.numChannels}`);
     
     if (cellsBufferRef.current) cellsBufferRef.current.destroy();
-    const isHighPrec = shaderFile.includes('v0.36') || shaderFile.includes('v0.37') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.47') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49') || shaderFile.includes('v0.50');
+    const isHighPrec = shaderFile.includes('v0.36') || shaderFile.includes('v0.37') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.47') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49') || shaderFile.includes('v0.50');
     const packFunc = isHighPrec ? packPatternMatrixHighPrecision : packPatternMatrix;
     const packedData = packFunc(matrix, padTopChannel);
     
@@ -1551,9 +1585,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   const drawWebGL = () => {
     const gl = glContextRef.current;
     const res = glResourcesRef.current;
-    const isOverlayShader = shaderFile.includes('v0.21') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.47') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49') || shaderFile.includes('v0.50');
-
-    if (!gl || !res || !isOverlayShader || !matrix) return;
+    if (!gl || !res || !WEBGL_HYBRID_SHADERS.has(shaderFile) || !matrix) return;
 
     const errors: string[] = [];
     const uniformVals: Record<string, number | string> = {};
@@ -1665,7 +1697,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
             offsetY = 0;
             layoutModeName = '32-STEP (v0.39)';
           } else {
-            // v0.21, v0.40, v0.42, v0.43, v0.46: Use GRID_RECT (matches render() logic)
+            // v0.21, v0.40, v0.42, v0.46: Use GRID_RECT (matches render() logic)
             const metrics = calculateHorizontalCellSize(gl.canvas.width, gl.canvas.height, 32, channelCount);
             effectiveCellW = metrics.cellW;
             effectiveCellH = metrics.cellH;
@@ -1923,7 +1955,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     // Render background pass for all shaders that are not self-compositing
     const needsBackground = !isSinglePassCompositeShader(shaderFile);
     if (bezelPipelineRef.current && bezelBindGroupRef.current && needsBackground && bezelUniformBufferRef.current) {
-      const bezelData = new Float32Array(24);
+      const bezelData = bezelFloatRef.current;
       bezelData[0] = canvasMetrics.width;
       bezelData[1] = canvasMetrics.height;
       bezelData[2] = 0; // bezelWidth
@@ -1942,7 +1974,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
       bezelData[16] = 1.0; // volume
       bezelData[17] = 0.5; // pan
       bezelData[18] = bpm ?? 120.0;
-      const bezelUint = new Uint32Array(bezelData.buffer);
+      const bezelUint = bezelUintRef.current;
       bezelUint[19] = isLooping ? 1 : 0;
       bezelUint[20] = 0; // currentOrder (could pass if needed)
       bezelUint[21] = Math.floor(playheadRow);
@@ -1953,7 +1985,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
       bezelData[22] = GRID_RECT.w;
       bezelData[23] = GRID_RECT.h;
       
-      device.queue.writeBuffer(bezelUniformBufferRef.current, 0, bezelData);
+      device.queue.writeBuffer(bezelUniformBufferRef.current, 0, bezelBufferDataRef.current, 0, 96); // Float32Array(24) = 96 bytes
 
       pass.setPipeline(bezelPipelineRef.current);
       pass.setBindGroup(0, bezelBindGroupRef.current);

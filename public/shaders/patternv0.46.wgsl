@@ -190,7 +190,6 @@ fn drawFrostedGlassCap(uv: vec2<f32>, size: vec2<f32>, color: vec3<f32>, isOn: b
     finalColor += fresnel * color * noteGlow * 0.3;
     return vec4<f32>(finalColor, edgeAlpha);
 }
-
 @fragment
 fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   // Compute derivatives in uniform control flow (before any early returns)
@@ -198,13 +197,30 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   let p = uv - vec2<f32>(0.5, 0.5);
   let aa = fwidth(p.y) * 0.33;
   
-  if (in.channel >= uniforms.numChannels) { return vec4<f32>(1.0, 0.0, 0.0, 1.0); }
+  if (in.channel >= uniforms.numChannels) { return vec4<f32>(0.0); }
+  
   let fs = getFragmentConstants();
   let bloom = uniforms.bloomIntensity;
 
-  if (in.position.y > uniforms.canvasH * 0.88) {
-    discard;
-  }
+  // ── Playhead proximity ────────────────────────────────────────────────────
+  let totalSteps = 64.0;
+  let playheadStep = uniforms.playheadRow - floor(uniforms.playheadRow / totalSteps) * totalSteps;
+  let rowF = f32(in.row % 64u);
+  let rowDistRaw = abs(rowF - playheadStep);
+  let rowDist = min(rowDistRaw, totalSteps - rowDistRaw);
+  let playheadHit = 1.0 - smoothstep(0.0, 2.0, rowDist);
+
+  // NOTE: Early discard moved to after derivative computation to avoid undefined behavior in fwidth()
+  // Clip UI strip at bottom of canvas — SAFE HERE after derivatives computed
+  if (in.position.y > uniforms.canvasH * 0.88) { discard; }
+
+  // ── Trailing sweep ────────────────────────────────────────────────────────
+  let stepsBehind = fract((playheadStep - rowF) / totalSteps) * totalSteps;
+  let trailGlow = select(
+    0.0,
+    exp(-stepsBehind * 0.40),
+    stepsBehind > 0.001 && stepsBehind < 14.0
+  );
 
   if (in.channel == 0u) {
     let playheadStep = uniforms.playheadRow - floor(uniforms.playheadRow / 64.0) * 64.0;
