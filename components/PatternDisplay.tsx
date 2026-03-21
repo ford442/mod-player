@@ -14,6 +14,20 @@ import {
 const DEFAULT_ROWS = 64;
 const DEFAULT_CHANNELS = 4;
 
+// Define which shaders support the WebGL frosted caps overlay.
+// Standalone visualizer shaders (v0.47-v0.50) are excluded — they are
+// self-contained WebGPU experiences and caps create visual clutter.
+const WEBGL_HYBRID_SHADERS = new Set([
+  'patternv0.21.wgsl',
+  'patternv0.38.wgsl',
+  'patternv0.39.wgsl',
+  'patternv0.40.wgsl',
+  'patternv0.42.wgsl',
+  'patternv0.43.wgsl',
+  'patternv0.44.wgsl',
+  'patternv0.46.wgsl',
+]);
+
 const EMPTY_CHANNEL: ChannelShadowState = {
   
   volume: 1.0, pan: 0.5, freq: 440, trigger: 0, noteAge: 1000,
@@ -713,9 +727,8 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     }
     `;
 
-    // Only compile if using a glass shader
-    const isOverlayShader = shaderFile.includes('v0.21') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.47') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49') || shaderFile.includes('v0.50');
-    if (!isOverlayShader) {
+    // Only compile if using a hybrid shader that needs WebGL caps
+    if (!WEBGL_HYBRID_SHADERS.has(shaderFile)) {
       // Clear the canvas to prevent ghosting when switching to non-overlay shaders
       if (glContextRef.current && glCanvasRef.current) {
         const gl = glContextRef.current;
@@ -1557,9 +1570,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   const drawWebGL = () => {
     const gl = glContextRef.current;
     const res = glResourcesRef.current;
-    const isOverlayShader = shaderFile.includes('v0.21') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.47') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49') || shaderFile.includes('v0.50');
-
-    if (!gl || !res || !isOverlayShader || !matrix) return;
+    if (!gl || !res || !WEBGL_HYBRID_SHADERS.has(shaderFile) || !matrix) return;
 
     const errors: string[] = [];
     const uniformVals: Record<string, number | string> = {};
