@@ -1,11 +1,10 @@
 import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react';
 import { ChannelShadowState, PatternMatrix, PlaybackState } from '../types';
-import { getLayoutModeFromShader } from '../utils/geometryConstants';
+
 import { useWebGLOverlay } from '../hooks/useWebGLOverlay';
 import { useWebGPURender, type WebGPURenderParams, type DebugInfo } from '../hooks/useWebGPURender';
 
 const DEFAULT_CHANNELS = 4;
-const PLAYHEAD_EPSILON = 0.0001;
 
 interface PatternDisplayProps {
   matrix: PatternMatrix | null;
@@ -212,22 +211,25 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     beatPhase, grooveAmount, kickTrigger, activeChannels, isModuleLoaded,
     bloomIntensity, bloomThreshold, dimFactor, volume, pan, isLooping,
     invertChannels, clickedButton, cellWidth, cellHeight, playheadRow,
-    localTime, isHorizontal, externalVideoSource, playbackStateRef,
+    localTime, isHorizontal, externalVideoSource,
     canvasMetrics, totalRows,
+    ...(playbackStateRef ? { playbackStateRef } : {}),
   });
   renderParamsRef.current = {
     matrix, channels, padTopChannel, isPlaying, bpm, timeSec, tickOffset,
     beatPhase, grooveAmount, kickTrigger, activeChannels, isModuleLoaded,
     bloomIntensity, bloomThreshold, dimFactor, volume, pan, isLooping,
     invertChannels, clickedButton, cellWidth, cellHeight, playheadRow,
-    localTime, isHorizontal, externalVideoSource, playbackStateRef,
+    localTime, isHorizontal, externalVideoSource,
     canvasMetrics, totalRows,
+    ...(playbackStateRef ? { playbackStateRef } : {}),
   };
 
   // WebGL overlay hook (frosted caps)
   const { drawWebGL } = useWebGLOverlay(glCanvasRef, {
     shaderFile, matrix, padTopChannel, isOverlayActive,
-    invertChannels, playheadRow, cellWidth, cellHeight, playbackStateRef,
+    invertChannels, playheadRow, cellWidth, cellHeight,
+    ...(playbackStateRef ? { playbackStateRef } : {}),
   }, setDebugInfo);
 
   // WebGPU render hook
