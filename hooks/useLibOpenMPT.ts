@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { LibOpenMPT, ModuleInfo, PatternMatrix, ChannelShadowState, PlaybackState } from '../types';
 import { OpenMPTWorkletEngine } from '../audio-worklet/OpenMPTWorkletEngine';
-import type { WorkletPositionData } from '../audio-worklet/types';
+import { getPatternMatrix } from '../utils/patternExtractor';
+import { startAudioPlayback, AudioGraphRefs, AudioGraphCallbacks, AudioGraphConfig } from './useAudioGraph';
 
 interface SyncDebugInfo {
   mode: string;
@@ -11,9 +12,6 @@ interface SyncDebugInfo {
   starvationCount: number;
 }
 
-// Constants
-const DEFAULT_ROWS = 64;
-const DEFAULT_CHANNELS = 4;
 // Use Vite BASE_URL for correct resolution under subdirectory deployment
 const DEFAULT_MODULE_URL = `${import.meta.env.BASE_URL}4-mat_madness.mod`;
 
@@ -103,7 +101,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
   const workletTimeAtStartRef = useRef<number>(0);
   const driftAccumulatorRef = useRef<number>(0);
   const lastCorrectedTimeRef = useRef<number>(0);
-  
+
   // TIMING FIX: Seek synchronization
   const pendingSeekRef = useRef<{ order: number; row: number; timestamp: number } | null>(null);
   const seekAcknowledgedRef = useRef<boolean>(true);
@@ -137,44 +135,6 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
     grooveAmount: 0.5,
     lastUpdateTimestamp: 0
   });
-
-  // Helpers
-  const getPatternMatrix = useCallback((modPtr: number, patternIndex: number, orderIndex: number): PatternMatrix => {
-    const lib = libopenmptRef.current;
-    if (!lib) return { order: orderIndex, patternIndex, numRows: DEFAULT_ROWS, numChannels: DEFAULT_CHANNELS, rows: [] };
-
-    const numRows = lib._openmpt_module_get_pattern_num_rows(modPtr, patternIndex);
-    const numChannels = lib._openmpt_module_get_num_channels(modPtr);
-    const rows: any[][] = [];
-
-    // Pre-allocate rows
-    for (let r = 0; r < numRows; r++) {
-      const rowData: any[] = [];
-      for (let c = 0; c < numChannels; c++) {
-        const note = lib._openmpt_module_get_pattern_row_channel_command(modPtr, patternIndex, r, c, 0); // Note
-        const inst = lib._openmpt_module_get_pattern_row_channel_command(modPtr, patternIndex, r, c, 1); // Instrument
-        const volCmd = lib._openmpt_module_get_pattern_row_channel_command(modPtr, patternIndex, r, c, 2); // VolCmd
-        const volVal = lib._openmpt_module_get_pattern_row_channel_command(modPtr, patternIndex, r, c, 3); // VolVal
-        const effCmd = lib._openmpt_module_get_pattern_row_channel_command(modPtr, patternIndex, r, c, 4); // EffectCmd
-        const effVal = lib._openmpt_module_get_pattern_row_channel_command(modPtr, patternIndex, r, c, 5); // EffectVal
-
-        rowData.push({
-          type: note > 0 ? 'note' : 'empty',
-          text: "",
-          note, inst, volCmd, volVal, effCmd, effVal
-        });
-      }
-      rows.push(rowData);
-    }
-
-    return {
-      order: orderIndex,
-      patternIndex,
-      numRows,
-      numChannels,
-      rows
-    };
-  }, []);
 
   const loadModule = useCallback(async (fileData: Uint8Array, fileName: string) => {
     if (!libopenmptRef.current) return;
@@ -262,7 +222,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
     let totalRows = 0;
     for (let i = 0; i < numOrders; i++) {
       const patIdx = lib._openmpt_module_get_order_pattern(modPtr, i);
-      const matrix = getPatternMatrix(modPtr, patIdx, i);
+      const matrix = getPatternMatrix(lib, modPtr, patIdx, i);
       matrices.push(matrix);
       totalRows += matrix.numRows;
     }
@@ -287,9 +247,9 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
     setIsModuleLoaded(true);
     setStatus(`Loaded "${title || fileName}"`);
 
-    // REMOVED AUTO-PLAY FROM HERE. 
+    // REMOVED AUTO-PLAY FROM HERE.
     // It prevented the AudioContext from securely starting because it lacked a user gesture on page load.
-  }, [getPatternMatrix]);
+  }, []);
 
   // TIMING FIX: Improved updateUI with drift compensation and proper interpolation
   const updateUI = useCallback(() => {
@@ -317,19 +277,19 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
       if (audioCtx && lastWorkletUpdateRef.current > 0) {
         const now = audioCtx.currentTime;
         const elapsedSinceWorkletUpdate = now - lastWorkletUpdateRef.current;
-        
+
         // Only interpolate if the worklet update is recent (within 100ms)
         if (elapsedSinceWorkletUpdate < 0.1) {
           // Calculate expected row progress based on BPM
           // Rows per second = BPM / 60 / 4 (assuming 4 rows per beat)
           const rowsPerSecond = currentBpm / 60 / 4;
           rowFraction = Math.min(1, elapsedSinceWorkletUpdate * rowsPerSecond);
-          
+
           // TIMING FIX: Apply drift correction
           const expectedTime = workletTimeRef.current + elapsedSinceWorkletUpdate;
           const drift = time - expectedTime;
           driftAccumulatorRef.current = driftAccumulatorRef.current * 0.9 + drift * 0.1;
-          
+
           // Update sync debug info
           if (Math.abs(driftAccumulatorRef.current) > MAX_DRIFT_SECONDS) {
             // Apply correction
@@ -367,7 +327,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
       if (newMatrix) setSequencerMatrix(newMatrix);
     }
 
-    setModuleInfo(prev => ({ ...prev, order, row, bpm: currentBpm }));
+    setModuleInfo((prev: ModuleInfo) => ({ ...prev, order, row, bpm: currentBpm }));
     setSequencerCurrentRow(row);
     setPlaybackSeconds(time);
 
@@ -399,7 +359,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
     };
 
     // TIMING FIX: Update sync debug info
-    setSyncDebug(prev => ({
+    setSyncDebug((prev: SyncDebugInfo) => ({
       ...prev,
       driftMs: Math.round(driftAccumulatorRef.current * 1000),
       row: row,
@@ -493,12 +453,12 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
 
     // Update main thread libopenmpt position
     lib._openmpt_module_set_position_order_row(modPtr, targetOrder, targetRow);
-    
+
     // TIMING FIX: Update worklet refs immediately for UI consistency
     workletOrderRef.current = targetOrder;
     workletRowRef.current = targetRow;
-    
-    setModuleInfo(prev => ({ ...prev, order: targetOrder, row: targetRow }));
+
+    setModuleInfo((prev: ModuleInfo) => ({ ...prev, order: targetOrder, row: targetRow }));
     setSequencerCurrentRow(targetRow);
     setSequencerGlobalRow(step);
 
@@ -512,9 +472,9 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
       // Native engine seek is synchronous, mark as acknowledged
       seekAcknowledgedRef.current = true;
     } else if (activeEngine === 'worklet' && audioWorkletNodeRef.current) {
-      audioWorkletNodeRef.current.port.postMessage({ 
-        type: 'seek', 
-        order: targetOrder, 
+      audioWorkletNodeRef.current.port.postMessage({
+        type: 'seek',
+        order: targetOrder,
         row: targetRow,
         // TIMING FIX: Include timestamp for worklet to correlate
         timestamp: audioCtx ? audioCtx.currentTime : 0
@@ -523,379 +483,25 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
   }, [activeEngine]);
 
   const play = useCallback(async () => {
-    if (!libopenmptRef.current) {
-      console.error("[PLAY] libopenmpt not initialized");
-      setStatus("Error: Audio library not ready");
-      return;
-    }
-    if (!fileDataRef.current) {
-      console.error("[PLAY] No module data available (fileDataRef is null)");
-      setStatus("Error: No module loaded");
-      return;
-    }
-
-    console.log('[PLAY] Starting playback...', {
-      engine: activeEngine,
-      isWorkletSupported,
-      hasFileData: !!fileDataRef.current,
-      fileDataLength: fileDataRef.current?.length
-    });
-
-    try {
-      if (!audioContextRef.current) {
-        console.log('[PLAY] Creating new AudioContext...');
-        audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'playback' });
-        // New context: worklet module needs to be (re)loaded
-        workletLoadedRef.current = false;
-      }
-
-      const ctx = audioContextRef.current;
-      console.log('[PLAY] AudioContext state:', ctx.state);
-
-      if (ctx.state === 'suspended') {
-        console.log('[PLAY] Resuming suspended AudioContext...');
-        await ctx.resume();
-        console.log('[PLAY] AudioContext resumed, new state:', ctx.state);
-      }
-
-      // TIMING FIX: Initialize audio clock reference
-      audioClockStartRef.current = ctx.currentTime;
-      workletTimeAtStartRef.current = 0;
-      driftAccumulatorRef.current = 0;
-
-      // Setup common nodes
-      if (!stereoPannerRef.current) {
-        console.log('[PLAY] Creating StereoPanner node...');
-        stereoPannerRef.current = ctx.createStereoPanner();
-        stereoPannerRef.current.pan.value = panValue;
-      }
-      if (!gainNodeRef.current) {
-        console.log('[PLAY] Creating Gain node...');
-        gainNodeRef.current = ctx.createGain();
-        gainNodeRef.current.gain.value = volume;
-      }
-      if (!analyserRef.current) {
-        console.log('[PLAY] Creating Analyser node...');
-        analyserRef.current = ctx.createAnalyser();
-        analyserRef.current.fftSize = 2048;
-        analyserRef.current.smoothingTimeConstant = 0.8;
-      }
-
-      // Disconnect previous source
-      if (audioWorkletNodeRef.current) {
-        console.log('[PLAY] Disconnecting previous AudioWorkletNode...');
-        audioWorkletNodeRef.current.disconnect();
-        audioWorkletNodeRef.current = null;
-      }
-
-      if (activeEngine === 'native-worklet' && isNativeWorkletAvailable) {
-        // ── Native C++/Wasm AudioWorklet engine (Phase 2) ──
-        console.log('[PLAY] Using native C++/Wasm AudioWorklet engine...');
-        try {
-          const engine = nativeEngineRef.current!;
-
-          // Load module data into the native engine
-          const buf = fileDataRef.current?.buffer;
-          if (buf) {
-            console.log('[PLAY] Sending module data to native engine:', buf.byteLength, 'bytes');
-            await engine.load(buf as ArrayBuffer);
-          }
-
-          // Set engine parameters
-          engine.setVolume(volume);
-          engine.setLoop(isLooping);
-
-          // Listen for position updates from the native engine
-          engine.on('position', (data: WorkletPositionData) => {
-            const now = ctx.currentTime;
-            workletOrderRef.current = data.currentOrder;
-            workletRowRef.current = data.currentRow;
-            workletTimeRef.current = data.positionMs / 1000;
-            lastWorkletUpdateRef.current = now;
-
-            // TIMING FIX: Update BPM ref from worklet
-            if (data.bpm && data.bpm > 0) {
-              workletBpmRef.current = data.bpm;
-            }
-
-            // TIMING FIX: Check for seek acknowledgment
-            if (pendingSeekRef.current && 
-                data.currentOrder === pendingSeekRef.current.order && 
-                data.currentRow === pendingSeekRef.current.row) {
-              seekAcknowledgedRef.current = true;
-              pendingSeekRef.current = null;
-            }
-
-            // Update channel VU data
-            const numCh = data.numChannels;
-            for (let c = 0; c < numCh && c < channelStatesRef.current.length; c++) {
-              const existing = channelStatesRef.current[c];
-              channelStatesRef.current[c] = {
-                volume: data.channelVU[c] || 0,
-                pan: existing?.pan ?? 128,
-                freq: existing?.freq ?? 0,
-                trigger: (data.channelVU[c] || 0) > 0.5 ? 1 : 0,
-                noteAge: existing?.noteAge ?? 0,
-                activeEffect: existing?.activeEffect ?? 0,
-                effectValue: existing?.effectValue ?? 0,
-                isMuted: existing?.isMuted ?? 0,
-              };
-            }
-
-            // When the engine supplies new pattern data (on order/pattern change),
-            // convert it to a PatternMatrix and update the sequencer display.
-            if (data.patternData) {
-              const pd = data.patternData;
-              const rows = pd.rows.map((row) =>
-                Array.from({ length: pd.numChannels }, (_, c): import('../types').PatternCell => {
-                  const noteVal = row.notes[c];
-                  const instVal = row.instruments[c];
-                  const volCmdVal = row.volCmds[c];
-                  const volVal = row.volVals[c];
-                  const effCmdVal = row.effCmds[c];
-                  const effVal = row.effVals[c];
-                  const hasNote = (noteVal ?? 0) > 0;
-                  const hasInst = (instVal ?? 0) > 0;
-                  const hasEffect = (effCmdVal ?? 0) > 0 || (effVal ?? 0) > 0;
-                  const type = hasNote ? 'note' : hasInst ? 'instrument' : hasEffect ? 'effect' : 'empty';
-                  return {
-                    type,
-                    text: '',
-                    note: noteVal && noteVal > 0 ? noteVal : undefined,
-                    inst: instVal && instVal > 0 ? instVal : undefined,
-                    volCmd: volCmdVal && volCmdVal > 0 ? volCmdVal : undefined,
-                    volVal: volVal && volVal > 0 ? volVal : undefined,
-                    effCmd: effCmdVal && effCmdVal > 0 ? effCmdVal : undefined,
-                    effVal: effVal && effVal > 0 ? effVal : undefined,
-                  };
-                })
-              );
-              const matrix = {
-                order: data.currentOrder,
-                patternIndex: pd.patternIndex,
-                numRows: pd.numRows,
-                numChannels: pd.numChannels,
-                rows,
-              };
-              patternMatricesRef.current[data.currentOrder] = matrix;
-              setSequencerMatrix(matrix);
-            }
-          });
-
-          engine.on('ended', () => {
-            console.log('[PLAY] Native engine reported module ended');
-            if (isLooping) {
-              seekToStepWrapper(0);
-            } else {
-              stopMusic(false);
-            }
-          });
-
-          // Start playback
-          engine.play();
-          console.log('[PLAY] Native C++/Wasm AudioWorklet engine started');
-        } catch (e) {
-          console.error("[PLAY] Failed to start native engine:", e);
-          console.warn("[PLAY] Falling back to JS AudioWorklet engine");
-          setActiveEngine('worklet');
-          // Continue to existing worklet path below
-        }
-      } else if (activeEngine === 'worklet' && isWorkletSupported) {
-        console.log('[PLAY] Using AudioWorklet engine...');
-
-        try {
-          // Load the worklet module only once per AudioContext
-          if (ctx.audioWorklet && !workletLoadedRef.current) {
-            console.log('[PLAY] ==================================================');
-            console.log('[PLAY] Loading AudioWorklet module...');
-            console.log('[PLAY] Resolved URL:', WORKLET_URL);
-            console.log('[PLAY] BASE_URL:', import.meta.env.BASE_URL);
-            console.log('[PLAY] AudioContext state:', ctx.state);
-            console.log('[PLAY] ==================================================');
-            await ctx.audioWorklet.addModule(WORKLET_URL);
-            workletLoadedRef.current = true;
-            console.log('[PLAY] ✅ AudioWorklet module loaded successfully');
-          } else {
-            console.log('[PLAY] Worklet module already loaded (skipping addModule)');
-          }
-
-          console.log('[PLAY] Creating AudioWorkletNode...');
-          // Shared WASM memory requires cross-origin isolation (COOP/COEP headers).
-          // In production without those headers SharedArrayBuffer is unavailable and
-          // new WebAssembly.Memory({ shared: true }) throws a TypeError, killing play().
-          // The JS AudioWorklet engine manages its own memory, so shared memory is
-          // optional here (only needed for the native C++/Wasm engine).
-          let wasmMemory = wasmMemoryRef.current;
-          const processorOptions: Record<string, unknown> = {};
-          if (!wasmMemory && window.crossOriginIsolated) {
-            console.log('[PLAY] Allocating shared WASM.Memory for worklet (16MB)');
-            wasmMemory = new WebAssembly.Memory({
-              initial: 256, // 256 pages = 16 MB
-              maximum: 256,
-              shared: true
-            });
-            wasmMemoryRef.current = wasmMemory;
-          }
-          if (wasmMemory) processorOptions.memory = wasmMemory;
-          const node = new AudioWorkletNode(ctx, 'openmpt-processor', {
-            numberOfInputs: 0,
-            numberOfOutputs: 1,
-            outputChannelCount: [2],
-            processorOptions
-          });
-          console.log('[PLAY] AudioWorkletNode created:', node);
-
-          node.port.onmessage = (e) => {
-            const { type, order, row, positionSeconds, message, bpm } = e.data;
-            
-            if (type === 'position') {
-              const now = ctx.currentTime;
-              workletOrderRef.current = order;
-              workletRowRef.current = row;
-              workletTimeRef.current = positionSeconds;
-              // TIMING FIX: Use audio context time for consistency
-              lastWorkletUpdateRef.current = now;
-              
-              // TIMING FIX: Update BPM ref from worklet
-              if (bpm && bpm > 0) {
-                workletBpmRef.current = bpm;
-                setModuleInfo(prev => ({ ...prev, bpm }));
-              }
-
-              // TIMING FIX: Check for seek acknowledgment
-              if (pendingSeekRef.current && 
-                  order === pendingSeekRef.current.order && 
-                  row === pendingSeekRef.current.row) {
-                seekAcknowledgedRef.current = true;
-                pendingSeekRef.current = null;
-              }
-            } else if (type === 'ended') {
-              console.log('[PLAY] Worklet reported module ended');
-              if (isLooping) {
-                seekToStepWrapper(0);
-              } else {
-                stopMusic(false);
-              }
-            } else if (type === 'error') {
-              console.error("[PLAY] Worklet error:", message);
-              // Detect WASM init failure and fall back to ScriptProcessorNode
-              if ((message?.includes('Lib init failed') || message?.includes('WASM library init timeout'))
-                  && !spFallbackTriggered.current) {
-                spFallbackTriggered.current = true;
-                console.warn('[PLAY] Worklet WASM init failed — falling back to ScriptProcessorNode');
-                try { node.disconnect(); } catch (_e) { /* ignore */ }
-                audioWorkletNodeRef.current = null;
-
-                const lib = libopenmptRef.current;
-                const modPtr = currentModulePtr.current;
-                if (lib && modPtr) {
-                  const SP_BUFFER = 4096;
-                  const spNode = ctx.createScriptProcessor(SP_BUFFER, 0, 2);
-                  const leftPtr = lib._malloc(4 * SP_BUFFER);
-                  const rightPtr = lib._malloc(4 * SP_BUFFER);
-                  spLeftBufPtr.current = leftPtr;
-                  spRightBufPtr.current = rightPtr;
-                  // Best-quality interpolation
-                  lib._openmpt_module_set_render_param(modPtr, 2, 8);
-
-                  spNode.onaudioprocess = (audioEvt) => {
-                    const outL = audioEvt.outputBuffer.getChannelData(0);
-                    const outR = audioEvt.outputBuffer.getChannelData(1);
-                    const mPtr = currentModulePtr.current;
-                    const mLib = libopenmptRef.current;
-                    if (!mLib || !mPtr) { outL.fill(0); outR.fill(0); return; }
-
-                    const written = mLib._openmpt_module_read_float_stereo(
-                      mPtr, ctx.sampleRate, SP_BUFFER, leftPtr, rightPtr
-                    );
-                    if (written > 0) {
-                      outL.set(new Float32Array(mLib.HEAPF32.buffer, leftPtr, written));
-                      outR.set(new Float32Array(mLib.HEAPF32.buffer, rightPtr, written));
-                      if (written < SP_BUFFER) { outL.fill(0, written); outR.fill(0, written); }
-                    } else {
-                      outL.fill(0); outR.fill(0);
-                    }
-
-                    // Update position refs for UI
-                    workletOrderRef.current = mLib._openmpt_module_get_current_order(mPtr);
-                    workletRowRef.current = mLib._openmpt_module_get_current_row(mPtr);
-                    workletTimeRef.current = mLib._openmpt_module_get_position_seconds(mPtr);
-                    lastWorkletUpdateRef.current = ctx.currentTime;
-                  };
-
-                  spNode.connect(analyserRef.current!);
-                  scriptProcessorRef.current = spNode;
-
-                  isPlayingRef.current = true;
-                  setIsPlaying(true);
-                  setStatus("Playing (ScriptProcessor fallback)...");
-                  if (animationFrameHandle.current) cancelAnimationFrame(animationFrameHandle.current);
-                  animationFrameHandle.current = requestAnimationFrame(updateUI);
-                } else {
-                  setStatus("Error: no module loaded for ScriptProcessor fallback");
-                }
-              } else if (!spFallbackTriggered.current) {
-                setStatus("Worklet error: " + message);
-              }
-            } else if (type === 'loaded') {
-              // Module is now loaded inside the worklet – safe to start the UI.
-              // This deferred start avoids the ~1-2 s off-timing caused by WASM
-              // initialisation happening after isPlaying was already set to true.
-              console.log("[PLAY] Worklet loaded module – starting animation");
-              isPlayingRef.current = true;
-              setIsPlaying(true);
-              setStatus("Playing...");
-              if (animationFrameHandle.current) cancelAnimationFrame(animationFrameHandle.current);
-              animationFrameHandle.current = requestAnimationFrame(updateUI);
-            } else if (type === 'seekAck') {
-              // TIMING FIX: Worklet acknowledged seek
-              seekAcknowledgedRef.current = true;
-              pendingSeekRef.current = null;
-            }
-          };
-
-          // Send module data (cloned, not transferred, so fileDataRef remains valid)
-          const buf = fileDataRef.current?.buffer;
-          if (buf) {
-            console.log('[PLAY] Sending module data to worklet:', buf.byteLength, 'bytes');
-            node.port.postMessage({ type: 'load', moduleData: buf });
-          } else {
-            console.error("[PLAY] No buffer to send to worklet!");
-          }
-
-          console.log('[PLAY] Connecting audio graph: worklet -> analyser -> panner -> gain -> destination');
-          node.connect(analyserRef.current!);
-          analyserRef.current!.connect(stereoPannerRef.current!);
-          stereoPannerRef.current!.connect(gainNodeRef.current!);
-          gainNodeRef.current!.connect(ctx.destination);
-
-          audioWorkletNodeRef.current = node;
-          // Show a loading state while the 4.8 MB WASM finishes initialising.
-          // isPlaying will be set to true via the 'loaded' message handler above.
-          setStatus("Loading audio engine...");
-          console.log('[PLAY] AudioWorklet setup complete – waiting for WASM loaded event');
-        } catch (e) {
-          console.error("[PLAY] Failed to create/load AudioWorkletNode:", e);
-          workletLoadedRef.current = false;
-          setStatus("Error: AudioWorklet failed to start (no ScriptProcessor fallback).");
-          return;
-        }
-      } else {
-        setStatus("Error: AudioWorklet not supported/available.");
-        return;
-      }
-
-      if (!audioWorkletNodeRef.current && activeEngine === 'native-worklet') {
-        isPlayingRef.current = true;
-        setIsPlaying(true);
-        setStatus("Playing...");
-        animationFrameHandle.current = requestAnimationFrame(updateUI);
-      }
-
-    } catch (e) {
-      console.error("[PLAY] Play error:", e);
-      setStatus("Error starting playback");
-    }
+    const audioRefs: AudioGraphRefs = {
+      libopenmptRef, fileDataRef, audioContextRef, workletLoadedRef,
+      stereoPannerRef, gainNodeRef, analyserRef, audioWorkletNodeRef,
+      nativeEngineRef, wasmMemoryRef, workletOrderRef, workletRowRef,
+      workletTimeRef, lastWorkletUpdateRef, workletBpmRef, pendingSeekRef,
+      seekAcknowledgedRef, spFallbackTriggered, scriptProcessorRef,
+      spLeftBufPtr, spRightBufPtr, isPlayingRef, animationFrameHandle,
+      currentModulePtr, channelStatesRef, patternMatricesRef,
+      audioClockStartRef, workletTimeAtStartRef, driftAccumulatorRef,
+    };
+    const audioCbs: AudioGraphCallbacks = {
+      setStatus, setIsPlaying, setActiveEngine, setModuleInfo, setSequencerMatrix,
+      stopMusic, seekToStepWrapper, updateUI,
+    };
+    const audioConfig: AudioGraphConfig = {
+      activeEngine, isWorkletSupported, isNativeWorkletAvailable,
+      panValue, volume, isLooping, WORKLET_URL,
+    };
+    await startAudioPlayback(audioRefs, audioCbs, audioConfig);
   }, [activeEngine, isWorkletSupported, isNativeWorkletAvailable, panValue, volume, isLooping, stopMusic, seekToStepWrapper, updateUI]);
 
   // Keep playRef always pointing to the latest play function
@@ -980,10 +586,10 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
         console.log("[INIT] Testing AudioWorklet support (API-level only)...");
         try {
           // Simple API capability check without creating AudioContext or loading modules
-          const hasWorklet = typeof window !== 'undefined' && 
-            'AudioContext' in window && 
+          const hasWorklet = typeof window !== 'undefined' &&
+            'AudioContext' in window &&
             'audioWorklet' in AudioContext.prototype;
-          
+
           if (hasWorklet) {
             setIsWorkletSupported(true);
             setActiveEngine('worklet');
