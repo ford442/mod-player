@@ -212,7 +212,8 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     bloomIntensity, bloomThreshold, dimFactor, volume, pan, isLooping,
     invertChannels, clickedButton, cellWidth, cellHeight, playheadRow,
     localTime, isHorizontal, externalVideoSource,
-    canvasMetrics, totalRows,
+    canvasMetrics,
+    ...(totalRows !== undefined ? { totalRows } : {}),
     ...(playbackStateRef ? { playbackStateRef } : {}),
   });
   renderParamsRef.current = {
@@ -221,7 +222,8 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     bloomIntensity, bloomThreshold, dimFactor, volume, pan, isLooping,
     invertChannels, clickedButton, cellWidth, cellHeight, playheadRow,
     localTime, isHorizontal, externalVideoSource,
-    canvasMetrics, totalRows,
+    canvasMetrics,
+    ...(totalRows !== undefined ? { totalRows } : {}),
     ...(playbackStateRef ? { playbackStateRef } : {}),
   };
 
