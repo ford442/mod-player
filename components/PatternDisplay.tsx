@@ -234,10 +234,11 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     ...(playbackStateRef ? { playbackStateRef } : {}),
   }, setDebugInfo);
 
-  // WebGPU render hook
+  // WebGPU render hook — matrix and padTopChannel passed directly so React tracks them as
+  // explicit deps, guaranteeing the cells buffer is rebuilt when a new module is loaded.
   const { gpuReady, render, deviceRef: gpuDevRef } = useWebGPURender(
     canvasRef, glCanvasRef, shaderFile,
-    syncCanvasSize, renderParamsRef, setDebugInfo, setWebgpuAvailable
+    syncCanvasSize, renderParamsRef, matrix, padTopChannel, setDebugInfo, setWebgpuAvailable
   );
 
   // Keep resize reconfiguration refs in sync
