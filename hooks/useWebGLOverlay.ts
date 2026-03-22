@@ -503,11 +503,11 @@ export function useWebGLOverlay(
 
       const setUniform = <T extends (loc: WebGLUniformLocation | null, ...args: any[]) => void>(
         _name: string,
-        location: WebGLUniformLocation | null,
+        location: WebGLUniformLocation | null | undefined,
         setter: T,
         ...args: Parameters<T> extends [any, ...infer R] ? R : never
       ) => {
-        if (location !== null) {
+        if (location != null) {
           (setter as any)(location, ...args);
           return true;
         }
@@ -540,7 +540,7 @@ export function useWebGLOverlay(
       gl.bindTexture(gl.TEXTURE_2D, texture);
       setUniform('u_noteData', uniforms.u_noteData, gl.uniform1i.bind(gl), 0);
 
-      if (res.capTexture && uniforms.u_capTexture !== null) {
+      if (res.capTexture && uniforms.u_capTexture != null) {
         gl.activeTexture(gl.TEXTURE1);
         gl.bindTexture(gl.TEXTURE_2D, res.capTexture);
         gl.uniform1i(uniforms.u_capTexture, 1);
@@ -570,25 +570,25 @@ export function useWebGLOverlay(
           offsetY = metrics.offsetY;
           layoutModeName = '32-STEP';
         }
-        if (uniforms.u_offset !== null) gl.uniform2f(uniforms.u_offset, offsetX, offsetY);
+        if (uniforms.u_offset != null) gl.uniform2f(uniforms.u_offset, offsetX, offsetY);
       } else if (layoutMode === LAYOUT_MODES.HORIZONTAL_64) {
         const metrics = calculateHorizontalCellSize(gl.canvas.width, gl.canvas.height, 64, channelCount);
         effectiveCellW = metrics.cellW;
         effectiveCellH = metrics.cellH;
         offsetX = metrics.offsetX;
         offsetY = metrics.offsetY;
-        if (uniforms.u_offset !== null) gl.uniform2f(uniforms.u_offset, offsetX, offsetY);
+        if (uniforms.u_offset != null) gl.uniform2f(uniforms.u_offset, offsetX, offsetY);
         layoutModeName = '64-STEP';
       } else {
-        if (uniforms.u_offset !== null) gl.uniform2f(uniforms.u_offset, 0.0, 0.0);
+        if (uniforms.u_offset != null) gl.uniform2f(uniforms.u_offset, 0.0, 0.0);
         layoutModeName = 'CIRCULAR';
       }
 
       const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
       const capScale = calculateCapScale(effectiveCellW, effectiveCellH, pixelRatio);
 
-      if (uniforms.u_cellSize !== null) gl.uniform2f(uniforms.u_cellSize, effectiveCellW, effectiveCellH);
-      if (uniforms.u_layoutMode !== null) gl.uniform1i(uniforms.u_layoutMode, layoutMode);
+      if (uniforms.u_cellSize != null) gl.uniform2f(uniforms.u_cellSize, effectiveCellW, effectiveCellH);
+      if (uniforms.u_layoutMode != null) gl.uniform1i(uniforms.u_layoutMode, layoutMode);
 
       uniformVals['u_offset'] = `${offsetX.toFixed(1)}, ${offsetY.toFixed(1)}`;
       uniformVals['u_cellSize'] = `${effectiveCellW.toFixed(1)}, ${effectiveCellH.toFixed(1)}`;
