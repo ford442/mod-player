@@ -60,16 +60,16 @@ export class BloomPostProcessor {
 
   // Call once after construction
   public async init() {
-    // Try to load shader code if not supplied
-    if (!this.thresholdShaderCode) {
-      this.thresholdShaderCode = await this.tryFetch(`${this.baseUrl}/shaders/bloom_threshold.wgsl`);
-    }
-    if (!this.blurShaderCode) {
-      this.blurShaderCode = await this.tryFetch(`${this.baseUrl}/shaders/bloom_blur.wgsl`);
-    }
-    if (!this.compositeShaderCode) {
-      this.compositeShaderCode = await this.tryFetch(`${this.baseUrl}/shaders/bloom_composite.wgsl`);
-    }
+    // Try to load shader code if not supplied, fetching concurrently if needed
+    const [t, b, c] = await Promise.all([
+      this.thresholdShaderCode ? Promise.resolve(this.thresholdShaderCode) : this.tryFetch(`${this.baseUrl}/shaders/bloom_threshold.wgsl`),
+      this.blurShaderCode ? Promise.resolve(this.blurShaderCode) : this.tryFetch(`${this.baseUrl}/shaders/bloom_blur.wgsl`),
+      this.compositeShaderCode ? Promise.resolve(this.compositeShaderCode) : this.tryFetch(`${this.baseUrl}/shaders/bloom_composite.wgsl`)
+    ]);
+
+    this.thresholdShaderCode = t;
+    this.blurShaderCode = b;
+    this.compositeShaderCode = c;
 
     // Create textures
     const width = this.canvas.width;
