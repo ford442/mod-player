@@ -104,6 +104,7 @@ export const packPatternMatrix = (matrix: PatternMatrix | null, padTopChannel = 
       let volVal = 0;
       let effCmd = 0;
       let effVal = 0;
+      let wordB = 0;
       
       if (cell) {
         // First try numeric fields (from getPatternMatrix)
@@ -114,6 +115,7 @@ export const packPatternMatrix = (matrix: PatternMatrix | null, padTopChannel = 
           volVal = cell.volVal || 0;
           effCmd = cell.effCmd || 0;
           effVal = cell.effVal || 0;
+          wordB = ((effCmd & 0xFF) << 8) | (effVal & 0xFF);
         }
         // Fall back to parsing text if available
         else if (cell.text && cell.text.trim()) {
@@ -123,15 +125,13 @@ export const packPatternMatrix = (matrix: PatternMatrix | null, padTopChannel = 
           const instMatch = text.match(/(\d{1,3})$/);
           inst = instMatch?.[1] ? Math.min(255, parseInt(instMatch[1], 10)) : 0;
           note = encodeNoteText(notePart);
-          packed[offset + 1] = parsePackedB(text) >>> 0;
+          wordB = parsePackedB(text) >>> 0;
         }
       }
       
       // Always write packed data for this cell position
       packed[offset] = ((note & 0xFF) << 24) | ((inst & 0xFF) << 16) | ((volCmd & 0xFF) << 8) | (volVal & 0xFF);
-      if (!cell?.text) {
-        packed[offset + 1] = ((effCmd & 0xFF) << 8) | (effVal & 0xFF);
-      }
+      packed[offset + 1] = wordB;
     }
   }
   return packed;
