@@ -174,16 +174,22 @@ export const encodeNoteText = (notePart: string): number => {
   return noteBase > 0 ? (octave + 1) * 12 + noteBase : 0;
 };
 
-export const packPatternMatrix = (matrix: PatternMatrix | null, padTopChannel = false): Uint32Array => {
+export interface PackedPatternData {
+  packedData: Uint32Array;
+  noteCount: number;
+}
+
+export const packPatternMatrix = (matrix: PatternMatrix | null, padTopChannel = false): PackedPatternData => {
   const rawChannels = matrix?.numChannels ?? DEFAULT_CHANNELS;
   const numRows = matrix?.numRows ?? DEFAULT_ROWS;
   const numChannels = padTopChannel ? rawChannels + 1 : rawChannels;
-  const packed = new Uint32Array(numRows * numChannels * 2);
+  const packedData = new Uint32Array(numRows * numChannels * 2);
 
-  if (!matrix) return packed;
+  if (!matrix) return { packedData, noteCount: 0 };
 
   const { rows } = matrix;
   const startCol = padTopChannel ? 1 : 0;
+  let noteCount = 0;
 
   for (let r = 0; r < numRows; r++) {
     const rowCells = rows[r] || [];
@@ -208,26 +214,27 @@ export const packPatternMatrix = (matrix: PatternMatrix | null, padTopChannel = 
           const instMatch = text.match(/(\d{1,3})$/);
           inst = instMatch?.[1] ? Math.min(255, parseInt(instMatch[1], 10)) : 0;
           note = encodeNoteText(notePart);
-          packed[offset + 1] = parsePackedB(text) >>> 0;
+          packedData[offset + 1] = parsePackedB(text) >>> 0;
         }
+        if (note > 0) noteCount++;
       }
 
-      packed[offset] = ((note & 0xFF) << 24) | ((inst & 0xFF) << 16) | ((volCmd & 0xFF) << 8) | (volVal & 0xFF);
+      packedData[offset] = ((note & 0xFF) << 24) | ((inst & 0xFF) << 16) | ((volCmd & 0xFF) << 8) | (volVal & 0xFF);
       if (!cell?.text) {
-        packed[offset + 1] = ((effCmd & 0xFF) << 8) | (effVal & 0xFF);
+        packedData[offset + 1] = ((effCmd & 0xFF) << 8) | (effVal & 0xFF);
       }
     }
   }
-  return packed;
+  return { packedData, noteCount };
 };
 
-export const packPatternMatrixHighPrecision = (matrix: PatternMatrix | null, padTopChannel = false): Uint32Array => {
+export const packPatternMatrixHighPrecision = (matrix: PatternMatrix | null, padTopChannel = false): PackedPatternData => {
   const rawChannels = matrix?.numChannels ?? DEFAULT_CHANNELS;
   const numRows = matrix?.numRows ?? DEFAULT_ROWS;
   const numChannels = padTopChannel ? rawChannels + 1 : rawChannels;
-  const packed = new Uint32Array(numRows * numChannels * 2);
+  const packedData = new Uint32Array(numRows * numChannels * 2);
 
-  if (!matrix) return packed;
+  if (!matrix) return { packedData, noteCount: 0 };
 
   const { rows } = matrix;
   const startCol = padTopChannel ? 1 : 0;
@@ -261,14 +268,14 @@ export const packPatternMatrixHighPrecision = (matrix: PatternMatrix | null, pad
         if (note > 0) notesPacked++;
       }
 
-      packed[offset] = ((note & 0xFF) << 24) | ((inst & 0xFF) << 16) | ((volCmd & 0xFF) << 8) | (volVal & 0xFF);
-      packed[offset + 1] = ((effCmd & 0xFF) << 8) | (effVal & 0xFF);
+      packedData[offset] = ((note & 0xFF) << 24) | ((inst & 0xFF) << 16) | ((volCmd & 0xFF) << 8) | (volVal & 0xFF);
+      packedData[offset + 1] = ((effCmd & 0xFF) << 8) | (effVal & 0xFF);
     }
   }
 
   console.log(`[packPatternMatrixHighPrecision] Packed ${notesPacked} notes into ${totalCells} cells (${numRows} rows x ${numChannels} channels)`);
 
-  return packed;
+  return { packedData, noteCount: notesPacked };
 };
 
 export const createBufferWithData = (device: GPUDevice, data: ArrayBufferView | ArrayBuffer, usage: GPUBufferUsageFlags): GPUBuffer => {

@@ -300,7 +300,8 @@ export function useWebGPURender(
         const p = renderParamsRef.current;
         const isHighPrec = shaderFile.includes('v0.36') || shaderFile.includes('v0.37') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.47') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49') || shaderFile.includes('v0.50');
         const packFunc = isHighPrec ? packPatternMatrixHighPrecision : packPatternMatrix;
-        cellsBufferRef.current = createBufferWithData(device, packFunc(p.matrix, p.padTopChannel), GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
+        const { packedData } = packFunc(p.matrix, p.padTopChannel);
+        cellsBufferRef.current = createBufferWithData(device, packedData, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
 
         if (layoutType === 'extended') {
           const numRows = p.matrix?.numRows ?? DEFAULT_ROWS;
@@ -370,12 +371,7 @@ export function useWebGPURender(
     if (cellsBufferRef.current) cellsBufferRef.current.destroy();
     const isHighPrec = shaderFile.includes('v0.36') || shaderFile.includes('v0.37') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.47') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49') || shaderFile.includes('v0.50');
     const packFunc = isHighPrec ? packPatternMatrixHighPrecision : packPatternMatrix;
-    const packedData = packFunc(p.matrix, p.padTopChannel);
-    let noteCount = 0;
-    for (let i = 0; i < packedData.length; i += 2) {
-      const note = ((packedData[i] ?? 0) >> 24) & 0xFF;
-      if (note > 0) noteCount++;
-    }
+    const { packedData, noteCount } = packFunc(p.matrix, p.padTopChannel);
     console.log(`[PatternDisplay] Packed data contains ${noteCount} notes in ${packedData.length / 2} cells`);
     cellsBufferRef.current = createBufferWithData(device, packedData, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
     if (layoutTypeRef.current === 'extended') {
