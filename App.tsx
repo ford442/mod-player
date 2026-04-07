@@ -49,7 +49,7 @@ const SHADER_GROUPS = {
 };
 
 function App() {
-  const [shaderFile, setShaderFile] = useState<string>('patternv0.40.wgsl');
+  const [shaderFile, setShaderFile] = useState<string>('patternv0.50.wgsl');
   const [volume, setVolume] = useState<number>(0.5);
   const [pan, setPan] = useState<number>(0.0);
 

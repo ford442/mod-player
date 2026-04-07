@@ -175,7 +175,7 @@ export async function startAudioPlayback(
               volume: data.channelVU[c] || 0,
               pan: existing?.pan ?? 128,
               freq: existing?.freq ?? 0,
-              trigger: (data.channelVU[c] || 0) > 0.5 ? 1 : 0,
+              trigger: (data.channelVU[c] || 0) > 0.05 ? 1 : 0,
               noteAge: existing?.noteAge ?? 0,
               activeEffect: existing?.activeEffect ?? 0,
               effectValue: existing?.effectValue ?? 0,
