@@ -395,6 +395,20 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     let hasNote = (note > 0u);
     let hasExpression = (volCmd > 0u) || (effCmd > 0u);
 
+    // Housing color: tint by note presence (restore color-per-note display)
+    var housingColor = fs.bgColor;
+    if (hasNote) {
+      let pitchHue = pitchClassFromIndex(note);
+      let baseColor = neonPalette(pitchHue);
+      let instBand = inst & 15u;
+      let instBright = 0.85 + (select(0.0, f32(instBand) / 15.0, instBand > 0u)) * 0.15;
+      let tintColor = baseColor * instBright;
+      housingColor = mix(fs.bgColor, tintColor, 0.35);
+    }
+
+    // Start with tinted housing background
+    finalColor = housingColor;
+
     // Bounds check for channel state array access
     var ch = ChannelState(0.0, 0.0, 0.0, 0u, 1000.0, 0u, 0.0, 0u);
     if (in.channel < arrayLength(&channels)) {
@@ -411,8 +425,8 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     if (!isMuted) {
       if (ch.trigger > 0u) {
         topIntensity = 2.5;
-      } else if (playheadActivation > 0.5) {
-        topIntensity = playheadActivation * 1.2;
+      } else if (hasNote) {
+        topIntensity = playheadActivation * 1.5;
       }
     }
     let topColor = blueColor * (1.5 + bloom * 2.0);
@@ -438,8 +452,12 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     // Lights up AMBER when there's an effect or volume command
     let amberColor = vec3<f32>(1.0, 0.55, 0.1);
     var botIntensity = 0.0;
-    if (!isMuted && hasExpression) {
-      botIntensity = 2.0;
+    if (!isMuted) {
+      if (hasExpression) {
+        botIntensity = 2.0;
+      } else if (hasNote && playheadActivation > 0.5) {
+        botIntensity = 0.6;
+      }
     }
     let botColor = amberColor * (1.5 + bloom * 2.0);
     
