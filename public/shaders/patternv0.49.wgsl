@@ -289,11 +289,6 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   let rowDist = min(rowDistRaw, 64.0 - rowDistRaw);
   let playheadActivation = 1.0 - smoothstep(0.0, 1.5, rowDist);
 
-  // Hardware Layering: Discard pixels over UI — SAFE HERE after playheadActivation computed
-  if (in.position.y > uniforms.canvasH * 0.88) {
-    discard;
-  }
-
   // CHANNEL 0 is the Indicator Ring (padTopChannel shifts music to 1-32)
   if (in.channel == 0u) {
     let onPlayhead = playheadActivation > 0.5;
@@ -354,9 +349,9 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     var topIntensity = 0.0;
     if (!isMuted) {
       if (ch.trigger > 0u) {
-        topIntensity = 1.0 + bloom;
+        topIntensity = 2.5;
       } else if (playheadActivation > 0.5) {
-        topIntensity = playheadActivation * 0.6;
+        topIntensity = playheadActivation * 1.2;
       }
     }
 
@@ -381,7 +376,7 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     let amberColor = vec3<f32>(1.0, 0.55, 0.1);
     var botIntensity = 0.0;
     if (!isMuted && hasExpression) {
-      botIntensity = 0.8 + bloom;
+      botIntensity = 2.0;
     }
 
     // --- RENDER UNIFIED GLASS LENS ---
@@ -398,13 +393,20 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
 
     finalColor = mix(finalColor, lens.rgb, lens.a);
 
-    // Add external glow when active
+    // External glow — bloom-independent so LEDs are always visible
     if (topIntensity > 0.0 || botIntensity > 0.0 || midIntensity > 0.5) {
       let totalActivity = topIntensity + botIntensity + (midIntensity - 0.12);
       let glowColor = mix(midColor, blueColor, topIntensity * 0.5);
       let glowColor2 = mix(glowColor, amberColor, botIntensity * 0.5);
-      let externalGlow = glowColor2 * totalActivity * bloom * 2.0 * exp(-length(p) * 4.0);
+      let externalGlow = glowColor2 * totalActivity * (0.3 + bloom * 1.5) * exp(-length(p) * 4.0);
       finalColor += externalGlow;
+    }
+    // Direct LED glow independent of bloom
+    if (!isMuted && ch.trigger > 0u) {
+      finalColor += blueColor * 0.4 * exp(-length(p) * 3.5);
+    }
+    if (!isMuted && hasExpression) {
+      finalColor += amberColor * 0.3 * exp(-length(p) * 3.5);
     }
   }
 
