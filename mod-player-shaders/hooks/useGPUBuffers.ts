@@ -80,16 +80,22 @@ const parsePackedB = (text: string) => {
          ((effCode & 0xff) << 8) | (effParam & 0xff);
 };
 
-export const packPatternMatrix = (matrix: PatternMatrix | null, padTopChannel = false): Uint32Array => {
+export interface PackedPatternData {
+  packedData: Uint32Array;
+  noteCount: number;
+}
+
+export const packPatternMatrix = (matrix: PatternMatrix | null, padTopChannel = false): PackedPatternData => {
   const rawChannels = matrix?.numChannels ?? DEFAULT_CHANNELS;
   const numRows = matrix?.numRows ?? DEFAULT_ROWS;
   const numChannels = padTopChannel ? rawChannels + 1 : rawChannels;
-  const packed = new Uint32Array(numRows * numChannels * 2);
+  const packedData = new Uint32Array(numRows * numChannels * 2);
 
-  if (!matrix) return packed;
+  if (!matrix) return { packedData, noteCount: 0 };
 
   const { rows } = matrix;
   const startCol = padTopChannel ? 1 : 0;
+  let noteCount = 0;
 
   for (let r = 0; r < numRows; r++) {
     const rowCells = rows[r] || [];
@@ -104,6 +110,7 @@ export const packPatternMatrix = (matrix: PatternMatrix | null, padTopChannel = 
       let volVal = 0;
       let effCmd = 0;
       let effVal = 0;
+      let wordB = 0;
       
       if (cell) {
         // First try numeric fields (from getPatternMatrix)
@@ -114,6 +121,7 @@ export const packPatternMatrix = (matrix: PatternMatrix | null, padTopChannel = 
           volVal = cell.volVal || 0;
           effCmd = cell.effCmd || 0;
           effVal = cell.effVal || 0;
+          wordB = ((effCmd & 0xFF) << 8) | (effVal & 0xFF);
         }
         // Fall back to parsing text if available
         else if (cell.text && cell.text.trim()) {
@@ -123,27 +131,26 @@ export const packPatternMatrix = (matrix: PatternMatrix | null, padTopChannel = 
           const instMatch = text.match(/(\d{1,3})$/);
           inst = instMatch?.[1] ? Math.min(255, parseInt(instMatch[1], 10)) : 0;
           note = encodeNoteText(notePart);
-          packed[offset + 1] = parsePackedB(text) >>> 0;
+          wordB = parsePackedB(text) >>> 0;
         }
+        if (note > 0) noteCount++;
       }
       
       // Always write packed data for this cell position
-      packed[offset] = ((note & 0xFF) << 24) | ((inst & 0xFF) << 16) | ((volCmd & 0xFF) << 8) | (volVal & 0xFF);
-      if (!cell?.text) {
-        packed[offset + 1] = ((effCmd & 0xFF) << 8) | (effVal & 0xFF);
-      }
+      packedData[offset] = ((note & 0xFF) << 24) | ((inst & 0xFF) << 16) | ((volCmd & 0xFF) << 8) | (volVal & 0xFF);
+      packedData[offset + 1] = wordB;
     }
   }
-  return packed;
+  return { packedData, noteCount };
 };
 
-export const packPatternMatrixHighPrecision = (matrix: PatternMatrix | null, padTopChannel = false): Uint32Array => {
+export const packPatternMatrixHighPrecision = (matrix: PatternMatrix | null, padTopChannel = false): PackedPatternData => {
   const rawChannels = matrix?.numChannels ?? DEFAULT_CHANNELS;
   const numRows = matrix?.numRows ?? DEFAULT_ROWS;
   const numChannels = padTopChannel ? rawChannels + 1 : rawChannels;
-  const packed = new Uint32Array(numRows * numChannels * 2);
+  const packedData = new Uint32Array(numRows * numChannels * 2);
 
-  if (!matrix) return packed;
+  if (!matrix) return { packedData, noteCount: 0 };
 
   const { rows } = matrix;
   const startCol = padTopChannel ? 1 : 0;
@@ -187,15 +194,15 @@ export const packPatternMatrixHighPrecision = (matrix: PatternMatrix | null, pad
       }
 
       // ALWAYS write packed data for this cell position
-      packed[offset] = ((note & 0xFF) << 24) | ((inst & 0xFF) << 16) | ((volCmd & 0xFF) << 8) | (volVal & 0xFF);
-      packed[offset + 1] = ((effCmd & 0xFF) << 8) | (effVal & 0xFF);
+      packedData[offset] = ((note & 0xFF) << 24) | ((inst & 0xFF) << 16) | ((volCmd & 0xFF) << 8) | (volVal & 0xFF);
+      packedData[offset + 1] = ((effCmd & 0xFF) << 8) | (effVal & 0xFF);
     }
   }
   
   // DEBUG: Log packing statistics
   console.log(`[packPatternMatrixHighPrecision] Packed ${notesPacked} notes into ${totalCells} cells (${numRows} rows x ${numChannels} channels)`);
   
-  return packed;
+  return { packedData, noteCount: notesPacked };
 };
 
 export const createBufferWithData = (
@@ -302,9 +309,10 @@ export function useGPUBuffers({
     }
 
     const packFunc = isHighPrecision ? packPatternMatrixHighPrecision : packPatternMatrix;
+    const { packedData } = packFunc(matrix, padTopChannel);
     cellsBufferRef.current = createBufferWithData(
       device,
-      packFunc(matrix, padTopChannel),
+      packedData,
       GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
     );
 
