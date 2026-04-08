@@ -85,6 +85,8 @@ export function useWebGPURender(
   shaderFile: string,
   syncCanvasSize: (canvas: HTMLCanvasElement, gl: HTMLCanvasElement | null) => void,
   renderParamsRef: React.MutableRefObject<WebGPURenderParams>,
+  matrix: import('../types').PatternMatrix | null,
+  padTopChannel: boolean,
   setDebugInfo: React.Dispatch<React.SetStateAction<DebugInfo>>,
   setWebgpuAvailable: (v: boolean) => void
 ) {
@@ -362,20 +364,26 @@ export function useWebGPURender(
     };
   }, [shaderFile, syncCanvasSize]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Update cells buffer when matrix changes
+  // Update cells buffer when matrix changes.
+  // Uses `matrix` and `padTopChannel` as direct React deps (not via renderParamsRef) so React
+  // reliably detects new-module loads even if the ref mutation timing is ambiguous.
   useEffect(() => {
     const device = deviceRef.current;
     if (!device || !gpuReady) return;
-    const p = renderParamsRef.current;
-    console.log(`[PatternDisplay] Updating cells buffer: matrix=${p.matrix ? 'yes' : 'null'}, rows=${p.matrix?.numRows}, channels=${p.matrix?.numChannels}`);
+    console.log(`[PatternDisplay] Updating cells buffer: matrix=${matrix ? 'yes' : 'null'}, rows=${matrix?.numRows}, channels=${matrix?.numChannels}`);
     if (cellsBufferRef.current) cellsBufferRef.current.destroy();
     const isHighPrec = shaderFile.includes('v0.36') || shaderFile.includes('v0.37') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.47') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49') || shaderFile.includes('v0.50');
     const packFunc = isHighPrec ? packPatternMatrixHighPrecision : packPatternMatrix;
     const { packedData, noteCount } = packFunc(p.matrix, p.padTopChannel);
+    let noteCount = 0;
+    for (let i = 0; i < packedData.length; i += 2) {
+      const note = ((packedData[i] ?? 0) >> 24) & 0xFF;
+      if (note > 0) noteCount++;
+    }
     console.log(`[PatternDisplay] Packed data contains ${noteCount} notes in ${packedData.length / 2} cells`);
     cellsBufferRef.current = createBufferWithData(device, packedData, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
     if (layoutTypeRef.current === 'extended') {
-      const numRows = p.matrix?.numRows ?? DEFAULT_ROWS;
+      const numRows = matrix?.numRows ?? DEFAULT_ROWS;
       const flags = buildRowFlags(numRows);
       if (!rowFlagsBufferRef.current || rowFlagsBufferRef.current.size < flags.byteLength) {
         rowFlagsBufferRef.current?.destroy();
@@ -385,7 +393,7 @@ export function useWebGPURender(
       }
     }
     refreshBindGroup(device);
-  }, [renderParamsRef.current.matrix, gpuReady, shaderFile, refreshBindGroup]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [matrix, padTopChannel, gpuReady, shaderFile, refreshBindGroup]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Update channel states buffer
   useEffect(() => {
@@ -411,7 +419,7 @@ export function useWebGPURender(
       }
       if (recreated) refreshBindGroup(device);
     }
-  }, [renderParamsRef.current.channels, renderParamsRef.current.matrix?.numChannels, gpuReady, refreshBindGroup]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [renderParamsRef.current.channels, matrix?.numChannels, padTopChannel, gpuReady, refreshBindGroup]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Stable render function — reads from renderParamsRef to avoid stale closures
   const render = useCallback(() => {
