@@ -256,17 +256,17 @@ fn drawUnifiedLensCap(
     // Top emitter scattering (Blue - note on)
     let distTop = length(uv - topPos - refractOffset * 0.3);
     let scatterTop = exp(-distTop * 5.0) * topEmitter.a;
-    subsurfaceGlow += topEmitter.rgb * scatterTop * 0.8;
-    
+    subsurfaceGlow += topEmitter.rgb * scatterTop * 3.5;
+
     // Middle emitter scattering (Note color - steady)
     let distMid = length(uv - midPos - refractOffset * 0.5);
     let scatterMid = exp(-distMid * 4.0) * midEmitter.a;
-    subsurfaceGlow += midEmitter.rgb * scatterMid * 1.5;
-    
+    subsurfaceGlow += midEmitter.rgb * scatterMid * 5.0;
+
     // Bottom emitter scattering (Amber - control)
     let distBot = length(uv - botPos - refractOffset * 0.3);
     let scatterBot = exp(-distBot * 5.0) * botEmitter.a;
-    subsurfaceGlow += botEmitter.rgb * scatterBot * 0.8;
+    subsurfaceGlow += botEmitter.rgb * scatterBot * 3.5;
     
     let totalGlow = topEmitter.a + midEmitter.a + botEmitter.a;
     let diffusion = exp(-radial * 3.0) * totalGlow * 0.3;
@@ -285,10 +285,11 @@ fn drawUnifiedLensCap(
     // Edge alpha
     let edgeAlpha = smoothstep(0.0, aa * 2.0, -dBox);
     
-    // Glass transparency
+    // Glass transparency — reduce opacity when active emitters are lit
     let diodeVisibility = diodeMask * 0.55;
     let baseAlpha = 0.72 + 0.28 * fresnel;
-    let alpha = mix(baseAlpha, 0.32, diodeVisibility) * edgeAlpha;
+    let emitterLift = clamp(topEmitter.a * 0.4 + botEmitter.a * 0.4, 0.0, 0.7);
+    let alpha = mix(baseAlpha, 0.32, min(diodeVisibility + emitterLift, 0.9)) * edgeAlpha;
     
     // Directional lighting
     let lightDir = vec3<f32>(0.4, -0.7, 0.6);
@@ -303,7 +304,7 @@ fn drawUnifiedLensCap(
     let diodeBlend = diodeMask * (1.0 - alpha * 0.65);
     finalColor = mix(finalColor, combinedDiode, diodeBlend);
     finalColor = mix(finalColor, litGlassColor, alpha);
-    finalColor += subsurfaceGlow * 2.0;
+    finalColor += subsurfaceGlow * 5.0;
     
     // Concentrated glow around active emitters
     if (midEmitter.a > 0.05) {
@@ -341,11 +342,6 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   let bloom = uniforms.bloomIntensity;
   let kick = uniforms.kickTrigger;
   let beat = uniforms.beatPhase;
-
-  // Hardware Layering: Discard pixels over UI
-  if (in.position.y > uniforms.canvasH * 0.88) {
-    discard;
-  }
 
   // Smooth playhead position
   let playheadStep = uniforms.playheadRow - floor(uniforms.playheadRow / 64.0) * 64.0;
@@ -399,6 +395,20 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     let hasNote = (note > 0u);
     let hasExpression = (volCmd > 0u) || (effCmd > 0u);
 
+    // Housing color: tint by note presence (restore color-per-note display)
+    var housingColor = fs.bgColor;
+    if (hasNote) {
+      let pitchHue = pitchClassFromIndex(note);
+      let baseColor = neonPalette(pitchHue);
+      let instBand = inst & 15u;
+      let instBright = 0.85 + (select(0.0, f32(instBand) / 15.0, instBand > 0u)) * 0.15;
+      let tintColor = baseColor * instBright;
+      housingColor = mix(fs.bgColor, tintColor, 0.35);
+    }
+
+    // Start with tinted housing background
+    finalColor = housingColor;
+
     // Bounds check for channel state array access
     var ch = ChannelState(0.0, 0.0, 0.0, 0u, 1000.0, 0u, 0.0, 0u);
     if (in.channel < arrayLength(&channels)) {
@@ -414,12 +424,12 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     var topIntensity = 0.0;
     if (!isMuted) {
       if (ch.trigger > 0u) {
-        topIntensity = 1.0 + bloom;
-      } else if (playheadActivation > 0.5) {
-        topIntensity = playheadActivation * 0.6;
+        topIntensity = 2.5;
+      } else if (hasNote) {
+        topIntensity = playheadActivation * 1.5;
       }
     }
-    let topColor = blueColor * (1.0 + bloom * 2.0);
+    let topColor = blueColor * (1.5 + bloom * 2.0);
     
     // EMITTER 2 (MIDDLE): Steady Note Color
     // Shows pitch color steadily whenever there's a note (does NOT blink)
@@ -442,10 +452,14 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     // Lights up AMBER when there's an effect or volume command
     let amberColor = vec3<f32>(1.0, 0.55, 0.1);
     var botIntensity = 0.0;
-    if (!isMuted && hasExpression) {
-      botIntensity = 0.8 + bloom;
+    if (!isMuted) {
+      if (hasExpression) {
+        botIntensity = 2.0;
+      } else if (hasNote && playheadActivation > 0.5) {
+        botIntensity = 0.6;
+      }
     }
-    let botColor = amberColor * (1.0 + bloom * 2.0);
+    let botColor = amberColor * (1.5 + bloom * 2.0);
     
     // --- DRAW UNIFIED LENS CAP ---
     let lensUV = btnUV - vec2<f32>(0.5, 0.5);
@@ -461,10 +475,19 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     
     finalColor = mix(finalColor, unifiedLens.rgb, unifiedLens.a);
 
-    // External glow when note is playing
+    // External glow when note is playing on playhead
     if (playheadActivation > 0.5 && hasNote) {
       let pulseColor = mix(blueColor, amberColor, 0.5 + 0.5 * sin(beat * 6.2832));
-      finalColor += pulseColor * playheadActivation * 0.15;
+      finalColor += pulseColor * playheadActivation * 0.4;
+    }
+
+    // Blue LED: bloom-independent external glow for active channels
+    if (!isMuted && ch.trigger > 0u) {
+      finalColor += blueColor * 0.4 * exp(-length(p) * 3.5);
+    }
+    // Amber LED: bloom-independent external glow for expression data
+    if (!isMuted && hasExpression) {
+      finalColor += amberColor * 0.3 * exp(-length(p) * 3.5);
     }
   }
 
