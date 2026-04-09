@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import type { MediaItem } from '../types';
 
 interface MediaPanelProps {
@@ -10,6 +10,8 @@ interface MediaPanelProps {
 
 export const MediaPanel: React.FC<MediaPanelProps> = ({ media, activeMediaId, onSelect, onRemove }) => {
   const [focusedId, setFocusedId] = useState<string | null>(activeMediaId || null);
+
+  const mediaMap = useMemo(() => new Map(media.map(item => [item.id, item])), [media]);
 
   const handleOpen = (id: string) => {
     setFocusedId(id);
@@ -53,7 +55,7 @@ export const MediaPanel: React.FC<MediaPanelProps> = ({ media, activeMediaId, on
             </div>
             <div className="flex items-center justify-center">
               {(() => {
-                const item = media.find(m => m.id === focusedId);
+                const item = mediaMap.get(focusedId);
                 if (!item) return null;
                 if (item.kind === 'video') {
                   return (
@@ -70,4 +72,3 @@ export const MediaPanel: React.FC<MediaPanelProps> = ({ media, activeMediaId, on
     </section>
   );
 };
-
