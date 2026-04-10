@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tracker GPU-9000 - Component Examples</title>
+  <link rel="stylesheet" href="design_system.css">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet">
+  <style>
+    body {
+      background: var(--color-bg-primary);
+      color: var(--color-text-primary);
+      padding: 2rem;
+    }
+    
+    .example-section {
+      margin-bottom: 3rem;
+      padding: 2rem;
+      background: var(--color-bg-secondary);
+      border-radius: var(--radius-lg);
+      border: 1px solid var(--color-border-subtle);
+    }
+    
+    .example-title {
+      font-family: var(--font-display);
+      font-size: var(--text-xl);
+      margin-bottom: 1.5rem;
+      color: var(--color-text-primary);
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+    }
+    
+    .example-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 2rem;
+    }
+    
+    .example-item {
+      padding: 1.5rem;
+      background: var(--color-bg-tertiary);
+      border-radius: var(--radius-md);
+    }
+    
+    .example-label {
+      font-size: var(--text-xs);
+      color: var(--color-text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 1rem;
+    }
+  </style>
+</head>
+<body>
+  <h1 style="font-family: var(--font-display); font-size: 2rem; margin-bottom: 2rem; text-align: center;">
+    Tracker GPU-9000 - UI Component Library
+  </h1>
+
+  <!-- Hardware Bezel Example -->
+  <section class="example-section">
+    <h2 class="example-title">Hardware Bezel Design</h2>
+    <div class="example-grid">
+      <div class="example-item">
+        <div class="example-label">Main Display Bezel</div>
+        <div class="hardware-bezel" style="max-width: 400px; margin: 0 auto;">
+          <div class="branding-plate">
+            <span class="branding-text">Tracker GPU-9000</span>
+          </div>
+          <div style="padding-top: 40px; aspect-ratio: 1; background: #0a0a0a; border-radius: 4px; display: flex; align-items: center; justify-content: center;">
+            <span style="color: var(--color-text-muted);">Pattern Display Canvas</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Transport Controls -->
+  <section class="example-section">
+    <h2 class="example-title">Transport Controls</h2>
+    <div class="example-grid">
+      <div class="example-item">
+        <div class="example-label">Standard State</div>
+        <div class="transport-group">
+          <button class="control-button" aria-label="Play">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M8 5v14l11-7z"/>
+            </svg>
+          </button>
+          <button class="control-button" aria-label="Stop">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M6 6h12v12H6z"/>
+            </svg>
+          </button>
+          <button class="control-button" aria-label="Loop">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.03 20 13.57 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74C4.46 8.97 4 10.43 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+      
+      <div class="example-item">
+        <div class="example-label">Active State</div>
+        <div class="transport-group">
+          <button class="control-button play active" aria-label="Play" aria-pressed="true">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M8 5v14l11-7z"/>
+            </svg>
+          </button>
+          <button class="control-button" aria-label="Stop">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M6 6h12v12H6z"/>
+            </svg>
+          </button>
+          <button class="control-button active" aria-label="Loop" aria-pressed="true">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.03 20 13.57 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74C4.46 8.97 4 10.43 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Sliders -->
+  <section class="example-section">
+    <h2 class="example-title">Volume & Pan Sliders</h2>
+    <div class="example-grid">
+      <div class="example-item">
+        <div class="example-label">Volume Control</div>
+        <div class="slider-group">
+          <span class="slider-label">Volume</span>
+          <div class="slider-container">
+            <input type="range" class="slider" min="0" max="100" value="75" aria-label="Volume">
+            <span class="slider-value">75%</span>
+          </div>
+        </div>
+      </div>
+      
+      <div class="example-item">
+        <div class="example-label">Pan Control</div>
+        <div class="slider-group">
+          <span class="slider-label">Pan</span>
+          <div class="slider-container">
+            <input type="range" class="slider" min="-100" max="100" value="0" aria-label="Pan">
+            <span class="slider-value">C</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- VU Meters -->
+  <section class="example-section">
+    <h2 class="example-title">VU Meters</h2>
+    <div class="example-grid">
+      <div class="example-item">
+        <div class="example-label">Gradient Style</div>
+        <div class="vu-meter-container">
+          <span class="vu-meter-label">CH1</span>
+          <div class="vu-meter">
+            <div class="vu-meter-scale"></div>
+            <div class="vu-meter-mask" style="height: 40%;"></div>
+            <div class="vu-meter-peak" style="bottom: 60%;"></div>
+          </div>
+        </div>
+      </div>
+      
+      <div class="example-item">
+        <div class="example-label">LED Style</div>
+        <div class="vu-meter-container">
+          <span class="vu-meter-label">CH2</span>
+          <div class="led-meter">
+            <div class="led-segment red"></div>
+            <div class="led-segment red"></div>
+            <div class="led-segment yellow active"></div>
+            <div class="led-segment yellow active"></div>
+            <div class="led-segment green active"></div>
+            <div class="led-segment green active"></div>
+            <div class="led-segment green active"></div>
+            <div class="led-segment green active"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Shader Selector -->
+  <section class="example-section">
+    <h2 class="example-title">Shader Selector</h2>
+    <div class="example-grid">
+      <div class="example-item">
+        <div class="example-label">Improved Dropdown</div>
+        <div class="selector-group">
+          <span class="selector-label">Visualizer</span>
+          <div class="selector">
+            <button class="selector-button">
+              <span>Classic Grid</span>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M7 10l5 5 5-5z"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
+      
+      <div class="example-item">
+        <div class="example-label">Dropdown Open State</div>
+        <div class="selector-group">
+          <span class="selector-label">Visualizer</span>
+          <div class="selector">
+            <button class="selector-button">
+              <span>Classic Grid</span>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M7 10l5 5 5-5z"/>
+              </svg>
+            </button>
+            <div class="selector-dropdown" style="position: relative; margin-top: 4px;">
+              <div class="selector-category">Square Patterns</div>
+              <div class="selector-option active">
+                <div class="selector-option-icon">⊞</div>
+                <div class="selector-option-text">
+                  <div class="selector-option-name">Classic Grid</div>
+                  <div class="selector-option-desc">Traditional tracker layout</div>
+                </div>
+              </div>
+              <div class="selector-option">
+                <div class="selector-option-icon">⊞</div>
+                <div class="selector-option-text">
+                  <div class="selector-option-name">Modern Grid</div>
+                  <div class="selector-option-desc">Enhanced with glow effects</div>
+                </div>
+              </div>
+              <div class="selector-category">Circular Patterns</div>
+              <div class="selector-option">
+                <div class="selector-option-icon">◉</div>
+                <div class="selector-option-text">
+                  <div class="selector-option-name">Radial</div>
+                  <div class="selector-option-desc">Circular note arrangement</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Panels -->
+  <section class="example-section">
+    <h2 class="example-title">Info Panels</h2>
+    <div class="example-grid">
+      <div class="example-item" style="padding: 0;">
+        <div class="example-label" style="padding: 1.5rem 1.5rem 0;">Playlist Panel</div>
+        <div class="panel" style="margin: 1rem;">
+          <div class="panel-header">
+            <span class="panel-title">Playlist</span>
+            <button class="panel-toggle">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M7 10l5 5 5-5z"/>
+              </svg>
+            </button>
+          </div>
+          <div class="panel-content">
+            <div class="playlist-item active">
+              <span class="playlist-item-number">01</span>
+              <span class="playlist-item-name">space_debris.mod</span>
+              <span class="playlist-item-duration">3:42</span>
+            </div>
+            <div class="playlist-item">
+              <span class="playlist-item-number">02</span>
+              <span class="playlist-item-name">cyberpunk_s3m.it</span>
+              <span class="playlist-item-duration">2:15</span>
+            </div>
+            <div class="playlist-item">
+              <span class="playlist-item-number">03</span>
+              <span class="playlist-item-name">chiptune_classic.xm</span>
+              <span class="playlist-item-duration">4:08</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      <div class="example-item" style="padding: 0;">
+        <div class="example-label" style="padding: 1.5rem 1.5rem 0;">Metadata Panel</div>
+        <div class="panel" style="margin: 1rem;">
+          <div class="panel-header">
+            <span class="panel-title">Module Info</span>
+            <button class="panel-toggle">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M7 10l5 5 5-5z"/>
+              </svg>
+            </button>
+          </div>
+          <div class="panel-content">
+            <div class="metadata-grid">
+              <span class="metadata-label">Title</span>
+              <span class="metadata-value">Space Debris</span>
+              
+              <span class="metadata-label">Artist</span>
+              <span class="metadata-value">Unknown</span>
+              
+              <span class="metadata-label">Format</span>
+              <span class="metadata-value">ProTracker MOD</span>
+              
+              <span class="metadata-label">Channels</span>
+              <span class="metadata-value">4</span>
+              
+              <span class="metadata-label">Patterns</span>
+              <span class="metadata-value">24</span>
+              
+              <span class="metadata-label">Duration</span>
+              <span class="metadata-value">3:42</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Debug Overlay -->
+  <section class="example-section">
+    <h2 class="example-title">Debug Overlay (Hidden by Default)</h2>
+    <div class="example-grid">
+      <div class="example-item">
+        <div class="example-label">When Enabled</div>
+        <div style="position: relative; height: 200px; background: var(--color-bg-tertiary); border-radius: var(--radius-md);">
+          <div class="debug-overlay" style="position: absolute;">
+            <div class="debug-section">
+              <div class="debug-section-title">Performance</div>
+              <div class="debug-row">
+                <span class="debug-label">FPS</span>
+                <span class="debug-value">60.0</span>
+              </div>
+              <div class="debug-row">
+                <span class="debug-label">Frame Time</span>
+                <span class="debug-value">16.67ms</span>
+              </div>
+            </div>
+            <div class="debug-section">
+              <div class="debug-section-title">Audio</div>
+              <div class="debug-row">
+                <span class="debug-label">Buffer</span>
+                <span class="debug-value">512 samples</span>
+              </div>
+              <div class="debug-row">
+                <span class="debug-label">Underruns</span>
+                <span class="debug-value">0</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Toast Notifications -->
+  <section class="example-section">
+    <h2 class="example-title">Toast Notifications</h2>
+    <div class="example-grid">
+      <div class="example-item">
+        <div class="example-label">Info Toast</div>
+        <div class="toast">
+          <div class="toast-icon info">ℹ</div>
+          <span class="toast-message">WebGPU mode enabled</span>
+          <button class="toast-close">×</button>
+        </div>
+      </div>
+      
+      <div class="example-item">
+        <div class="example-label">Warning Toast</div>
+        <div class="toast">
+          <div class="toast-icon warning">⚠</div>
+          <span class="toast-message">Using fallback renderer</span>
+          <button class="toast-close">×</button>
+        </div>
+      </div>
+      
+      <div class="example-item">
+        <div class="example-label">Success Toast</div>
+        <div class="toast">
+          <div class="toast-icon success">✓</div>
+          <span class="toast-message">Module loaded successfully</span>
+          <button class="toast-close">×</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Empty States -->
+  <section class="example-section">
+    <h2 class="example-title">Empty States</h2>
+    <div class="example-grid">
+      <div class="example-item">
+        <div class="example-label">No Module Loaded</div>
+        <div class="empty-state">
+          <svg class="empty-state-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2z"/>
+          </svg>
+          <h3 class="empty-state-title">No Module Loaded</h3>
+          <p class="empty-state-description">Drop a MOD, S3M, IT, or XM file here to start playing</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Loading States -->
+  <section class="example-section">
+    <h2 class="example-title">Loading States</h2>
+    <div class="example-grid">
+      <div class="example-item">
+        <div class="example-label">Skeleton Loading</div>
+        <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+          <div class="loading-skeleton" style="height: 20px; width: 60%;"></div>
+          <div class="loading-skeleton" style="height: 20px; width: 80%;"></div>
+          <div class="loading-skeleton" style="height: 20px; width: 40%;"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</body>
+</html>
