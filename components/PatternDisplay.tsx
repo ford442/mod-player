@@ -90,8 +90,16 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   const canvasSizeRef = useRef({ width: 0, height: 0, dpr: 1 });
   const resizeTimeoutRef = useRef<number | null>(null);
 
-  const [debugInfo, setDebugInfo] = useState<DebugInfo>({
-    layoutMode: 'NONE', errors: [], uniforms: {}, visible: true
+  const [debugInfo, setDebugInfo] = useState<DebugInfo>(() => {
+    // Check URL for debug parameter to enable debug overlay on load
+    const urlParams = new URLSearchParams(window.location.search);
+    const debugFromUrl = urlParams.get('debug') === 'true';
+    return {
+      layoutMode: 'NONE',
+      errors: [],
+      uniforms: {},
+      visible: debugFromUrl // Default to hidden, enable with ?debug=true
+    };
   });
 
   const numChannels = matrix?.numChannels ?? DEFAULT_CHANNELS;

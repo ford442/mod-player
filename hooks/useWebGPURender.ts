@@ -371,12 +371,17 @@ export function useWebGPURender(
     const device = deviceRef.current;
     if (!device || !gpuReady) return;
     const p = renderParamsRef.current;
-    console.log(`[PatternDisplay] Updating cells buffer: matrix=${matrix ? 'yes' : 'null'}, rows=${matrix?.numRows}, channels=${matrix?.numChannels}`);
+    const rawChannels = matrix?.numChannels ?? DEFAULT_CHANNELS;
+    const numChannels = p.padTopChannel ? rawChannels + 1 : rawChannels;
+    const numRows = matrix?.numRows ?? DEFAULT_ROWS;
+    console.log(`[PatternDisplay] Updating cells buffer: matrix=${matrix ? 'yes' : 'null'}, rows=${numRows}, rawChannels=${rawChannels}, padTopChannel=${p.padTopChannel}, totalChannels=${numChannels}`);
     if (cellsBufferRef.current) cellsBufferRef.current.destroy();
     const isHighPrec = shaderFile.includes('v0.36') || shaderFile.includes('v0.37') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.47') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49') || shaderFile.includes('v0.50');
     const packFunc = isHighPrec ? packPatternMatrixHighPrecision : packPatternMatrix;
     const { packedData, noteCount } = packFunc(p.matrix, p.padTopChannel);
-    console.log(`[PatternDisplay] Packed data contains ${noteCount} notes in ${packedData.length / 2} cells`);
+    const actualCells = packedData.length / 2;
+    const expectedCells = numRows * numChannels;
+    console.log(`[PatternDisplay] Packed data contains ${noteCount} notes in ${actualCells} cells (expected: ${expectedCells} = ${numRows} rows × ${numChannels} channels)`);
     cellsBufferRef.current = createBufferWithData(device, packedData, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
     if (layoutTypeRef.current === 'extended') {
       const numRows = matrix?.numRows ?? DEFAULT_ROWS;
@@ -597,24 +602,23 @@ export function useWebGPURender(
     pass.end();
     device.queue.submit([encoder.finish()]);
 
-    // Update debug info
+    // Update debug info - always update regardless of overlay state
     const isOverlayActive = shaderFile.includes('v0.21') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.47') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49') || shaderFile.includes('v0.50');
-    if (!isOverlayActive) {
-      const layoutModeName = isCircularLayoutShader(shaderFile) ? 'CIRCULAR (WebGPU)' :
-        p.isHorizontal ? 'HORIZONTAL (WebGPU)' : 'STANDARD (WebGPU)';
-      setDebugInfo((prev: DebugInfo) => ({
-        ...prev,
-        layoutMode: layoutModeName,
-        uniforms: {
-          shader: shaderFile,
-          numRows: p.matrix?.numRows ?? DEFAULT_ROWS,
-          numChannels,
-          totalInstances,
-          playheadRow: (p.playbackStateRef?.current?.playheadRow ?? p.playheadRow).toFixed(2),
-        },
-        errors: [],
-      }));
-    }
+    const layoutModeName = isCircularLayoutShader(shaderFile) ? 'CIRCULAR (WebGPU)' :
+      p.isHorizontal ? 'HORIZONTAL (WebGPU)' : 'STANDARD (WebGPU)';
+    setDebugInfo((prev: DebugInfo) => ({
+      ...prev,
+      layoutMode: layoutModeName,
+      uniforms: {
+        shader: shaderFile,
+        overlay: isOverlayActive ? 'ACTIVE' : 'NONE',
+        numRows: p.matrix?.numRows ?? DEFAULT_ROWS,
+        numChannels,
+        totalInstances,
+        playheadRow: (p.playbackStateRef?.current?.playheadRow ?? p.playheadRow).toFixed(2),
+      },
+      errors: [],
+    }));
   }, [shaderFile, setDebugInfo, refreshBindGroup]); // reads renderParamsRef; shaderFile is stable per init cycle
 
   return { gpuReady, render, deviceRef };

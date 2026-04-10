@@ -156,37 +156,37 @@ fn getFragmentConstants() -> FragmentConstants {
 fn drawFrostedGlassCap(uv: vec2<f32>, size: vec2<f32>, color: vec3<f32>, isOn: bool, aa: f32, noteGlow: f32) -> vec4<f32> {
     let p = uv;
     let dBox = sdRoundedBox(p, size * 0.5, 0.08);
-
+    
     if (dBox > 0.0) {
         return vec4<f32>(0.0, 0.0, 0.0, 0.0);
     }
-
+    
     let n = normalize(vec3<f32>(p.x * 2.0 / size.x, p.y * 2.0 / size.y, 0.35));
     let viewDir = vec3<f32>(0.0, 0.0, 1.0);
-
+    
     let fresnel = pow(1.0 - abs(dot(n, viewDir)), 2.5);
     let radial = length(p / (size * 0.5));
     let thickness = 0.12;
     let subsurface = exp(-thickness * 3.5) * noteGlow * (1.0 - radial * 0.4);
-
+    
     let bgColor = vec3<f32>(0.05, 0.05, 0.06);
     let glassColor = mix(bgColor * 0.2, color, 0.8);
-
+    
     let edgeAlpha = smoothstep(0.0, aa * 2.0, -dBox);
     let alpha = edgeAlpha * (0.7 + 0.3 * fresnel);
-
+    
     let light = vec3<f32>(0.5, -0.8, 1.0);
     let diff = max(0.0, dot(n, normalize(light)));
     let litGlassColor = glassColor * (0.55 + 0.45 * diff);
-
+    
     var finalColor = mix(bgColor, litGlassColor, alpha);
     finalColor += subsurface * color * 3.5;
-
+    
     if (isOn) {
         let innerGlow = (1.0 - radial) * noteGlow * 0.4;
         finalColor += color * innerGlow;
     }
-
+    
     finalColor += fresnel * color * noteGlow * 0.3;
     return vec4<f32>(finalColor, edgeAlpha);
 }
@@ -196,9 +196,9 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   let uv = in.uv;
   let p = uv - vec2<f32>(0.5, 0.5);
   let aa = fwidth(p.y) * 0.33;
-
+  
   if (in.channel >= uniforms.numChannels) { return vec4<f32>(0.0); }
-
+  
   let fs = getFragmentConstants();
   let bloom = uniforms.bloomIntensity;
 
@@ -228,12 +228,12 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     let rowDist = min(rowDistRaw, 64.0 - rowDistRaw);
     let playheadActivation = 1.0 - smoothstep(0.0, 1.5, rowDist);
     let onPlayhead = playheadActivation > 0.5;
-
+    
     // Explicit Type Fixes
     let indSize = vec2<f32>(0.3, 0.3);
     let indColor = mix(vec3<f32>(0.2, 0.2, 0.2), fs.ledOnColor * 1.2, playheadActivation);
     let indLed = drawFrostedGlassCap(p, indSize, indColor, onPlayhead, aa, playheadActivation * 1.5);
-
+    
     var col = indLed.rgb;
     var alpha = indLed.a;
     if (playheadActivation > 0.0) {

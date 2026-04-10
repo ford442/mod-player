@@ -14,6 +14,13 @@ const EMPTY_CHANNEL: ChannelShadowState = {
   activeEffect: 0, effectValue: 0, isMuted: 0
 };
 
+// Note constants for duration calculation (DURA-001)
+const NOTE_OFF = 97;   // MOD note-off command
+const NOTE_CUT = 98;   // MOD note-cut command  
+const NOTE_FADE = 99;  // MOD note-fade command
+const NOTE_MIN = 1;    // Minimum valid note
+const NOTE_MAX = 96;   // Maximum valid note
+
 export const PLAYHEAD_EPSILON = 0.0001;
 
 export const alignTo = (val: number, align: number): number =>
@@ -179,22 +186,143 @@ export interface PackedPatternData {
   noteCount: number;
 }
 
+/**
+ * Note duration info for a single cell (DURA-001)
+ */
+export interface NoteDurationInfo {
+  duration: number;    // Total duration in rows (1-255)
+  rowOffset: number;   // Offset from note start (0 = note-on row)
+  isNoteOff: boolean;  // Whether this is a note-off/cut/fade row
+}
+
+/**
+ * Calculate note durations by scanning for note-off commands (DURA-001)
+ * Returns a 2D array of duration info for each cell [row][channel]
+ */
+export const calculateNoteDurations = (
+  matrix: PatternMatrix
+): NoteDurationInfo[][] => {
+  const { numRows, numChannels, rows } = matrix;
+  const result: NoteDurationInfo[][] = [];
+
+  // Initialize result array
+  for (let r = 0; r < numRows; r++) {
+    result[r] = [];
+    for (let c = 0; c < numChannels; c++) {
+      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+      result[r]!.push({ duration: 1, rowOffset: 0, isNoteOff: false });
+    }
+  }
+
+  // For each channel, scan to calculate note durations
+  for (let ch = 0; ch < numChannels; ch++) {
+    let currentNoteStart = -1;
+
+    for (let row = 0; row < numRows; row++) {
+      const rowData = rows[row];
+      const cell = rowData?.[ch];
+      const note = cell?.note || 0;
+
+      // Check if this is a valid note (1-96)
+      const hasNote = note >= NOTE_MIN && note <= NOTE_MAX;
+      // Check for note-off commands (97=note-off, 98=note-cut, 99=fade)
+      const isNoteOff = note === NOTE_OFF || note === NOTE_CUT || note === NOTE_FADE;
+      // Volume zero also acts as note-off
+      const isVolumeOff = cell?.volCmd === 0xC0 && cell?.volVal === 0;
+
+      if (hasNote) {
+        // New note - end previous note if exists
+        if (currentNoteStart >= 0) {
+          const duration = row - currentNoteStart;
+          for (let r = currentNoteStart; r < row; r++) {
+            const rowResult = result[r];
+            const cellResult = rowResult?.[ch];
+            if (cellResult) {
+              cellResult.duration = Math.min(duration, 255);
+              cellResult.rowOffset = r - currentNoteStart;
+              cellResult.isNoteOff = false;
+            }
+          }
+        }
+        // Start new note
+        currentNoteStart = row;
+        const startRowResult = result[row];
+        const startCellResult = startRowResult?.[ch];
+        if (startCellResult) {
+          startCellResult.duration = 1;
+          startCellResult.rowOffset = 0;
+          startCellResult.isNoteOff = false;
+        }
+      } else if (isNoteOff || isVolumeOff) {
+        // Note-off detected - end current note
+        if (currentNoteStart >= 0) {
+          const duration = row - currentNoteStart + 1;
+          for (let r = currentNoteStart; r <= row; r++) {
+            const endRowResult = result[r];
+            const endCellResult = endRowResult?.[ch];
+            if (endCellResult) {
+              endCellResult.duration = Math.min(duration, 255);
+              endCellResult.rowOffset = r - currentNoteStart;
+              endCellResult.isNoteOff = (r === row); // Last row is the note-off
+            }
+          }
+          currentNoteStart = -1;
+        } else {
+          // Standalone note-off
+          const standaloneResult = result[row];
+          const standaloneCell = standaloneResult?.[ch];
+          if (standaloneCell) {
+            standaloneCell.duration = 1;
+            standaloneCell.rowOffset = 0;
+            standaloneCell.isNoteOff = true;
+          }
+        }
+      }
+    }
+
+    // Handle notes that extend to end of pattern
+    if (currentNoteStart >= 0) {
+      const duration = numRows - currentNoteStart;
+      for (let r = currentNoteStart; r < numRows; r++) {
+        const tailRowResult = result[r];
+        const tailCellResult = tailRowResult?.[ch];
+        if (tailCellResult) {
+          tailCellResult.duration = Math.min(duration, 255);
+          tailCellResult.rowOffset = r - currentNoteStart;
+          tailCellResult.isNoteOff = false;
+        }
+      }
+    }
+  }
+
+  return result;
+};
+
 export const packPatternMatrix = (matrix: PatternMatrix | null, padTopChannel = false): PackedPatternData => {
   const rawChannels = matrix?.numChannels ?? DEFAULT_CHANNELS;
   const numRows = matrix?.numRows ?? DEFAULT_ROWS;
   const numChannels = padTopChannel ? rawChannels + 1 : rawChannels;
-  const packedData = new Uint32Array(numRows * numChannels * 2);
+  const totalCells = numRows * numChannels;
+  const packedData = new Uint32Array(totalCells * 2);
 
   if (!matrix) return { packedData, noteCount: 0 };
 
   const { rows } = matrix;
   const startCol = padTopChannel ? 1 : 0;
   let noteCount = 0;
+  const maxOffset = packedData.length - 1;
 
   for (let r = 0; r < numRows; r++) {
     const rowCells = rows[r] || [];
     for (let c = 0; c < rawChannels; c++) {
       const offset = (r * numChannels + (c + startCol)) * 2;
+      
+      // BOUNDS CHECK: Prevent buffer overflow (DATA-001 fix)
+      if (offset < 0 || offset + 1 > maxOffset) {
+        console.warn(`[packPatternMatrix] BOUNDS VIOLATION: offset=${offset}, maxOffset=${maxOffset}, r=${r}, c=${c}, numChannels=${numChannels}`);
+        continue;
+      }
+      
       const cell = rowCells[c];
 
       let note = 0, inst = 0, volCmd = 0, volVal = 0, effCmd = 0, effVal = 0;
@@ -232,22 +360,36 @@ export const packPatternMatrixHighPrecision = (matrix: PatternMatrix | null, pad
   const rawChannels = matrix?.numChannels ?? DEFAULT_CHANNELS;
   const numRows = matrix?.numRows ?? DEFAULT_ROWS;
   const numChannels = padTopChannel ? rawChannels + 1 : rawChannels;
-  const packedData = new Uint32Array(numRows * numChannels * 2);
+  const totalCells = numRows * numChannels;
+  const packedData = new Uint32Array(totalCells * 2);
 
   if (!matrix) return { packedData, noteCount: 0 };
 
   const { rows } = matrix;
   const startCol = padTopChannel ? 1 : 0;
 
+  // DURA-001: Calculate note durations for sustain visualization
+  const durationInfo = calculateNoteDurations(matrix);
+
   let notesPacked = 0;
-  let totalCells = 0;
+  let cellsWritten = 0;
+  let expressionOnlyCount = 0;
+  const maxOffset = packedData.length - 1;
 
   for (let r = 0; r < numRows; r++) {
     const rowCells = rows[r] || [];
     for (let c = 0; c < rawChannels; c++) {
       const offset = (r * numChannels + (c + startCol)) * 2;
+      
+      // BOUNDS CHECK: Prevent buffer overflow (DATA-001 fix)
+      if (offset < 0 || offset + 1 > maxOffset) {
+        console.warn(`[packPatternMatrixHighPrecision] BOUNDS VIOLATION: offset=${offset}, maxOffset=${maxOffset}, r=${r}, c=${c}, numChannels=${numChannels}`);
+        continue;
+      }
+      
       const cell = rowCells[c];
-      totalCells++;
+      const dInfo = durationInfo[r]?.[c] || { duration: 1, rowOffset: 0, isNoteOff: false };
+      cellsWritten++;
 
       let note = 0, inst = 0, volCmd = 0, volVal = 0, effCmd = 0, effVal = 0;
 
@@ -268,12 +410,63 @@ export const packPatternMatrixHighPrecision = (matrix: PatternMatrix | null, pad
         if (note > 0) notesPacked++;
       }
 
-      packedData[offset] = ((note & 0xFF) << 24) | ((inst & 0xFF) << 16) | ((volCmd & 0xFF) << 8) | (volVal & 0xFF);
-      packedData[offset + 1] = ((effCmd & 0xFF) << 8) | (effVal & 0xFF);
+      // Detect expression-only steps (EXPR-001): volume/effect present but no note pitch
+      // Bit 15 of packedA (inst field) is used as the expression-only flag
+      const hasNote = (note > 0);
+      const hasVolCmd = (volCmd > 0);
+      const hasEffCmd = (effCmd > 0);
+      const isExpressionOnly = !hasNote && (hasVolCmd || hasEffCmd);
+      
+      if (isExpressionOnly) {
+        expressionOnlyCount++;
+        // Use bit 15 (0x8000) of the inst field to flag expression-only rows
+        // Instrument is limited to 7 bits (0-127) in the shader when this flag is used
+        inst = (inst & 0x7F) | 0x80;
+      }
+
+      // DURA-002: Pack duration data into cell structure
+      // New packing scheme for high-precision mode:
+      // packedA: [note:8][inst:8][duration:8][volPacked:8]
+      //   - note: 8 bits (0-255, where 97=note-off)
+      //   - inst: 8 bits (bit 7 is expression-only flag)
+      //   - duration: 8 bits (1-255 rows)
+      //   - volPacked: 4 bits volCmd + 4 bits volVal (upper nibbles)
+      // packedB: [effCmd:8][effVal:8][durationFlags:7][reserved:1][volCmd:8]
+      //   - effCmd: 8 bits (effect command)
+      //   - effVal: 8 bits (effect value)
+      //   - durationFlags: 7 bits [rowOffset:6][isNoteOff:1]
+      //   - reserved: 1 bit
+      //   - volCmd: 8 bits (full volume command for shader)
+      
+      const duration = Math.min(dInfo.duration, 255);
+      const rowOffset = Math.min(dInfo.rowOffset, 63);
+      const isNoteOffFlag = dInfo.isNoteOff ? 1 : 0;
+      const durationFlags = (rowOffset << 1) | isNoteOffFlag;
+      
+      // Compress volume to fit in one byte
+      const volCmdNibble = (volCmd >> 4) & 0x0F;
+      const volValNibble = (volVal >> 4) & 0x0F;
+      const volPacked = (volCmdNibble << 4) | volValNibble;
+
+      packedData[offset] = ((note & 0xFF) << 24) | 
+                           ((inst & 0xFF) << 16) | 
+                           ((duration & 0xFF) << 8) | 
+                           (volPacked & 0xFF);
+      
+      packedData[offset + 1] = ((effCmd & 0xFF) << 24) | 
+                               ((effVal & 0xFF) << 16) | 
+                               ((durationFlags & 0x7F) << 8) | 
+                               (volCmd & 0xFF);
     }
   }
 
-  console.log(`[packPatternMatrixHighPrecision] Packed ${notesPacked} notes into ${totalCells} cells (${numRows} rows x ${numChannels} channels)`);
+  // DEBUG: Log packing statistics with buffer size verification (DATA-001)
+  console.log(`[packPatternMatrixHighPrecision] Packed ${notesPacked} notes, ${expressionOnlyCount} expression-only steps into ${cellsWritten} cells (${numRows} rows x ${numChannels} channels). Buffer size: ${packedData.length} uint32s (${totalCells} cells)`);
+  
+  // Verify consistency
+  if (cellsWritten !== rawChannels * numRows) {
+    console.warn(`[packPatternMatrixHighPrecision] CELL COUNT MISMATCH: expected=${rawChannels * numRows}, actual=${cellsWritten}`);
+  }
 
   return { packedData, noteCount: notesPacked };
 };

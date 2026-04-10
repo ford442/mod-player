@@ -3,6 +3,7 @@ import { LibOpenMPT, ModuleInfo, PatternMatrix, ChannelShadowState, PlaybackStat
 import { OpenMPTWorkletEngine } from '../audio-worklet/OpenMPTWorkletEngine';
 import { getPatternMatrix } from '../utils/patternExtractor';
 import { startAudioPlayback, AudioGraphRefs, AudioGraphCallbacks, AudioGraphConfig } from './useAudioGraph';
+import { useWorkletLoader, getWorkletUrl } from './useWorkletLoader';
 
 interface SyncDebugInfo {
   mode: string;
@@ -15,26 +16,16 @@ interface SyncDebugInfo {
 // Use Vite BASE_URL for correct resolution under subdirectory deployment
 const DEFAULT_MODULE_URL = `${import.meta.env.BASE_URL}4-mat_madness.mod`;
 
-// Runtime base URL detection for subdirectory deployment (e.g., /xm-player/)
-// Vite's BASE_URL may be '/' at build time, so we detect actual path from window.location
-const detectRuntimeBase = (): string => {
-  const viteBase = import.meta.env.BASE_URL;
-  // If Vite base is explicitly set (not root), use it
-  if (viteBase && viteBase !== '/') {
-    return viteBase.endsWith('/') ? viteBase : `${viteBase}/`;
-  }
-  // Otherwise detect from current URL path
-  const pathSegments = window.location.pathname.split('/').filter(Boolean);
-  if (pathSegments.length > 0) {
-    return `/${pathSegments[0]}/`;
-  }
-  return '/';
-};
+// AUDIO-001 FIX: Use centralized worklet URL construction from useWorkletLoader
+const WORKLET_URL = getWorkletUrl();
 
-const RUNTIME_BASE_URL = detectRuntimeBase();
-const WORKLET_URL = `${RUNTIME_BASE_URL}worklets/openmpt-worklet.js`;
-console.log('[AudioWorklet] Worklet URL resolved:', WORKLET_URL, '(Vite BASE_URL:', import.meta.env.BASE_URL, ', Runtime base:', RUNTIME_BASE_URL, ')');
-// const SAMPLE_RATE = 44100;
+// AUDIO-001 FIX: Enhanced logging for diagnostics
+console.log('[AudioWorklet] Configuration:', {
+  workletUrl: WORKLET_URL,
+  viteBaseUrl: import.meta.env.BASE_URL,
+  currentPath: window.location.pathname,
+  origin: window.location.origin,
+});
 
 // TIMING FIX: Maximum allowed drift before correction (in seconds)
 const MAX_DRIFT_SECONDS = 0.1;
@@ -67,6 +58,14 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
   const [isNativeWorkletAvailable, setIsNativeWorkletAvailable] = useState<boolean>(false);
   const [restartPlayback, setRestartPlayback] = useState<boolean>(false);
   const [syncDebug, setSyncDebug] = useState<SyncDebugInfo>({ mode: "none", bufferMs: 0, driftMs: 0, row: 0, starvationCount: 0 });
+  
+  // AUDIO-001 FIX: Track worklet load errors for UI feedback
+  const [workletLoadError, setWorkletLoadError] = useState<string | null>(null);
+  
+  // AUDIO-001 FIX: Initialize worklet loader with diagnostics
+  const { verifyWorkletFile, isAudioWorkletSupported: checkWorkletSupport } = useWorkletLoader({
+    debug: true,
+  });
 
   const libopenmptRef = useRef<LibOpenMPT | null>(null);
   const currentModulePtr = useRef<number>(0);
@@ -508,6 +507,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
   // so processModuleData (which memoises over different deps) can call it without stale closure
   playRef.current = play;
 
+  // AUDIO-001 FIX: Enhanced toggle function with better engine state management
   const toggleAudioEngine = useCallback(() => {
     // Cycle: native-worklet → worklet → native-worklet (if available)
     let newEngine: 'worklet' | 'native-worklet';
@@ -517,13 +517,21 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
       newEngine = isNativeWorkletAvailable ? 'native-worklet' : 'worklet';
     }
 
+    console.log('[toggleEngine]', { 
+      from: activeEngine, 
+      to: newEngine, 
+      isNativeAvailable: isNativeWorkletAvailable,
+      isWorkletSupported,
+      willRestart: isPlaying
+    });
+
     if (isPlaying) {
       setRestartPlayback(true);
       stopMusic(false);
     }
     setActiveEngine(newEngine);
-    console.log('[toggleEngine]', activeEngine, '→', newEngine);
-  }, [activeEngine, isPlaying, isWorkletSupported, isNativeWorkletAvailable, stopMusic]);
+    setWorkletLoadError(null); // Clear any previous errors when switching
+  }, [activeEngine, isPlaying, isNativeWorkletAvailable, isWorkletSupported, stopMusic]);
 
   useEffect(() => {
     if (restartPlayback) {
@@ -581,27 +589,41 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
         libopenmptRef.current = lib;
         setIsReady(true);
 
-        // AudioWorklet support check - API only, NO early addModule() probe
-        // The actual worklet module is loaded only during playback via addModule()
-        console.log("[INIT] Testing AudioWorklet support (API-level only)...");
+        // AUDIO-001 FIX: Enhanced AudioWorklet support check with detailed diagnostics
+        console.log("[INIT] Testing AudioWorklet support...");
         try {
-          // Simple API capability check without creating AudioContext or loading modules
-          const hasWorklet = typeof window !== 'undefined' &&
-            'AudioContext' in window &&
-            'audioWorklet' in AudioContext.prototype;
+          const hasWorkletSupport = checkWorkletSupport();
+          
+          console.log('[INIT] AudioWorklet diagnostics:', {
+            hasWorkletSupport,
+            workletUrl: WORKLET_URL,
+            userAgent: navigator.userAgent.substring(0, 50) + '...',
+          });
 
-          if (hasWorklet) {
-            setIsWorkletSupported(true);
-            setActiveEngine('worklet');
-            console.log('✅ [INIT] AudioWorklet API available (module will load at playback time)');
+          // AUDIO-001 FIX: Verify the worklet file is accessible
+          if (hasWorkletSupport) {
+            const fileAccessible = await verifyWorkletFile();
+            
+            if (fileAccessible) {
+              setIsWorkletSupported(true);
+              setActiveEngine('worklet');
+              console.log('✅ [INIT] AudioWorklet API available and file accessible');
+            } else {
+              console.warn("⚠️ [INIT] AudioWorklet API available but worklet file not accessible");
+              setIsWorkletSupported(false);
+              setWorkletLoadError(`Worklet file not found at ${WORKLET_URL}. Check deployment.`);
+              setStatus("Error: Worklet file not accessible.");
+            }
           } else {
             console.warn("⚠️ [INIT] AudioWorklet API not available in this browser");
             setIsWorkletSupported(false);
+            setWorkletLoadError('AudioWorklet not supported in this browser');
             setStatus("Error: AudioWorklet not supported in this browser.");
           }
         } catch (e) {
           console.warn("⚠️ [INIT] AudioWorklet API check failed:", e);
           setIsWorkletSupported(false);
+          setWorkletLoadError('AudioWorklet check failed: ' + (e as Error).message);
           setStatus("Error: AudioWorklet not supported in this browser.");
         }
 
@@ -609,7 +631,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
         // Note: enabling this requires building the wasm engine using
         // ./scripts/build-wasm.sh (Emscripten SDK must be installed).
         try {
-          const nativeGlueUrl = `${RUNTIME_BASE_URL}worklets/openmpt-native.js`;
+          const nativeGlueUrl = `${import.meta.env.BASE_URL}worklets/openmpt-native.js`;
           console.log('[INIT] Probing for native engine at:', nativeGlueUrl);
           const probeResp = await fetch(nativeGlueUrl, { method: 'HEAD' });
           if (probeResp.ok) {
@@ -703,6 +725,8 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
     analyserNode: analyserRef.current,
     // PERFORMANCE OPTIMIZATION: Export ref for high-frequency updates
     // PatternDisplay reads directly from this to this ref - avoids React re-renders
-    playbackStateRef
+    playbackStateRef,
+    // AUDIO-001 FIX: Export worklet diagnostics
+    workletLoadError,
   };
 }

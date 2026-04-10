@@ -89,6 +89,7 @@ function App() {
     syncDebug,
     analyserNode,
     playbackStateRef,
+    workletLoadError,
   } = useLibOpenMPT(volume);
 
   // Media Overlay State
@@ -378,10 +379,10 @@ function App() {
                 </button>
                 <button
                   onClick={toggleAudioEngine}
-                  disabled={!isWorkletSupported}
-                  title={!isWorkletSupported ? "AudioWorklet not supported" : "Toggle Audio Engine (Worklet vs ScriptProcessor)"}
+                  disabled={!isWorkletSupported || !!workletLoadError}
+                  title={workletLoadError ? `Worklet Error: ${workletLoadError}` : !isWorkletSupported ? "AudioWorklet not supported" : "Toggle Audio Engine (Worklet vs ScriptProcessor)"}
                   className={`px-4 py-2 text-sm font-mono rounded-lg shadow-lg transition-colors border ${
-                    !isWorkletSupported
+                    !isWorkletSupported || !!workletLoadError
                       ? 'bg-gray-300 text-gray-500 cursor-not-allowed border-gray-400 opacity-50'
                       : activeEngine === 'native-worklet'
                         ? 'bg-purple-600 text-white border-purple-500 hover:bg-purple-700'
