@@ -3,6 +3,7 @@
 // Top: Blue Note-On | Middle: Steady Note Color | Bottom: Amber Control
 // Based on v0.49 (circular layout with padTopChannel=true)
 // Note: Requires padTopChannel=true in PatternDisplay to shift music channels 1-32.
+// DURA UPDATE: Added note duration visualization with sustain tails
 
 struct Uniforms {
   numRows: u32,
@@ -25,6 +26,13 @@ struct Uniforms {
   bloomThreshold: f32,
   invertChannels: u32,
 };
+
+// DURA: Note duration constants
+const NOTE_MIN: u32 = 1u;
+const NOTE_MAX: u32 = 96u;
+const NOTE_OFF: u32 = 97u;
+const NOTE_CUT: u32 = 98u;
+const NOTE_FADE: u32 = 99u;
 
 @group(0) @binding(0) var<storage, read> cells: array<u32>;
 @group(0) @binding(1) var<uniform> uniforms: Uniforms;
@@ -134,6 +142,93 @@ fn pitchClassFromIndex(note: u32) -> f32 {
   if (note == 0u) { return 0.0; }
   let semi = (note - 1u) % 12u;
   return f32(semi) / 12.0;
+}
+
+// DURA: Structure to hold unpacked note duration info
+struct NoteDurationInfo {
+  duration: u32,      // Total note duration in rows
+  rowOffset: u32,     // How many rows from note start (0 = note-on)
+  isNoteOff: bool,    // Whether this cell is the note-off row
+}
+
+// DURA: Unpack duration info from packed cell data
+fn unpackDurationInfo(packedA: u32, packedB: u32) -> NoteDurationInfo {
+  var info: NoteDurationInfo;
+  
+  // Duration is in bits 8-15 of packedA (where volCmd used to be)
+  info.duration = (packedA >> 8) & 0xFFu;
+  if (info.duration == 0u) { info.duration = 1u; }
+  
+  // rowOffset and isNoteOff are packed into bits 8-14 of packedB
+  let durationFlags = (packedB >> 8) & 0x7Fu;
+  info.rowOffset = durationFlags >> 1u;
+  info.isNoteOff = (durationFlags & 1u) != 0u;
+  
+  return info;
+}
+
+// DURA: Calculate sustain brightness based on position in note
+fn calculateSustainBrightness(info: NoteDurationInfo, baseIntensity: f32) -> f32 {
+  if (info.duration <= 1u) {
+    // Short note - full brightness
+    return baseIntensity;
+  }
+  
+  let progress = f32(info.rowOffset) / f32(info.duration);
+  
+  // Note-on row: full brightness
+  if (info.rowOffset == 0u) {
+    return baseIntensity;
+  }
+  
+  // Last 2-3 rows: fade out
+  let remaining = info.duration - info.rowOffset;
+  if (remaining <= 3u) {
+    // Fade from 60% to 30% over last 3 rows
+    let fadeFactor = f32(remaining) / 3.0;
+    return baseIntensity * (0.3 + 0.3 * fadeFactor);
+  }
+  
+  // Middle of sustain: 40-60% brightness
+  return baseIntensity * (0.4 + 0.2 * (1.0 - progress));
+}
+
+// DURA: Check if this cell is part of an active sustain
+fn isSustaining(info: NoteDurationInfo, hasNote: bool) -> bool {
+  return hasNote && (info.duration > 1u) && (info.rowOffset < info.duration);
+}
+
+// DURA: Calculate blue LED intensity for note trigger/sustain
+fn calculateBlueIntensity(
+  info: NoteDurationInfo, 
+  hasNote: bool, 
+  isPlayhead: bool,
+  trigger: u32,
+  beatPhase: f32
+) -> f32 {
+  var intensity = 0.0;
+  
+  if (isPlayhead) {
+    // Playhead row always gets some blue glow
+    intensity = 0.6;
+  }
+  
+  if (hasNote) {
+    if (info.rowOffset == 0u) {
+      // Note-on trigger: bright flash
+      if (trigger > 0u) {
+        intensity = 1.0 + beatPhase * 0.3; // Pulse with beat
+      } else {
+        intensity = 0.8;
+      }
+    } else if (isSustaining(info, hasNote)) {
+      // Sustain tail: dim blue glow that fades
+      let sustainBrightness = calculateSustainBrightness(info, 0.5);
+      intensity = max(intensity, sustainBrightness);
+    }
+  }
+  
+  return intensity;
 }
 
 struct FragmentConstants {
@@ -379,55 +474,95 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   }
 
   if (inButton > 0.5) {
+    // DURA: Unpack note and duration info from new packed format
     let note = (in.packedA >> 24) & 255u;
-    let inst = (in.packedA >> 16) & 255u;
-    let volCmd = (in.packedA >> 8) & 255u;
-    let effCmd = (in.packedB >> 8) & 255u;
-    let effVal = in.packedB & 255u;
+    let instRaw = (in.packedA >> 16) & 255u;
+    let durationRaw = (in.packedA >> 8) & 255u;        // DURA: duration in rows
+    let volPacked = in.packedA & 255u;                // DURA: packed volCmd/volVal
+    
+    let effCmd = (in.packedB >> 24) & 255u;           // DURA: effect command
+    let effVal = (in.packedB >> 16) & 255u;           // DURA: effect value  
+    let durationFlags = (in.packedB >> 8) & 0x7Fu;    // DURA: rowOffset + isNoteOff
+    let volCmdFull = in.packedB & 255u;               // DURA: full volume command
 
-    let hasNote = (note > 0u);
-    let hasExpression = (volCmd > 0u) || (effCmd > 0u);
+    // Unpack expression-only flag from bit 7 of inst field (EXPR-001)
+    let isExpressionOnly = (instRaw & 128u) != 0u;
+    let inst = instRaw & 127u;
+    
+    // DURA: Reconstruct volume command from packed nibble
+    let volCmd = (volPacked >> 4) << 4;
+    let volVal = (volPacked & 0x0Fu) << 4;
+
+    // DURA: Build duration info struct
+    var dInfo: NoteDurationInfo;
+    dInfo.duration = durationRaw;
+    if (dInfo.duration == 0u) { dInfo.duration = 1u; }
+    dInfo.rowOffset = durationFlags >> 1u;
+    dInfo.isNoteOff = (durationFlags & 1u) != 0u;
+
+    // DURA: Note state detection
+    let hasNote = (note >= NOTE_MIN && note <= NOTE_MAX);
+    let isNoteOffCmd = (note == NOTE_OFF || note == NOTE_CUT || note == NOTE_FADE);
+    let hasExpression = (volCmd > 0u) || (effCmd > 0u) || (volCmdFull > 0u);
     let ch = channels[in.channel];
     let isMuted = (ch.isMuted == 1u);
-
-    // --- THREE-EMITTER SYSTEM ---
     
-    // EMITTER 1 (TOP): Blue Note-On Indicator
-    // Lights up BLUE when note is triggered or playhead is on this step
+    // DURA: Check if this cell is part of an active sustain
+    let isSustain = isSustaining(dInfo, hasNote);
+    let isNoteOnRow = hasNote && (dInfo.rowOffset == 0u);
+
+    // --- THREE-EMITTER SYSTEM with DURA enhancements ---
+    
+    // EMITTER 1 (TOP): Blue Note-On Indicator with Sustain
+    // DURA: Bright blue on note trigger, dimmer blue glow during sustain
     let blueColor = vec3<f32>(0.15, 0.5, 1.0);
-    var topIntensity = 0.0;
-    if (!isMuted) {
-      if (ch.trigger > 0u) {
-        topIntensity = 1.0 + bloom;
-      } else if (playheadActivation > 0.5) {
-        topIntensity = playheadActivation * 0.6;
-      }
-    }
+    var topIntensity = calculateBlueIntensity(dInfo, hasNote, playheadActivation > 0.5, ch.trigger, beat);
+    if (isMuted) { topIntensity *= 0.2; }
     let topColor = blueColor * (1.0 + bloom * 2.0);
     
-    // EMITTER 2 (MIDDLE): Steady Note Color
-    // Shows pitch color steadily whenever there's a note (does NOT blink)
+    // EMITTER 2 (MIDDLE): Note Color with Duration Visualization
+    // DURA: Full brightness on note-on, 40-60% brightness during sustain
+    // Fade effect on last 2-3 rows of sustain tail
     var noteColor = vec3<f32>(0.15);
-    var midIntensity = 0.12; // Base dim glow
-    if (hasNote) {
+    var midIntensity = 0.08; // Base dim glow for empty cells
+    
+    if (hasNote && !isExpressionOnly) {
       let pitchHue = pitchClassFromIndex(note);
       let baseColor = neonPalette(pitchHue);
       let instBand = inst & 15u;
       let instBright = 0.85 + (select(0.0, f32(instBand) / 15.0, instBand > 0u)) * 0.15;
       noteColor = baseColor * instBright;
       
-      // Steady indication - no flashing, just presence
-      midIntensity = 0.6 + bloom * 2.0;
-      if (isMuted) { midIntensity *= 0.3; }
+      // DURA: Calculate brightness based on sustain position
+      midIntensity = calculateSustainBrightness(dInfo, 0.8 + bloom * 2.0);
+      
+      if (isMuted) { midIntensity *= 0.25; }
+    } else if (isNoteOffCmd || dInfo.isNoteOff) {
+      // DURA: Note-off rows show dim pulse
+      noteColor = vec3<f32>(0.3, 0.3, 0.35);
+      midIntensity = 0.2 + 0.1 * sin(uniforms.timeSec * 4.0);
+    } else if (isExpressionOnly) {
+      // Expression-only: subtle amber tint in middle
+      noteColor = vec3<f32>(0.4, 0.25, 0.05);
+      midIntensity = 0.15;
     }
     let midColor = noteColor;
     
     // EMITTER 3 (BOTTOM): Amber Control Message Indicator
-    // Lights up AMBER when there's an effect or volume command
+    // Lights up AMBER for expression-only steps and note-on rows with expression
     let amberColor = vec3<f32>(1.0, 0.55, 0.1);
     var botIntensity = 0.0;
     if (!isMuted && hasExpression) {
-      botIntensity = 0.8 + bloom;
+      if (isExpressionOnly) {
+        // Expression-only steps: amber at 60% intensity
+        botIntensity = 0.6 + bloom * 0.8;
+      } else if (isNoteOnRow) {
+        // DURA: Brighter amber on note-on rows with expression
+        botIntensity = 1.0 + bloom * 1.5;
+      } else {
+        // Steps with note AND expression: subtle amber
+        botIntensity = 0.4 + bloom * 0.6;
+      }
     }
     let botColor = amberColor * (1.0 + bloom * 2.0);
     
@@ -437,18 +572,19 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     
     let unifiedLens = drawUnifiedLensCap(
         lensUV, lensSize,
-        vec4<f32>(topColor, topIntensity),    // Top: Blue note-on
-        vec4<f32>(midColor, midIntensity),    // Middle: Steady note color
+        vec4<f32>(topColor, topIntensity),    // Top: Blue note-on/sustain
+        vec4<f32>(midColor, midIntensity),    // Middle: Note color with sustain
         vec4<f32>(botColor, botIntensity),    // Bottom: Amber control
         aa
     );
     
     finalColor = mix(finalColor, unifiedLens.rgb, unifiedLens.a);
 
-    // External glow when note is playing
-    if (playheadActivation > 0.5 && hasNote) {
-      let pulseColor = mix(blueColor, amberColor, 0.5 + 0.5 * sin(beat * 6.2832));
-      finalColor += pulseColor * playheadActivation * 0.15;
+    // DURA: Enhanced external glow for sustained notes
+    if (playheadActivation > 0.5 && (hasNote || isSustain)) {
+      let pulseColor = mix(blueColor, noteColor, 0.5 + 0.5 * sin(beat * 6.2832));
+      let sustainBoost = select(1.0, 1.5, isSustain && !isNoteOnRow);
+      finalColor += pulseColor * playheadActivation * 0.15 * sustainBoost;
     }
   }
 

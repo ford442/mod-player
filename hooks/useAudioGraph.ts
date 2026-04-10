@@ -5,6 +5,7 @@ import type React from 'react';
 import { LibOpenMPT, PatternMatrix, ChannelShadowState, ModuleInfo, PatternCell } from '../types';
 import { OpenMPTWorkletEngine } from '../audio-worklet/OpenMPTWorkletEngine';
 import type { WorkletPositionData } from '../audio-worklet/types';
+import { getWorkletUrl } from './useWorkletLoader';
 
 export interface AudioGraphRefs {
   libopenmptRef:       React.MutableRefObject<LibOpenMPT | null>;
@@ -59,6 +60,22 @@ export interface AudioGraphConfig {
   WORKLET_URL:            string;
 }
 
+// AUDIO-001 FIX: Enhanced logging helper
+const logWorkletDiagnostics = (ctx: AudioContext, workletUrl: string) => {
+  console.log('[WORKLET_DIAGNOSTICS]', {
+    audioContextState: ctx.state,
+    audioContextSampleRate: ctx.sampleRate,
+    workletUrl,
+    hasAudioWorklet: !!ctx.audioWorklet,
+    baseUrl: import.meta.env.BASE_URL,
+    location: window.location.href,
+    timestamp: new Date().toISOString(),
+  });
+};
+
+// AUDIO-001 FIX: Centralized worklet URL from useWorkletLoader
+const WORKLET_URL = getWorkletUrl();
+
 export async function startAudioPlayback(
   refs: AudioGraphRefs,
   callbacks: AudioGraphCallbacks,
@@ -92,6 +109,9 @@ export async function startAudioPlayback(
 
     const ctx = refs.audioContextRef.current;
     console.log('[PLAY] AudioContext state:', ctx.state);
+    
+    // AUDIO-001 FIX: Log diagnostics
+    logWorkletDiagnostics(ctx, config.WORKLET_URL);
 
     if (ctx.state === 'suspended') {
       console.log('[PLAY] Resuming suspended AudioContext...');
@@ -245,16 +265,56 @@ export async function startAudioPlayback(
       console.log('[PLAY] Using AudioWorklet engine...');
 
       try {
-        // Load the worklet module only once per AudioContext
+        // AUDIO-001 FIX: Enhanced worklet module loading with better error handling
         if (ctx.audioWorklet && !refs.workletLoadedRef.current) {
+          // Use centralized WORKLET_URL for consistency
+          const workletUrl = WORKLET_URL || config.WORKLET_URL;
+          
           console.log('[PLAY] ==================================================');
           console.log('[PLAY] Loading AudioWorklet module...');
-          console.log('[PLAY] Resolved URL:', config.WORKLET_URL);
+          console.log('[PLAY] Resolved URL:', workletUrl);
           console.log('[PLAY] AudioContext state:', ctx.state);
           console.log('[PLAY] ==================================================');
-          await ctx.audioWorklet.addModule(config.WORKLET_URL);
-          refs.workletLoadedRef.current = true;
-          console.log('[PLAY] ✅ AudioWorklet module loaded successfully');
+          
+          try {
+            // AUDIO-001 FIX: Add timeout for worklet loading to detect hanging
+            const loadTimeout = new Promise<never>((_, reject) => {
+              setTimeout(() => reject(new Error('Worklet module load timeout (10s)')), 10000);
+            });
+            
+            const loadWorklet = ctx.audioWorklet.addModule(workletUrl);
+            await Promise.race([loadWorklet, loadTimeout]);
+            
+            refs.workletLoadedRef.current = true;
+            console.log('[PLAY] ✅ AudioWorklet module loaded successfully');
+          } catch (loadError) {
+            console.error('[PLAY] ❌ Failed to load AudioWorklet module:', loadError);
+            console.error('[PLAY] URL attempted:', workletUrl);
+            
+            // AUDIO-001 FIX: Provide helpful diagnostics for common issues
+            const errorMsg = (loadError as Error).message || 'Unknown error';
+            
+            // Check for 404 errors
+            if (errorMsg.includes('404') || errorMsg.includes('Not Found')) {
+              console.error('[PLAY] This appears to be a 404 error.');
+              console.error('[PLAY] Ensure the worklet file exists at:', workletUrl);
+              console.error('[PLAY] The file should be in public/worklets/ directory.');
+            }
+            
+            // Check for common CORS issues
+            if (errorMsg.includes('Failed to fetch') || errorMsg.includes('NetworkError')) {
+              console.error('[PLAY] This appears to be a CORS or network issue.');
+              console.error('[PLAY] Ensure the server sends proper CORS headers for the worklet file.');
+            }
+            
+            // Check for MIME type issues
+            if (errorMsg.includes('MIME') || errorMsg.includes('application/javascript')) {
+              console.error('[PLAY] This appears to be a MIME type issue.');
+              console.error('[PLAY] Ensure the server serves .js files with Content-Type: application/javascript');
+            }
+            
+            throw loadError;
+          }
         } else {
           console.log('[PLAY] Worklet module already loaded (skipping addModule)');
         }
@@ -277,12 +337,22 @@ export async function startAudioPlayback(
           refs.wasmMemoryRef.current = wasmMemory;
         }
         if (wasmMemory) processorOptions.memory = wasmMemory;
-        const node = new AudioWorkletNode(ctx, 'openmpt-processor', {
-          numberOfInputs: 0,
-          numberOfOutputs: 1,
-          outputChannelCount: [2],
-          processorOptions,
-        });
+        
+        // AUDIO-001 FIX: Wrap node creation in try-catch for better diagnostics
+        let node: AudioWorkletNode;
+        try {
+          node = new AudioWorkletNode(ctx, 'openmpt-processor', {
+            numberOfInputs: 0,
+            numberOfOutputs: 1,
+            outputChannelCount: [2],
+            processorOptions,
+          });
+        } catch (nodeError) {
+          console.error('[PLAY] ❌ Failed to create AudioWorkletNode:', nodeError);
+          console.error('[PLAY] This may indicate the worklet module failed to register properly.');
+          throw nodeError;
+        }
+        
         console.log('[PLAY] AudioWorkletNode created:', node);
 
         node.port.onmessage = (e) => {
@@ -417,7 +487,16 @@ export async function startAudioPlayback(
       } catch (e) {
         console.error("[PLAY] Failed to create/load AudioWorkletNode:", e);
         refs.workletLoadedRef.current = false;
-        callbacks.setStatus("Error: AudioWorklet failed to start (no ScriptProcessor fallback).");
+        
+        // AUDIO-001 FIX: Better error messages based on error type
+        const errorMsg = (e as Error).message || 'Unknown error';
+        if (errorMsg.includes('timeout')) {
+          callbacks.setStatus("Error: AudioWorklet load timeout (check network)");
+        } else if (errorMsg.includes('404') || errorMsg.includes('Not Found')) {
+          callbacks.setStatus("Error: Worklet file not found (check deployment)");
+        } else {
+          callbacks.setStatus("Error: AudioWorklet failed to start (no ScriptProcessor fallback).");
+        }
         return;
       }
     } else {

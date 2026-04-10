@@ -16,6 +16,11 @@ logs/
 *~
 .aider*
 
+# Editor backup/swap files
+*.kate-swp
+*.bak
+* back*
+
 # Planning docs (moved to docs/planning/)
 .kimi/
 
