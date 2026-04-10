@@ -408,6 +408,9 @@ export function useWebGPURender(
       if (!channelBufferDataRef.current || channelBufferDataRef.current.byteLength < requiredSize) {
         channelBufferDataRef.current = new ArrayBuffer(requiredSize);
         channelDataViewRef.current = new DataView(channelBufferDataRef.current);
+      } else {
+        // Clear old data before reuse to prevent stale values from previous modules
+        new Uint8Array(channelBufferDataRef.current).fill(0, 0, requiredSize);
       }
       fillChannelStates(p.channels, count, channelDataViewRef.current!, p.padTopChannel);
       let recreated = false;
@@ -418,7 +421,7 @@ export function useWebGPURender(
       } else {
         device.queue.writeBuffer(channelsBufferRef.current, 0, channelBufferDataRef.current!, 0, requiredSize);
       }
-      if (recreated) refreshBindGroup(device);
+      if (recreated || channelsBufferRef.current) refreshBindGroup(device);
     }
   }, [renderParamsRef.current.channels, matrix?.numChannels, padTopChannel, gpuReady, refreshBindGroup]); // eslint-disable-line react-hooks/exhaustive-deps
 
