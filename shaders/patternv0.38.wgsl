@@ -238,74 +238,13 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     let effCmd = (in.packedB >> 8) & 255u;
     let effVal = in.packedB & 255u;
 
-    let hasNote = (note > 0u);
-    let hasExpression = (volCmd > 0u) || (effCmd > 0u);
+    // Cap/LED indicators are now drawn by the WebGL2 overlay.
+    // Keep housing, background, playhead highlight only.
     let ch = channels[in.channel];
     let isMuted = (ch.isMuted == 1u);
-
-    let topUV = btnUV - vec2(0.5, 0.16);
-    let topSize = vec2(0.20, 0.20);
-    let isDataPresent = hasExpression && !isMuted;
-    let topColorBase = vec3(0.0, 0.9, 1.0);
-    let topColor = topColorBase * select(0.0, 1.5 + bloom, isDataPresent);
-    let topLed = drawChromeIndicator(topUV, topSize, topColor, isDataPresent, aa);
-    finalColor = mix(finalColor, topLed.rgb, topLed.a);
-    if (isDataPresent) { finalColor += topColor * topLed.a * 0.3; }
-
-    let mainUV = btnUV - vec2(0.5, 0.5);
-    let mainSize = vec2(0.55, 0.45);
-    var noteColor = vec3(0.2);
-    var lightAmount = 0.0;
-
-    if (hasNote) {
-      let pitchHue = pitchClassFromIndex(note);
-      let baseColor = neonPalette(pitchHue);
-      let instBand = inst & 15u;
-      let instBright = 0.8 + (select(0.0, f32(instBand) / 15.0, instBand > 0u)) * 0.2;
-      noteColor = baseColor * instBright;
-
-      let linger = exp(-ch.noteAge * 1.5);
-      let onPlayhead = (in.row == uniforms.playheadRow);
-      let strike = select(0.0, 3.0, onPlayhead);
-      let flash = f32(ch.trigger) * 1.0;
-
-      var d = f32(in.row) + uniforms.tickOffset - f32(uniforms.playheadRow);
-      let totalSteps = 64.0;
-      if (d > totalSteps * 0.5) { d = d - totalSteps; }
-      if (d < -totalSteps * 0.5) { d = d + totalSteps; }
-      let coreDist = abs(d);
-      let energy = 0.02 / (coreDist + 0.001);
-      let trail = exp(-10.0 * max(0.0, -d));
-      let activeVal = clamp(pow(energy, 1.5) + trail, 0.0, 1.0);
-
-      lightAmount = (activeVal * 0.8 + flash + strike + (linger * 2.0)) * clamp(ch.volume, 0.0, 1.2);
-      if (isMuted) { lightAmount *= 0.2; }
+    if (isMuted) {
+      finalColor *= 0.3;
     }
-
-    let displayColor = noteColor * max(lightAmount, 0.1) * (1.0 + bloom * 6.0);
-    let isLit = (lightAmount > 0.05);
-    let mainPad = drawChromeIndicator(mainUV, mainSize, displayColor, isLit, aa);
-    finalColor = mix(finalColor, mainPad.rgb, mainPad.a);
-
-    let botUV = btnUV - vec2(0.5, 0.85);
-    let botSize = vec2(0.25, 0.12);
-    var effColor = vec3(0.0);
-    var isEffOn = false;
-
-    if (effCmd > 0u) {
-      effColor = neonPalette(f32(effCmd) / 32.0);
-      let strength = clamp(f32(effVal) / 255.0, 0.2, 1.0);
-      if (!isMuted) {
-        effColor *= strength * (1.0 + bloom * 2.5);
-        isEffOn = true;
-      }
-    } else if (volCmd > 0u) {
-      effColor = vec3(0.9, 0.9, 0.9);
-      if (!isMuted) { effColor *= 0.5; isEffOn = true; }
-    }
-
-    let botLed = drawChromeIndicator(botUV, botSize, effColor, isEffOn, aa);
-    finalColor = mix(finalColor, botLed.rgb, botLed.a);
   }
 
   if (housingMask < 0.5) { return vec4(fs.borderColor, 0.0); }

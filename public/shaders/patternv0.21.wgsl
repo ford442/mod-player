@@ -262,69 +262,19 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   }
 
   if (inButton > 0.5) {
-      // Refined masks using AA sharpness for perfectly symmetrical caps
-      let mainButtonXMask = smoothstep(0.13 - aa, 0.13 + aa, x) - smoothstep(0.86 - aa, 0.86 + aa, x);
-
-      // 1. Top Indicator (The Blue "Cap")
-      // Widened the Y range to make it a block rather than a slit, matching button width
-      let topLightMask = (smoothstep(0.05 - aa, 0.05 + aa, y) - smoothstep(0.18 - aa, 0.18 + aa, y)) * mainButtonXMask;
-
-      // 2. Main Button Body (Centered with equal 0.04 gap from caps)
-      let mainButtonYMask = smoothstep(0.22 - aa, 0.22 + aa, y) - smoothstep(0.78 - aa, 0.78 + aa, y);
-      let mainButtonMask = mainButtonYMask * mainButtonXMask;
-
-      // 3. Bottom Indicator Cap (Symmetrical to top cap)
-      let bottomLightMask = (smoothstep(0.82 - aa, 0.82 + aa, y) - smoothstep(0.95 - aa, 0.95 + aa, y)) * mainButtonXMask;
-
+      // Caps/LED indicators are now drawn by the WebGL2 overlay.
+      // Keep muted dimming and playhead highlight.
       if (ch.isMuted == 1u) {
           finalColor *= 0.3;
-      }
-
-      // TOP LIGHT: Activity (Additive)
-      if (step(0.1, exp(-ch.noteAge * 2.0)) > 0.5) {
-          let topGlow = vec3<f32>(0.0, 0.9, 1.0);
-          // Additive blend
-          finalColor += topGlow * topLightMask * 1.5;
-      }
-
-      // MAIN LIGHT: Note (Additive + Subsurface)
-      if (hasNote) {
-          let pitchHue = pitchClassFromPacked(in.packedA);
-          let base_note_color = neonPalette(pitchHue);
-          let instBand = inst & 15u;
-          let instBrightness = 0.8 + (select(0.0, f32(instBand) / 15.0, instBand > 0u)) * 0.2;
-
-          var noteColor = base_note_color * instBrightness;
-
-          // Flash intensity based on trigger
-          let flash = f32(ch.trigger) * 0.8;
-
-          // Calculate additive light amount
-          let activeLevel = exp(-ch.noteAge * 3.0);
-          let lightAmount = (activeLevel * 0.8 + flash) * clamp(ch.volume, 0.0, 1.2);
-
-          // 1. Additive Core Bloom
-          finalColor += noteColor * mainButtonMask * lightAmount * 2.0;
-
-          // 2. Tasteful Subsurface Scattering (Tint the housing)
-          // This makes the grey plastic look like it's glowing from inside
-          let subsurface = noteColor * housingMask * lightAmount * 0.15;
-          finalColor += subsurface;
-      }
-
-      // BOTTOM LIGHT: Effect (Additive)
-      if (hasEffect) {
-          let effectColor = effectColorFromCode(effCode, vec3<f32>(0.9, 0.8, 0.2));
-          let strength = clamp(f32(effParam) / 255.0, 0.2, 1.0);
-          finalColor += effectColor * bottomLightMask * strength * 2.5;
-          // Slight subsurface for effect too
-          finalColor += effectColor * housingMask * strength * 0.05;
       }
 
       // Row 0 Proximity (Playhead) Blink
       let rowDist = abs(i32(in.row) - i32(uniforms.playheadRow));
       if (rowDist == 0 && !hasNote) {
           // Additive white glance on empty active cell
+          let mainButtonXMask = smoothstep(0.13 - aa, 0.13 + aa, x) - smoothstep(0.86 - aa, 0.86 + aa, x);
+          let mainButtonYMask = smoothstep(0.22 - aa, 0.22 + aa, y) - smoothstep(0.78 - aa, 0.78 + aa, y);
+          let mainButtonMask = mainButtonYMask * mainButtonXMask;
           finalColor += vec3<f32>(0.15, 0.2, 0.25) * mainButtonMask;
       }
   }
