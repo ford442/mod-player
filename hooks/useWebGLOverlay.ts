@@ -174,11 +174,11 @@ export function useWebGLOverlay(
         v_chState0 = texelFetch(u_channelState, ivec2(trackIndex, 0), 0);
         v_chState1 = texelFetch(u_channelState, ivec2(trackIndex, 1), 0);
 
-        // Check for note data
+        // Check for note data (quick presence detection — full unpacking in FS)
         uint note = (cellData.r >> 24u) & 255u;
         uint effCmd = (cellData.g >> 24u) & 255u;
-        uint volCmd = cellData.g & 255u;
-        v_hasNote = ((note > 0u) || (effCmd > 0u) || (volCmd > 0u)) ? 1.0 : 0.0;
+        uint volCmdFull = cellData.g & 255u; // Low byte of packedB = volCmdFull
+        v_hasNote = ((note > 0u) || (effCmd > 0u) || (volCmdFull > 0u)) ? 1.0 : 0.0;
 
         // Playhead Logic
         float stepsPerPage = (u_layoutMode == 3) ? 64.0 : 32.0;
@@ -861,7 +861,8 @@ export function useWebGLOverlay(
       uniformVals['pixelRatio'] = pixelRatio;
       uniformVals['GRID_RECT'] = `${GRID_RECT.x.toFixed(3)}, ${GRID_RECT.y.toFixed(3)}, ${GRID_RECT.w.toFixed(3)}, ${GRID_RECT.h.toFixed(3)}`;
 
-      // Additive blending so overlay light adds on top of WGSL cells
+      // Additive blending: SRC_ALPHA preserves alpha-based edge anti-aliasing,
+      // ONE on destination adds light on top of WGSL cells without darkening them.
       gl.enable(gl.BLEND);
       gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
 
