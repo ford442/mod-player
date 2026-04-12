@@ -252,74 +252,11 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     let ch = channels[in.channel];
     let isMuted = (ch.isMuted == 1u);
 
-    // Explicit Type Fixes
-    let topUV = btnUV - vec2<f32>(0.5, 0.16);
-    let topSize = vec2<f32>(0.20, 0.20);
-    let isDataPresent = hasExpression && !isMuted;
-    let topColorBase = vec3<f32>(0.0, 0.9, 1.0);
-    let topColor = topColorBase * select(0.0, 1.5 + bloom, isDataPresent);
-    let topLed = drawFrostedGlassCap(topUV, topSize, topColor, isDataPresent, aa, select(0.0, 1.0, isDataPresent));
-    finalColor = mix(finalColor, topLed.rgb, topLed.a);
-
-    // Explicit Type Fixes
-    let mainUV = btnUV - vec2<f32>(0.5, 0.5);
-    let mainSize = vec2<f32>(0.55, 0.45);
-    var noteColor = vec3<f32>(0.2, 0.2, 0.2);
-    var lightAmount = 0.0;
-    var noteGlow = 0.0;
-
-    if (hasNote) {
-      let pitchHue = pitchClassFromIndex(note);
-      let baseColor = neonPalette(pitchHue);
-      let instBand = inst & 15u;
-      let instBright = 0.85 + (select(0.0, f32(instBand) / 15.0, instBand > 0u)) * 0.15;
-      noteColor = baseColor * instBright;
-
-      let linger = exp(-ch.noteAge * 1.2);
-      let playheadStep = uniforms.playheadRow - floor(uniforms.playheadRow / 64.0) * 64.0;
-      let rowDistRaw = abs(f32(in.row % 64u) - playheadStep);
-      let rowDist = min(rowDistRaw, 64.0 - rowDistRaw);
-      let playheadActivation = 1.0 - smoothstep(0.0, 1.5, rowDist);
-      let strike = playheadActivation * 3.5;
-      let flash = f32(ch.trigger) * 1.2;
-
-      let totalSteps = 64.0;
-      let d = fract((f32(in.row) + uniforms.tickOffset - uniforms.playheadRow) / totalSteps) * totalSteps;
-      let coreDist = min(d, totalSteps - d);
-      let energy = 0.03 / (coreDist + 0.001);
-      let trail = exp(-7.0 * max(0.0, -d));
-      let activeVal = clamp(pow(energy, 1.3) + trail, 0.0, 1.0);
-
-      lightAmount = (activeVal * 0.9 + flash + strike + (linger * 2.5)) * clamp(ch.volume, 0.0, 1.2);
-      if (isMuted) { lightAmount *= 0.2; }
-      noteGlow = lightAmount;
+    // Cap/LED indicators are now drawn by the WebGL2 overlay.
+    // Keep housing background and muted dimming.
+    if (isMuted) {
+      finalColor *= 0.3;
     }
-
-    let displayColor = noteColor * max(lightAmount, 0.12) * (1.0 + bloom * 8.0);
-    let isLit = (lightAmount > 0.05);
-    let mainPad = drawFrostedGlassCap(mainUV, mainSize, displayColor, isLit, aa, noteGlow);
-    finalColor = mix(finalColor, mainPad.rgb, mainPad.a);
-
-    // Explicit Type Fixes
-    let botUV = btnUV - vec2<f32>(0.5, 0.85);
-    let botSize = vec2<f32>(0.25, 0.12);
-    var effColor = vec3<f32>(0.0, 0.0, 0.0);
-    var isEffOn = false;
-
-    if (effCmd > 0u) {
-      effColor = neonPalette(f32(effCmd) / 32.0);
-      let strength = clamp(f32(effVal) / 255.0, 0.2, 1.0);
-      if (!isMuted) {
-        effColor *= strength * (1.0 + bloom * 3.5);
-        isEffOn = true;
-      }
-    } else if (volCmd > 0u) {
-      effColor = vec3<f32>(0.9, 0.9, 0.9);
-      if (!isMuted) { effColor *= 0.6; isEffOn = true; }
-    }
-
-    let botLed = drawFrostedGlassCap(botUV, botSize, effColor, isEffOn, aa, select(0.0, 0.7, isEffOn));
-    finalColor = mix(finalColor, botLed.rgb, botLed.a);
   }
 
   // Kick reactive glow

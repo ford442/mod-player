@@ -174,9 +174,9 @@ fn drawEmitterDiode(uv: vec2<f32>, intensity: f32, color: vec3<f32>, isOn: bool)
     let p = uv;
     let dDiode = sdRoundedBox(p, diodeSize * 0.5, 0.06);
     
-    // Diode has a smaller "die" inside it
-    let dieSize = vec2<f32>(0.14, 0.07);
-    let dDie = sdRoundedBox(p, dieSize * 0.5, 0.03);
+    // Diode has a smaller "die" inside it — tighter for distinct dot appearance
+    let dieSize = vec2<f32>(0.10, 0.05);
+    let dDie = sdRoundedBox(p, dieSize * 0.5, 0.02);
     
     // Base diode housing (darker)
     let diodeMask = 1.0 - smoothstep(0.0, 0.015, dDiode);
@@ -253,24 +253,25 @@ fn drawUnifiedLensCap(
     // Subsurface scattering
     var subsurfaceGlow = vec3<f32>(0.0);
     
-    // Top emitter scattering (Blue - note on)
+    // Top emitter scattering (Blue - note on) — tightened falloff
     let distTop = length(uv - topPos - refractOffset * 0.3);
-    let scatterTop = exp(-distTop * 5.0) * topEmitter.a;
-    subsurfaceGlow += topEmitter.rgb * scatterTop * 3.5;
+    let scatterTop = exp(-distTop * 9.0) * topEmitter.a;
+    subsurfaceGlow += topEmitter.rgb * scatterTop * 2.2;
 
-    // Middle emitter scattering (Note color - steady)
+    // Middle emitter scattering (Note color - steady) — tightened falloff
     let distMid = length(uv - midPos - refractOffset * 0.5);
-    let scatterMid = exp(-distMid * 4.0) * midEmitter.a;
-    subsurfaceGlow += midEmitter.rgb * scatterMid * 5.0;
+    let scatterMid = exp(-distMid * 7.5) * midEmitter.a;
+    subsurfaceGlow += midEmitter.rgb * scatterMid * 3.0;
 
-    // Bottom emitter scattering (Amber - control)
+    // Bottom emitter scattering (Amber - control) — tightened falloff
     let distBot = length(uv - botPos - refractOffset * 0.3);
-    let scatterBot = exp(-distBot * 5.0) * botEmitter.a;
-    subsurfaceGlow += botEmitter.rgb * scatterBot * 3.5;
+    let scatterBot = exp(-distBot * 9.0) * botEmitter.a;
+    subsurfaceGlow += botEmitter.rgb * scatterBot * 2.2;
     
-    let totalGlow = topEmitter.a + midEmitter.a + botEmitter.a;
-    let diffusion = exp(-radial * 3.0) * totalGlow * 0.3;
-    subsurfaceGlow += (topEmitter.rgb + midEmitter.rgb + botEmitter.rgb) * diffusion * 0.2;
+    // Per-emitter fringe glow (replaces shared diffusion that smeared all three)
+    subsurfaceGlow += topEmitter.rgb * exp(-distTop * 6.0) * topEmitter.a * 0.15;
+    subsurfaceGlow += midEmitter.rgb * exp(-distMid * 6.0) * midEmitter.a * 0.15;
+    subsurfaceGlow += botEmitter.rgb * exp(-distBot * 6.0) * botEmitter.a * 0.15;
     
     // Glass base color
     let bgColor = vec3<f32>(0.04, 0.04, 0.05);
@@ -304,26 +305,31 @@ fn drawUnifiedLensCap(
     let diodeBlend = diodeMask * (1.0 - alpha * 0.65);
     finalColor = mix(finalColor, combinedDiode, diodeBlend);
     finalColor = mix(finalColor, litGlassColor, alpha);
-    finalColor += subsurfaceGlow * 5.0;
+    finalColor += subsurfaceGlow * 1.8;
     
     // Concentrated glow around active emitters
     if (midEmitter.a > 0.05) {
         let midGlowDist = length(uv - midPos - refractOffset * 0.5);
-        let midGlow = (1.0 - smoothstep(0.0, 0.35, midGlowDist)) * midEmitter.a * 0.5;
+        let midGlow = (1.0 - smoothstep(0.0, 0.18, midGlowDist)) * midEmitter.a * 0.5;
         finalColor += midEmitter.rgb * midGlow;
     }
     if (topEmitter.a > 0.05) {
         let topGlowDist = length(uv - topPos - refractOffset * 0.3);
-        let topGlow = (1.0 - smoothstep(0.0, 0.25, topGlowDist)) * topEmitter.a * 0.3;
+        let topGlow = (1.0 - smoothstep(0.0, 0.14, topGlowDist)) * topEmitter.a * 0.3;
         finalColor += topEmitter.rgb * topGlow;
     }
     if (botEmitter.a > 0.05) {
         let botGlowDist = length(uv - botPos - refractOffset * 0.3);
-        let botGlow = (1.0 - smoothstep(0.0, 0.25, botGlowDist)) * botEmitter.a * 0.3;
+        let botGlow = (1.0 - smoothstep(0.0, 0.14, botGlowDist)) * botEmitter.a * 0.3;
         finalColor += botEmitter.rgb * botGlow;
     }
     
     finalColor += fresnel * vec3<f32>(0.9, 0.95, 1.0) * 0.18 * (1.0 + radial * 0.5);
+    
+    // Horizontal separator shadows between the three emitter zones
+    let sepShadowTop = (1.0 - smoothstep(0.0, 0.015, abs(p.y - (-0.14)))) * 0.35;
+    let sepShadowBot = (1.0 - smoothstep(0.0, 0.015, abs(p.y - 0.14))) * 0.35;
+    finalColor -= finalColor * (sepShadowTop + sepShadowBot);
     
     let vignette = 1.0 - radial * radial * 0.25;
     finalColor *= vignette;
@@ -424,9 +430,9 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     var topIntensity = 0.0;
     if (!isMuted) {
       if (ch.trigger > 0u) {
-        topIntensity = 2.5;
+        topIntensity = 3.0 + kick * 0.5;
       } else if (hasNote) {
-        topIntensity = playheadActivation * 1.5;
+        topIntensity = playheadActivation * 0.8;
       }
     }
     let topColor = blueColor * (1.5 + bloom * 2.0);
@@ -499,6 +505,12 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   let noise = fract(sin(dot(in.uv * uniforms.timeSec, vec2<f32>(12.9898, 78.233))) * 43758.5453);
   finalColor += (noise - 0.5) * 0.01;
 
-  if (housingMask < 0.5) { return vec4<f32>(fs.borderColor, 0.0); }
+  // Idle cells: thin outer stroke instead of invisible
+  if (housingMask < 0.5) {
+    if (dHousing < 0.02) {
+      return vec4<f32>(fs.ledOffColor, 1.0);
+    }
+    return vec4<f32>(fs.borderColor, 0.0);
+  }
   return vec4<f32>(finalColor, 1.0);
 }
