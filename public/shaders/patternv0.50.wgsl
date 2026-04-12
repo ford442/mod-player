@@ -280,6 +280,7 @@ fn drawUnifiedLensCap(
     activeColor = mix(activeColor, topEmitter.rgb, topEmitter.a * 0.5);
     activeColor = mix(activeColor, botEmitter.rgb, botEmitter.a * 0.5);
     
+    let totalGlow = topEmitter.a + midEmitter.a + botEmitter.a;
     let litTint = mix(vec3<f32>(0.92, 0.93, 0.98), activeColor, min(totalGlow * 0.4, 0.4));
     let glassBaseColor = mix(bgColor * 0.12, litTint, 0.88);
     
