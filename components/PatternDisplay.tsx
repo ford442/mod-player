@@ -239,6 +239,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   const { drawWebGL } = useWebGLOverlay(glCanvasRef, {
     shaderFile, matrix, padTopChannel, isOverlayActive,
     invertChannels, playheadRow, cellWidth, cellHeight,
+    channels, bloomIntensity,
     ...(playbackStateRef ? { playbackStateRef } : {}),
   }, setDebugInfo);
 
