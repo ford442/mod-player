@@ -203,7 +203,7 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   let inst = in.packedA & 255u;
   let effCode = (in.packedB >> 8) & 255u;
   let effParam = in.packedB & 255u;
-  let hasNote = (note >= 65u && note <= 71u) || (note > 0u && note < 128u);
+  let hasNote = (note >= 1u && note <= 96u);
   let hasEffect = (effParam > 0u);
   
   // Get channel state for note activity with bounds check
@@ -227,69 +227,10 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
       col = mix(col, btnColor * 0.6, 0.9);
   }
 
-  // --- FROSTED CAPS (Top and Bottom Lights) ---
+  // --- FROSTED CAPS now drawn by WebGL2 overlay ---
   if (inButton > 0.5) {
-      // Refined masks using AA sharpness for perfectly symmetrical caps
-      let mainButtonXMask = smoothstep(0.13 - aa, 0.13 + aa, btnUV.x) - smoothstep(0.86 - aa, 0.86 + aa, btnUV.x);
-
-      // 1. TOP CAP: Activity/Note indicator (The "Frosted Glass" effect)
-      // Exactly 15% height at top
-      let topLightMask = (smoothstep(0.05 - aa, 0.05 + aa, btnUV.y) - smoothstep(0.20 - aa, 0.20 + aa, btnUV.y)) * mainButtonXMask;
-
-      // 2. Main Button Body (Centered with equal gap from caps)
-      let mainButtonYMask = smoothstep(0.22 - aa, 0.22 + aa, btnUV.y) - smoothstep(0.78 - aa, 0.78 + aa, btnUV.y);
-      let mainButtonMask = mainButtonYMask * mainButtonXMask;
-
-      // 3. BOTTOM CAP: Effect indicator (Symmetrical to top cap, exactly 15% height)
-      let bottomLightMask = (smoothstep(0.80 - aa, 0.80 + aa, btnUV.y) - smoothstep(0.95 - aa, 0.95 + aa, btnUV.y)) * mainButtonXMask;
-
       if (ch.isMuted == 1u) {
           col *= 0.3;
-      }
-
-      // TOP LIGHT: Note Activity (Additive glow - the "frosted cap")
-      if (hasNote || step(0.1, exp(-ch.noteAge * 2.0)) > 0.5) {
-          let pitchHue = pitchClassFromPacked(in.packedA);
-          let base_note_color = neonPalette(pitchHue);
-          let instBand = inst & 15u;
-          let instBrightness = 0.8 + (select(0.0, f32(instBand) / 15.0, instBand > 0u)) * 0.2;
-          var noteColor = base_note_color * instBrightness;
-
-          // Flash intensity based on trigger
-          let flash = f32(ch.trigger) * 0.5;
-
-          // Calculate additive light amount
-          let activeLevel = exp(-ch.noteAge * 3.0);
-          let lightAmount = (activeLevel * 0.8 + flash) * clamp(ch.volume, 0.0, 1.2);
-
-          // 1. Additive Core Bloom on top cap - REDUCED intensity
-          col += noteColor * topLightMask * lightAmount * 0.8;
-
-          // 2. Main button body glow - VERY SUBTLE (was filling entire cell)
-          col += noteColor * mainButtonMask * lightAmount * 0.15;
-
-          // 3. Subsurface Scattering (Tint the housing) - REDUCED
-          let subsurface = noteColor * housingMask * lightAmount * 0.08;
-          col += subsurface;
-      } else {
-          // Idle state - subtle frosted cap
-          col += vec3<f32>(0.0, 0.3, 0.4) * topLightMask * 0.15;
-      }
-
-      // BOTTOM LIGHT: Effect (Additive) - REDUCED intensity
-      if (hasEffect) {
-          let effectColor = effectColorFromCode(effCode, vec3<f32>(0.9, 0.8, 0.2));
-          let strength = clamp(f32(effParam) / 255.0, 0.2, 1.0);
-          col += effectColor * bottomLightMask * strength * 1.2;
-          // Slight subsurface for effect too
-          col += effectColor * housingMask * strength * 0.03;
-      }
-
-      // Row 0 Proximity (Playhead) Blink - ONLY on caps
-      let rowDist = abs(i32(in.row) - i32(uniforms.playheadRow));
-      if (rowDist == 0 && !hasNote) {
-          // Additive white glance on empty active cell - only on caps
-          col += vec3<f32>(0.15, 0.2, 0.25) * (topLightMask + bottomLightMask) * 0.5;
       }
   }
 

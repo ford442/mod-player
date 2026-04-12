@@ -281,19 +281,7 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
       capColor = mix(capColor, baseCol, nearPlayhead * 0.65);
     }
 
-    // ── Blue note-on indicator (top-left micro-LED) ──────────────────
-    // Lights blue when the playhead is on this row and channel is active
-    let ledNoteOn = vec2<f32>(-0.30, -0.30);
-    let dLedOn    = length(p - ledNoteOn) - 0.07;
-    if (dLedOn < 0.0) {
-      let ledCol = select(
-        vec3<f32>(0.05, 0.10, 0.20),      // off — dark blue
-        vec3<f32>(0.25, 0.55, 1.00),      // on  — bright blue
-        chTrigger || (nearPlayhead > 0.5)
-      );
-      let ledGlow = select(0.0, bloom * 1.2, chTrigger);
-      return vec4<f32>((ledCol + ledGlow) * dim, 1.0);
-    }
+    // ── Blue note-on indicator — now drawn by WebGL2 overlay ──────────
 
     // Trigger flash
     if (chTrigger) {
@@ -310,31 +298,7 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     alpha    = 0.75;
   }
 
-  // ── Amber volume/expression indicator (top-right micro-LED) ──────────
-  // Lights amber when a volume column command is present in this cell
-  let ledVol  = vec2<f32>(0.30, -0.30);
-  let dLedVol = length(p - ledVol) - 0.07;
-  if (dLedVol < 0.0) {
-    let ledCol = select(
-      vec3<f32>(0.18, 0.12, 0.02),    // off — dark amber
-      vec3<f32>(1.00, 0.65, 0.10),    // on  — bright amber
-      hasVol
-    );
-    let ledGlow = select(0.0, bloom * 0.8, hasVol && onPlayhead);
-    return vec4<f32>((ledCol + ledGlow) * dim, 1.0);
-  }
-
-  // ── Effect indicator (bottom centre micro-LED) ─────────────────────
-  let ledEff  = vec2<f32>(0.0, 0.30);
-  let dLedEff = length(p - ledEff) - 0.06;
-  if (dLedEff < 0.0) {
-    let ledCol = select(
-      vec3<f32>(0.10, 0.14, 0.10),    // off — dark green
-      vec3<f32>(0.30, 0.95, 0.40),    // on  — bright green
-      hasEffect
-    );
-    return vec4<f32>(ledCol * dim, 1.0);
-  }
+  // ── Volume/Expression and Effect indicators — now drawn by WebGL2 overlay ──
 
   // ── Frosted surface shading ──────────────────────────────────────────
   let edge   = smoothstep(0.0, 0.08, -dBox);
