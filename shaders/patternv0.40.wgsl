@@ -150,7 +150,7 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   let dBox = sdRoundedBox(p, vec2<f32>(0.45, 0.40), 0.05);
   var col = fs.bgColor;
   
-  col *= smoothstep(0.0, 0.1, dBox + 0.5);
+  col += smoothstep(0.0, 0.1, dBox + 0.5) * 0.02;
 
   let onPlayhead = (in.row == u32(uniforms.playheadRow));
   

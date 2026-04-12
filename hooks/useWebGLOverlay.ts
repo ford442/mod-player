@@ -1,10 +1,12 @@
 // WebGL2 overlay subsystem for PatternDisplay.
-// Renders frosted-glass "cap" buttons on top of the WebGPU canvas for hybrid shaders.
+// Renders three-LED frosted lens caps on top of the WebGPU canvas for hybrid shaders.
 // Uses instanced rendering — one quad per (channel × step) pair.
+// Three-emitter system: Top=Blue note-on, Mid=Pitch-colored note, Bot=Amber expression.
 
 import { useRef, useEffect, useCallback } from 'react';
 import type React from 'react';
-import { PatternMatrix, PlaybackState } from '../types';
+import { ChannelShadowState, PatternMatrix, PlaybackState } from '../types';
+import { packPatternMatrixHighPrecision } from '../utils/gpuPacking';
 import {
   WEBGL_HYBRID_SHADERS,
   getLayoutType,
@@ -44,6 +46,8 @@ export interface WebGLOverlayParams {
   playheadRow: number;
   cellWidth: number;
   cellHeight: number;
+  channels?: ChannelShadowState[];
+  bloomIntensity?: number;
   playbackStateRef?: React.MutableRefObject<PlaybackState>;
 }
 
@@ -57,7 +61,8 @@ type DebugInfo = {
 type GLResources = {
   program: WebGLProgram;
   vao: WebGLVertexArrayObject;
-  texture: WebGLTexture;
+  cellTexture: WebGLTexture;
+  stateTexture: WebGLTexture;
   capTexture?: WebGLTexture;
   buffer: WebGLBuffer;
   uniforms: Record<string, WebGLUniformLocation | null>;
@@ -87,7 +92,8 @@ export function useWebGLOverlay(
         oldGl.deleteProgram(oldRes.program);
         oldGl.deleteVertexArray(oldRes.vao);
         oldGl.deleteBuffer(oldRes.buffer);
-        oldGl.deleteTexture(oldRes.texture);
+        oldGl.deleteTexture(oldRes.cellTexture);
+        oldGl.deleteTexture(oldRes.stateTexture);
         if (oldRes.capTexture) oldGl.deleteTexture(oldRes.capTexture);
         oldGl.clearColor(0, 0, 0, 0);
         oldGl.clear(oldGl.COLOR_BUFFER_BIT | oldGl.DEPTH_BUFFER_BIT);
@@ -121,15 +127,23 @@ export function useWebGLOverlay(
 
     glContextRef.current = gl;
 
+    // --- VERTEX SHADER ---
+    // Fetches cell data (packedA, packedB) and channel state in the VS,
+    // passes as flat varyings to avoid per-pixel texelFetch.
     const vsSource = `#version 300 es
     precision highp float;
+    precision highp int;
+    precision highp usampler2D;
 
     in vec2 a_pos;
-    in vec2 a_uv;
 
+    // Flat varyings for fragment shader
+    flat out uvec2 v_cell;       // (packedA, packedB)
+    flat out vec4 v_chState0;    // (volume, pan, freq, trigger)
+    flat out vec4 v_chState1;    // (noteAge, activeEffect, effectValue, isMuted)
     out vec2 v_uv;
-    out float v_active;  // 1.0 if Playhead matches this step
-    out float v_hasNote; // 1.0 if Note data exists here
+    flat out float v_active;     // playhead activation
+    flat out float v_hasNote;    // 1.0 if note data exists
 
     uniform vec2 u_resolution;
     uniform vec2 u_cellSize;
@@ -139,38 +153,46 @@ export function useWebGLOverlay(
     uniform float u_playhead;
     uniform int u_invertChannels;
     uniform int u_layoutMode; // 1=Circ, 2=Horiz32, 3=Horiz64
-    uniform highp usampler2D u_noteData;
+    uniform highp usampler2D u_cellData;    // RG32UI: (packedA, packedB)
+    uniform highp sampler2D u_channelState; // RGBA32F: row0=(vol,pan,freq,trig), row1=(age,eff,effVal,muted)
 
     const float PI = 3.14159265359;
-    const float INNER_RADIUS = 0.3;  // From POLAR_RINGS
-    const float OUTER_RADIUS = 0.9;  // From POLAR_RINGS
-    const float CAP_SCALE_FACTOR = 0.88; // From CAP_CONFIG
+    const float INNER_RADIUS = 0.3;
+    const float OUTER_RADIUS = 0.9;
+    const float CAP_SCALE_FACTOR = 0.88;
 
     void main() {
         int id = gl_InstanceID;
-        // u_cols = numChannels; texture is stored as width=channels, height=steps
-        int trackIndex = id % int(u_cols); // 0 to numChannels-1
-        int stepIndex  = id / int(u_cols); // 0 to stepsForMode-1
+        int trackIndex = id % int(u_cols);
+        int stepIndex  = id / int(u_cols);
 
-        // 1. Check for Note Data (texture: x=channel, y=step)
-        uint note = texelFetch(u_noteData, ivec2(trackIndex, stepIndex), 0).r;
-        v_hasNote = (note > 0u) ? 1.0 : 0.0;
+        // Fetch cell data (packedA, packedB)
+        uvec2 cellData = texelFetch(u_cellData, ivec2(trackIndex, stepIndex), 0).rg;
+        v_cell = cellData;
 
-        // 2. Playhead Logic
+        // Fetch channel state (2 rows)
+        v_chState0 = texelFetch(u_channelState, ivec2(trackIndex, 0), 0);
+        v_chState1 = texelFetch(u_channelState, ivec2(trackIndex, 1), 0);
+
+        // Check for note data (quick presence detection — full unpacking in FS)
+        uint note = (cellData.r >> 24u) & 255u;
+        uint effCmd = (cellData.g >> 24u) & 255u;
+        uint volCmdFull = cellData.g & 255u; // Low byte of packedB = volCmdFull
+        v_hasNote = ((note > 0u) || (effCmd > 0u) || (volCmdFull > 0u)) ? 1.0 : 0.0;
+
+        // Playhead Logic
         float stepsPerPage = (u_layoutMode == 3) ? 64.0 : 32.0;
         float relativePlayhead = mod(u_playhead, stepsPerPage);
-
         float distToPlayhead = abs(float(stepIndex) - relativePlayhead);
         distToPlayhead = min(distToPlayhead, stepsPerPage - distToPlayhead);
         float activation = 1.0 - smoothstep(0.0, 1.5, distToPlayhead);
         v_active = activation;
 
-        // 3. Positioning Logic
+        // Positioning Logic
         if (u_layoutMode == 2 || u_layoutMode == 3) {
             // --- HORIZONTAL LAYOUT (32-step or 64-step) ---
-            // Steps run along X, channels run along Y
             float capScale = min(u_cellSize.x, u_cellSize.y) * CAP_SCALE_FACTOR;
-            if (note == 0u) capScale = 0.0;
+            if (v_hasNote < 0.5) capScale = 0.0;
             capScale *= 1.0 + (0.2 * activation);
 
             float cellX = u_offset.x + float(stepIndex)  * u_cellSize.x;
@@ -183,33 +205,27 @@ export function useWebGLOverlay(
 
         } else {
             // --- CIRCULAR LAYOUT ---
-            // Use pixel-space radii (based on minDim) to match the WGSL background shader
-            // and prevent elliptical stretching on non-square viewports.
-
             float numTracks = u_cols;
             float trackIndexF = float(trackIndex);
             if (u_invertChannels == 0) { trackIndexF = numTracks - 1.0 - trackIndexF; }
 
-            // Pixel-space radii matching WGSL v0.46 exactly
-            float minDim = min(u_resolution.x, u_resolution.y);
+            // Snap minDim to integer for DPR parity with WGSL
+            float minDim = floor(min(u_resolution.x, u_resolution.y));
             float maxRadius = minDim * 0.45;
             float minRadius = minDim * 0.15;
             float ringDepth = (maxRadius - minRadius) / numTracks;
 
-            // Center in the ring (matches WGSL positioning)
             float pixelRadius = minRadius + trackIndexF * ringDepth + ringDepth * 0.5;
 
             float totalSteps = 64.0;
             float anglePerStep = (2.0 * PI) / totalSteps;
             float theta = -1.570796 + float(stepIndex) * anglePerStep;
 
-            // Button sizing using shared cap scale
             float circumference = 2.0 * PI * pixelRadius;
             float arcLength = circumference / totalSteps;
             float btnW = arcLength * CAP_SCALE_FACTOR;
             float btnH = ringDepth * 0.92;
 
-            // Playhead pop effect
             float circPlayhead = mod(u_playhead, totalSteps);
             float circDist = abs(float(stepIndex) - circPlayhead);
             circDist = min(circDist, totalSteps - circDist);
@@ -219,19 +235,16 @@ export function useWebGLOverlay(
             btnH *= popScale;
             v_active = circActivation;
 
-            // Local position with rotation
             vec2 localPos = a_pos * vec2(btnW, btnH);
             float rotAng = theta + 1.570796;
             float cA = cos(rotAng); float sA = sin(rotAng);
             float rotX = localPos.x * cA - localPos.y * sA;
             float rotY = localPos.x * sA + localPos.y * cA;
 
-            // World position in pixels
             vec2 center = u_resolution * 0.5;
             float worldX = center.x + cos(theta) * pixelRadius + rotX;
             float worldY = center.y + sin(theta) * pixelRadius + rotY;
 
-            // Convert to NDC
             vec2 ndc = vec2(
                 (worldX / u_resolution.x) * 2.0 - 1.0,
                 1.0 - (worldY / u_resolution.y) * 2.0
@@ -255,43 +268,253 @@ export function useWebGLOverlay(
       return;
     }
 
+    // --- FRAGMENT SHADER ---
+    // Three-LED unified lens cap ported from v0.50 WGSL
     const fsSource = `#version 300 es
     precision highp float;
+    precision highp int;
 
+    flat in uvec2 v_cell;
+    flat in vec4 v_chState0;
+    flat in vec4 v_chState1;
     in vec2 v_uv;
-    in float v_active;  // Playhead Hit
-    in float v_hasNote; // Note Exists
+    flat in float v_active;
+    flat in float v_hasNote;
 
     uniform sampler2D u_capTexture;
+    uniform float u_bloomIntensity;
+    uniform float u_timeSec;
 
     out vec4 fragColor;
 
-    void main() {
-        // Read the "Frosted Glass" texture
-        vec4 cap = texture(u_capTexture, v_uv);
+    // --- Pitch-to-color (neonPalette from v0.50) ---
+    vec3 neonPalette(float hue) {
+        float h6 = hue * 6.0;
+        float r = clamp(abs(h6 - 3.0) - 1.0, 0.0, 1.0);
+        float g = clamp(2.0 - abs(h6 - 2.0), 0.0, 1.0);
+        float b = clamp(2.0 - abs(h6 - 4.0), 0.0, 1.0);
+        return vec3(r, g, b) * 1.2 + 0.1;
+    }
 
-        // Base Lighting (Idle)
-        vec3 lightColor = vec3(0.0);
-        float intensity = 0.0;
+    float pitchClassFromIndex(uint note) {
+        if (note < 1u || note > 96u) return 0.0;
+        uint semi = (note - 1u) % 12u;
+        return float(semi) / 12.0;
+    }
 
-        if (v_hasNote > 0.5) {
-            // IDLE STATE: Cool Blue Data Glow
-            lightColor = vec3(0.0, 0.6, 1.0);
-            intensity = 0.8;
+    // --- SDF: Rounded Box ---
+    float sdRoundedBox(vec2 p, vec2 b, float r) {
+        vec2 q = abs(p) - b + vec2(r);
+        return length(max(q, vec2(0.0))) + min(max(q.x, q.y), 0.0) - r;
+    }
+
+    // --- Single LED emitter diode ---
+    vec4 drawEmitterDiode(vec2 uv, float intensity, vec3 color, bool isOn) {
+        vec2 diodeSize = vec2(0.28, 0.14);
+        float dDiode = sdRoundedBox(uv, diodeSize * 0.5, 0.06);
+        vec2 dieSize = vec2(0.10, 0.05);
+        float dDie = sdRoundedBox(uv, dieSize * 0.5, 0.02);
+        float diodeMask = 1.0 - smoothstep(0.0, 0.015, dDiode);
+        float dieMask = 1.0 - smoothstep(0.0, 0.008, dDie);
+        vec3 diodeColor = vec3(0.06, 0.06, 0.08);
+        if (isOn) {
+            vec3 dieGlow = color * (1.0 + intensity * 4.0);
+            vec3 housingGlow = color * 0.12 * intensity;
+            diodeColor = mix(housingGlow, dieGlow, dieMask);
+            float hotspot = exp(-length(uv / vec2(0.06, 0.03)) * 2.5) * intensity;
+            diodeColor += color * hotspot * 0.6;
+        }
+        return vec4(diodeColor, diodeMask);
+    }
+
+    // --- Unified three-emitter lens cap ---
+    vec4 drawUnifiedLensCap(
+        vec2 uv, vec2 lensSize,
+        vec4 topEmitter, vec4 midEmitter, vec4 botEmitter,
+        float aa
+    ) {
+        vec2 p = uv;
+        float dBox = sdRoundedBox(p, lensSize * 0.5, 0.12);
+        if (dBox > 0.0) return vec4(0.0);
+
+        vec2 topPos = vec2(0.0, -0.28);
+        vec2 midPos = vec2(0.0, 0.0);
+        vec2 botPos = vec2(0.0, 0.28);
+
+        float radial = length(p / (lensSize * 0.5));
+        float edgeThickness = 0.18 + radial * 0.12;
+        float centerThickness = 0.06;
+
+        vec3 n = normalize(vec3(p.x * 2.5 / lensSize.x, p.y * 2.5 / lensSize.y, 0.35));
+        vec3 viewDir = vec3(0.0, 0.0, 1.0);
+        float fresnel = pow(1.0 - abs(dot(n, viewDir)), 2.5);
+
+        vec4 topDiode = drawEmitterDiode(uv - topPos, topEmitter.a, topEmitter.rgb, topEmitter.a > 0.05);
+        vec4 midDiode = drawEmitterDiode(uv - midPos, midEmitter.a, midEmitter.rgb, midEmitter.a > 0.05);
+        vec4 botDiode = drawEmitterDiode(uv - botPos, botEmitter.a, botEmitter.rgb, botEmitter.a > 0.05);
+
+        vec3 combinedDiode = vec3(0.06, 0.06, 0.08);
+        if (botDiode.a > 0.0) combinedDiode = mix(combinedDiode, botDiode.rgb, botDiode.a);
+        if (midDiode.a > 0.0) combinedDiode = mix(combinedDiode, midDiode.rgb, midDiode.a);
+        if (topDiode.a > 0.0) combinedDiode = mix(combinedDiode, topDiode.rgb, topDiode.a);
+        float diodeMask = max(max(topDiode.a, midDiode.a), botDiode.a);
+
+        float refractionStrength = (1.0 - radial * 0.6) * 0.04;
+        vec2 refractOffset = p * refractionStrength;
+
+        // Tightened subsurface scattering (matching v0.50 §1)
+        vec3 subsurfaceGlow = vec3(0.0);
+        float distTop = length(uv - topPos - refractOffset * 0.3);
+        float scatterTop = exp(-distTop * 9.0) * topEmitter.a;
+        subsurfaceGlow += topEmitter.rgb * scatterTop * 2.2;
+        float distMid = length(uv - midPos - refractOffset * 0.5);
+        float scatterMid = exp(-distMid * 7.5) * midEmitter.a;
+        subsurfaceGlow += midEmitter.rgb * scatterMid * 3.0;
+        float distBot = length(uv - botPos - refractOffset * 0.3);
+        float scatterBot = exp(-distBot * 9.0) * botEmitter.a;
+        subsurfaceGlow += botEmitter.rgb * scatterBot * 2.2;
+        // Per-emitter fringe (replaces shared diffusion)
+        subsurfaceGlow += topEmitter.rgb * exp(-distTop * 6.0) * topEmitter.a * 0.15;
+        subsurfaceGlow += midEmitter.rgb * exp(-distMid * 6.0) * midEmitter.a * 0.15;
+        subsurfaceGlow += botEmitter.rgb * exp(-distBot * 6.0) * botEmitter.a * 0.15;
+
+        // Glass base color
+        vec3 bgColor = vec3(0.04, 0.04, 0.05);
+        vec3 activeColor = midEmitter.rgb * midEmitter.a;
+        activeColor = mix(activeColor, topEmitter.rgb, topEmitter.a * 0.5);
+        activeColor = mix(activeColor, botEmitter.rgb, botEmitter.a * 0.5);
+        float totalGlow = topEmitter.a + midEmitter.a + botEmitter.a;
+        vec3 litTint = mix(vec3(0.92, 0.93, 0.98), activeColor, min(totalGlow * 0.4, 0.4));
+        vec3 glassBaseColor = mix(bgColor * 0.12, litTint, 0.88);
+
+        float edgeAlpha = smoothstep(0.0, aa * 2.0, -dBox);
+        float diodeVisibility = diodeMask * 0.55;
+        float baseAlpha = 0.72 + 0.28 * fresnel;
+        float emitterLift = clamp(topEmitter.a * 0.4 + botEmitter.a * 0.4, 0.0, 0.7);
+        float alpha = mix(baseAlpha, 0.32, min(diodeVisibility + emitterLift, 0.9)) * edgeAlpha;
+
+        vec3 lightDir = vec3(0.4, -0.7, 0.6);
+        float diff = max(0.0, dot(n, normalize(lightDir)));
+        float spec = pow(max(0.0, dot(reflect(-normalize(lightDir), n), viewDir)), 40.0);
+        vec3 litGlassColor = glassBaseColor * (0.45 + 0.55 * diff) + vec3(spec * 0.25);
+
+        vec3 finalColor = bgColor;
+        float diodeBlend = diodeMask * (1.0 - alpha * 0.65);
+        finalColor = mix(finalColor, combinedDiode, diodeBlend);
+        finalColor = mix(finalColor, litGlassColor, alpha);
+        finalColor += subsurfaceGlow * 1.8;
+
+        // Concentrated glow (tightened radii matching v0.50 §1)
+        if (midEmitter.a > 0.05) {
+            float midGlowDist = length(uv - midPos - refractOffset * 0.5);
+            float midGlow = (1.0 - smoothstep(0.0, 0.18, midGlowDist)) * midEmitter.a * 0.5;
+            finalColor += midEmitter.rgb * midGlow;
+        }
+        if (topEmitter.a > 0.05) {
+            float topGlowDist = length(uv - topPos - refractOffset * 0.3);
+            float topGlow = (1.0 - smoothstep(0.0, 0.14, topGlowDist)) * topEmitter.a * 0.3;
+            finalColor += topEmitter.rgb * topGlow;
+        }
+        if (botEmitter.a > 0.05) {
+            float botGlowDist = length(uv - botPos - refractOffset * 0.3);
+            float botGlow = (1.0 - smoothstep(0.0, 0.14, botGlowDist)) * botEmitter.a * 0.3;
+            finalColor += botEmitter.rgb * botGlow;
         }
 
-        // Active Lighting (Hit)
-        vec3 activeColor = vec3(1.0, 0.5, 0.1);
-        float activeIntensity = 1.5; // Bloom boost
-        lightColor = mix(lightColor, activeColor, v_active);
-        intensity = mix(intensity, activeIntensity, v_active);
+        finalColor += fresnel * vec3(0.9, 0.95, 1.0) * 0.18 * (1.0 + radial * 0.5);
 
-        // Apply Light to Material
-        vec3 finalRGB = cap.rgb * lightColor * intensity;
+        // Horizontal separator shadows
+        float sepShadowTop = (1.0 - smoothstep(0.0, 0.015, abs(p.y - (-0.14)))) * 0.35;
+        float sepShadowBot = (1.0 - smoothstep(0.0, 0.015, abs(p.y - 0.14))) * 0.35;
+        finalColor -= finalColor * (sepShadowTop + sepShadowBot);
 
-        // Final Output
-        fragColor = vec4(finalRGB, cap.a * 0.9); // 0.9 alpha for translucency
+        float vignette = 1.0 - radial * radial * 0.25;
+        finalColor *= vignette;
 
+        return vec4(finalColor, edgeAlpha);
+    }
+
+    void main() {
+        // Unpack cell data
+        uint packedA = v_cell.x;
+        uint packedB = v_cell.y;
+
+        uint note = (packedA >> 24u) & 255u;
+        uint instRaw = (packedA >> 16u) & 255u;
+        uint durationRaw = (packedA >> 8u) & 255u;
+        uint volPacked = packedA & 255u;
+        uint effCmd = (packedB >> 24u) & 255u;
+        uint effVal = (packedB >> 16u) & 255u;
+        uint durationFlags = (packedB >> 8u) & 127u;
+        uint volCmdFull = packedB & 255u;
+
+        bool isExpressionOnly = (instRaw & 128u) != 0u;
+        uint volCmd = (volPacked >> 4u) << 4u;
+
+        bool hasNote = (note >= 1u && note <= 96u);
+        bool hasExpression = (volCmd > 0u) || (effCmd > 0u) || (volCmdFull > 0u);
+
+        // Channel state
+        float chVolume = v_chState0.x;
+        float chTrigger = v_chState0.w;
+        float chNoteAge = v_chState1.x;
+        float chIsMuted = v_chState1.w;
+        bool isMuted = chIsMuted > 0.5;
+
+        float bloom = u_bloomIntensity;
+        float aa = fwidth(v_uv.y) * 0.33;
+
+        // Map UV to lens-cap space (-0.5..0.5)
+        vec2 lensUV = v_uv - vec2(0.5);
+
+        // --- THREE EMITTER SETUP ---
+
+        // EMITTER 1 (TOP): Blue note-on indicator
+        vec3 blueColor = vec3(0.15, 0.5, 1.0);
+        float topIntensity = 0.0;
+        if (!isMuted) {
+            if (chTrigger > 0.5) {
+                topIntensity = 3.0;
+            } else if (hasNote) {
+                topIntensity = v_active * 0.8;
+            }
+        }
+        vec3 topColor = blueColor * (1.5 + bloom * 2.0);
+
+        // EMITTER 2 (MIDDLE): Pitch-colored note indicator
+        vec3 noteColor = vec3(0.15);
+        float midIntensity = 0.12;
+        if (hasNote && !isExpressionOnly) {
+            float pitchHue = pitchClassFromIndex(note);
+            noteColor = neonPalette(pitchHue);
+            midIntensity = 0.6 + bloom * 2.0;
+            if (isMuted) midIntensity *= 0.3;
+        }
+        vec3 midColor = noteColor;
+
+        // EMITTER 3 (BOTTOM): Amber expression indicator
+        vec3 amberColor = vec3(1.0, 0.55, 0.1);
+        float botIntensity = 0.0;
+        if (!isMuted) {
+            if (hasExpression) {
+                botIntensity = 2.0;
+            } else if (hasNote && v_active > 0.5) {
+                botIntensity = 0.6;
+            }
+        }
+        vec3 botColor = amberColor * (1.5 + bloom * 2.0);
+
+        // Draw unified lens cap
+        vec2 lensSize = vec2(0.6, 0.82);
+        vec4 lens = drawUnifiedLensCap(
+            lensUV, lensSize,
+            vec4(topColor, topIntensity),
+            vec4(midColor, midIntensity),
+            vec4(botColor, botIntensity),
+            aa
+        );
+
+        fragColor = vec4(lens.rgb, lens.a * 0.95);
         if (fragColor.a < 0.01) discard;
     }
     `;
@@ -352,13 +575,23 @@ export function useWebGLOverlay(
     gl.enableVertexAttribArray(0);
     gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
 
-    const tex = gl.createTexture()!;
-    gl.bindTexture(gl.TEXTURE_2D, tex);
+    // Cell data texture (RG32UI — packedA, packedB)
+    const cellTex = gl.createTexture()!;
+    gl.bindTexture(gl.TEXTURE_2D, cellTex);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
 
+    // Channel state texture (RGBA32F — 2 rows per channel)
+    const stateTex = gl.createTexture()!;
+    gl.bindTexture(gl.TEXTURE_2D, stateTex);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+
+    // Cap texture (frosted button PNG — legacy, still useful for material)
     const capTex = gl.createTexture()!;
     gl.bindTexture(gl.TEXTURE_2D, capTex);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
@@ -391,14 +624,17 @@ export function useWebGLOverlay(
         u_playhead: gl.getUniformLocation(prog, 'u_playhead'),
         u_layoutMode: gl.getUniformLocation(prog, 'u_layoutMode'),
         u_invertChannels: gl.getUniformLocation(prog, 'u_invertChannels'),
-        u_noteData: gl.getUniformLocation(prog, 'u_noteData'),
+        u_cellData: gl.getUniformLocation(prog, 'u_cellData'),
+        u_channelState: gl.getUniformLocation(prog, 'u_channelState'),
         u_capTexture: gl.getUniformLocation(prog, 'u_capTexture'),
+        u_bloomIntensity: gl.getUniformLocation(prog, 'u_bloomIntensity'),
+        u_timeSec: gl.getUniformLocation(prog, 'u_timeSec'),
       };
 
       console.log(`[WebGL] Shader: ${shaderFile}, Layout: ${getLayoutType(shaderFile)}`);
 
-      const coreUniforms = ['u_resolution', 'u_noteData', 'u_cols', 'u_playhead'];
-      const variantUniforms = ['u_layoutMode', 'u_invertChannels', 'u_cellSize', 'u_offset', 'u_capTexture', 'u_rows'];
+      const coreUniforms = ['u_resolution', 'u_cellData', 'u_cols', 'u_playhead'];
+      const variantUniforms = ['u_layoutMode', 'u_invertChannels', 'u_cellSize', 'u_offset', 'u_capTexture', 'u_rows', 'u_channelState', 'u_bloomIntensity', 'u_timeSec'];
 
       const nullUniforms = Object.entries(uniformLocs)
         .filter(([, loc]) => loc === null)
@@ -414,7 +650,7 @@ export function useWebGLOverlay(
         console.log(`[WebGL] Variant uniforms optimized out in ${shaderFile}:`, missingVariant);
       }
 
-      glResourcesRef.current = { program: prog, vao, texture: tex, capTexture: capTex, buffer: buf, uniforms: uniformLocs };
+      glResourcesRef.current = { program: prog, vao, cellTexture: cellTex, stateTexture: stateTex, capTexture: capTex, buffer: buf, uniforms: uniformLocs };
       console.log('✅ WebGL resources initialized');
     } catch (e) {
       console.error('❌ Error setting up uniforms:', e);
@@ -427,7 +663,8 @@ export function useWebGLOverlay(
         gl.deleteProgram(prog);
         gl.deleteVertexArray(vao);
         gl.deleteBuffer(buf);
-        gl.deleteTexture(tex);
+        gl.deleteTexture(cellTex);
+        gl.deleteTexture(stateTex);
         if (capTex) gl.deleteTexture(capTex);
         gl.clearColor(0, 0, 0, 0);
         gl.clear(gl.COLOR_BUFFER_BIT);
@@ -442,7 +679,7 @@ export function useWebGLOverlay(
     return initWebGL();
   }, [paramsRef.current.shaderFile, initWebGL]); // re-init on shader change
 
-  // Upload matrix data to the WebGL note-data texture
+  // Upload matrix data to the WebGL cell-data texture (RG32UI)
   useEffect(() => {
     const p = paramsRef.current;
     if (!p.isOverlayActive) return;
@@ -454,23 +691,14 @@ export function useWebGLOverlay(
     const rows = p.matrix.numRows;
     const rawCols = p.matrix.numChannels;
     const cols = p.padTopChannel ? rawCols + 1 : rawCols;
-    const startCol = p.padTopChannel ? 1 : 0;
 
-    const data = new Uint8Array(rows * cols);
+    // Always use high-precision packing for consistent three-LED data
+    const { packedData } = packPatternMatrixHighPrecision(p.matrix, p.padTopChannel);
 
-    for (let r = 0; r < rows; r++) {
-      const rowData = p.matrix.rows[r] || [];
-      for (let c = 0; c < rawCols; c++) {
-        const cell = rowData[c];
-        const hasNote = cell && cell.note !== undefined && cell.note > 0;
-        const texIndex = r * cols + (c + startCol);
-        data[texIndex] = hasNote ? 255 : 0;
-      }
-    }
-
-    gl.bindTexture(gl.TEXTURE_2D, res.texture);
-    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8UI, cols, rows, 0, gl.RED_INTEGER, gl.UNSIGNED_BYTE, data);
+    // Upload as RG32UI texture (2 uint32 per texel = packedA, packedB)
+    gl.bindTexture(gl.TEXTURE_2D, res.cellTexture);
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG32UI, cols, rows, 0, gl.RG_INTEGER, gl.UNSIGNED_INT, packedData);
   }, [paramsRef.current.matrix, paramsRef.current.padTopChannel, paramsRef.current.shaderFile]);
 
   const drawWebGL = useCallback(() => {
@@ -483,7 +711,7 @@ export function useWebGLOverlay(
     const uniformVals: Record<string, number | string> = {};
 
     try {
-      const { program, vao, texture, uniforms } = res;
+      const { program, vao, cellTexture, stateTexture, uniforms } = res;
       const numChannelsForGL = p.padTopChannel ? (p.matrix.numChannels || DEFAULT_CHANNELS) + 1 : (p.matrix.numChannels || DEFAULT_CHANNELS);
       const cols = numChannelsForGL;
       const rows = p.matrix.numRows || DEFAULT_ROWS;
@@ -492,6 +720,30 @@ export function useWebGLOverlay(
       if (preError !== gl.NO_ERROR) {
         errors.push(`Pre-draw GL Error: 0x${preError.toString(16)}`);
       }
+
+      // Upload channel state texture (RGBA32F, width=cols, height=2)
+      const chans = p.channels || [];
+      const stateData = new Float32Array(cols * 2 * 4);
+      const startIdx = p.padTopChannel ? 1 : 0;
+      for (let i = 0; i < (p.matrix.numChannels || DEFAULT_CHANNELS); i++) {
+        const ch = chans[i] || { volume: 0, pan: 0.5, freq: 440, trigger: 0, noteAge: 1000, activeEffect: 0, effectValue: 0, isMuted: 0 };
+        const colIdx = i + startIdx;
+        // Row 0: volume, pan, freq, trigger
+        const r0 = colIdx * 4;
+        stateData[r0] = ch.volume ?? 0;
+        stateData[r0 + 1] = ch.pan ?? 0.5;
+        stateData[r0 + 2] = ch.freq ?? 440;
+        stateData[r0 + 3] = ch.trigger ?? 0;
+        // Row 1: noteAge, activeEffect, effectValue, isMuted
+        const r1 = (cols + colIdx) * 4;
+        stateData[r1] = ch.noteAge ?? 1000;
+        stateData[r1 + 1] = ch.activeEffect ?? 0;
+        stateData[r1 + 2] = ch.effectValue ?? 0;
+        stateData[r1 + 3] = ch.isMuted ?? 0;
+      }
+
+      gl.bindTexture(gl.TEXTURE_2D, stateTexture);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, cols, 2, 0, gl.RGBA, gl.FLOAT, stateData);
 
       gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
       gl.clearColor(0, 0, 0, 0);
@@ -526,6 +778,10 @@ export function useWebGLOverlay(
         const hasInvert = setUniform('u_invertChannels', uniforms.u_invertChannels, gl.uniform1i.bind(gl), p.invertChannels ? 1 : 0);
         if (hasInvert) uniformVals['u_invertChannels'] = p.invertChannels ? 1 : 0;
 
+        // New uniforms
+        setUniform('u_bloomIntensity', uniforms.u_bloomIntensity, gl.uniform1f.bind(gl), p.bloomIntensity ?? 1.0);
+        setUniform('u_timeSec', uniforms.u_timeSec, gl.uniform1f.bind(gl), performance.now() / 1000.0);
+
         if (!hasResolution || !hasCols || !hasPlayhead) {
           const missing = ['u_resolution', 'u_cols', 'u_playhead'].filter((_, i) =>
             ![hasResolution, hasCols, hasPlayhead][i]
@@ -536,14 +792,19 @@ export function useWebGLOverlay(
         errors.push(`Uniform upload error: ${e}`);
       }
 
+      // Bind textures
       gl.activeTexture(gl.TEXTURE0);
-      gl.bindTexture(gl.TEXTURE_2D, texture);
-      setUniform('u_noteData', uniforms.u_noteData, gl.uniform1i.bind(gl), 0);
+      gl.bindTexture(gl.TEXTURE_2D, cellTexture);
+      setUniform('u_cellData', uniforms.u_cellData, gl.uniform1i.bind(gl), 0);
+
+      gl.activeTexture(gl.TEXTURE1);
+      gl.bindTexture(gl.TEXTURE_2D, stateTexture);
+      setUniform('u_channelState', uniforms.u_channelState, gl.uniform1i.bind(gl), 1);
 
       if (res.capTexture && uniforms.u_capTexture != null) {
-        gl.activeTexture(gl.TEXTURE1);
+        gl.activeTexture(gl.TEXTURE2);
         gl.bindTexture(gl.TEXTURE_2D, res.capTexture);
-        gl.uniform1i(uniforms.u_capTexture, 1);
+        gl.uniform1i(uniforms.u_capTexture, 2);
       }
 
       let effectiveCellW = p.cellWidth;
@@ -552,7 +813,11 @@ export function useWebGLOverlay(
       let offsetY = 0;
       let layoutModeName = 'CIRCULAR';
 
-      const layoutMode = getLayoutModeFromShader(p.shaderFile);
+      // Override layout for v0.21 (it's horizontal but not in getLayoutModeFromShader)
+      let layoutMode = getLayoutModeFromShader(p.shaderFile);
+      if (p.shaderFile.includes('v0.21')) {
+        layoutMode = LAYOUT_MODES.HORIZONTAL_32;
+      }
       const channelCount = cols;
 
       if (layoutMode === LAYOUT_MODES.HORIZONTAL_32) {
@@ -596,8 +861,10 @@ export function useWebGLOverlay(
       uniformVals['pixelRatio'] = pixelRatio;
       uniformVals['GRID_RECT'] = `${GRID_RECT.x.toFixed(3)}, ${GRID_RECT.y.toFixed(3)}, ${GRID_RECT.w.toFixed(3)}, ${GRID_RECT.h.toFixed(3)}`;
 
+      // Additive blending: SRC_ALPHA preserves alpha-based edge anti-aliasing,
+      // ONE on destination adds light on top of WGSL cells without darkening them.
       gl.enable(gl.BLEND);
-      gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+      gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
 
       const stepsForMode = layoutMode === LAYOUT_MODES.HORIZONTAL_32 ? 32 :
         layoutMode === LAYOUT_MODES.HORIZONTAL_64 ? 64 : 64;
