@@ -178,7 +178,15 @@ export function useWebGLOverlay(
         uint note = (cellData.r >> 24u) & 255u;
         uint effCmd = (cellData.g >> 24u) & 255u;
         uint volCmdFull = cellData.g & 255u; // Low byte of packedB = volCmdFull
-        v_hasNote = ((note > 0u) || (effCmd > 0u) || (volCmdFull > 0u)) ? 1.0 : 0.0;
+        // Duration data for sustain detection in VS
+        uint durationRaw = (cellData.r >> 8u) & 255u;
+        uint durationFlags = (cellData.g >> 8u) & 127u;
+        uint rowOffset = (durationFlags >> 1u) & 63u;
+        bool isNoteOffFlag = (durationFlags & 1u) != 0u;
+        // A cell is visible if it has a note, expression data, OR is part of an active sustain
+        bool hasNoteOrExpr = (note > 0u) || (effCmd > 0u) || (volCmdFull > 0u);
+        bool isSustainCell = (note >= 1u && note <= 96u) && (durationRaw > 1u) && (rowOffset > 0u) && !isNoteOffFlag;
+        v_hasNote = (hasNoteOrExpr || isSustainCell) ? 1.0 : 0.0;
 
         // Playhead Logic
         float stepsPerPage = (u_layoutMode == 3) ? 64.0 : 32.0;
@@ -209,13 +217,14 @@ export function useWebGLOverlay(
             float trackIndexF = float(trackIndex);
             if (u_invertChannels == 0) { trackIndexF = numTracks - 1.0 - trackIndexF; }
 
-            // Snap minDim to integer for DPR parity with WGSL
-            float minDim = floor(min(u_resolution.x, u_resolution.y));
+            // Match WGSL: no floor() — keeps sub-pixel parity with the GPU grid
+            float minDim = min(u_resolution.x, u_resolution.y);
             float maxRadius = minDim * 0.45;
             float minRadius = minDim * 0.15;
             float ringDepth = (maxRadius - minRadius) / numTracks;
 
-            float pixelRadius = minRadius + trackIndexF * ringDepth + ringDepth * 0.5;
+            // Match WGSL: cell center is at ring-start, not ring-center
+            float pixelRadius = minRadius + trackIndexF * ringDepth;
 
             float totalSteps = 64.0;
             float anglePerStep = (2.0 * PI) / totalSteps;
@@ -318,11 +327,17 @@ export function useWebGLOverlay(
         float dieMask = 1.0 - smoothstep(0.0, 0.008, dDie);
         vec3 diodeColor = vec3(0.06, 0.06, 0.08);
         if (isOn) {
+            // Central hotspot: tight Gaussian emitting directly under the cap
+            float dist = length(uv / vec2(0.06, 0.03));
+            float hotspot = exp(-dist * 2.5) * intensity;
+
+            // Subsurface scatter: wider, color-shifted bleed through frosted plastic
+            float scatter = smoothstep(1.0, 0.0, dist * 0.4) * 0.3 * intensity;
+
             vec3 dieGlow = color * (1.0 + intensity * 4.0);
             vec3 housingGlow = color * 0.12 * intensity;
             diodeColor = mix(housingGlow, dieGlow, dieMask);
-            float hotspot = exp(-length(uv / vec2(0.06, 0.03)) * 2.5) * intensity;
-            diodeColor += color * hotspot * 0.6;
+            diodeColor += color * (hotspot * 0.6 + scatter * 0.4);
         }
         return vec4(diodeColor, diodeMask);
     }
@@ -451,8 +466,17 @@ export function useWebGLOverlay(
         bool isExpressionOnly = (instRaw & 128u) != 0u;
         uint volCmd = (volPacked >> 4u) << 4u;
 
+        // Note state detection
         bool hasNote = (note >= 1u && note <= 96u);
+        bool isNoteOff = (note == 97u || note == 98u || note == 99u);
         bool hasExpression = (volCmd > 0u) || (effCmd > 0u) || (volCmdFull > 0u);
+
+        // Duration / sustain state (DURA data from gpuPacking)
+        uint rowOffset = (durationFlags >> 1u) & 63u;
+        bool isNoteOffFlag = (durationFlags & 1u) != 0u;
+        bool isSustaining = hasNote && (durationRaw > 1u) && (rowOffset > 0u) && !isNoteOffFlag;
+        bool isNoteOnRow = hasNote && (rowOffset == 0u);
+        float sustainProgress = (durationRaw > 1u) ? float(rowOffset) / float(durationRaw) : 0.0;
 
         // Channel state
         float chVolume = v_chState0.x;
@@ -469,14 +493,23 @@ export function useWebGLOverlay(
 
         // --- THREE EMITTER SETUP ---
 
-        // EMITTER 1 (TOP): Blue note-on indicator
+        // EMITTER 1 (TOP): Blue/Cyan — Note trigger + sustain trail
         vec3 blueColor = vec3(0.15, 0.5, 1.0);
         float topIntensity = 0.0;
         if (!isMuted) {
-            if (chTrigger > 0.5) {
+            if (chTrigger > 0.5 && isNoteOnRow) {
+                // Bright flash on note-on trigger row
                 topIntensity = 3.0;
-            } else if (hasNote) {
+            } else if (isNoteOnRow) {
+                // Note-on row near playhead
                 topIntensity = v_active * 0.8;
+            } else if (isSustaining) {
+                // Sustain trail: faint blue/cyan glow that fades with distance
+                float sustainFade = 0.4 - sustainProgress * 0.2;
+                topIntensity = max(sustainFade, 0.15);
+            } else if (isNoteOff || isNoteOffFlag) {
+                // Note-off: completely dark (channel was cut)
+                topIntensity = 0.0;
             }
         }
         vec3 topColor = blueColor * (1.5 + bloom * 2.0);
@@ -487,17 +520,28 @@ export function useWebGLOverlay(
         if (hasNote && !isExpressionOnly) {
             float pitchHue = pitchClassFromIndex(note);
             noteColor = neonPalette(pitchHue);
-            midIntensity = 0.6 + bloom * 2.0;
+            if (isNoteOnRow) {
+                // Strong glow for note-on
+                midIntensity = 0.6 + bloom * 2.0;
+            } else if (isSustaining) {
+                // Dimmer glow for sustained note
+                float sustainBright = 0.5 - sustainProgress * 0.25;
+                midIntensity = max(sustainBright, 0.15);
+            }
             if (isMuted) midIntensity *= 0.3;
         }
         vec3 midColor = noteColor;
 
-        // EMITTER 3 (BOTTOM): Amber expression indicator
+        // EMITTER 3 (BOTTOM): Amber/Orange — Expression indicator
         vec3 amberColor = vec3(1.0, 0.55, 0.1);
         float botIntensity = 0.0;
         if (!isMuted) {
-            if (hasExpression) {
+            if (isExpressionOnly && hasExpression) {
+                // Expression-only step (no note trigger): distinct amber glow
                 botIntensity = 2.0;
+            } else if (hasExpression && hasNote) {
+                // Note + expression: moderate amber
+                botIntensity = 1.2;
             } else if (hasNote && v_active > 0.5) {
                 botIntensity = 0.6;
             }
@@ -821,13 +865,7 @@ export function useWebGLOverlay(
       const channelCount = cols;
 
       if (layoutMode === LAYOUT_MODES.HORIZONTAL_32) {
-        if (p.shaderFile.includes('v0.39')) {
-          effectiveCellW = gl.canvas.width / 32.0;
-          effectiveCellH = gl.canvas.height / channelCount;
-          offsetX = 0;
-          offsetY = 0;
-          layoutModeName = '32-STEP (v0.39)';
-        } else {
+        {
           const metrics = calculateHorizontalCellSize(gl.canvas.width, gl.canvas.height, 32, channelCount);
           effectiveCellW = metrics.cellW;
           effectiveCellH = metrics.cellH;
