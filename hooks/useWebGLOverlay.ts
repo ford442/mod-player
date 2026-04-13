@@ -160,6 +160,11 @@ export function useWebGLOverlay(
     const float INNER_RADIUS = 0.3;
     const float OUTER_RADIUS = 0.9;
     const float CAP_SCALE_FACTOR = 0.88;
+    const uint NOTE_MIN = 1u;    // Minimum valid MIDI note
+    const uint NOTE_MAX = 96u;   // Maximum valid MIDI note
+    const uint NOTE_OFF = 97u;   // Note-off command
+    const uint NOTE_CUT = 98u;   // Note-cut command
+    const uint NOTE_FADE = 99u;  // Note-fade command
 
     void main() {
         int id = gl_InstanceID;
@@ -178,7 +183,18 @@ export function useWebGLOverlay(
         uint note = (cellData.r >> 24u) & 255u;
         uint effCmd = (cellData.g >> 24u) & 255u;
         uint volCmdFull = cellData.g & 255u; // Low byte of packedB = volCmdFull
-        v_hasNote = ((note > 0u) || (effCmd > 0u) || (volCmdFull > 0u)) ? 1.0 : 0.0;
+        // Duration data for sustain detection in VS
+        // packedA layout: [note:8][inst:8][duration:8][volPacked:8]
+        uint durationRaw = (cellData.r >> 8u) & 255u;
+        // packedB layout: [effCmd:8][effVal:8][durationFlags:7][reserved:1][volCmd:8]
+        // durationFlags: [rowOffset:6][isNoteOff:1]
+        uint durationFlags = (cellData.g >> 8u) & 127u;
+        uint rowOffset = (durationFlags >> 1u) & 63u;
+        bool isNoteOffFlag = (durationFlags & 1u) != 0u;
+        // A cell is visible if it has a note, expression data, OR is part of an active sustain
+        bool hasNoteOrExpr = (note > 0u) || (effCmd > 0u) || (volCmdFull > 0u);
+        bool isSustainCell = (note >= NOTE_MIN && note <= NOTE_MAX) && (durationRaw > 1u) && (rowOffset > 0u) && !isNoteOffFlag;
+        v_hasNote = (hasNoteOrExpr || isSustainCell) ? 1.0 : 0.0;
 
         // Playhead Logic
         float stepsPerPage = (u_layoutMode == 3) ? 64.0 : 32.0;
@@ -209,13 +225,14 @@ export function useWebGLOverlay(
             float trackIndexF = float(trackIndex);
             if (u_invertChannels == 0) { trackIndexF = numTracks - 1.0 - trackIndexF; }
 
-            // Snap minDim to integer for DPR parity with WGSL
-            float minDim = floor(min(u_resolution.x, u_resolution.y));
+            // Match WGSL: no floor() — keeps sub-pixel parity with the GPU grid
+            float minDim = min(u_resolution.x, u_resolution.y);
             float maxRadius = minDim * 0.45;
             float minRadius = minDim * 0.15;
             float ringDepth = (maxRadius - minRadius) / numTracks;
 
-            float pixelRadius = minRadius + trackIndexF * ringDepth + ringDepth * 0.5;
+            // Match WGSL: cell center is at ring-start, not ring-center
+            float pixelRadius = minRadius + trackIndexF * ringDepth;
 
             float totalSteps = 64.0;
             float anglePerStep = (2.0 * PI) / totalSteps;
@@ -281,6 +298,13 @@ export function useWebGLOverlay(
     flat in float v_active;
     flat in float v_hasNote;
 
+    // Note range constants (must match VS)
+    const uint NOTE_MIN = 1u;
+    const uint NOTE_MAX = 96u;
+    const uint NOTE_OFF = 97u;
+    const uint NOTE_CUT = 98u;
+    const uint NOTE_FADE = 99u;
+
     uniform sampler2D u_capTexture;
     uniform float u_bloomIntensity;
     uniform float u_timeSec;
@@ -318,11 +342,19 @@ export function useWebGLOverlay(
         float dieMask = 1.0 - smoothstep(0.0, 0.008, dDie);
         vec3 diodeColor = vec3(0.06, 0.06, 0.08);
         if (isOn) {
+            // Central hotspot: tight Gaussian emitting directly under the cap
+            // vec2(0.06, 0.03) = die half-size in UV space; 2.5 = falloff sharpness
+            float dist = length(uv / vec2(0.06, 0.03));
+            float hotspot = exp(-dist * 2.5) * intensity;
+
+            // Subsurface scatter: wider bleed through frosted plastic
+            // 0.4 = scatter radius multiplier; 0.3 = max scatter brightness
+            float scatter = smoothstep(1.0, 0.0, dist * 0.4) * 0.3 * intensity;
+
             vec3 dieGlow = color * (1.0 + intensity * 4.0);
             vec3 housingGlow = color * 0.12 * intensity;
             diodeColor = mix(housingGlow, dieGlow, dieMask);
-            float hotspot = exp(-length(uv / vec2(0.06, 0.03)) * 2.5) * intensity;
-            diodeColor += color * hotspot * 0.6;
+            diodeColor += color * (hotspot * 0.6 + scatter * 0.4);
         }
         return vec4(diodeColor, diodeMask);
     }
@@ -451,8 +483,19 @@ export function useWebGLOverlay(
         bool isExpressionOnly = (instRaw & 128u) != 0u;
         uint volCmd = (volPacked >> 4u) << 4u;
 
-        bool hasNote = (note >= 1u && note <= 96u);
+        // Note state detection
+        bool hasNote = (note >= NOTE_MIN && note <= NOTE_MAX);
+        bool isNoteOff = (note == NOTE_OFF || note == NOTE_CUT || note == NOTE_FADE);
         bool hasExpression = (volCmd > 0u) || (effCmd > 0u) || (volCmdFull > 0u);
+
+        // Duration / sustain state (DURA data packed by calculateNoteDurations)
+        // durationFlags layout: [rowOffset:6][isNoteOff:1]
+        uint rowOffset = (durationFlags >> 1u) & 63u;
+        bool isNoteOffFlag = (durationFlags & 1u) != 0u;
+        bool isSustaining = hasNote && (durationRaw > 1u) && (rowOffset > 0u) && !isNoteOffFlag;
+        bool isNoteOnRow = hasNote && (rowOffset == 0u);
+        // 0.0 at note start → 1.0 at note end; used to fade trail glow
+        float sustainProgress = (durationRaw > 1u) ? float(rowOffset) / float(durationRaw) : 0.0;
 
         // Channel state
         float chVolume = v_chState0.x;
@@ -469,14 +512,24 @@ export function useWebGLOverlay(
 
         // --- THREE EMITTER SETUP ---
 
-        // EMITTER 1 (TOP): Blue note-on indicator
+        // EMITTER 1 (TOP): Blue/Cyan — Note trigger + sustain trail
         vec3 blueColor = vec3(0.15, 0.5, 1.0);
         float topIntensity = 0.0;
         if (!isMuted) {
-            if (chTrigger > 0.5) {
+            if (chTrigger > 0.5 && isNoteOnRow) {
+                // Bright flash on note-on trigger row
                 topIntensity = 3.0;
-            } else if (hasNote) {
+            } else if (isNoteOnRow) {
+                // Note-on row near playhead
                 topIntensity = v_active * 0.8;
+            } else if (isSustaining) {
+                // Sustain trail: fades from 0.4 (note start) to 0.2 (note end)
+                // Clamped to 0.15 minimum to keep a dim glow visible
+                float sustainFade = 0.4 - sustainProgress * 0.2;
+                topIntensity = max(sustainFade, 0.15);
+            } else if (isNoteOff || isNoteOffFlag) {
+                // Note-off: completely dark (channel was cut)
+                topIntensity = 0.0;
             }
         }
         vec3 topColor = blueColor * (1.5 + bloom * 2.0);
@@ -487,17 +540,29 @@ export function useWebGLOverlay(
         if (hasNote && !isExpressionOnly) {
             float pitchHue = pitchClassFromIndex(note);
             noteColor = neonPalette(pitchHue);
-            midIntensity = 0.6 + bloom * 2.0;
+            if (isNoteOnRow) {
+                // Strong glow for note-on
+                midIntensity = 0.6 + bloom * 2.0;
+            } else if (isSustaining) {
+                // Sustain: fades from 0.5 (note start) to 0.25 (note end)
+                // Clamped to 0.15 minimum for a dim ringing glow
+                float sustainBright = 0.5 - sustainProgress * 0.25;
+                midIntensity = max(sustainBright, 0.15);
+            }
             if (isMuted) midIntensity *= 0.3;
         }
         vec3 midColor = noteColor;
 
-        // EMITTER 3 (BOTTOM): Amber expression indicator
+        // EMITTER 3 (BOTTOM): Amber/Orange — Expression indicator
         vec3 amberColor = vec3(1.0, 0.55, 0.1);
         float botIntensity = 0.0;
         if (!isMuted) {
-            if (hasExpression) {
+            if (isExpressionOnly && hasExpression) {
+                // Expression-only step (no note trigger): distinct amber glow
                 botIntensity = 2.0;
+            } else if (hasExpression && hasNote) {
+                // Note + expression: moderate amber
+                botIntensity = 1.2;
             } else if (hasNote && v_active > 0.5) {
                 botIntensity = 0.6;
             }
@@ -821,13 +886,7 @@ export function useWebGLOverlay(
       const channelCount = cols;
 
       if (layoutMode === LAYOUT_MODES.HORIZONTAL_32) {
-        if (p.shaderFile.includes('v0.39')) {
-          effectiveCellW = gl.canvas.width / 32.0;
-          effectiveCellH = gl.canvas.height / channelCount;
-          offsetX = 0;
-          offsetY = 0;
-          layoutModeName = '32-STEP (v0.39)';
-        } else {
+        {
           const metrics = calculateHorizontalCellSize(gl.canvas.width, gl.canvas.height, 32, channelCount);
           effectiveCellW = metrics.cellW;
           effectiveCellH = metrics.cellH;
