@@ -160,6 +160,11 @@ export function useWebGLOverlay(
     const float INNER_RADIUS = 0.3;
     const float OUTER_RADIUS = 0.9;
     const float CAP_SCALE_FACTOR = 0.88;
+    const uint NOTE_MIN = 1u;    // Minimum valid MIDI note
+    const uint NOTE_MAX = 96u;   // Maximum valid MIDI note
+    const uint NOTE_OFF = 97u;   // Note-off command
+    const uint NOTE_CUT = 98u;   // Note-cut command
+    const uint NOTE_FADE = 99u;  // Note-fade command
 
     void main() {
         int id = gl_InstanceID;
@@ -179,13 +184,16 @@ export function useWebGLOverlay(
         uint effCmd = (cellData.g >> 24u) & 255u;
         uint volCmdFull = cellData.g & 255u; // Low byte of packedB = volCmdFull
         // Duration data for sustain detection in VS
+        // packedA layout: [note:8][inst:8][duration:8][volPacked:8]
         uint durationRaw = (cellData.r >> 8u) & 255u;
+        // packedB layout: [effCmd:8][effVal:8][durationFlags:7][reserved:1][volCmd:8]
+        // durationFlags: [rowOffset:6][isNoteOff:1]
         uint durationFlags = (cellData.g >> 8u) & 127u;
         uint rowOffset = (durationFlags >> 1u) & 63u;
         bool isNoteOffFlag = (durationFlags & 1u) != 0u;
         // A cell is visible if it has a note, expression data, OR is part of an active sustain
         bool hasNoteOrExpr = (note > 0u) || (effCmd > 0u) || (volCmdFull > 0u);
-        bool isSustainCell = (note >= 1u && note <= 96u) && (durationRaw > 1u) && (rowOffset > 0u) && !isNoteOffFlag;
+        bool isSustainCell = (note >= NOTE_MIN && note <= NOTE_MAX) && (durationRaw > 1u) && (rowOffset > 0u) && !isNoteOffFlag;
         v_hasNote = (hasNoteOrExpr || isSustainCell) ? 1.0 : 0.0;
 
         // Playhead Logic
@@ -290,6 +298,13 @@ export function useWebGLOverlay(
     flat in float v_active;
     flat in float v_hasNote;
 
+    // Note range constants (must match VS)
+    const uint NOTE_MIN = 1u;
+    const uint NOTE_MAX = 96u;
+    const uint NOTE_OFF = 97u;
+    const uint NOTE_CUT = 98u;
+    const uint NOTE_FADE = 99u;
+
     uniform sampler2D u_capTexture;
     uniform float u_bloomIntensity;
     uniform float u_timeSec;
@@ -328,10 +343,12 @@ export function useWebGLOverlay(
         vec3 diodeColor = vec3(0.06, 0.06, 0.08);
         if (isOn) {
             // Central hotspot: tight Gaussian emitting directly under the cap
+            // vec2(0.06, 0.03) = die half-size in UV space; 2.5 = falloff sharpness
             float dist = length(uv / vec2(0.06, 0.03));
             float hotspot = exp(-dist * 2.5) * intensity;
 
-            // Subsurface scatter: wider, color-shifted bleed through frosted plastic
+            // Subsurface scatter: wider bleed through frosted plastic
+            // 0.4 = scatter radius multiplier; 0.3 = max scatter brightness
             float scatter = smoothstep(1.0, 0.0, dist * 0.4) * 0.3 * intensity;
 
             vec3 dieGlow = color * (1.0 + intensity * 4.0);
@@ -467,15 +484,17 @@ export function useWebGLOverlay(
         uint volCmd = (volPacked >> 4u) << 4u;
 
         // Note state detection
-        bool hasNote = (note >= 1u && note <= 96u);
-        bool isNoteOff = (note == 97u || note == 98u || note == 99u);
+        bool hasNote = (note >= NOTE_MIN && note <= NOTE_MAX);
+        bool isNoteOff = (note == NOTE_OFF || note == NOTE_CUT || note == NOTE_FADE);
         bool hasExpression = (volCmd > 0u) || (effCmd > 0u) || (volCmdFull > 0u);
 
-        // Duration / sustain state (DURA data from gpuPacking)
+        // Duration / sustain state (DURA data packed by calculateNoteDurations)
+        // durationFlags layout: [rowOffset:6][isNoteOff:1]
         uint rowOffset = (durationFlags >> 1u) & 63u;
         bool isNoteOffFlag = (durationFlags & 1u) != 0u;
         bool isSustaining = hasNote && (durationRaw > 1u) && (rowOffset > 0u) && !isNoteOffFlag;
         bool isNoteOnRow = hasNote && (rowOffset == 0u);
+        // 0.0 at note start → 1.0 at note end; used to fade trail glow
         float sustainProgress = (durationRaw > 1u) ? float(rowOffset) / float(durationRaw) : 0.0;
 
         // Channel state
@@ -504,7 +523,8 @@ export function useWebGLOverlay(
                 // Note-on row near playhead
                 topIntensity = v_active * 0.8;
             } else if (isSustaining) {
-                // Sustain trail: faint blue/cyan glow that fades with distance
+                // Sustain trail: fades from 0.4 (note start) to 0.2 (note end)
+                // Clamped to 0.15 minimum to keep a dim glow visible
                 float sustainFade = 0.4 - sustainProgress * 0.2;
                 topIntensity = max(sustainFade, 0.15);
             } else if (isNoteOff || isNoteOffFlag) {
@@ -524,7 +544,8 @@ export function useWebGLOverlay(
                 // Strong glow for note-on
                 midIntensity = 0.6 + bloom * 2.0;
             } else if (isSustaining) {
-                // Dimmer glow for sustained note
+                // Sustain: fades from 0.5 (note start) to 0.25 (note end)
+                // Clamped to 0.15 minimum for a dim ringing glow
                 float sustainBright = 0.5 - sustainProgress * 0.25;
                 midIntensity = max(sustainBright, 0.15);
             }
