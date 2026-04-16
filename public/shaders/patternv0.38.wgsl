@@ -232,17 +232,50 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   }
 
   if (inButton > 0.5) {
-    let note = (in.packedA >> 24) & 255u;
-    let inst = (in.packedA >> 16) & 255u;
-    let volCmd = (in.packedA >> 8) & 255u;
-    let effCmd = (in.packedB >> 8) & 255u;
-    let effVal = in.packedB & 255u;
+    let note   = (in.packedA >> 24) & 255u;
+    let inst   = (in.packedA >> 16) & 255u;
+    let volCmd = (in.packedA >>  8) & 255u;
+    let effCmd = (in.packedB >>  8) & 255u;
+    let hasNote       = (note > 0u) && (note <= 120u);
+    let hasExpression = (volCmd > 0u) || (effCmd > 0u);
 
-    // Cap/LED indicators are now drawn by the WebGL2 overlay.
-    // Keep housing, background, playhead highlight only.
-    let ch = channels[in.channel];
+    let ch      = channels[in.channel];
     let isMuted = (ch.isMuted == 1u);
-    if (isMuted) {
+
+    // Playhead proximity (wrap-safe, 64-step page)
+    let playheadStep   = uniforms.playheadRow - floor(uniforms.playheadRow / 64.0) * 64.0;
+    let rowDistRaw     = abs(f32(in.row % 64u) - playheadStep);
+    let rowDist        = min(rowDistRaw, 64.0 - rowDistRaw);
+    let playheadActivation = 1.0 - smoothstep(0.0, 1.5, rowDist);
+
+    if (!isMuted) {
+      if (hasNote) {
+        let pitchHue = pitchClassFromIndex(note);
+        let noteCol  = neonPalette(pitchHue);
+        var noteGlow = playheadActivation;
+        if (ch.trigger > 0u && playheadActivation > 0.5) { noteGlow += 1.0; }
+
+        let mainUV  = btnUV - vec2<f32>(0.5, 0.5);
+        let mainSz  = vec2<f32>(0.60, 0.60);
+        let mainLed = drawChromeIndicator(mainUV, mainSz, noteCol * max(0.4, noteGlow), noteGlow > 0.05, aa);
+        finalColor  = mix(finalColor, mainLed.rgb, mainLed.a);
+        if (noteGlow > 0.05) { finalColor += noteCol * noteGlow * bloom * 0.3; }
+      } else {
+        finalColor = mix(finalColor, vec3<f32>(0.08, 0.09, 0.11), 0.5);
+      }
+
+      if (hasExpression) {
+        let exprUV  = btnUV - vec2<f32>(0.5, 0.82);
+        let exprSz  = vec2<f32>(0.30, 0.12);
+        let exprCol = vec3<f32>(0.0, 0.7, 1.0) * (1.0 + bloom * 0.5);
+        let exprLed = drawChromeIndicator(exprUV, exprSz, exprCol, true, aa);
+        finalColor  = mix(finalColor, exprLed.rgb, exprLed.a);
+      }
+
+      if (playheadActivation > 0.0) {
+        finalColor += vec3<f32>(0.05, 0.05, 0.10) * playheadActivation;
+      }
+    } else {
       finalColor *= 0.3;
     }
   }

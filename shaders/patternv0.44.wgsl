@@ -137,18 +137,32 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
                   let dataIdx = u32(patternRowIdx) * uniforms.numChannels + u32(colId);
                   if (dataIdx < arrayLength(&cells) / 2u) {
                       let packedA = cells[dataIdx * 2u];
+                      let packedB = cells[dataIdx * 2u + 1u];
                       let note = (packedA >> 24) & 255u;
-                      
+                      let volCmd = (packedA >> 8) & 255u;
+                      let effCmd = (packedB >> 8) & 255u;
+                      let ch = channels[u32(colId)];
+
                       if (note > 0u) {
                           let baseCol = getNoteColor(note);
                           capColor = mix(capColor, baseCol, 0.4);
-                          
+
                           let playheadDist = abs(visRow - centerRow);
                           let playheadGlow = 1.0 - smoothstep(0.0, 1.2, playheadDist);
                           if (playheadGlow > 0.0) {
                               glow = playheadGlow;
                               capColor = mix(capColor, vec3<f32>(1.0, 1.0, 1.0), 0.5);
                           }
+                          // Trigger flash: pulse on playhead row
+                          if (ch.trigger > 0u && playheadGlow > 0.5) {
+                              glow += 1.0;
+                              capColor += vec3<f32>(0.5, 0.5, 0.5);
+                          }
+                      }
+
+                      // Expression indicator: subtle cyan tint for vol/effect commands
+                      if ((volCmd > 0u || effCmd > 0u) && ch.isMuted == 0u) {
+                          capColor += vec3<f32>(0.0, 0.04, 0.08);
                       }
                   }
               }
