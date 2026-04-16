@@ -75,6 +75,7 @@ export function useWebGLOverlay(
 ) {
   const glContextRef = useRef<WebGL2RenderingContext | null>(null);
   const glResourcesRef = useRef<GLResources | null>(null);
+  const stateDataRef = useRef<Float32Array | null>(null);
 
   // Mutable ref so draw/upload functions always read fresh values without recreating
   const paramsRef = useRef(params);
@@ -788,7 +789,13 @@ export function useWebGLOverlay(
 
       // Upload channel state texture (RGBA32F, width=cols, height=2)
       const chans = p.channels || [];
-      const stateData = new Float32Array(cols * 2 * 4);
+      const requiredSize = cols * 2 * 4;
+      if (!stateDataRef.current || stateDataRef.current.length !== requiredSize) {
+        stateDataRef.current = new Float32Array(requiredSize);
+      }
+      const stateData = stateDataRef.current;
+      stateData.fill(0);
+
       const startIdx = p.padTopChannel ? 1 : 0;
       for (let i = 0; i < (p.matrix.numChannels || DEFAULT_CHANNELS); i++) {
         const ch = chans[i] || { volume: 0, pan: 0.5, freq: 440, trigger: 0, noteAge: 1000, activeEffect: 0, effectValue: 0, isMuted: 0 };
