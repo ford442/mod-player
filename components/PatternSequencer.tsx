@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { PatternMatrix } from '../types';
 
+const NOTE_REGEX = /[A-G]#?-/i;
+
 interface PatternSequencerProps {
   matrix: PatternMatrix | null;
   currentRow: number;
@@ -161,7 +163,7 @@ export const PatternSequencer: React.FC<PatternSequencerProps> = ({ matrix, curr
                     {Array.from({ length: patternLen }).map((_, stepIdx) => {
                       const cells = patternRows[stepIdx] || Array.from({ length: columns }, () => ({ type: 'empty', text: '' }));
                       const cell = cells[chIdx];
-                      const cellNote = cell && /[A-G]#?-/i.test(cell.text || '') ? cell.text : '';
+                      const cellNote = cell && NOTE_REGEX.test(cell.text || '') ? cell.text : '';
                       const isActive = stepIdx === (currentRow % patternLen);
 
                       let cellColor = 'rgba(60,60,70,0.3)'; // empty/dim
