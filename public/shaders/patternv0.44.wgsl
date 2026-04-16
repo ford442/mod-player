@@ -134,6 +134,50 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     // ── Trailing sweep ────────────────────────────────────────────────────
     col += vec3<f32>(0.03, 0.14, 0.45) * trailGlow * 0.35;
 
+    // ── Per-cell LED dot indicators ───────────────────────────────────────
+    // Read note/expression data from the cells buffer and render a small
+    // dot at the centre of each cell to show note presence and expression data.
+    let rowId  = floor(localUV.y * nRows);
+    let rowInt = u32(rowId);
+    let pageStart = floor(uniforms.playheadRow / nCols) * nCols;
+    let absRow = u32(pageStart) + u32(stepId);
+
+    if (rowInt < uniforms.numChannels && absRow < uniforms.numRows) {
+      let cellIdx = absRow * uniforms.numChannels + rowInt;
+      if (cellIdx * 2u + 1u < arrayLength(&cells)) {
+        let pA   = cells[cellIdx * 2u];
+        let pB   = cells[cellIdx * 2u + 1u];
+        let note = (pA >> 24) & 255u;
+        let volC = (pA >>  8) & 255u;
+        let effC = (pB >>  8) & 255u;
+
+        // Circular dot centred in the cell
+        let dotDist = length(cellUV - vec2<f32>(0.5, 0.5));
+        let dotMask = 1.0 - smoothstep(0.18, 0.26, dotDist);
+
+        if (dotMask > 0.01 && rowInt < arrayLength(&channels)) {
+          let ch = channels[rowInt];
+          if (ch.isMuted == 0u) {
+            if (note > 0u && note <= 120u) {
+              // Inline neonPalette: cosine colour wheel mapped to pitch class
+              let t = f32((note - 1u) % 12u) / 12.0;
+              let noteCol = vec3<f32>(
+                0.5 + 0.5 * cos(6.28318 * t),
+                0.5 + 0.5 * cos(6.28318 * (t + 0.33)),
+                0.5 + 0.5 * cos(6.28318 * (t + 0.67))
+              );
+              let isActive = (ch.trigger > 0u) && (stepId == activeStep);
+              let bright   = select(0.55, 1.5 + uniforms.bloomIntensity, isActive);
+              col = mix(col, noteCol * bright, dotMask * 0.85);
+            } else if (volC > 0u || effC > 0u) {
+              // Expression-only cell: subtle cyan dot
+              col = mix(col, vec3<f32>(0.0, 0.40, 0.70) * 0.50, dotMask * 0.35);
+            }
+          }
+        }
+      }
+    }
+
     // ── Inner vignette at grid edges ──────────────────────────────────────
     let vignX = smoothstep(0.0, 0.04, localUV.x) * smoothstep(0.0, 0.04, 1.0 - localUV.x);
     let vignY = smoothstep(0.0, 0.04, localUV.y) * smoothstep(0.0, 0.04, 1.0 - localUV.y);

@@ -313,12 +313,12 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   if (inButton > 0.5) {
     let noteChar = (in.packedA >> 24) & 255u;
     let inst = in.packedA & 255u;
-    let volType = (in.packedB >> 24) & 255u;
+    let volCmd = (in.packedA >> 8) & 255u;
     let effCode = (in.packedB >> 8) & 255u;
     let effParam = in.packedB & 255u;
 
-    let hasNote = (noteChar >= 65u && noteChar <= 71u);
-    let hasExpression = (volType > 0u) || (effCode > 0u);
+    let hasNote = (noteChar >= 65u && noteChar <= 122u);
+    let hasExpression = (volCmd > 0u) || (effCode > 0u);
     let ch = channels[in.channel];
     let isMuted = (ch.isMuted == 1u);
 

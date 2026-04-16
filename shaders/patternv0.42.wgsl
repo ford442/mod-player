@@ -298,7 +298,19 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     alpha    = 0.75;
   }
 
-  // ── Volume/Expression and Effect indicators — now drawn by WebGL2 overlay ──
+  // ── Volume/Expression indicator ──────────────────────────────────────
+  if ((hasVol || hasEffect) && !chActive) {
+    // Dim cyan tint for cells with vol/effect commands but no active trigger
+    capColor += vec3<f32>(0.0, 0.04, 0.08);
+  }
+  if (hasVol || hasEffect) {
+    // Bright expression dot near top of cap
+    let exprCenter = vec2<f32>(0.0, -0.32);
+    let exprDist = length(p - exprCenter);
+    let exprMask = 1.0 - smoothstep(0.04, 0.07, exprDist);
+    let exprCol = vec3<f32>(0.0, 0.75, 1.0) * (0.8 + bloom * 0.5);
+    capColor = mix(capColor, exprCol, exprMask * 0.85);
+  }
 
   // ── Frosted surface shading ──────────────────────────────────────────
   let edge   = smoothstep(0.0, 0.08, -dBox);

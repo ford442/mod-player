@@ -227,11 +227,42 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
       col = mix(col, btnColor * 0.6, 0.9);
   }
 
-  // --- FROSTED CAPS now drawn by WebGL2 overlay ---
+  // --- LED / Cap indicators ---
   if (inButton > 0.5) {
-      if (ch.isMuted == 1u) {
-          col *= 0.3;
+    let volCmd        = (in.packedA >> 8) & 255u;
+    let hasNote       = (note >= 1u && note <= 120u);
+    let hasExpression = (volCmd > 0u) || (effCode > 0u);
+
+    // Playhead proximity (wrap-safe)
+    let playheadStep      = uniforms.playheadRow - floor(uniforms.playheadRow / 64.0) * 64.0;
+    let rowDistRaw        = abs(f32(in.row % 64u) - playheadStep);
+    let rowDist           = min(rowDistRaw, 64.0 - rowDistRaw);
+    let playheadActivation = 1.0 - smoothstep(0.0, 1.5, rowDist);
+
+    if (ch.isMuted == 1u) {
+      col *= 0.3;
+    } else {
+      if (hasNote) {
+        let noteCol = neonPalette(f32((note - 1u) % 12u) / 12.0);
+        col = mix(col, noteCol, 0.35 * max(playheadActivation, 0.12));
+        // Trigger flash
+        if (ch.trigger > 0u && playheadActivation > 0.5) {
+          col += noteCol * (0.5 + bloom * 0.4);
+        }
+      } else {
+        col = mix(col, vec3<f32>(0.07, 0.08, 0.10), 0.4);
       }
+
+      // Expression indicator: subtle cyan tint
+      if (hasExpression) {
+        col += vec3<f32>(0.0, 0.05, 0.10);
+      }
+
+      // Playhead ambient
+      if (playheadActivation > 0.0) {
+        col += vec3<f32>(0.05, 0.05, 0.10) * playheadActivation;
+      }
+    }
   }
 
   // Playhead Highlight (Vertical Line across active column)
