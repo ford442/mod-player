@@ -26,7 +26,8 @@ export class BloomPostProcessor {
   private compositePipeline!: GPURenderPipeline;
 
   private thresholdBindGroup!: GPUBindGroup;
-  private blurBindGroups: GPUBindGroup[] = [];
+  private hBlurBindGroup!: GPUBindGroup;
+  private vBlurBindGroup!: GPUBindGroup;
   private compositeBindGroup!: GPUBindGroup;
 
   private thresholdBuffer!: GPUBuffer;
@@ -176,12 +177,22 @@ export class BloomPostProcessor {
       ],
     });
 
-    // Blur bind group (will be recreated for v-pass with updated texture view when necessary)
+    // Horizontal blur bind group
     const blurLayout = this.blurPipeline.getBindGroupLayout(0);
-    this.blurBindGroups[0] = this.device.createBindGroup({
+    this.hBlurBindGroup = this.device.createBindGroup({
       layout: blurLayout,
       entries: [
         { binding: 0, resource: this.thresholdTexture.createView() },
+        { binding: 1, resource: this.linearSampler },
+        { binding: 2, resource: { buffer: this.blurBuffer } },
+      ],
+    });
+
+    // Vertical blur bind group
+    this.vBlurBindGroup = this.device.createBindGroup({
+      layout: blurLayout,
+      entries: [
+        { binding: 0, resource: (this.blurTextures[0] ?? this.sceneTexture).createView() },
         { binding: 1, resource: this.linearSampler },
         { binding: 2, resource: { buffer: this.blurBuffer } },
       ],
@@ -233,15 +244,6 @@ export class BloomPostProcessor {
     const blurSize = { width: blurTex0.width, height: blurTex0.height };
     this.device.queue.writeBuffer(this.blurBuffer, 0, new Float32Array([1, 0, blurSize.width, blurSize.height]));
 
-    // Recreate bindgroup for blur input if needed
-    const hBlurBind = this.device.createBindGroup({
-      layout: this.blurPipeline.getBindGroupLayout(0),
-      entries: [
-        { binding: 0, resource: this.thresholdTexture.createView() },
-        { binding: 1, resource: this.linearSampler },
-        { binding: 2, resource: { buffer: this.blurBuffer } },
-      ],
-    });
 
     const hBlurPass = commandEncoder.beginRenderPass({
       colorAttachments: [{
@@ -252,21 +254,13 @@ export class BloomPostProcessor {
       }],
     });
     hBlurPass.setPipeline(this.blurPipeline);
-    hBlurPass.setBindGroup(0, hBlurBind);
+    hBlurPass.setBindGroup(0, this.hBlurBindGroup);
     hBlurPass.draw(6);
     hBlurPass.end();
 
     // PASS 4: Vertical blur -> blurTextures[1]
     this.device.queue.writeBuffer(this.blurBuffer, 0, new Float32Array([0, 1, blurSize.width, blurSize.height]));
 
-    const vBlurBind = this.device.createBindGroup({
-      layout: this.blurPipeline.getBindGroupLayout(0),
-      entries: [
-        { binding: 0, resource: (this.blurTextures[0] ?? this.sceneTexture).createView() },
-        { binding: 1, resource: this.linearSampler },
-        { binding: 2, resource: { buffer: this.blurBuffer } },
-      ],
-    });
 
     const vBlurPass = commandEncoder.beginRenderPass({
       colorAttachments: [{
@@ -277,22 +271,11 @@ export class BloomPostProcessor {
       }],
     });
     vBlurPass.setPipeline(this.blurPipeline);
-    vBlurPass.setBindGroup(0, vBlurBind);
+    vBlurPass.setBindGroup(0, this.vBlurBindGroup);
     vBlurPass.draw(6);
     vBlurPass.end();
 
     // PASS 5: Composite -> swapchain
-    // Recreate composite bind group to ensure latest blur view is bound
-    this.compositeBindGroup = this.device.createBindGroup({
-      layout: this.compositePipeline.getBindGroupLayout(0),
-      entries: [
-        { binding: 0, resource: this.sceneTexture.createView() },
-        { binding: 1, resource: this.linearSampler },
-        { binding: 2, resource: (this.blurTextures[1] ?? this.sceneTexture).createView() },
-        { binding: 3, resource: this.linearSampler },
-        { binding: 4, resource: { buffer: this.compositeBuffer } },
-      ],
-    });
 
     const compositePass = commandEncoder.beginRenderPass({
       colorAttachments: [{
