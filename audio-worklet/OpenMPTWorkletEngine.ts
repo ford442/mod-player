@@ -210,11 +210,61 @@ export class OpenMPTWorkletEngine extends MiniEventEmitter<EngineEventMap> {
      * Load a module from a URL.
      */
     async loadFromURL(url: string): Promise<WorkletModuleMetadata | null> {
+        if (!this.module) {
+            this.emit('error', { message: 'Engine not initialized', code: 'NOT_INIT' });
+            return null;
+        }
+
         try {
             const response = await fetch(url);
             if (!response.ok) throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-            const data = await response.arrayBuffer();
-            return this.load(data);
+
+            const contentLength = response.headers.get('content-length');
+            const totalSize = contentLength ? parseInt(contentLength, 10) : 0;
+
+            if (totalSize > 0 && response.body) {
+                // Pre-allocate exactly on the WASM heap to avoid intermediate ArrayBuffer allocation and GC spikes
+                const ptr = this.module._malloc(totalSize);
+                if (!ptr) throw new Error('Failed to allocate WASM memory');
+
+                const reader = response.body.getReader();
+                let offset = 0;
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    if (value) {
+                        this.module.HEAPU8.set(value, ptr + offset);
+                        offset += value.length;
+                    }
+                }
+
+                const result = this.module._load_module(ptr, offset);
+                this.module._free(ptr);
+
+                if (!result) {
+                    this.emit('error', { message: 'Invalid module format', code: 'LOAD_FAILED' });
+                    return null;
+                }
+
+                // Module metadata will be available after the worklet thread processes the load
+                // For now, return a placeholder that gets filled in via position polling
+                const metadata: WorkletModuleMetadata = {
+                    title: '',
+                    numOrders: 0,
+                    numPatterns: 0,
+                    numChannels: 0,
+                    durationSeconds: 0,
+                    initialBpm: 0,
+                };
+
+                this.emit('loaded', metadata);
+                return metadata;
+            } else {
+                // Fallback for servers without Content-Length
+                const data = await response.arrayBuffer();
+                return this.load(data);
+            }
         } catch (err) {
             const message = err instanceof Error ? err.message : String(err);
             this.emit('error', { message, code: 'FETCH_ERROR' });
