@@ -11,6 +11,12 @@ function error(...args) { console.error('[Worklet]', ...args); }
 class XMPlayerProcessor extends AudioWorkletProcessor {
   constructor(options) {
     super(options);
+    // Provide Emscripten with the shared WASM Memory BEFORE the script loads
+    if (options && options.processorOptions && options.processorOptions.memory) {
+      globalThis.Module = globalThis.Module || {};
+      globalThis.Module['wasmMemory'] = options.processorOptions.memory;
+    }
+
     this.modulePtr = 0;
     this.leftBufPtr = 0;
     this.rightBufPtr = 0;
