@@ -354,13 +354,19 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
 
   if (inButton > 0.5) {
     let noteChar = (in.packedA >> 24) & 255u;
-    let inst = in.packedA & 255u;
+    let inst = (in.packedA >> 16) & 255u;
     let effCode = (in.packedB >> 8) & 255u;
     let effParam = in.packedB & 255u;
 
-    let hasNote = (noteChar >= 65u && noteChar <= 71u);
+    // Fixed: numeric note values 1-120, not ASCII A-G (65-71)
+    let hasNote = (noteChar > 0u) && (noteChar <= 120u);
     let hasEffect = (effParam > 0u);
-    let ch = channels[in.channel];
+
+    // Bounds check for channel state array access
+    var ch = ChannelState(0.0, 0.0, 0.0, 0u, 1000.0, 0u, 0.0, 0u);
+    if (in.channel < arrayLength(&channels)) {
+      ch = channels[in.channel];
+    }
     let isMuted = (ch.isMuted == 1u);
 
     // COMPONENT 1: ACTIVITY LIGHT (Blue indicator for trap)
