@@ -79,7 +79,7 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
   let center = vec2<f32>(uniforms.canvasW * 0.5, uniforms.canvasH * 0.5);
   let minDim = min(uniforms.canvasW, uniforms.canvasH);
 
-  let maxRadius = minDim * 0.40; // Reduced from 0.45 to make room for buttons
+  let maxRadius = minDim * 0.35; // Fits within gridBottom (0.85) to prevent bottom cutoff
   let minRadius = minDim * 0.15;
   let ringDepth = (maxRadius - minRadius) / f32(numChannels);
 
