@@ -194,7 +194,6 @@ export interface NoteDurationInfo {
   rowOffset: number;   // Offset from note start (0 = note-on row)
   isNoteOff: boolean;  // Whether this is a note-off/cut/fade row
 }
-
 /**
  * Calculate note durations by scanning for note-off commands (DURA-001)
  * Returns a 2D array of duration info for each cell [row][channel]
@@ -203,81 +202,77 @@ export const calculateNoteDurations = (
   matrix: PatternMatrix
 ): NoteDurationInfo[][] => {
   const { numRows, numChannels, rows } = matrix;
-  const result: NoteDurationInfo[][] = [];
+  
+  // Initialize result
+  const result: NoteDurationInfo[][] = Array.from({ length: numRows }, () =>
+    Array.from({ length: numChannels }, () => ({
+      duration: 1,
+      rowOffset: 0,
+      isNoteOff: false,
+    }))
+  );
 
-  // Initialize result array
-  for (let r = 0; r < numRows; r++) {
-    result[r] = [];
-    for (let c = 0; c < numChannels; c++) {
-      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-      result[r]!.push({ duration: 1, rowOffset: 0, isNoteOff: false });
-    }
-  }
-
-  // For each channel, scan to calculate note durations
   for (let ch = 0; ch < numChannels; ch++) {
-    let currentNoteStart = -1;
+    let noteStartRow = -1;
 
     for (let row = 0; row < numRows; row++) {
-      const rowData = rows[row];
-      const cell = rowData?.[ch];
-      const note = cell?.note || 0;
+      const cell = rows[row]?.[ch];
+      if (!cell) continue;
 
-      // Check if this is a valid note (1-96)
+      const note = cell.note || 0;
       const hasNote = note >= NOTE_MIN && note <= NOTE_MAX;
-      // Check for note-off commands (97=note-off, 98=note-cut, 99=fade)
       const isNoteOff = note === NOTE_OFF || note === NOTE_CUT || note === NOTE_FADE;
-      // Volume zero also acts as note-off
-      const isVolumeOff = cell?.volCmd === 0xC0 && cell?.volVal === 0;
-
-      // Pass 1: Forward pass to compute rowOffset and track note states
-      const cr = result[row]?.[ch];
-      if (!cr) continue;
+      const isVolumeOff = cell.volCmd === 0xC0 && cell.volVal === 0;
 
       if (hasNote) {
-        currentNoteStart = row;
-        cr.rowOffset = 0;
-        cr.isNoteOff = false;
-      } else if (isNoteOff || isVolumeOff) {
-        cr.rowOffset = currentNoteStart >= 0 ? row - currentNoteStart : 0;
-        cr.isNoteOff = true;
-        currentNoteStart = -1;
-      } else {
-        cr.rowOffset = currentNoteStart >= 0 ? row - currentNoteStart : 0;
-        cr.isNoteOff = false;
+        // New note starts → end previous note if any
+        if (noteStartRow !== -1) {
+          const duration = row - noteStartRow;
+          for (let r = noteStartRow; r < row; r++) {
+            const res = result[r][ch];
+            res.duration = Math.min(duration, 255);
+            res.rowOffset = r - noteStartRow;
+            res.isNoteOff = false;
+          }
+        }
+
+        // Start new note
+        noteStartRow = row;
+        const res = result[row][ch];
+        res.duration = 1;           // temporary
+        res.rowOffset = 0;
+        res.isNoteOff = false;
+      } 
+      else if (isNoteOff || isVolumeOff) {
+        // Note-off / cut / fade → end current note
+        if (noteStartRow !== -1) {
+          const duration = row - noteStartRow + 1; // include the off row
+          for (let r = noteStartRow; r <= row; r++) {
+            const res = result[r][ch];
+            res.duration = Math.min(duration, 255);
+            res.rowOffset = r - noteStartRow;
+            res.isNoteOff = (r === row); // only the last row is the actual off
+          }
+          noteStartRow = -1;
+        } else {
+          // Standalone note-off without preceding note
+          const res = result[row][ch];
+          res.duration = 1;
+          res.rowOffset = 0;
+          res.isNoteOff = true;
+        }
       }
+      // else: empty cell → continue current note (do nothing here)
     }
 
-    // Pass 2: Backward pass to calculate duration
-    let activeDuration = 1;
-    let inNote = false;
-
-    for (let row = numRows - 1; row >= 0; row--) {
-      const cr = result[row]?.[ch];
-      if (!cr) continue;
-
-      if (cr.isNoteOff) {
-        activeDuration = cr.rowOffset + 1;
-        cr.duration = Math.min(activeDuration, 255);
-        inNote = true;
-      } else if (cr.rowOffset === 0 && inNote) {
-        cr.duration = Math.min(activeDuration, 255);
-        inNote = false;
-      } else if (cr.rowOffset === 0 && !inNote) {
-        const rowData = rows[row];
-        const cell = rowData?.[ch];
-        const note = cell?.note || 0;
-        const hasNote = note >= NOTE_MIN && note <= NOTE_MAX;
-
-        if (hasNote) {
-          cr.duration = Math.min(numRows - row, 255);
-        } else {
-          cr.duration = 1;
-        }
-      } else if (inNote) {
-        cr.duration = Math.min(activeDuration, 255);
-      } else {
-        cr.duration = Math.min(numRows - (row - cr.rowOffset), 255);
+    // Handle notes that run until the end of the pattern
+    if (noteStartRow !== -1) {
+      const duration = numRows - noteStartRow;
+      for (let r = noteStartRow; r < numRows; r++) {
+        const res = result[r][ch];
+        res.duration = Math.min(duration, 255);
+        res.rowOffset = r - noteStartRow;
+        res.isNoteOff = false;
       }
     }
   }
