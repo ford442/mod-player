@@ -155,15 +155,28 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   let onPlayhead = (in.row == u32(uniforms.playheadRow));
   
   let note = (in.packedA >> 24) & 255u;
+  let volCmd = (in.packedA >> 8) & 255u;
+  let effCmd = (in.packedB >> 8) & 255u;
   let hasNote = note > 0u;
-  
+  let hasExpression = (volCmd > 0u) || (effCmd > 0u);
+  let ch = channels[in.channel];
+
   if (hasNote) {
       let noteCol = neonPalette(f32(note % 12u) / 12.0);
       let dist = length(p);
       let glow = exp(-dist * 4.0);
       col += noteCol * glow * 1.5;
+      // Trigger flash: pulse on the exact playhead row
+      if (ch.trigger > 0u && onPlayhead) {
+          col += noteCol * 1.5;
+      }
   }
-  
+
+  // Expression indicator: subtle cyan tint for cells with vol/effect commands
+  if (hasExpression && ch.isMuted == 0u) {
+      col += vec3<f32>(0.0, 0.04, 0.08) * uniforms.bloomIntensity;
+  }
+
   if (onPlayhead) {
       col += vec3<f32>(0.2, 0.2, 0.25) * 0.8;
   }

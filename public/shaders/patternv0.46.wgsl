@@ -257,20 +257,43 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   }
 
   if (inButton > 0.5) {
-    let note = (in.packedA >> 24) & 255u;
-    let inst = (in.packedA >> 16) & 255u;
-    let volCmd = (in.packedA >> 8) & 255u;
-    let effCmd = (in.packedB >> 8) & 255u;
-    let effVal = in.packedB & 255u;
-
-    let hasNote = (note > 0u);
+    let note          = (in.packedA >> 24) & 255u;
+    let inst          = (in.packedA >> 16) & 255u;
+    let volCmd        = (in.packedA >>  8) & 255u;
+    let effCmd        = (in.packedB >>  8) & 255u;
+    let hasNote       = (note > 0u) && (note <= 120u);
     let hasExpression = (volCmd > 0u) || (effCmd > 0u);
-    let ch = channels[in.channel];
-    let isMuted = (ch.isMuted == 1u);
+    let ch            = channels[in.channel];
+    let isMuted       = (ch.isMuted == 1u);
 
-    // Cap/LED indicators are now drawn by the WebGL2 overlay.
-    // Keep housing background and muted dimming.
-    if (isMuted) {
+    if (!isMuted) {
+      if (hasNote) {
+        let pitchHue = pitchClassFromIndex(note);
+        let noteCol  = neonPalette(pitchHue);
+        // playheadHit already computed above (0..1 proximity)
+        var noteGlow = playheadHit;
+        if (ch.trigger > 0u && playheadHit > 0.5) { noteGlow += 1.0; }
+
+        let mainUV  = btnUV - vec2<f32>(0.5, 0.5);
+        let mainSz  = vec2<f32>(0.60, 0.60);
+        let mainLed = drawFrostedGlassCap(mainUV, mainSz, noteCol * max(0.35, noteGlow), noteGlow > 0.05, aa, noteGlow);
+        finalColor  = mix(finalColor, mainLed.rgb, mainLed.a);
+        if (noteGlow > 0.05) { finalColor += noteCol * noteGlow * bloom * 0.3; }
+      } else {
+        finalColor = mix(finalColor, vec3<f32>(0.06, 0.07, 0.09), 0.5);
+      }
+
+      if (hasExpression) {
+        let exprCenter = p - vec2<f32>(0.0, -0.32);
+        let exprMask   = 1.0 - smoothstep(0.04, 0.07, length(exprCenter));
+        let exprCol    = vec3<f32>(0.0, 0.75, 1.0) * (0.9 + bloom * 0.4);
+        finalColor     = mix(finalColor, exprCol, exprMask * 0.85);
+      }
+
+      if (playheadHit > 0.0) {
+        finalColor += vec3<f32>(0.04, 0.04, 0.08) * playheadHit;
+      }
+    } else {
       finalColor *= 0.3;
     }
   }
