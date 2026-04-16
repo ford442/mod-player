@@ -794,9 +794,16 @@ export function useWebGLOverlay(
         stateDataRef.current = new Float32Array(requiredSize);
       }
       const stateData = stateDataRef.current;
-      stateData.fill(0);
-
       const startIdx = p.padTopChannel ? 1 : 0;
+      
+      // Zero out the padding channel to prevent stale data if re-used
+      if (startIdx === 1) {
+        for (let j = 0; j < 4; j++) {
+          stateData[j] = 0;
+          stateData[cols * 4 + j] = 0;
+        }
+      }
+
       for (let i = 0; i < (p.matrix.numChannels || DEFAULT_CHANNELS); i++) {
         const ch = chans[i] || { volume: 0, pan: 0.5, freq: 440, trigger: 0, noteAge: 1000, activeEffect: 0, effectValue: 0, isMuted: 0 };
         const colIdx = i + startIdx;
