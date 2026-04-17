@@ -388,7 +388,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
       {!debugPanelOpen && (
         <button
           onClick={onOpenDebug}
-          className="fixed top-4 right-4 z-50 rounded-full border border-green-500/40 bg-black/80 px-3 py-1 text-sm text-green-300 shadow-lg hover:bg-black"
+          className="fixed top-4 right-4 z-50 rounded-full border border-green-500/40 bg-black/80 px-3 py-1 text-sm text-green-300 shadow-lg hover:bg-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-400"
           aria-label="Open debug panel"
         >
           🔍

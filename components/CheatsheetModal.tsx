@@ -13,7 +13,12 @@ export const CheatsheetModal: React.FC<CheatsheetModalProps> = ({ onClose }) => 
       'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
     ) ?? [];
 
-    getFocusable()[0]?.focus();
+    const focusable = getFocusable();
+    if (focusable[0]) {
+      focusable[0].focus();
+    } else {
+      dialogRef.current?.focus();
+    }
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -58,6 +63,7 @@ export const CheatsheetModal: React.FC<CheatsheetModalProps> = ({ onClose }) => 
         role="dialog"
         aria-modal="true"
         aria-label="Keyboard shortcuts"
+        tabIndex={-1}
         className="w-full max-w-2xl rounded-lg border border-cyan-500/40 bg-[#0b1116] p-5 text-sm text-gray-200 shadow-2xl"
       >
         <div className="mb-4 flex items-center justify-between">
