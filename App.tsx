@@ -39,6 +39,7 @@ const SHADER_GROUPS = {
     { id: 'patternv0.47.wgsl', label: 'v0.47 (Trap Frosted)' },
     { id: 'patternv0.46.wgsl', label: 'v0.46 (Frosted Glass)' },
     { id: 'patternv0.45.wgsl', label: 'v0.45 (Frosted Bloom)' },
+    { id: 'patternv0.45b.wgsl', label: 'v0.45b (Note-On Sustain)' },
     { id: 'patternv0.42.wgsl', label: 'v0.42 (Frosted Disc)' },
     { id: 'patternv0.38.wgsl', label: 'v0.38 (Glass)' },
     { id: 'patternv0.35_bloom.wgsl', label: 'v0.35 (Bloom)' },
