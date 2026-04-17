@@ -172,8 +172,18 @@ export function useWebGLOverlay(
         int trackIndex = id % int(u_cols);
         int stepIndex  = id / int(u_cols);
 
-        // Fetch cell data (packedA, packedB)
-        uvec2 cellData = texelFetch(u_cellData, ivec2(trackIndex, stepIndex), 0).rg;
+        // Page-aware cell data fetch.
+        // Horizontal layouts page through the pattern (32 or 64 steps per page);
+        // circular layouts show all rows directly but must clamp to valid range.
+        int actualRow;
+        if (u_layoutMode == 2 || u_layoutMode == 3) {
+            float stepsPerPageH = (u_layoutMode == 3) ? 64.0 : 32.0;
+            int pageStart = int(floor(u_playhead / stepsPerPageH) * stepsPerPageH);
+            actualRow = clamp(pageStart + stepIndex, 0, int(u_rows) - 1);
+        } else {
+            actualRow = clamp(stepIndex, 0, int(u_rows) - 1);
+        }
+        uvec2 cellData = texelFetch(u_cellData, ivec2(trackIndex, actualRow), 0).rg;
         v_cell = cellData;
 
         // Fetch channel state (2 rows)
