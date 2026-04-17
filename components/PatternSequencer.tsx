@@ -1,8 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { PatternMatrix } from '../types';
 
-const NOTE_REGEX = /[A-G]#?-/i;
-
 interface PatternSequencerProps {
   matrix: PatternMatrix | null;
   currentRow: number;

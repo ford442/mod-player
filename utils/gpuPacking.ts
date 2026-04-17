@@ -229,7 +229,7 @@ export const calculateNoteDurations = (
         if (noteStartRow !== -1) {
           const duration = row - noteStartRow;
           for (let r = noteStartRow; r < row; r++) {
-            const res = result[r][ch];
+            const res = result[r]![ch]!;
             res.duration = Math.min(duration, 255);
             res.rowOffset = r - noteStartRow;
             res.isNoteOff = false;
@@ -238,7 +238,7 @@ export const calculateNoteDurations = (
 
         // Start new note
         noteStartRow = row;
-        const res = result[row][ch];
+        const res = result[row]![ch]!;
         res.duration = 1;           // temporary
         res.rowOffset = 0;
         res.isNoteOff = false;
@@ -248,7 +248,7 @@ export const calculateNoteDurations = (
         if (noteStartRow !== -1) {
           const duration = row - noteStartRow + 1; // include the off row
           for (let r = noteStartRow; r <= row; r++) {
-            const res = result[r][ch];
+            const res = result[r]![ch]!;
             res.duration = Math.min(duration, 255);
             res.rowOffset = r - noteStartRow;
             res.isNoteOff = (r === row); // only the last row is the actual off
@@ -256,7 +256,7 @@ export const calculateNoteDurations = (
           noteStartRow = -1;
         } else {
           // Standalone note-off without preceding note
-          const res = result[row][ch];
+          const res = result[row]![ch]!;
           res.duration = 1;
           res.rowOffset = 0;
           res.isNoteOff = true;
@@ -269,7 +269,7 @@ export const calculateNoteDurations = (
     if (noteStartRow !== -1) {
       const duration = numRows - noteStartRow;
       for (let r = noteStartRow; r < numRows; r++) {
-        const res = result[r][ch];
+        const res = result[r]![ch]!;
         res.duration = Math.min(duration, 255);
         res.rowOffset = r - noteStartRow;
         res.isNoteOff = false;
