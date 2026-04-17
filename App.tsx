@@ -4,6 +4,7 @@ import { Controls } from './components/Controls';
 import { PatternDisplay } from './components/PatternDisplay';
 import { MediaOverlay } from './components/MediaOverlay';
 import { Studio3D } from './components/Studio3D';
+import { CheatsheetModal } from './components/CheatsheetModal';
 
 import { ChannelMeters } from './components/ChannelMeters';
 import { MetadataPanel } from './components/MetadataPanel';
@@ -13,6 +14,7 @@ import { SeekBar } from './components/SeekBar';
 import { useLibOpenMPT } from './hooks/useLibOpenMPT';
 import { usePlaylist } from './hooks/usePlaylist';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
+import { useLocalStorage } from './hooks/useLocalStorage';
 import type { MediaItem } from './types';
 import { 
   DEFAULT_BLOOM_PRESET, 
@@ -100,6 +102,8 @@ function App() {
   const [showChannelMeters, setShowChannelMeters] = useState<boolean>(true);
   const [showMetadata, setShowMetadata] = useState<boolean>(true);
   const [showPlaylist, setShowPlaylist] = useState<boolean>(true);
+  const [debugPanelOpen, setDebugPanelOpen] = useLocalStorage<boolean>('xasm1.debugPanel.open', false);
+  const [cheatsheetOpen, setCheatsheetOpen] = useState<boolean>(false);
 
   // Channel VU data (from worklet channelStates)
   const channelVU = useMemo(() => {
@@ -153,21 +157,41 @@ function App() {
   // Sync pan with library
   useEffect(() => { setLibPan(pan); }, [pan, setLibPan]);
 
+  const seekByOrderDelta = useCallback((delta: number) => {
+    const rowsPerPattern = sequencerMatrix?.numRows ?? 64;
+    const currentOrder = sequencerMatrix?.order ?? 0;
+    const targetStep = (currentOrder + delta) * rowsPerPattern;
+    seekToStep(Math.max(0, targetStep));
+  }, [seekToStep, sequencerMatrix]);
+
+  const jumpToOrder = useCallback((orderIndex: number) => {
+    const rowsPerPattern = sequencerMatrix?.numRows ?? 64;
+    const targetStep = orderIndex * rowsPerPattern;
+    seekToStep(Math.max(0, targetStep));
+  }, [seekToStep, sequencerMatrix?.numRows]);
+
   // Keyboard shortcuts
   useKeyboardShortcuts({
     onPlayPause: () => { isPlaying ? stopMusic(false) : play(); },
-    onStop: () => stopMusic(false),
-    onSeekForward: () => seekToStep(Math.floor(playbackRowFraction) + 4),
-    onSeekBackward: () => seekToStep(Math.max(0, Math.floor(playbackRowFraction) - 4)),
+    // Issue #135 binding table: ArrowLeft/Right seek one row
+    onSeekForward: () => seekToStep(Math.floor(playbackRowFraction) + 1),
+    onSeekBackward: () => seekToStep(Math.max(0, Math.floor(playbackRowFraction) - 1)),
+    onSeekNextOrder: () => seekByOrderDelta(1),
+    onSeekPrevOrder: () => seekByOrderDelta(-1),
+    onPreviousOrder: () => seekByOrderDelta(-1),
+    onNextOrder: () => seekByOrderDelta(1),
+    onJumpToOrder: jumpToOrder,
     onVolumeUp: () => setVolume(v => Math.min(1, v + 0.05)),
     onVolumeDown: () => setVolume(v => Math.max(0, v - 0.05)),
-    onNextTrack: handlePlaylistNext,
-    onPrevTrack: handlePlaylistPrev,
     onToggleLoop: () => setIsLooping(!isLooping),
     onToggleFullscreen: () => {
       if (document.fullscreenElement) document.exitFullscreen();
       else document.documentElement.requestFullscreen();
     },
+    onToggleDebugPanel: () => setDebugPanelOpen(!debugPanelOpen),
+    onToggleCheatsheet: () => setCheatsheetOpen((open) => !open),
+    onCloseCheatsheet: () => setCheatsheetOpen(false),
+    cheatsheetOpen,
   });
 
   // Register PWA service worker
@@ -252,107 +276,113 @@ function App() {
   if (is3DMode) {
     const shader3D = get3DShader();
     return (
-      <Studio3D
-        darkMode={isDarkMode}
-        viewMode={viewMode}
-        onDarkModeToggle={() => setIsDarkMode(!isDarkMode)}
-        onViewModeToggle={() => setViewMode(viewMode === 'device' ? 'wall' : 'device')}
-        onExitStudio={() => setIs3DMode(false)}
-        dimFactor={dimFactor}
-        headerContent={
-          <div className="scale-75 origin-top-left">
-         <Header status={status} />
-         <div className={`mb-2 inline-flex flex-col rounded border px-2 py-1 text-[10px] font-mono ${isDarkMode ? 'border-gray-700 bg-black/50 text-gray-300' : 'border-gray-300 bg-white/80 text-gray-700'}`}>
-           <span>sync mode: {syncDebug.mode}</span>
-           <span>buffer: {syncDebug.bufferMs.toFixed(1)}ms</span>
-           <span>drift: {syncDebug.driftMs.toFixed(1)}ms</span>
-           <span>row: {syncDebug.row.toFixed(2)}</span>
-           <span>starvations: {syncDebug.starvationCount}</span>
-         </div>
-          </div>
-        }
-        patternDisplayContent={
-          <div className="scale-75 origin-center">
-            <PatternDisplay
-              key={shader3D}
-              matrix={sequencerMatrix}
-              playheadRow={playbackRowFraction}
-              isPlaying={isPlaying}
-              bpm={120}
-              timeSec={playbackSeconds}
-              tickOffset={playbackRowFraction % 1}
-              channels={channelStates}
-              beatPhase={beatPhase}
-              grooveAmount={grooveAmount}
-              kickTrigger={kickTrigger}
-              activeChannels={activeChannels}
-              isModuleLoaded={isModuleLoaded}
-              shaderFile={shader3D}
-              volume={volume}
-              pan={pan}
-              isLooping={isLooping}
-              totalRows={totalPatternRows}
-              onPlay={play}
-              onStop={() => stopMusic(false)}
-              onFileSelected={handleFileSelected}
-              onLoopToggle={() => setIsLooping(!isLooping)}
-              onSeek={(row) => seekToStep(row)}
-              onVolumeChange={setVolume}
-              onPanChange={setPan}
-              externalVideoSource={null}
-              dimFactor={dimFactor}
-              analyserNode={analyserNode}
-              // PERFORMANCE OPTIMIZATION: Pass ref for high-frequency updates
-              playbackStateRef={playbackStateRef}
-              // Bloom settings from preset
-              bloomIntensity={bloomPreset.intensity}
-              bloomThreshold={bloomPreset.threshold}
-            />
-          </div>
-        }
-        controlsContent={
-          <div className="scale-75 origin-top-left">
-            <Controls
-              isReady={isReady}
-              isPlaying={isPlaying}
-              isModuleLoaded={isModuleLoaded}
-              onFileSelected={handleFileSelected}
-              onPlay={play}
-              onStop={() => stopMusic(false)}
-              isLooping={isLooping}
-              onLoopToggle={() => setIsLooping(!isLooping)}
-              volume={volume}
-              setVolume={setVolume}
-              pan={pan}
-              setPan={setPan}
-              onMediaAdd={handleMediaAdd}
-              onRemoteMediaSelect={handleRemoteMediaSelect}
-              remoteMediaList={[
-                { id: '1', kind: 'video', url: 'clouds.mp4', fileName: 'Clouds Demo (MP4)', mimeType: 'video/mp4' }
-              ]}
-              bloomPreset={bloomPreset}
-              onBloomPresetChange={setBloomPreset}
-              colorScheme={colorScheme}
-              onColorSchemeChange={setColorScheme}
-            />
-          </div>
-        }
-        mediaOverlayContent={
-          mediaVisible && mediaItem ? (
+      <>
+        <Studio3D
+          darkMode={isDarkMode}
+          viewMode={viewMode}
+          onDarkModeToggle={() => setIsDarkMode(!isDarkMode)}
+          onViewModeToggle={() => setViewMode(viewMode === 'device' ? 'wall' : 'device')}
+          onExitStudio={() => setIs3DMode(false)}
+          dimFactor={dimFactor}
+          headerContent={
+            <div className="scale-75 origin-top-left">
+            <Header status={status} isModuleLoaded={isModuleLoaded} />
+            <div className={`mb-2 inline-flex flex-col rounded border px-2 py-1 text-[10px] font-mono ${isDarkMode ? 'border-gray-700 bg-black/50 text-gray-300' : 'border-gray-300 bg-white/80 text-gray-700'}`}>
+              <span>sync mode: {syncDebug.mode}</span>
+              <span>buffer: {syncDebug.bufferMs.toFixed(1)}ms</span>
+              <span>drift: {syncDebug.driftMs.toFixed(1)}ms</span>
+              <span>row: {syncDebug.row.toFixed(2)}</span>
+              <span>starvations: {syncDebug.starvationCount}</span>
+            </div>
+            </div>
+          }
+          patternDisplayContent={
             <div className="scale-75 origin-center">
-              <MediaOverlay
-                item={mediaItem}
-                visible={mediaVisible}
-                onClose={() => setMediaVisible(false)}
-                onUpdate={(partial) => {
-                  if (mediaItem) setMediaItem({ ...mediaItem, ...partial });
-                }}
+              <PatternDisplay
+                key={shader3D}
+                matrix={sequencerMatrix}
+                playheadRow={playbackRowFraction}
+                isPlaying={isPlaying}
+                bpm={120}
+                timeSec={playbackSeconds}
+                tickOffset={playbackRowFraction % 1}
+                channels={channelStates}
+                beatPhase={beatPhase}
+                grooveAmount={grooveAmount}
+                kickTrigger={kickTrigger}
+                activeChannels={activeChannels}
+                isModuleLoaded={isModuleLoaded}
+                shaderFile={shader3D}
+                volume={volume}
+                pan={pan}
+                isLooping={isLooping}
+                totalRows={totalPatternRows}
+                onPlay={play}
+                onStop={() => stopMusic(false)}
+                onFileSelected={handleFileSelected}
+                onLoopToggle={() => setIsLooping(!isLooping)}
+                onSeek={(row) => seekToStep(row)}
+                onVolumeChange={setVolume}
+                onPanChange={setPan}
+                externalVideoSource={null}
+                dimFactor={dimFactor}
+                analyserNode={analyserNode}
+                debugPanelOpen={debugPanelOpen}
+                onCloseDebug={() => setDebugPanelOpen(false)}
+                onOpenDebug={() => setDebugPanelOpen(true)}
+                // PERFORMANCE OPTIMIZATION: Pass ref for high-frequency updates
+                playbackStateRef={playbackStateRef}
+                // Bloom settings from preset
+                bloomIntensity={bloomPreset.intensity}
+                bloomThreshold={bloomPreset.threshold}
               />
             </div>
-          ) : undefined
-        }
-        playheadX={playbackSeconds * 10.0}
-      />
+          }
+          controlsContent={
+            <div className="scale-75 origin-top-left">
+              <Controls
+                isReady={isReady}
+                isPlaying={isPlaying}
+                isModuleLoaded={isModuleLoaded}
+                onFileSelected={handleFileSelected}
+                onPlay={play}
+                onStop={() => stopMusic(false)}
+                isLooping={isLooping}
+                onLoopToggle={() => setIsLooping(!isLooping)}
+                volume={volume}
+                setVolume={setVolume}
+                pan={pan}
+                setPan={setPan}
+                onMediaAdd={handleMediaAdd}
+                onRemoteMediaSelect={handleRemoteMediaSelect}
+                remoteMediaList={[
+                  { id: '1', kind: 'video', url: 'clouds.mp4', fileName: 'Clouds Demo (MP4)', mimeType: 'video/mp4' }
+                ]}
+                bloomPreset={bloomPreset}
+                onBloomPresetChange={setBloomPreset}
+                colorScheme={colorScheme}
+                onColorSchemeChange={setColorScheme}
+              />
+            </div>
+          }
+          mediaOverlayContent={
+            mediaVisible && mediaItem ? (
+              <div className="scale-75 origin-center">
+                <MediaOverlay
+                  item={mediaItem}
+                  visible={mediaVisible}
+                  onClose={() => setMediaVisible(false)}
+                  onUpdate={(partial) => {
+                    if (mediaItem) setMediaItem({ ...mediaItem, ...partial });
+                  }}
+                />
+              </div>
+            ) : undefined
+          }
+          playheadX={playbackSeconds * 10.0}
+        />
+        {cheatsheetOpen && <CheatsheetModal onClose={() => setCheatsheetOpen(false)} />}
+      </>
     );
   }
 
@@ -360,7 +390,7 @@ function App() {
   return (
     <div className={`min-h-screen ${isDarkMode ? 'bg-gray-900 text-white' : 'bg-gray-100 text-black'} p-4 flex flex-col items-center transition-colors duration-300`}>
       <div className="w-full max-w-[1280px]">
-        <Header status={status} />
+        <Header status={status} isModuleLoaded={isModuleLoaded} />
 
         {/* Global Controls */}
         <div className="mb-4 flex flex-wrap items-center justify-between gap-4">
@@ -469,12 +499,15 @@ function App() {
              onLoopToggle={() => setIsLooping(!isLooping)}
              onSeek={(row) => seekToStep(row)}
              onVolumeChange={setVolume}
-             onPanChange={setPan}
-             externalVideoSource={null}
-             dimFactor={dimFactor}
-             analyserNode={analyserNode}
-             // PERFORMANCE OPTIMIZATION: Pass ref for high-frequency updates
-             playbackStateRef={playbackStateRef}
+              onPanChange={setPan}
+              externalVideoSource={null}
+              dimFactor={dimFactor}
+              analyserNode={analyserNode}
+              debugPanelOpen={debugPanelOpen}
+              onCloseDebug={() => setDebugPanelOpen(false)}
+              onOpenDebug={() => setDebugPanelOpen(true)}
+              // PERFORMANCE OPTIMIZATION: Pass ref for high-frequency updates
+              playbackStateRef={playbackStateRef}
              // Bloom settings from preset
              bloomIntensity={bloomPreset.intensity}
              bloomThreshold={bloomPreset.threshold}
@@ -612,6 +645,7 @@ function App() {
              <p>WebGPU required for visualization.</p>
         </div>
       </div>
+      {cheatsheetOpen && <CheatsheetModal onClose={() => setCheatsheetOpen(false)} />}
     </div>
   );
 }

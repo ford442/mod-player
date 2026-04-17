@@ -157,6 +157,7 @@ export const Studio3D: React.FC<Studio3DProps> = ({
         <OrbitControls
           ref={controlsRef}
           enableDamping
+          keyEvents={false}
           dampingFactor={0.05}
           minDistance={5}
           maxDistance={30}

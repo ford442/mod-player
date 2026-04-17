@@ -55,7 +55,6 @@ type DebugInfo = {
   layoutMode: string;
   errors: string[];
   uniforms: Record<string, number | string>;
-  visible: boolean;
 };
 
 type GLResources = {

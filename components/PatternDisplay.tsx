@@ -39,6 +39,9 @@ interface PatternDisplayProps {
   dimFactor?: number;
   analyserNode?: AnalyserNode | null;
   playbackStateRef?: React.MutableRefObject<PlaybackState>;
+  debugPanelOpen?: boolean;
+  onCloseDebug?: () => void;
+  onOpenDebug?: () => void;
 }
 
 export const PatternDisplay: React.FC<PatternDisplayProps> = ({
@@ -74,6 +77,9 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   dimFactor = 1.0,
   analyserNode,
   playbackStateRef,
+  debugPanelOpen = false,
+  onCloseDebug,
+  onOpenDebug,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const glCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -90,16 +96,10 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   const canvasSizeRef = useRef({ width: 0, height: 0, dpr: 1 });
   const resizeTimeoutRef = useRef<number | null>(null);
 
-  const [debugInfo, setDebugInfo] = useState<DebugInfo>(() => {
-    // Check URL for debug parameter to enable debug overlay on load
-    const urlParams = new URLSearchParams(window.location.search);
-    const debugFromUrl = urlParams.get('debug') === 'true';
-    return {
-      layoutMode: 'NONE',
-      errors: [],
-      uniforms: {},
-      visible: debugFromUrl // Default to hidden, enable with ?debug=true
-    };
+  const [debugInfo, setDebugInfo] = useState<DebugInfo>({
+    layoutMode: 'NONE',
+    errors: [],
+    uniforms: {},
   });
 
   const numChannels = matrix?.numChannels ?? DEFAULT_CHANNELS;
@@ -122,17 +122,6 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   useEffect(() => {
     // externalVideoSource is read from renderParamsRef on each frame
   }, [externalVideoSource]);
-
-  // Keyboard toggle for debug overlay
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'd' || e.key === 'D') {
-        setDebugInfo(prev => ({ ...prev, visible: !prev.visible }));
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
 
   // Canvas resize handling
   const syncCanvasSize = useCallback((canvas: HTMLCanvasElement, glCanvas: HTMLCanvasElement | null) => {
@@ -396,11 +385,21 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
 
       {!webgpuAvailable && <div className="error">WebGPU not available in this browser.</div>}
 
-      {debugInfo.visible && (
+      {!debugPanelOpen && (
+        <button
+          onClick={onOpenDebug}
+          className="fixed top-4 right-4 z-50 rounded-full border border-green-500/40 bg-black/80 px-3 py-1 text-sm text-green-300 shadow-lg hover:bg-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-400"
+          aria-label="Open debug panel"
+        >
+          🔍
+        </button>
+      )}
+
+      {debugPanelOpen && (
         <div className="fixed top-4 right-4 bg-black/90 border border-green-500/50 rounded p-3 text-xs font-mono z-50 max-w-xs" style={{ backdropFilter: 'blur(4px)' }}>
           <div className="flex justify-between items-center mb-2">
             <span className="text-green-400 font-bold">🔍 PatternDisplay Debug</span>
-            <button onClick={() => setDebugInfo(prev => ({ ...prev, visible: false }))} className="text-gray-500 hover:text-white">✕</button>
+            <button onClick={onCloseDebug} className="text-gray-500 hover:text-white">✕</button>
           </div>
           <div className="mb-2">
             <span className="text-gray-400">Mode:</span>
@@ -425,7 +424,6 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
               </div>
             ))}
           </div>
-          <div className="text-[9px] text-gray-600 mt-2 pt-1 border-t border-gray-800">Press 'D' to toggle</div>
         </div>
       )}
     </div>
