@@ -1,6 +1,60 @@
 # Weekly Plan - XASM-1 (patternv0.50 "Trap Frosted Lens")
 
-## Overview
+## Today's focus
+**Fix First — channel-count buffer mismatch in the pattern packing pipeline.**
+The packer (`packPatternMatrixHighPrecision`) emits `64 × 5 = 320` cells while `PatternDisplay` allocates `64 × 4 = 256`. Fifth-channel / metadata-row data is silently dropped or overruns the buffer, which directly blocks the note-duration visualization feature (the DURA pipeline writes duration/rowOffset/isNoteOff into exactly that column). Land a verified fix today so downstream shader work can trust its inputs.
+
+## Ideas
+<!-- User-written ideas Noah accumulates during the week. Routine prioritizes these. -->
+- [ ] Amber-vs-blue emitter differentiation for expression-only steps (narrative §Note-Duration and §Graphical 2; partial groundwork in v0.50 three-LED rewrite Apr 12)
+- [ ] Animated playhead scan-line arc at the current row in circular shaders (narrative §Graphical 4)
+- [ ] Fractional-row interpolation for smooth 144 Hz playhead (`smoothPlayhead = row + fraction`) via `useRef`, bypass React state (narrative §Advanced 1)
+- [ ] SharedArrayBuffer oscilloscope pipeline from worklet → GPU texture (narrative §Advanced 4)
+- [ ] Move initial module parse off the main thread into a Web Worker to avoid 300 ms–1 s freezes on large `.it` files (narrative §Advanced 3)
+- [ ] Darker-chassis toggle + drop shadow for white-chassis contrast (narrative §Graphical 6)
+- [ ] Collapsible / default-hidden PatternDisplay debug panel (narrative §Graphical 8)
+- [ ] Keyboard shortcut set: space/arrows/1–9 for play/seek/order jump (narrative §UI/UX)
+- [ ] Persist last-used shader in localStorage + per-module memory (narrative §Quick wins)
+- [ ] Thumbnail previews + favorites in shader selector (narrative §Shader UI)
+- [ ] Multi-layer bloom: separate passes for triggers / sustains / expression (narrative §Shader 2)
+
+## Backlog
+<!-- Unfinished items, known bugs, deferred work. -->
+- [ ] **[in progress — 2026-04-17]** Bug 1: 5-channel packer vs 4-channel buffer mismatch — today's Fix First
+- [ ] Bug 3: PatternDisplay debug panel shows `Mode: NONE` while v0.50 renders (UI/state disconnect)
+- [ ] Bug 4: ▶️ Play button scrolls canvas off-screen (focus/scroll side effect)
+- [ ] Verify Bug 5 (shader `.bak`/`.kate-swp` files) actually cleaned — current `ls` shows 58 `.wgsl` files with no backups visible; confirm and add `.gitignore` patterns if missing
+- [ ] Verify Bug 2 (ScriptProcessor fallback) fully resolved by #131 `refactor(worklet): remove registerProcessor hack` — spot-check on prod
+- [ ] CRT scanline / phosphor post-process shader (narrative §Shader)
+- [ ] Dynamic per-instrument color palettes (narrative §Shader / §UI)
+- [ ] Compute-shader port of note-duration calculation (narrative §Performance)
+- [ ] Mobile "lite" render mode (narrative §Performance)
+- [ ] Storage-manager integration: `/api/shaders`, `/api/songs`, rating hookup (narrative §Integration)
+
+## Done
+- [x] 2026-04-17 — WebGL2 overlay coordinate alignment with WebGPU shader steps (#132)
+- [x] 2026-04-17 — Outstanding TypeScript errors swept (#133)
+- [x] 2026-04-16 — Worklet registerProcessor hack removed, formal `processorOptions` path (#131)
+- [x] 2026-04-16 — BloomPostProcessor BindGroup creation optimized (#130)
+- [x] 2026-04-16 — Lazy-load pattern matrices (#129)
+- [x] 2026-04-16 — Note duration calc O(N³) → O(N)
+- [x] 2026-04-16 — PatternSequencer regex optimization
+- [x] 2026-04-16 — v0.45 circle bottom-cutoff fix + max-radius clamp
+- [x] 2026-04-15 — LED indicator consistency across pattern shaders (#123)
+- [x] 2026-04-15 — Large public assets restored after history cleanup
+- [x] 2026-04-13 — WebGL cap alignment + LED sustain/expression color states (initial cut)
+- [x] 2026-04-12 — v0.50 "Trap Frosted Lens" three-emitter rewrite (RG32UI cells, RGBA32F channel state, additive blend)
+- [x] 2026-04-10 — Stale channel buffer + bind-group refresh fix; shader animation on second-song-load fix
+
+## Last run
+Date: 2026-04-17 (first run under new routine template)
+Mode: Fix First
+Focus: 5-channel / 4-channel buffer mismatch in `packPatternMatrixHighPrecision` ↔ `PatternDisplay` cells buffer.
+Outcome: kickoff dispatch generated; kimi-cli swarm task, Copilot issue draft, 3 chat-model expansions, Claude Code deploy-dry-run task, and Jules wrap-up template all queued. Awaiting kimi-cli run.
+
+---
+
+## Overview (archival analysis — pre-routine notes)
 The XASM-1 (patternv0.50 "Trap Frosted Lens") is a WebGPU-rendered circular tracker note display. It already has a sophisticated three-emitter LED system per step. Here is everything I found — bugs, missing features, and graphical improvement ideas.
 
 ---
