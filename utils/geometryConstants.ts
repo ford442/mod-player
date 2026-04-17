@@ -54,13 +54,12 @@ export function calculateCapScale(cellW: number, cellH: number, pixelRatio: numb
 
 // Determine layout mode from shader filename
 export function getLayoutModeFromShader(shaderFile: string): LayoutMode {
-  if (shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || 
-      shaderFile.includes('v0.42') || shaderFile.includes('v0.43') ||
-      shaderFile.includes('v0.44')) {
+  if (shaderFile.includes('v0.39') || shaderFile.includes('v0.40') ||
+      shaderFile.includes('v0.43') || shaderFile.includes('v0.44')) {
     return LAYOUT_MODES.HORIZONTAL_32;
   }
-  
-  if (shaderFile.includes('v0.45') || shaderFile.includes('v0.46') ||
+
+  if (shaderFile.includes('v0.42') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') ||
       shaderFile.includes('v0.47') || shaderFile.includes('v0.48') ||
       shaderFile.includes('v0.49')) {
     return LAYOUT_MODES.CIRCULAR;
