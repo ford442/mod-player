@@ -335,6 +335,19 @@ export const packPatternMatrix = (matrix: PatternMatrix | null, padTopChannel = 
       }
     }
   }
+  // DEV INVARIANT: packed buffer must exactly match declared dimensions
+  if (import.meta.env?.DEV) {
+    const allocatedCells = packedData.length / 2;
+    const expectedCells = numRows * numChannels;
+    if (allocatedCells !== expectedCells) {
+      console.error(
+        `[gpuPacking INVARIANT] packPatternMatrix: buffer size mismatch. ` +
+        `allocatedCells=${allocatedCells}, expectedCells=${expectedCells} ` +
+        `(${numRows} rows × ${numChannels} channels). packedData.length=${packedData.length}`
+      );
+    }
+  }
+
   return { packedData, noteCount };
 };
 
@@ -448,6 +461,19 @@ export const packPatternMatrixHighPrecision = (matrix: PatternMatrix | null, pad
   // Verify consistency
   if (cellsWritten !== rawChannels * numRows) {
     console.warn(`[packPatternMatrixHighPrecision] CELL COUNT MISMATCH: expected=${rawChannels * numRows}, actual=${cellsWritten}`);
+  }
+
+  // DEV INVARIANT: packed buffer must exactly match declared dimensions
+  if (import.meta.env?.DEV) {
+    const allocatedCells = packedData.length / 2;
+    const expectedCells = numRows * numChannels;
+    if (allocatedCells !== expectedCells) {
+      console.error(
+        `[gpuPacking INVARIANT] packPatternMatrixHighPrecision: buffer size mismatch. ` +
+        `allocatedCells=${allocatedCells}, expectedCells=${expectedCells} ` +
+        `(${numRows} rows × ${numChannels} channels = ${totalCells}). packedData.length=${packedData.length}`
+      );
+    }
   }
 
   return { packedData, noteCount: notesPacked };

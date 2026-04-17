@@ -383,6 +383,18 @@ export function useWebGPURender(
     const expectedCells = numRows * numChannels;
     console.log(`[PatternDisplay] Packed data contains ${noteCount} notes in ${actualCells} cells (expected: ${expectedCells} = ${numRows} rows × ${numChannels} channels)`);
     cellsBufferRef.current = createBufferWithData(device, packedData, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
+
+    // DEV INVARIANT: GPU buffer size must match packed data size
+    if (import.meta.env?.DEV && cellsBufferRef.current) {
+      if (cellsBufferRef.current.size !== packedData.byteLength) {
+        console.error(
+          `[useWebGPURender INVARIANT] cells buffer size mismatch. ` +
+          `bufferSize=${cellsBufferRef.current.size}, packedDataByteLength=${packedData.byteLength}, ` +
+          `actualCells=${packedData.length / 2}, expectedCells=${numRows * numChannels}`
+        );
+      }
+    }
+
     if (layoutTypeRef.current === 'extended') {
       const numRows = matrix?.numRows ?? DEFAULT_ROWS;
       const flags = buildRowFlags(numRows);

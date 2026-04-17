@@ -1,0 +1,138 @@
+- generic [ref=e4]:
+  - banner [ref=e5]:
+    - heading "libopenmpt Note Viewer" [level=1] [ref=e6]
+    - paragraph [ref=e7]: Playing (ScriptProcessor fallback)...
+  - generic [ref=e8]:
+    - generic [ref=e9]:
+      - button "🎬 3D Mode" [ref=e10] [cursor=pointer]
+      - button "🌙 Dark" [ref=e11] [cursor=pointer]
+      - button "⚡ Worklet" [ref=e12] [cursor=pointer]
+    - generic [ref=e13]:
+      - generic [ref=e14]:
+        - generic [ref=e15]: Square
+        - combobox [ref=e16]:
+          - option "Select..." [disabled] [selected]
+          - option "v0.44 (Frosted Wall 64)"
+          - option "v0.43 (Frosted Wall 32)"
+          - option "v0.40 (Frosted Grid)"
+          - option "v0.39 (Modern)"
+          - option "v0.21 (Wall)"
+      - generic [ref=e18]:
+        - generic [ref=e19]: Circular
+        - combobox [ref=e20]:
+          - option "Select..." [disabled]
+          - option "v0.50 (Trap Frosted Lens)"
+          - option "v0.49 (Trap Frosted Glass)"
+          - option "v0.48 (Trap Frosted Disc)"
+          - option "v0.47 (Trap Frosted)"
+          - option "v0.46 (Frosted Glass)" [selected]
+          - option "v0.45 (Frosted Bloom)"
+          - option "v0.42 (Frosted Disc)"
+          - option "v0.38 (Glass)"
+          - option "v0.35 (Bloom)"
+          - option "v0.30 (Disc)"
+      - generic [ref=e22]:
+        - generic [ref=e23]: Video
+        - combobox [ref=e24]:
+          - option "Select..." [disabled] [selected]
+          - option "v0.23 (Clouds)"
+          - option "v0.24 (Tunnel)"
+  - generic [ref=e151]:
+    - generic [ref=e163]: Tracker GPU-9000
+    - generic [ref=e166]: WebGPU not available in this browser.
+  - generic [ref=e42]:
+    - generic [ref=e43]:
+      - img [ref=e44]
+      - button "Choose File" [ref=e46]
+    - generic [ref=e47]:
+      - img [ref=e48]
+      - button "Choose File" [ref=e50]
+    - generic [ref=e52]:
+      - generic [ref=e53]: "Server Media:"
+      - combobox "Server Media:" [ref=e54]:
+        - option "Select File..." [disabled] [selected]
+        - option "Clouds Demo (MP4)"
+    - generic [ref=e55]:
+      - button "▶️ Play" [ref=e56] [cursor=pointer]
+      - button "⏹️ Stop" [ref=e57] [cursor=pointer]
+      - button "🔄 Loop" [ref=e58] [cursor=pointer]
+    - generic [ref=e60]:
+      - generic [ref=e61]: "💡 Bloom:"
+      - combobox "💡 Bloom:" [ref=e62]:
+        - option "Subtle UI"
+        - option "Standard" [selected]
+        - option "Gaming"
+        - option "HDR Cinematic"
+        - option "Neon"
+    - generic [ref=e64]:
+      - generic [ref=e65]: "🎨 Colors:"
+      - combobox "🎨 Colors:" [ref=e66]:
+        - option "Chromatic"
+        - option "Golden Ratio" [selected]
+        - option "Warm/Cool"
+        - option "Rainbow"
+    - generic [ref=e67]:
+      - generic [ref=e68]: "Vol:"
+      - slider [ref=e69]: "0.5"
+    - generic [ref=e70]:
+      - generic [ref=e71]: "Pan:"
+      - slider [ref=e72]: "0"
+  - generic [ref=e114]:
+    - generic [ref=e115]: 0:49
+    - generic [ref=e118]: 0:00
+    - generic [ref=e119]: ▶
+  - generic [ref=e73]:
+    - button "📊 VU Meters" [ref=e74] [cursor=pointer]
+    - button "ℹ️ Metadata" [ref=e75] [cursor=pointer]
+    - button "📋 Playlist" [ref=e76] [cursor=pointer]
+  - generic [ref=e80]:
+    - generic [ref=e81]:
+      - generic [ref=e120]:
+        - generic [ref=e121]: Playing (ScriptProcessor fallback)...
+        - generic [ref=e122]: ▶ PLAYING
+      - generic [ref=e123]:
+        - generic [ref=e124]:
+          - generic [ref=e125]: Artist
+          - generic [ref=e126]: —
+        - generic [ref=e127]:
+          - generic [ref=e128]: Tracker
+          - generic [ref=e129]: JS AudioWorklet
+        - generic [ref=e130]:
+          - generic [ref=e131]: Channels
+          - generic [ref=e132]: "4"
+        - generic [ref=e133]:
+          - generic [ref=e134]: BPM
+          - generic [ref=e135]: "125"
+        - generic [ref=e136]:
+          - generic [ref=e137]: Orders
+          - generic [ref=e138]: 6/42
+        - generic [ref=e139]:
+          - generic [ref=e140]: Pattern
+          - generic [ref=e141]: "07"
+        - generic [ref=e142]:
+          - generic [ref=e143]: Row
+          - generic [ref=e144]: 0/64
+        - generic [ref=e145]:
+          - generic [ref=e146]: Length
+          - generic [ref=e147]: 0:00
+        - generic [ref=e148]:
+          - generic [ref=e149]: Position
+          - generic [ref=e150]: 0:49
+    - generic [ref=e83]:
+      - generic [ref=e86]: CH 1
+      - generic [ref=e89]: CH 2
+      - generic [ref=e92]: CH 3
+      - generic [ref=e95]: CH 4
+  - generic [ref=e99]:
+    - generic [ref=e100]:
+      - generic [ref=e101]: Playlist (0)
+      - generic [ref=e102]:
+        - button "Previous track" [disabled] [ref=e103]: ⏮
+        - button "Next track" [disabled] [ref=e104]: ⏭
+        - button "Shuffle Off" [ref=e105] [cursor=pointer]: 🔀
+        - button "No Repeat" [ref=e106] [cursor=pointer]: ➡️
+        - button "Add files to playlist" [ref=e107] [cursor=pointer]: ➕
+    - generic [ref=e109]: Drag & drop module files here
+  - generic [ref=e110]:
+    - paragraph [ref=e111]: Supports .mod, .xm, .s3m, .it files.
+    - paragraph [ref=e112]: WebGPU required for visualization.
