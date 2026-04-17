@@ -43,7 +43,6 @@ export type DebugInfo = {
   layoutMode: string;
   errors: string[];
   uniforms: Record<string, number | string>;
-  visible: boolean;
 };
 
 // All per-frame render parameters — updated every React render via ref assignment

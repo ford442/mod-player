@@ -2,15 +2,21 @@ import { useEffect, useRef } from 'react';
 
 interface KeyboardShortcutActions {
   onPlayPause: () => void;
-  onStop: () => void;
   onSeekForward: () => void;
   onSeekBackward: () => void;
+  onSeekNextOrder: () => void;
+  onSeekPrevOrder: () => void;
+  onPreviousOrder: () => void;
+  onNextOrder: () => void;
+  onJumpToOrder: (orderIndex: number) => void;
   onVolumeUp: () => void;
   onVolumeDown: () => void;
-  onNextTrack: () => void;
-  onPrevTrack: () => void;
   onToggleLoop: () => void;
   onToggleFullscreen: () => void;
+  onToggleDebugPanel: () => void;
+  onToggleCheatsheet: () => void;
+  onCloseCheatsheet: () => void;
+  cheatsheetOpen: boolean;
 }
 
 export function useKeyboardShortcuts(actions: KeyboardShortcutActions) {
@@ -19,23 +25,36 @@ export function useKeyboardShortcuts(actions: KeyboardShortcutActions) {
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Don't capture when typing in inputs
-      const tag = (e.target as HTMLElement)?.tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName ?? '';
+      if (['INPUT', 'TEXTAREA', 'SELECT'].includes(tag)) return;
+      if ((e.key === ' ' || e.key === 'Enter') && tag === 'BUTTON') return;
+      if (target?.isContentEditable) return;
+      if (e.isComposing || e.keyCode === 229) return;
+      if ((e.ctrlKey || e.metaKey) && e.key !== 'Escape') return;
 
       const a = actionsRef.current;
+      if (a.cheatsheetOpen && e.key !== 'Escape') {
+        e.preventDefault();
+        return;
+      }
+
+      const digitMatch = e.code.match(/^Digit([1-9])$/);
+      if (digitMatch) {
+        e.preventDefault();
+        a.onJumpToOrder(Number(digitMatch[1]) - 1);
+        return;
+      }
+
       switch (e.key) {
         case ' ':
           e.preventDefault();
           a.onPlayPause();
           break;
-        case 'Escape':
-          a.onStop();
-          break;
         case 'ArrowRight':
           e.preventDefault();
           if (e.shiftKey) {
-            a.onNextTrack();
+            a.onSeekNextOrder();
           } else {
             a.onSeekForward();
           }
@@ -43,18 +62,26 @@ export function useKeyboardShortcuts(actions: KeyboardShortcutActions) {
         case 'ArrowLeft':
           e.preventDefault();
           if (e.shiftKey) {
-            a.onPrevTrack();
+            a.onSeekPrevOrder();
           } else {
             a.onSeekBackward();
           }
           break;
         case 'ArrowUp':
           e.preventDefault();
-          a.onVolumeUp();
+          if (e.shiftKey) {
+            a.onVolumeUp();
+          } else {
+            a.onPreviousOrder();
+          }
           break;
         case 'ArrowDown':
           e.preventDefault();
-          a.onVolumeDown();
+          if (e.shiftKey) {
+            a.onVolumeDown();
+          } else {
+            a.onNextOrder();
+          }
           break;
         case 'l':
         case 'L':
@@ -63,6 +90,27 @@ export function useKeyboardShortcuts(actions: KeyboardShortcutActions) {
         case 'f':
         case 'F':
           a.onToggleFullscreen();
+          break;
+        case 'd':
+        case 'D':
+          e.preventDefault();
+          a.onToggleDebugPanel();
+          break;
+        case '?':
+          e.preventDefault();
+          a.onToggleCheatsheet();
+          break;
+        case '/':
+          if (e.shiftKey && e.code === 'Slash') {
+            e.preventDefault();
+            a.onToggleCheatsheet();
+          }
+          break;
+        case 'Escape':
+          if (a.cheatsheetOpen) {
+            e.preventDefault();
+            a.onCloseCheatsheet();
+          }
           break;
       }
     };
