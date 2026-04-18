@@ -30,6 +30,9 @@ struct Uniforms {
 // Note constants for numeric note values
 const NOTE_MIN: u32 = 1u;
 const NOTE_MAX: u32 = 96u;
+const NOTE_OFF: u32 = 97u;
+const NOTE_CUT: u32 = 98u;
+const NOTE_FADE: u32 = 99u;
 
 @group(0) @binding(0) var<storage, read> cells: array<u32>;
 @group(0) @binding(1) var<uniform> uniforms: Uniforms;
@@ -222,7 +225,6 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   if (in.channel >= uniforms.numChannels) { return vec4<f32>(1.0, 0.0, 0.0, 1.0); }
   let dimFactor = uniforms.dimFactor;
   let bloom = uniforms.bloomIntensity;
-  let isPlaying = (uniforms.isPlaying == 1u);
 
   let uv = in.uv;
 
@@ -280,9 +282,12 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   // Wrapped playhead position for this pattern
   let maxRows = f32(uniforms.numRows);
   let playheadStep = uniforms.playheadRow - floor(uniforms.playheadRow / maxRows) * maxRows;
-  let rowDistRaw = abs(f32(in.row % uniforms.numRows) - playheadStep);
-  let rowDist = min(rowDistRaw, maxRows - rowDistRaw);
-  let playheadActivation = 1.0 - smoothstep(0.0, 1.5, rowDist);
+  var delta = playheadStep - f32(in.row);
+  if (delta < -maxRows * 0.5) {
+      delta += maxRows;
+  } else if (delta > maxRows * 0.5) {
+      delta -= maxRows;
+  }
 
   if (hasNote) {
       let pitchHue = pitchClassFromIndex(note);
@@ -293,45 +298,24 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
 
       // Unpack duration info
       let dInfo = unpackDurationInfo(in.packedA, in.packedB);
-      let noteStartRow = i32(in.row);
-      let noteEndRow = noteStartRow + i32(dInfo.duration);
-      let playhead = i32(playheadStep);
-      let patternLen = i32(uniforms.numRows);
-
-      // The note-on cell stays bright while the note is sounding.
-      // Handle pattern wrap-around for notes that span the boundary.
-      var isActive = false;
-      if (noteEndRow <= patternLen) {
-          isActive = playhead >= noteStartRow && playhead < noteEndRow;
-      } else {
-          let wrappedEnd = noteEndRow - patternLen;
-          isActive = playhead >= noteStartRow || playhead < wrappedEnd;
+      let isNoteOffCmd = note == NOTE_OFF || note == NOTE_CUT || note == NOTE_FADE;
+      let isNoteOnCell = dInfo.rowOffset == 0u && !dInfo.isNoteOff && !isNoteOffCmd;
+      var sustainGlow = 0.0;
+      let durationF = f32(dInfo.duration);
+      if (isNoteOnCell && durationF > 0.0 && delta >= 0.0 && delta <= durationF) {
+          sustainGlow = 1.0;
       }
 
-      if (isActive) {
-          glow = 0.8;
+      if (sustainGlow > 0.0) {
+          glow = max(glow, sustainGlow);
           capColor = mix(capColor, baseCol, 0.85);
-      }
-
-      // Highlight if active row (playhead proximity glow)
-      if (playheadActivation > 0.0) {
-          glow = max(glow, playheadActivation);
-          capColor = mix(capColor, vec3<f32>(1.0), 0.5);
       }
 
       // Trigger flash
       let ch = channels[in.channel];
-      if (ch.trigger > 0u && playheadActivation > 0.5) {
+      if (ch.trigger > 0u && isNoteOnCell) {
           glow += 1.0;
           capColor += vec3<f32>(0.5);
-      }
-  }
-
-  // Playhead Highlight Line
-  if (playheadActivation > 0.0) {
-      capColor += vec3<f32>(0.1, 0.1, 0.15) * playheadActivation;
-      if (isPlaying && playheadActivation > 0.5) {
-          glow += 0.2;
       }
   }
 
