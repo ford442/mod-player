@@ -52,9 +52,9 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
   let row = instanceIndex / numChannels;
   let channel = instanceIndex % numChannels;
 
-  // Cull instances not in current 64-step page to prevent alpha/z-fighting
-  let pageStart = u32(uniforms.playheadRow / 64.0) * 64u;
-  var isVisible = (row >= pageStart && row < pageStart + 64u);
+  // Cull instances not in current pattern-length page to prevent alpha/z-fighting
+  let pageStart = u32(uniforms.playheadRow / f32(uniforms.numRows)) * uniforms.numRows;
+  var isVisible = (row >= pageStart && row < pageStart + uniforms.numRows);
 
   let invertedChannel = numChannels - 1u - channel;
   let ringIndex = select(invertedChannel, channel, (uniforms.invertChannels == 1u));
@@ -68,9 +68,9 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
 
   let radius = minRadius + f32(ringIndex) * ringDepth;
 
-  let totalSteps = 64.0;
+  let totalSteps = f32(uniforms.numRows);
   let anglePerStep = 6.2831853 / totalSteps;
-  let theta = -1.570796 + f32(row % 64u) * anglePerStep;
+  let theta = -1.570796 + f32(row % uniforms.numRows) * anglePerStep;
 
   let circumference = 2.0 * 3.14159265 * radius;
   let arcLength = circumference / totalSteps;
@@ -207,9 +207,10 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   }
 
   if (in.channel == 0u) {
-    let playheadStep = uniforms.playheadRow - floor(uniforms.playheadRow / 64.0) * 64.0;
-    let rowDistRaw = abs(f32(in.row % 64u) - playheadStep);
-    let rowDist = min(rowDistRaw, 64.0 - rowDistRaw);
+    let maxRows = f32(uniforms.numRows);
+    let playheadStep = uniforms.playheadRow - floor(uniforms.playheadRow / maxRows) * maxRows;
+    let rowDistRaw = abs(f32(in.row % uniforms.numRows) - playheadStep);
+    let rowDist = min(rowDistRaw, maxRows - rowDistRaw);
     let playheadActivation = 1.0 - smoothstep(0.0, 1.5, rowDist);
     let onPlayhead = playheadActivation > 0.5;
     
@@ -250,10 +251,11 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     let ch            = channels[in.channel];
     let isMuted       = (ch.isMuted == 1u);
 
-    // Playhead proximity (wrap-safe, 64-step page)
-    let playheadStep      = uniforms.playheadRow - floor(uniforms.playheadRow / 64.0) * 64.0;
-    let rowDistRaw        = abs(f32(in.row % 64u) - playheadStep);
-    let rowDist           = min(rowDistRaw, 64.0 - rowDistRaw);
+    // Playhead proximity (wrap-safe, dynamic page)
+    let maxRows = f32(uniforms.numRows);
+    let playheadStep      = uniforms.playheadRow - floor(uniforms.playheadRow / maxRows) * maxRows;
+    let rowDistRaw        = abs(f32(in.row % uniforms.numRows) - playheadStep);
+    let rowDist           = min(rowDistRaw, maxRows - rowDistRaw);
     let playheadActivation = 1.0 - smoothstep(0.0, 1.5, rowDist);
 
     if (!isMuted) {

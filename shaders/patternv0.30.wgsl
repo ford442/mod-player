@@ -65,9 +65,9 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
 
   let radius = minRadius + f32(ringIndex) * ringDepth;
 
-  let totalSteps = 64.0;
+  let totalSteps = f32(uniforms.numRows);
   let anglePerStep = 6.2831853 / totalSteps;
-  let theta = -1.570796 + f32(row % 64u) * anglePerStep;
+  let theta = -1.570796 + f32(row % uniforms.numRows) * anglePerStep;
 
   let circumference = 2.0 * 3.14159265 * radius;
   let arcLength = circumference / totalSteps;
@@ -321,7 +321,7 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
 
       let flash = f32(ch.trigger) * 0.8;
       var d = f32(in.row) + uniforms.tickOffset - f32(uniforms.playheadRow);
-      let totalSteps = 64.0;
+      let totalSteps = f32(uniforms.numRows);
       if (d > totalSteps * 0.5) { d = d - totalSteps; }
       if (d < -totalSteps * 0.5) { d = d + totalSteps; }
 

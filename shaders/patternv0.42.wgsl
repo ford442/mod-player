@@ -51,7 +51,6 @@ struct VertexOut {
 };
 
 // Ring geometry constants
-const TOTAL_STEPS: f32 = 64.0;
 const TWO_PI:      f32 = 6.2831853;
 const HALF_PI:     f32 = 1.5707963;
 
@@ -102,11 +101,12 @@ fn vs(
   let ringDepth = (maxRadius - minRadius) / f32(numChannels);
   let radius    = minRadius + f32(ringIndex) * ringDepth + ringDepth * 0.5;
 
-  let anglePerStep = TWO_PI / TOTAL_STEPS;
-  let theta        = -HALF_PI + f32(row % 64u) * anglePerStep;
+  let totalSteps = f32(uniforms.numRows);
+  let anglePerStep = TWO_PI / totalSteps;
+  let theta        = -HALF_PI + f32(row % uniforms.numRows) * anglePerStep;
 
   let circumference = TWO_PI * radius;
-  let arcLength     = circumference / TOTAL_STEPS;
+  let arcLength     = circumference / totalSteps;
 
   let btnW = arcLength * 0.90;
   let btnH = ringDepth * 0.88;
@@ -246,8 +246,8 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   let hasEffect  = (effCmd > 0u);
 
   // Playhead proximity
-  let playheadStep = uniforms.playheadRow - floor(uniforms.playheadRow / TOTAL_STEPS) * TOTAL_STEPS;
-  let rowInPage    = f32(in.row % 64u);
+  let playheadStep = uniforms.playheadRow - floor(uniforms.playheadRow / f32(uniforms.numRows)) * f32(uniforms.numRows);
+  let rowInPage    = f32(in.row % uniforms.numRows);
   let rowDistRaw   = abs(rowInPage - playheadStep);
   let rowDist      = min(rowDistRaw, TOTAL_STEPS - rowDistRaw);
   let onPlayhead   = rowDist < 1.5;

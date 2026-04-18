@@ -90,9 +90,9 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
 
   let radius = minRadius + f32(ringIndex) * ringDepth;
 
-  let totalSteps = 64.0;
+  let totalSteps = f32(uniforms.numRows);
   let anglePerStep = 6.2831853 / totalSteps;
-  let theta = -1.570796 + f32(row % 64u) * anglePerStep;
+  let theta = -1.570796 + f32(row % uniforms.numRows) * anglePerStep;
 
   let circumference = 2.0 * 3.14159265 * radius;
   let arcLength = circumference / totalSteps;
@@ -278,41 +278,60 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   let hasNote = (note >= NOTE_MIN && note <= NOTE_MAX);
 
   // Wrapped playhead position for this pattern
-  let playheadStep = uniforms.playheadRow - floor(uniforms.playheadRow / 64.0) * 64.0;
+  let maxRows = f32(uniforms.numRows);
+  let playheadStep = uniforms.playheadRow - floor(uniforms.playheadRow / maxRows) * maxRows;
+  let rowDistRaw = abs(f32(in.row % uniforms.numRows) - playheadStep);
+  let rowDist = min(rowDistRaw, maxRows - rowDistRaw);
+  let playheadActivation = 1.0 - smoothstep(0.0, 1.5, rowDist);
 
   if (hasNote) {
       let pitchHue = pitchClassFromIndex(note);
       let baseCol = neonPalette(pitchHue);
 
-      // Always show dim note color
-      capColor = mix(capColor, baseCol, 0.3);
+      // Base note color
+      capColor = mix(capColor, baseCol, 0.4);
 
       // Unpack duration info
       let dInfo = unpackDurationInfo(in.packedA, in.packedB);
       let noteStartRow = i32(in.row);
       let noteEndRow = noteStartRow + i32(dInfo.duration);
       let playhead = i32(playheadStep);
+      let patternLen = i32(uniforms.numRows);
 
       // The note-on cell stays bright while the note is sounding.
       // Handle pattern wrap-around for notes that span the boundary.
       var isActive = false;
-      if (noteEndRow <= 64) {
+      if (noteEndRow <= patternLen) {
           isActive = playhead >= noteStartRow && playhead < noteEndRow;
       } else {
-          let wrappedEnd = noteEndRow - 64;
+          let wrappedEnd = noteEndRow - patternLen;
           isActive = playhead >= noteStartRow || playhead < wrappedEnd;
       }
 
       if (isActive) {
           glow = 0.8;
           capColor = mix(capColor, baseCol, 0.85);
+      }
 
-          // Extra flash on the exact note-on row
-          let ch = channels[in.channel];
-          if (ch.trigger > 0u && playhead == noteStartRow) {
-              glow += 0.5;
-              capColor += vec3<f32>(0.3);
-          }
+      // Highlight if active row (playhead proximity glow)
+      if (playheadActivation > 0.0) {
+          glow = max(glow, playheadActivation);
+          capColor = mix(capColor, vec3<f32>(1.0), 0.5);
+      }
+
+      // Trigger flash
+      let ch = channels[in.channel];
+      if (ch.trigger > 0u && playheadActivation > 0.5) {
+          glow += 1.0;
+          capColor += vec3<f32>(0.5);
+      }
+  }
+
+  // Playhead Highlight Line
+  if (playheadActivation > 0.0) {
+      capColor += vec3<f32>(0.1, 0.1, 0.15) * playheadActivation;
+      if (isPlaying && playheadActivation > 0.5) {
+          glow += 0.2;
       }
   }
 
