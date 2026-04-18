@@ -199,10 +199,12 @@ export interface NoteDurationInfo {
  * Returns a 2D array of duration info for each cell [row][channel]
  */
 export const calculateNoteDurations = (
-  matrix: PatternMatrix
+  matrix: PatternMatrix | null
 ): NoteDurationInfo[][] => {
+  if (!matrix) return [];
+
   const { numRows, numChannels, rows } = matrix;
-  
+
   // Initialize result
   const result: NoteDurationInfo[][] = Array.from({ length: numRows }, () =>
     Array.from({ length: numChannels }, () => ({
@@ -229,37 +231,45 @@ export const calculateNoteDurations = (
         if (noteStartRow !== -1) {
           const duration = row - noteStartRow;
           for (let r = noteStartRow; r < row; r++) {
-            const res = result[r]![ch]!;
-            res.duration = Math.min(duration, 255);
-            res.rowOffset = r - noteStartRow;
-            res.isNoteOff = false;
+            const res = result[r]?.[ch];
+            if (res) {
+              res.duration = Math.min(duration, 255);
+              res.rowOffset = r - noteStartRow;
+              res.isNoteOff = false;
+            }
           }
         }
 
         // Start new note
         noteStartRow = row;
-        const res = result[row]![ch]!;
-        res.duration = 1;           // temporary
-        res.rowOffset = 0;
-        res.isNoteOff = false;
-      } 
+        const res = result[row]?.[ch];
+        if (res) {
+          res.duration = 1;           // temporary
+          res.rowOffset = 0;
+          res.isNoteOff = false;
+        }
+      }
       else if (isNoteOff || isVolumeOff) {
         // Note-off / cut / fade → end current note
         if (noteStartRow !== -1) {
           const duration = row - noteStartRow + 1; // include the off row
           for (let r = noteStartRow; r <= row; r++) {
-            const res = result[r]![ch]!;
-            res.duration = Math.min(duration, 255);
-            res.rowOffset = r - noteStartRow;
-            res.isNoteOff = (r === row); // only the last row is the actual off
+            const res = result[r]?.[ch];
+            if (res) {
+              res.duration = Math.min(duration, 255);
+              res.rowOffset = r - noteStartRow;
+              res.isNoteOff = (r === row); // only the last row is the actual off
+            }
           }
           noteStartRow = -1;
         } else {
           // Standalone note-off without preceding note
-          const res = result[row]![ch]!;
-          res.duration = 1;
-          res.rowOffset = 0;
-          res.isNoteOff = true;
+          const res = result[row]?.[ch];
+          if (res) {
+            res.duration = 1;
+            res.rowOffset = 0;
+            res.isNoteOff = true;
+          }
         }
       }
       // else: empty cell → continue current note (do nothing here)
@@ -269,10 +279,12 @@ export const calculateNoteDurations = (
     if (noteStartRow !== -1) {
       const duration = numRows - noteStartRow;
       for (let r = noteStartRow; r < numRows; r++) {
-        const res = result[r]![ch]!;
-        res.duration = Math.min(duration, 255);
-        res.rowOffset = r - noteStartRow;
-        res.isNoteOff = false;
+        const res = result[r]?.[ch];
+        if (res) {
+          res.duration = Math.min(duration, 255);
+          res.rowOffset = r - noteStartRow;
+          res.isNoteOff = false;
+        }
       }
     }
   }
