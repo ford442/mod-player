@@ -141,6 +141,20 @@ export const packPatternMatrix = (matrix: PatternMatrix | null, padTopChannel = 
       packedData[offset + 1] = wordB;
     }
   }
+
+  // DEV INVARIANT: packed buffer must exactly match declared dimensions
+  if (import.meta.env?.DEV) {
+    const allocatedCells = packedData.length / 2;
+    const expectedCells = numRows * numChannels;
+    if (allocatedCells !== expectedCells) {
+      console.error(
+        `[gpuPacking INVARIANT] packPatternMatrix: buffer size mismatch. ` +
+        `allocatedCells=${allocatedCells}, expectedCells=${expectedCells} ` +
+        `(${numRows} rows × ${numChannels} channels). packedData.length=${packedData.length}`
+      );
+    }
+  }
+
   return { packedData, noteCount };
 };
 
@@ -202,6 +216,19 @@ export const packPatternMatrixHighPrecision = (matrix: PatternMatrix | null, pad
   // DEBUG: Log packing statistics
   console.log(`[packPatternMatrixHighPrecision] Packed ${notesPacked} notes into ${totalCells} cells (${numRows} rows x ${numChannels} channels)`);
   
+  // DEV INVARIANT: packed buffer must exactly match declared dimensions
+  if (import.meta.env?.DEV) {
+    const allocatedCells = packedData.length / 2;
+    const expectedCells = numRows * numChannels;
+    if (allocatedCells !== expectedCells) {
+      console.error(
+        `[gpuPacking INVARIANT] packPatternMatrixHighPrecision: buffer size mismatch. ` +
+        `allocatedCells=${allocatedCells}, expectedCells=${expectedCells} ` +
+        `(${numRows} rows × ${numChannels} channels = ${totalCells}). packedData.length=${packedData.length}`
+      );
+    }
+  }
+
   return { packedData, noteCount: notesPacked };
 };
 
@@ -315,6 +342,20 @@ export function useGPUBuffers({
       packedData,
       GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
     );
+
+    // DEV INVARIANT: GPU buffer size must match packed data size
+    if (import.meta.env?.DEV && cellsBufferRef.current) {
+      if (cellsBufferRef.current.size !== packedData.byteLength) {
+        const numRows = matrix?.numRows ?? DEFAULT_ROWS;
+        const rawChannels = matrix?.numChannels ?? DEFAULT_CHANNELS;
+        const numChannels = padTopChannel ? rawChannels + 1 : rawChannels;
+        console.error(
+          `[useGPUBuffers INVARIANT] cells buffer size mismatch. ` +
+          `bufferSize=${cellsBufferRef.current.size}, packedDataByteLength=${packedData.byteLength}, ` +
+          `actualCells=${packedData.length / 2}, expectedCells=${numRows * numChannels}`
+        );
+      }
+    }
 
     // Update row flags for extended layout
     if (layoutType === 'extended') {

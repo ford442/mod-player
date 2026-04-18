@@ -23,6 +23,6 @@
     "exactOptionalPropertyTypes": true
   },
   "include": ["."],
-  "exclude": ["node_modules", "dist", "vite.config.ts", "kimi_agents"],
+  "exclude": ["node_modules", "dist", "vite.config.ts", "kimi_agents", "jules_patch"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }
