@@ -282,6 +282,8 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   // Wrapped playhead position for this pattern
   let maxRows = f32(uniforms.numRows);
   let playheadStep = uniforms.playheadRow - floor(uniforms.playheadRow / maxRows) * maxRows;
+  // Use shortest signed distance across pattern boundary so row 63→0 wrap stays
+  // directional for sustain timing (forward-in-time deltas remain >= 0).
   var delta = playheadStep - f32(in.row);
   if (delta < -maxRows * 0.5) {
       delta += maxRows;

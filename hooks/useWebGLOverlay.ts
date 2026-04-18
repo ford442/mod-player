@@ -214,19 +214,20 @@ export function useWebGLOverlay(
                              ((note >= NOTE_MIN && note <= NOTE_MAX) ? 1.5 : 0.0);
         bool hasPitchNote = (note >= NOTE_MIN && note <= NOTE_MAX);
         bool isNoteOffCmd = (note == NOTE_OFF || note == NOTE_CUT || note == NOTE_FADE);
+        // Keep this predicate in sync with FS + patternv0.45b.wgsl sustain logic.
         bool isNoteOnCell = hasPitchNote && (rowOffset == 0u) && !isNoteOffFlag && !isNoteOffCmd;
 
         float stepsPerPage = (u_layoutMode == 3) ? 64.0 : 32.0;
         float relativePlayhead = mod(u_playhead, stepsPerPage);
         float delta = relativePlayhead - float(stepIndex);
         if (delta < -stepsPerPage / 2.0) delta += stepsPerPage;
-        else if (delta > stepsPerPage / 2.0) delta -= stepsPerPage;
+        if (delta > stepsPerPage / 2.0) delta -= stepsPerPage;
 
         // v_active = 1.0 only when playhead is within the note's duration window
         // Fast fade-out in the last 0.5 steps so it doesn't snap off harshly
         float activation = 0.0;
-        bool activationEligible = USE_NOTE_SUSTAIN_TAIL_MODE ? isNoteOnCell : hasPitchNote;
-        if (activationEligible && noteDuration > 0.0 && delta >= 0.0 && delta <= noteDuration) {
+        bool sustainCellFilter = USE_NOTE_SUSTAIN_TAIL_MODE ? isNoteOnCell : hasPitchNote;
+        if (sustainCellFilter && noteDuration > 0.0 && delta >= 0.0 && delta <= noteDuration) {
             activation = 1.0;
             float fadeEnd = noteDuration - 0.5;
             if (delta > fadeEnd && fadeEnd > 0.0) {
