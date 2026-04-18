@@ -468,7 +468,6 @@ export const packPatternMatrixHighPrecision = (matrix: PatternMatrix | null, pad
   }
 
   // DEBUG: Log packing statistics with buffer size verification (DATA-001)
-  console.log(`[packPatternMatrixHighPrecision] Packed ${notesPacked} notes, ${expressionOnlyCount} expression-only steps into ${cellsWritten} cells (${numRows} rows x ${numChannels} channels). Buffer size: ${packedData.length} uint32s (${totalCells} cells)`);
   
   // Verify consistency
   if (cellsWritten !== rawChannels * numRows) {

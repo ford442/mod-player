@@ -1005,17 +1005,6 @@ export function useWebGLOverlay(
 
       setDebugInfo((prev: DebugInfo) => ({ ...prev, layoutMode: layoutModeName, errors, uniforms: uniformVals }));
 
-      console.group(`🔍 PatternDisplay Debug - Mode ${layoutMode}`);
-      console.log('Layout:', layoutModeName);
-      console.log('GRID_RECT:', GRID_RECT);
-      console.log('POLAR_RINGS:', POLAR_RINGS);
-      console.log('CAP_CONFIG:', CAP_CONFIG);
-      console.log('effectiveCellW/H:', effectiveCellW, effectiveCellH);
-      console.log('capScale:', capScale);
-      console.log('totalInstances:', totalInstances);
-      console.log('Errors:', errors.length > 0 ? errors : 'None');
-      console.groupEnd();
-
     } catch (e) {
       console.error('❌ drawWebGL error:', e);
       errors.push(`Exception: ${e}`);
