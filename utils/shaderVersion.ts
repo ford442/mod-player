@@ -11,6 +11,7 @@ export const WEBGL_HYBRID_SHADERS = new Set([
   'patternv0.39.wgsl',
   'patternv0.40.wgsl',
   'patternv0.42.wgsl',
+  'patternv0.45b.wgsl',
   'patternv0.46.wgsl',
 ]);
 

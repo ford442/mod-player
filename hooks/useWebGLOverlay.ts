@@ -82,6 +82,7 @@ export function useWebGLOverlay(
 
   const initWebGL = useCallback(() => {
     const shaderFile = paramsRef.current.shaderFile;
+    const useNoteSustainTailMode = shaderFile.includes('v0.45b');
     console.group('🔧 initWebGL');
 
     // Clean up existing WebGL resources first
@@ -165,6 +166,7 @@ export function useWebGLOverlay(
     const uint NOTE_OFF = 97u;   // Note-off command
     const uint NOTE_CUT = 98u;   // Note-cut command
     const uint NOTE_FADE = 99u;  // Note-fade command
+    const bool USE_NOTE_SUSTAIN_TAIL_MODE = ${useNoteSustainTailMode ? 'true' : 'false'};
 
     void main() {
         int id = gl_InstanceID;
@@ -210,16 +212,22 @@ export function useWebGLOverlay(
         // Unpack duration from packedA: [note:8][inst:8][duration:8][volPacked:8]
         float noteDuration = (durationRaw > 0u) ? float(durationRaw) :
                              ((note >= NOTE_MIN && note <= NOTE_MAX) ? 1.5 : 0.0);
+        bool hasPitchNote = (note >= NOTE_MIN && note <= NOTE_MAX);
+        bool isNoteOffCmd = (note == NOTE_OFF || note == NOTE_CUT || note == NOTE_FADE);
+        // Keep this predicate in sync with FS + patternv0.45b.wgsl sustain logic.
+        bool isNoteOnCell = hasPitchNote && (rowOffset == 0u) && !isNoteOffFlag && !isNoteOffCmd;
 
         float stepsPerPage = (u_layoutMode == 3) ? 64.0 : 32.0;
         float relativePlayhead = mod(u_playhead, stepsPerPage);
         float delta = relativePlayhead - float(stepIndex);
         if (delta < -stepsPerPage / 2.0) delta += stepsPerPage;
+        if (delta > stepsPerPage / 2.0) delta -= stepsPerPage;
 
         // v_active = 1.0 only when playhead is within the note's duration window
         // Fast fade-out in the last 0.5 steps so it doesn't snap off harshly
         float activation = 0.0;
-        if (noteDuration > 0.0 && delta >= 0.0 && delta <= noteDuration) {
+        bool sustainCellFilter = USE_NOTE_SUSTAIN_TAIL_MODE ? isNoteOnCell : hasPitchNote;
+        if (sustainCellFilter && noteDuration > 0.0 && delta >= 0.0 && delta <= noteDuration) {
             activation = 1.0;
             float fadeEnd = noteDuration - 0.5;
             if (delta > fadeEnd && fadeEnd > 0.0) {
@@ -338,6 +346,7 @@ export function useWebGLOverlay(
     const uint NOTE_OFF = 97u;
     const uint NOTE_CUT = 98u;
     const uint NOTE_FADE = 99u;
+    const bool USE_NOTE_SUSTAIN_TAIL_MODE = ${useNoteSustainTailMode ? 'true' : 'false'};
 
     uniform sampler2D u_capTexture;
     uniform float u_bloomIntensity;
@@ -556,11 +565,13 @@ export function useWebGLOverlay(
             } else if (isNoteOnRow) {
                 // Note-on row near playhead
                 topIntensity = v_active * 0.8;
-            } else if (isSustaining) {
+            } else if (isSustaining && !USE_NOTE_SUSTAIN_TAIL_MODE) {
                 // Sustain trail: fades from 0.4 (note start) to 0.2 (note end)
                 // Clamped to 0.15 minimum to keep a dim glow visible
                 float sustainFade = 0.4 - sustainProgress * 0.2;
                 topIntensity = max(sustainFade, 0.15);
+            } else if (USE_NOTE_SUSTAIN_TAIL_MODE && isNoteOnRow && v_active > 0.0) {
+                topIntensity = max(topIntensity, v_active * 0.8);
             } else if (isNoteOff || isNoteOffFlag) {
                 // Note-off: completely dark (channel was cut)
                 topIntensity = 0.0;
@@ -577,7 +588,10 @@ export function useWebGLOverlay(
             if (isNoteOnRow) {
                 // Strong glow for note-on
                 midIntensity = 0.6 + bloom * 2.0;
-            } else if (isSustaining) {
+                if (USE_NOTE_SUSTAIN_TAIL_MODE && v_active > 0.0) {
+                    midIntensity = max(midIntensity, 0.6 + v_active * (0.8 + bloom));
+                }
+            } else if (isSustaining && !USE_NOTE_SUSTAIN_TAIL_MODE) {
                 // Sustain: fades from 0.5 (note start) to 0.25 (note end)
                 // Clamped to 0.15 minimum for a dim ringing glow
                 float sustainBright = 0.5 - sustainProgress * 0.25;
