@@ -13,8 +13,6 @@ import {
 } from '../utils/shaderVersion';
 import {
   GRID_RECT,
-  POLAR_RINGS,
-  CAP_CONFIG,
   calculateHorizontalCellSize,
   calculateCapScale,
   getLayoutModeFromShader,
