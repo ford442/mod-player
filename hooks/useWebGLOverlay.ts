@@ -206,12 +206,26 @@ export function useWebGLOverlay(
         bool isSustainCell = (note >= NOTE_MIN && note <= NOTE_MAX) && (durationRaw > 1u) && (rowOffset > 0u) && !isNoteOffFlag;
         v_hasNote = (hasNoteOrExpr || isSustainCell) ? 1.0 : 0.0;
 
-        // Playhead Logic
+        // Playhead Logic — Directional Sustain/Duration Tail
+        // Unpack duration from packedA: [note:8][inst:8][duration:8][volPacked:8]
+        float noteDuration = (durationRaw > 0u) ? float(durationRaw) :
+                             ((note >= NOTE_MIN && note <= NOTE_MAX) ? 1.5 : 0.0);
+
         float stepsPerPage = (u_layoutMode == 3) ? 64.0 : 32.0;
         float relativePlayhead = mod(u_playhead, stepsPerPage);
-        float distToPlayhead = abs(float(stepIndex) - relativePlayhead);
-        distToPlayhead = min(distToPlayhead, stepsPerPage - distToPlayhead);
-        float activation = 1.0 - smoothstep(0.0, 1.5, distToPlayhead);
+        float delta = relativePlayhead - float(stepIndex);
+        if (delta < -stepsPerPage / 2.0) delta += stepsPerPage;
+
+        // v_active = 1.0 only when playhead is within the note's duration window
+        // Fast fade-out in the last 0.5 steps so it doesn't snap off harshly
+        float activation = 0.0;
+        if (noteDuration > 0.0 && delta >= 0.0 && delta <= noteDuration) {
+            activation = 1.0;
+            float fadeEnd = noteDuration - 0.5;
+            if (delta > fadeEnd && fadeEnd > 0.0) {
+                activation = 1.0 - smoothstep(fadeEnd, noteDuration, delta);
+            }
+        }
         v_active = activation;
 
         // Positioning Logic
@@ -254,9 +268,19 @@ export function useWebGLOverlay(
             float btnH = ringDepth * 0.92;
 
             float circPlayhead = mod(u_playhead, totalSteps);
-            float circDist = abs(float(stepIndex) - circPlayhead);
-            circDist = min(circDist, totalSteps - circDist);
-            float circActivation = 1.0 - smoothstep(0.0, 1.5, circDist);
+            float circDelta = circPlayhead - float(stepIndex);
+            if (circDelta < -totalSteps / 2.0) circDelta += totalSteps;
+
+            float circDuration = (durationRaw > 0u) ? float(durationRaw) :
+                                 ((note >= NOTE_MIN && note <= NOTE_MAX) ? 1.5 : 0.0);
+            float circActivation = 0.0;
+            if (circDuration > 0.0 && circDelta >= 0.0 && circDelta <= circDuration) {
+                circActivation = 1.0;
+                float circFadeEnd = circDuration - 0.5;
+                if (circDelta > circFadeEnd && circFadeEnd > 0.0) {
+                    circActivation = 1.0 - smoothstep(circFadeEnd, circDuration, circDelta);
+                }
+            }
             float popScale = (v_hasNote > 0.5) ? (1.0 + 0.2 * circActivation) : 0.0;
             btnW *= popScale;
             btnH *= popScale;
