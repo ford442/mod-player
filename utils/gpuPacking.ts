@@ -15,11 +15,10 @@ const EMPTY_CHANNEL: ChannelShadowState = {
 };
 
 // Note constants for duration calculation (DURA-001)
-const NOTE_OFF = 97;   // MOD note-off command
-const NOTE_CUT = 98;   // MOD note-cut command  
-const NOTE_FADE = 99;  // MOD note-fade command
 const NOTE_MIN = 1;    // Minimum valid note
-const NOTE_MAX = 96;   // Maximum valid note
+const NOTE_MAX = 119;  // Maximum valid note (C0–B9, covers MOD/XM/IT full range)
+/** Any note value ≥ NOTE_OFF_MIN is a note-off, note-cut, or note-fade event. */
+const NOTE_OFF_MIN = 120;
 
 export const PLAYHEAD_EPSILON = 0.0001;
 
@@ -223,7 +222,7 @@ export const calculateNoteDurations = (
 
       const note = cell.note || 0;
       const hasNote = note >= NOTE_MIN && note <= NOTE_MAX;
-      const isNoteOff = note === NOTE_OFF || note === NOTE_CUT || note === NOTE_FADE;
+      const isNoteOff = note >= NOTE_OFF_MIN;
       const isVolumeOff = cell.volCmd === 0xC0 && cell.volVal === 0;
 
       if (hasNote) {
@@ -417,12 +416,26 @@ export const packPatternMatrixHighPrecision = (matrix: PatternMatrix | null, pad
         if (note > 0) notesPacked++;
       }
 
-      // Detect expression-only steps (EXPR-001): volume/effect present but no note pitch
-      // Bit 15 of packedA (inst field) is used as the expression-only flag
-      const hasNote = (note > 0);
-      const hasVolCmd = (volCmd > 0);
-      const hasEffCmd = (effCmd > 0);
-      const isExpressionOnly = !hasNote && (hasVolCmd || hasEffCmd);
+      // Strict expression check — mirrors patternExtractor rules.
+      // hasNote covers both note-on (1–119) and note-off/cut (120+).
+      const hasValidNote  = note >= NOTE_MIN && note <= NOTE_MAX;
+      const hasNoteOff    = note >= NOTE_OFF_MIN;
+      const hasNote       = hasValidNote || hasNoteOff;
+
+      // Volume effect present when column cmd 2 > 0.
+      // Effect present when cmd 4 > 0, or arpeggio exception: cmd 4 == 0 with non-zero param.
+      const hasVolEffect  = volCmd > 0;
+      const hasEffect     = effCmd > 0 || (effCmd === 0 && effVal > 0);
+      const hasExpression = hasVolEffect || hasEffect;
+
+      // Belt-and-suspenders: zero out expression fields that didn't pass strict check.
+      // Catches any residual default values that weren't sanitized by patternExtractor.
+      if (!hasVolEffect) { volCmd = 0; volVal = 0; }
+      if (!hasEffect)    { effCmd = 0; effVal = 0; }
+
+      // Detect expression-only steps (EXPR-001): volume/effect present but no note pitch.
+      // Bit 7 of packedA (inst field) is used as the expression-only flag.
+      const isExpressionOnly = !hasNote && hasExpression;
       
       if (isExpressionOnly) {
         expressionOnlyCount++;
