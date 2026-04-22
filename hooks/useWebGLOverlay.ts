@@ -81,6 +81,7 @@ export function useWebGLOverlay(
   const initWebGL = useCallback(() => {
     const shaderFile = paramsRef.current.shaderFile;
     const useNoteSustainTailMode = shaderFile.includes('v0.45b');
+    const isV021 = shaderFile.includes('v0.21');
     console.group('🔧 initWebGL');
 
     // Clean up existing WebGL resources first
@@ -165,6 +166,7 @@ export function useWebGLOverlay(
     const uint NOTE_CUT = 98u;   // Note-cut command
     const uint NOTE_FADE = 99u;  // Note-fade command
     const bool USE_NOTE_SUSTAIN_TAIL_MODE = ${useNoteSustainTailMode ? 'true' : 'false'};
+    const bool IS_V021 = ${isV021 ? 'true' : 'false'};
 
     void main() {
         int id = gl_InstanceID;
@@ -215,21 +217,44 @@ export function useWebGLOverlay(
         // Keep this predicate in sync with FS + patternv0.45b.wgsl sustain logic.
         bool isNoteOnCell = hasPitchNote && (rowOffset == 0u) && !isNoteOffFlag && !isNoteOffCmd;
 
-        float stepsPerPage = (u_layoutMode == 3) ? 64.0 : 32.0;
-        float relativePlayhead = mod(u_playhead, stepsPerPage);
-        float delta = relativePlayhead - float(stepIndex);
-        if (delta < -stepsPerPage / 2.0) delta += stepsPerPage;
-        if (delta > stepsPerPage / 2.0) delta -= stepsPerPage;
-
-        // v_active = 1.0 only when playhead is within the note's duration window
-        // Fast fade-out in the last 0.5 steps so it doesn't snap off harshly
         float activation = 0.0;
-        bool sustainCellFilter = USE_NOTE_SUSTAIN_TAIL_MODE ? isNoteOnCell : hasPitchNote;
-        if (sustainCellFilter && noteDuration > 0.0 && delta >= 0.0 && delta <= noteDuration) {
-            activation = 1.0;
-            float fadeEnd = noteDuration - 0.5;
-            if (delta > fadeEnd && fadeEnd > 0.0) {
-                activation = 1.0 - smoothstep(fadeEnd, noteDuration, delta);
+        if (IS_V021) {
+            // V0.21 Strict Delta: absolute row-based with pattern-loop wrap (64-row patterns)
+            float delta = u_playhead - float(actualRow);
+            if (delta < -32.0) delta += 64.0;
+            else if (delta > 32.0) delta -= 64.0;
+
+            // For v0.21, any cell with data gets at least a 1-row duration so expression-only steps light up
+            float cellDuration = (noteDuration > 0.0) ? noteDuration :
+                                 ((note > 0u || volCmdFull > 0u || effCmd > 0u) ? 1.0 : 0.0);
+
+            bool isActive = (delta >= 0.0 && delta < cellDuration);
+            // Note-off rows cut the light immediately
+            if (isNoteOffCmd || isNoteOffFlag) isActive = false;
+
+            if (isActive) {
+                if (note > 0u) {
+                    activation = 2.0; // Bright note (Blue/Cyan)
+                } else if (volCmdFull > 0u || effCmd > 0u) {
+                    activation = 1.0; // Dim expression (Amber/Orange)
+                }
+            }
+        } else {
+            float stepsPerPage = (u_layoutMode == 3) ? 64.0 : 32.0;
+            float relativePlayhead = mod(u_playhead, stepsPerPage);
+            float delta = relativePlayhead - float(stepIndex);
+            if (delta < -stepsPerPage / 2.0) delta += stepsPerPage;
+            if (delta > stepsPerPage / 2.0) delta -= stepsPerPage;
+
+            // v_active = 1.0 only when playhead is within the note's duration window
+            // Fast fade-out in the last 0.5 steps so it doesn't snap off harshly
+            bool sustainCellFilter = USE_NOTE_SUSTAIN_TAIL_MODE ? isNoteOnCell : hasPitchNote;
+            if (sustainCellFilter && noteDuration > 0.0 && delta >= 0.0 && delta <= noteDuration) {
+                activation = 1.0;
+                float fadeEnd = noteDuration - 0.5;
+                if (delta > fadeEnd && fadeEnd > 0.0) {
+                    activation = 1.0 - smoothstep(fadeEnd, noteDuration, delta);
+                }
             }
         }
         v_active = activation;
@@ -553,67 +578,92 @@ export function useWebGLOverlay(
 
         // --- THREE EMITTER SETUP ---
 
-        // EMITTER 1 (TOP): Blue/Cyan — Note trigger + sustain trail
-        vec3 blueColor = vec3(0.15, 0.5, 1.0);
+        vec3 topColor = vec3(0.15, 0.5, 1.0) * (1.5 + bloom * 2.0);
+        vec3 midColor = vec3(0.15);
+        vec3 botColor = vec3(1.0, 0.55, 0.1) * (1.5 + bloom * 2.0);
         float topIntensity = 0.0;
-        if (!isMuted) {
-            if (chTrigger > 0.5 && isNoteOnRow) {
-                // Bright flash on note-on trigger row
-                topIntensity = 3.0;
-            } else if (isNoteOnRow) {
-                // Note-on row near playhead
-                topIntensity = v_active * 0.8;
-            } else if (isSustaining && !USE_NOTE_SUSTAIN_TAIL_MODE) {
-                // Sustain trail: fades from 0.4 (note start) to 0.2 (note end)
-                // Clamped to 0.15 minimum to keep a dim glow visible
-                float sustainFade = 0.4 - sustainProgress * 0.2;
-                topIntensity = max(sustainFade, 0.15);
-            } else if (USE_NOTE_SUSTAIN_TAIL_MODE && isNoteOnRow && v_active > 0.0) {
-                topIntensity = max(topIntensity, v_active * 0.8);
-            } else if (isNoteOff || isNoteOffFlag) {
-                // Note-off: completely dark (channel was cut)
-                topIntensity = 0.0;
-            }
-        }
-        vec3 topColor = blueColor * (1.5 + bloom * 2.0);
-
-        // EMITTER 2 (MIDDLE): Pitch-colored note indicator
-        vec3 noteColor = vec3(0.15);
         float midIntensity = 0.12;
-        if (hasNote && !isExpressionOnly) {
-            float pitchHue = pitchClassFromIndex(note);
-            noteColor = neonPalette(pitchHue);
-            if (isNoteOnRow) {
-                // Strong glow for note-on
-                midIntensity = 0.6 + bloom * 2.0;
-                if (USE_NOTE_SUSTAIN_TAIL_MODE && v_active > 0.0) {
-                    midIntensity = max(midIntensity, 0.6 + v_active * (0.8 + bloom));
-                }
-            } else if (isSustaining && !USE_NOTE_SUSTAIN_TAIL_MODE) {
-                // Sustain: fades from 0.5 (note start) to 0.25 (note end)
-                // Clamped to 0.15 minimum for a dim ringing glow
-                float sustainBright = 0.5 - sustainProgress * 0.25;
-                midIntensity = max(sustainBright, 0.15);
-            }
-            if (isMuted) midIntensity *= 0.3;
-        }
-        vec3 midColor = noteColor;
-
-        // EMITTER 3 (BOTTOM): Amber/Orange — Expression indicator
-        vec3 amberColor = vec3(1.0, 0.55, 0.1);
         float botIntensity = 0.0;
-        if (!isMuted) {
-            if (isExpressionOnly && hasExpression) {
-                // Expression-only step (no note trigger): distinct amber glow
-                botIntensity = 2.0;
-            } else if (hasExpression && hasNote) {
-                // Note + expression: moderate amber
-                botIntensity = 1.2;
-            } else if (hasNote && v_active > 0.5) {
-                botIntensity = 0.6;
+
+        if (IS_V021) {
+            // V0.21 Strict Two-State LED Logic
+            // v_active: 2.0 = note active, 1.0 = expression active, 0.0 = off
+            if (!isMuted) {
+                if (v_active > 1.5) {
+                    // Bright Blue/Cyan glow for active note
+                    topIntensity = 3.0;
+                    float pitchHue = pitchClassFromIndex(note);
+                    midColor = neonPalette(pitchHue);
+                    midIntensity = 0.6 + bloom * 2.0;
+                    botIntensity = 0.6;
+                } else if (v_active > 0.5) {
+                    // Dim Amber/Orange glow for active expression (no note)
+                    botIntensity = 1.2;
+                }
             }
+        } else {
+            // EMITTER 1 (TOP): Blue/Cyan — Note trigger + sustain trail
+            vec3 blueColor = vec3(0.15, 0.5, 1.0);
+            topIntensity = 0.0;
+            if (!isMuted) {
+                if (chTrigger > 0.5 && isNoteOnRow) {
+                    // Bright flash on note-on trigger row
+                    topIntensity = 3.0;
+                } else if (isNoteOnRow) {
+                    // Note-on row near playhead
+                    topIntensity = v_active * 0.8;
+                } else if (isSustaining && !USE_NOTE_SUSTAIN_TAIL_MODE) {
+                    // Sustain trail: fades from 0.4 (note start) to 0.2 (note end)
+                    // Clamped to 0.15 minimum to keep a dim glow visible
+                    float sustainFade = 0.4 - sustainProgress * 0.2;
+                    topIntensity = max(sustainFade, 0.15);
+                } else if (USE_NOTE_SUSTAIN_TAIL_MODE && isNoteOnRow && v_active > 0.0) {
+                    topIntensity = max(topIntensity, v_active * 0.8);
+                } else if (isNoteOff || isNoteOffFlag) {
+                    // Note-off: completely dark (channel was cut)
+                    topIntensity = 0.0;
+                }
+            }
+            topColor = blueColor * (1.5 + bloom * 2.0);
+
+            // EMITTER 2 (MIDDLE): Pitch-colored note indicator
+            noteColor = vec3(0.15);
+            midIntensity = 0.12;
+            if (hasNote && !isExpressionOnly) {
+                float pitchHue = pitchClassFromIndex(note);
+                noteColor = neonPalette(pitchHue);
+                if (isNoteOnRow) {
+                    // Strong glow for note-on
+                    midIntensity = 0.6 + bloom * 2.0;
+                    if (USE_NOTE_SUSTAIN_TAIL_MODE && v_active > 0.0) {
+                        midIntensity = max(midIntensity, 0.6 + v_active * (0.8 + bloom));
+                    }
+                } else if (isSustaining && !USE_NOTE_SUSTAIN_TAIL_MODE) {
+                    // Sustain: fades from 0.5 (note start) to 0.25 (note end)
+                    // Clamped to 0.15 minimum for a dim ringing glow
+                    float sustainBright = 0.5 - sustainProgress * 0.25;
+                    midIntensity = max(sustainBright, 0.15);
+                }
+                if (isMuted) midIntensity *= 0.3;
+            }
+            midColor = noteColor;
+
+            // EMITTER 3 (BOTTOM): Amber/Orange — Expression indicator
+            vec3 amberColor = vec3(1.0, 0.55, 0.1);
+            botIntensity = 0.0;
+            if (!isMuted) {
+                if (isExpressionOnly && hasExpression) {
+                    // Expression-only step (no note trigger): distinct amber glow
+                    botIntensity = 2.0;
+                } else if (hasExpression && hasNote) {
+                    // Note + expression: moderate amber
+                    botIntensity = 1.2;
+                } else if (hasNote && v_active > 0.5) {
+                    botIntensity = 0.6;
+                }
+            }
+            botColor = amberColor * (1.5 + bloom * 2.0);
         }
-        vec3 botColor = amberColor * (1.5 + bloom * 2.0);
 
         // Draw unified lens cap
         vec2 lensSize = vec2(0.6, 0.82);

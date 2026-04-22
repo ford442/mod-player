@@ -247,7 +247,7 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
         col = mix(col, noteCol, 0.35 * max(playheadActivation, 0.12));
         // Trigger flash
         if (ch.trigger > 0u && playheadActivation > 0.5) {
-          col += noteCol * (0.5 + bloom * 0.4);
+          col += noteCol * (0.5 + uniforms.bloomIntensity * 0.4);
         }
       } else {
         col = mix(col, vec3<f32>(0.07, 0.08, 0.10), 0.4);
