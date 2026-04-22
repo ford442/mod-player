@@ -1,8 +1,8 @@
 // patternv0.45b.wgsl
-// Frosted Bloom with Note-On Cell Sustain
+// Frosted Bloom with Note-On Cell Sustain + Exp LEDs
 // - Note-on cell brightens and stays lit for the note's duration
-// - No white playhead indicator
-// - No trail of bright cells
+// - Exponential LED glow on active note cells
+// - No playhead trail — simple on/off per note duration
 
 struct Uniforms {
   numRows: u32,
@@ -172,31 +172,6 @@ fn toUpperAscii(code: u32) -> u32 {
   return select(code, code - 32u, (code >= 97u) & (code <= 122u));
 }
 
-fn pitchClassFromPacked(packed: u32) -> f32 {
-  let c0 = toUpperAscii((packed >> 24) & 255u);
-  var semitone: i32 = 0;
-  var valid = true;
-  switch (c0) {
-    case 65u: { semitone = 9; }
-    case 66u: { semitone = 11; }
-    case 67u: { semitone = 0; }
-    case 68u: { semitone = 2; }
-    case 69u: { semitone = 4; }
-    case 70u: { semitone = 5; }
-    case 71u: { semitone = 7; }
-    default: { valid = false; }
-  }
-  if (!valid) { return 0.0; }
-  let c1 = toUpperAscii((packed >> 16) & 255u);
-  if ((c1 == 35u) || (c1 == 43u)) {
-    semitone = (semitone + 1) % 12;
-  } else if (c1 == 66u) {
-    semitone = (semitone + 11) % 12;
-  }
-  return f32(semitone) / 12.0;
-}
-
-// Numeric pitch class for high-precision packed note values
 fn pitchClassFromIndex(note: u32) -> f32 {
   if (note == 0u) { return 0.0; }
   let semi = (note - 1u) % 12u;
@@ -225,6 +200,7 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   if (in.channel >= uniforms.numChannels) { return vec4<f32>(1.0, 0.0, 0.0, 1.0); }
   let dimFactor = uniforms.dimFactor;
   let bloom = uniforms.bloomIntensity;
+  let isPlaying = (uniforms.isPlaying == 1u);
 
   let uv = in.uv;
 
@@ -240,14 +216,12 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
       let ctrlH = 1.0 - gridBottom;
       let ctrlUV = vec2<f32>(uv.x, (uv.y - gridBottom) / ctrlH);
 
-      // Buttons: Loop (Left), Play (Center), Stop (Right)
       let btnY = 0.5;
 
       // Play
       var pPlay = ctrlUV - vec2<f32>(0.5, btnY);
       pPlay.x *= aspect * (ctrlH / 1.0);
       let dPlay = sdTriangle(pPlay * 4.0, 0.3);
-      let isPlaying = uniforms.isPlaying == 1u;
       let playCol = select(vec3<f32>(0.0, 0.4, 0.0), vec3<f32>(0.2, 1.0, 0.2), isPlaying);
       col = mix(col, playCol, 1.0 - smoothstep(0.0, 0.05, dPlay));
 
@@ -283,8 +257,9 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   // Wrapped playhead position for this pattern
   let maxRows = f32(uniforms.numRows);
   let playheadStep = uniforms.playheadRow - floor(uniforms.playheadRow / maxRows) * maxRows;
-  // Use shortest signed distance across pattern boundary so row 63→0 wrap stays
-  // directional for sustain timing (forward-in-time deltas remain >= 0).
+
+  // Signed delta: how many rows ahead the playhead is from this cell.
+  // Wrapped so forward-in-time deltas are always >= 0.
   var delta = playheadStep - f32(in.row);
   if (delta < -maxRows * 0.5) {
       delta += maxRows;
@@ -296,33 +271,56 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
       let pitchHue = pitchClassFromIndex(note);
       let baseCol = neonPalette(pitchHue);
 
-      // Base note color
+      // Base note color (subtle, always on for note cells)
       capColor = mix(capColor, baseCol, 0.4);
 
-      // Unpack duration info
+      // Unpack duration info from packed cell data
       let dInfo = unpackDurationInfo(in.packedA, in.packedB);
       let isNoteOffCmd = note == NOTE_OFF || note == NOTE_CUT || note == NOTE_FADE;
-      let isNoteOnCell = dInfo.rowOffset == 0u && !dInfo.isNoteOff && !isNoteOffCmd;
-      var sustainGlow = 0.0;
+      let isNoteOnCell = (dInfo.rowOffset == 0u && !dInfo.isNoteOff && !isNoteOffCmd);
+
+      // ---- NOTE-ON SUSTAIN ----
+      // Cell illuminates when playhead hits the note-on row,
+      // stays lit for the note's duration, then turns off.
       let durationF = f32(dInfo.duration);
+      var sustainGlow = 0.0;
       if (isNoteOnCell && durationF > 0.0 && delta >= 0.0 && delta <= durationF) {
           sustainGlow = 1.0;
       }
 
       if (sustainGlow > 0.0) {
           glow = max(glow, sustainGlow);
+          // Deepen color while sustained
           capColor = mix(capColor, baseCol, 0.85);
       }
 
-      // Trigger flash
+      // ---- TRIGGER FLASH ----
+      // Bright flash on the exact note-on row
       let ch = channels[in.channel];
       if (ch.trigger > 0u && isNoteOnCell) {
           glow += 1.0;
           capColor += vec3<f32>(0.5);
       }
+
+      // ---- EXP LED GLOW ----
+      // Exponential radial glow emanating from cell center while sustained.
+      // Creates a soft "LED bloom" effect on active note cells.
+      if (sustainGlow > 0.0) {
+          let p = uv - 0.5;
+          let distFromCenter = length(p);
+          let expGlow = exp(-distFromCenter * 4.0) * sustainGlow;
+          capColor += baseCol * expGlow * 0.6;
+          glow += expGlow * 0.5;
+      }
   }
 
-  // Frosted Effect
+  // ---- KICK REACTIVE GLOW ----
+  // Global kick pulse (always active, independent of notes)
+  let p = uv - 0.5;
+  let kickPulse = uniforms.kickTrigger * exp(-length(p) * 3.0) * 0.3;
+  capColor += vec3<f32>(0.9, 0.2, 0.4) * kickPulse * bloom;
+
+  // ---- FROSTED MATERIAL ----
   let edge = smoothstep(0.0, 0.1, -dBox);
   let light = vec3<f32>(0.5, -0.8, 1.0);
   let n = normalize(vec3<f32>((uv.x - 0.5), (uv.y - 0.5), 0.5));
@@ -336,10 +334,6 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
       capColor *= (1.0 + bloom);
   }
 
-  // Kick reactive glow
-  let p = in.uv - 0.5;
-  let kickPulse = uniforms.kickTrigger * exp(-length(p) * 3.0) * 0.3;
-  capColor += vec3<f32>(0.9, 0.2, 0.4) * kickPulse * uniforms.bloomIntensity;
   // Dithering for night mode
   let noise = fract(sin(dot(in.uv * uniforms.timeSec, vec2<f32>(12.9898, 78.233))) * 43758.5453);
   capColor += (noise - 0.5) * 0.01;

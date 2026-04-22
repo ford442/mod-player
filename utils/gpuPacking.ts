@@ -416,6 +416,21 @@ export const packPatternMatrixHighPrecision = (matrix: PatternMatrix | null, pad
         if (note > 0) notesPacked++;
       }
 
+      // DURA-003: For duration tail rows, copy the note value from the note-on row
+      // so shaders can identify and color sustain tail cells. This is essential for
+      // strict Duration Tail visualizers (e.g., v0.45b) where every row in the sustain
+      // must know which pitch it belongs to.
+      if (note === 0 && dInfo.duration > 1 && dInfo.rowOffset > 0 && !dInfo.isNoteOff) {
+        const startRow = r - dInfo.rowOffset;
+        if (startRow >= 0) {
+          const startCell = rows[startRow]?.[c];
+          if (startCell && startCell.note && startCell.note >= NOTE_MIN && startCell.note <= NOTE_MAX) {
+            note = startCell.note;
+            if (inst === 0) inst = startCell.inst || 0;
+          }
+        }
+      }
+
       // Strict expression check — mirrors patternExtractor rules.
       // hasNote covers both note-on (1–119) and note-off/cut (120+).
       const hasValidNote  = note >= NOTE_MIN && note <= NOTE_MAX;
