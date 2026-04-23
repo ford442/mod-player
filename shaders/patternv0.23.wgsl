@@ -92,8 +92,8 @@ fn hash1(p: vec2<f32>) -> f32 {
 }
 
 // Digital decay glitch function
-fn block_slide(uv: vec2<f32>, strength: f32, block_size: f32) -> vec2<f32> {
-    let blocks = vec2<f32>(block_size, block_size * (uniforms.canvasH / uniforms.canvasW));
+fn block_slide(uv: vec2<f32>, strength: f32, block_size: f32, aspect: f32) -> vec2<f32> {
+    let blocks = vec2<f32>(block_size / aspect, block_size);
     let block_uv = floor(uv * blocks);
     let slide_amount = (hash1(block_uv) - 0.5) * 2.0; // Centered hash
     return vec2<f32>(uv.x + slide_amount * strength, uv.y);
@@ -102,10 +102,10 @@ fn block_slide(uv: vec2<f32>, strength: f32, block_size: f32) -> vec2<f32> {
 
 @fragment
 fn fs(fragIn: VertexOut) -> @location(0) vec4<f32> {
-    var uv = fragIn.uv;
     // Fix aspect ratio for the scene coordinates
     let aspect = uniforms.canvasW / uniforms.canvasH;
-    var p = (uv - 0.5) * vec2<f32>(aspect, 1.0) * 2.0; // Centered at 0,0
+    var uv = vec2<f32>((fragIn.uv.x - 0.5) * aspect + 0.5, fragIn.uv.y);
+    var p = (uv - 0.5) * 2.0; // Centered at 0,0
 
     var finalColor = vec3<f32>(0.05, 0.05, 0.08); // Dark stage background
 
@@ -145,13 +145,13 @@ fn fs(fragIn: VertexOut) -> @location(0) vec4<f32> {
     let kick = uniforms.kickTrigger;
     
     let texScale = 0.8; 
-    var charUV = (fragIn.uv - 0.5) * (1.0/texScale) + 0.5; 
+    var charUV = (uv - 0.5) * (1.0/texScale) + 0.5;
     charUV.y = 1.0 - charUV.y; // Flip Y-coordinate
 
     // --- DIGITAL DECAY GLITCH ---
     let block_size = mix(200.0, 40.0, kick);
     let slide_strength = kick * kick;
-    let glitchUV = block_slide(charUV, slide_strength, block_size);
+    let glitchUV = block_slide(charUV, slide_strength, block_size, aspect);
 
     // --- UNCONDITIONAL SAMPLING ---
     let r = textureSample(myTexture, mySampler, glitchUV).r;
@@ -175,7 +175,7 @@ fn fs(fragIn: VertexOut) -> @location(0) vec4<f32> {
     }
 
     // Vignette
-    let vig = 1.0 - length(fragIn.uv - 0.5) * 0.8;
+    let vig = 1.0 - length(uv - 0.5) * 0.8;
     finalColor *= vig;
 
     return vec4<f32>(finalColor, 1.0);
