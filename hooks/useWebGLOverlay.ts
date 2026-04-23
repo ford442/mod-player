@@ -797,12 +797,17 @@ export function useWebGLOverlay(
       const coreUniforms = ['u_resolution', 'u_cellData', 'u_cols', 'u_playhead'];
       const variantUniforms = ['u_layoutMode', 'u_invertChannels', 'u_cellSize', 'u_offset', 'u_capTexture', 'u_rows', 'u_channelState', 'u_bloomIntensity', 'u_timeSec'];
 
-      const nullUniforms = Object.entries(uniformLocs)
-        .filter(([, loc]) => loc === null)
-        .map(([name]) => name);
-
-      const missingCore = nullUniforms.filter(name => coreUniforms.includes(name));
-      const missingVariant = nullUniforms.filter(name => variantUniforms.includes(name));
+      const missingCore: string[] = [];
+      const missingVariant: string[] = [];
+      for (const [name, loc] of Object.entries(uniformLocs)) {
+        if (loc === null) {
+          if (coreUniforms.includes(name)) {
+            missingCore.push(name);
+          } else if (variantUniforms.includes(name)) {
+            missingVariant.push(name);
+          }
+        }
+      }
 
       if (missingCore.length > 0) {
         console.error(`[WebGL] ❌ Missing CORE uniforms in ${shaderFile}:`, missingCore);
