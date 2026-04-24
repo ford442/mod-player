@@ -21,6 +21,11 @@ struct Uniforms {
   bloomIntensity: f32,
   bloomThreshold: f32,
   invertChannels: u32,
+  dimFactor: f32,
+  _r0: f32,
+  _r1: f32,
+  _r2: f32,
+  _r3: f32,
   colorPalette: u32,
 };
 
