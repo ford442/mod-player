@@ -10,6 +10,8 @@ import { ChannelMeters } from './components/ChannelMeters';
 import { MetadataPanel } from './components/MetadataPanel';
 import type { ModuleMetadata } from './components/MetadataPanel';
 import { Playlist } from './components/Playlist';
+import type { PlaylistItem } from './components/Playlist';
+import { StoragePlaylist } from './components/StoragePlaylist';
 import { SeekBar } from './components/SeekBar';
 import { useLibOpenMPT } from './hooks/useLibOpenMPT';
 import { usePlaylist } from './hooks/usePlaylist';
@@ -103,6 +105,7 @@ function App() {
   const [showChannelMeters, setShowChannelMeters] = useState<boolean>(true);
   const [showMetadata, setShowMetadata] = useState<boolean>(true);
   const [showPlaylist, setShowPlaylist] = useState<boolean>(true);
+  const [showStorageLibrary, setShowStorageLibrary] = useState<boolean>(false);
   const [debugPanelOpen, setDebugPanelOpen] = useLocalStorage<boolean>('xasm1.debugPanel.open', false);
   const [cheatsheetOpen, setCheatsheetOpen] = useState<boolean>(false);
 
@@ -154,6 +157,14 @@ function App() {
   const handlePlaylistFilesAdded = useCallback((files: FileList) => {
     playlist.addFiles(files);
   }, [playlist]);
+
+  const handleAddToPlaylist = useCallback((item: PlaylistItem) => {
+    playlist.addItem(item);
+  }, [playlist]);
+
+  const handleStorageLoadAndPlay = useCallback((fileData: Uint8Array, fileName: string) => {
+    loadFile(fileData, fileName);
+  }, [loadFile]);
 
   // Sync pan with library
   useEffect(() => { setLibPan(pan); }, [pan, setLibPan]);
@@ -569,6 +580,7 @@ function App() {
             { key: 'meters', label: '📊 VU Meters', state: showChannelMeters, toggle: setShowChannelMeters },
             { key: 'meta', label: 'ℹ️ Metadata', state: showMetadata, toggle: setShowMetadata },
             { key: 'playlist', label: '📋 Playlist', state: showPlaylist, toggle: setShowPlaylist },
+            { key: 'storage', label: '📦 Storage', state: showStorageLibrary, toggle: setShowStorageLibrary },
           ].map(({ key, label, state, toggle }) => (
             <button
               key={key}
@@ -639,6 +651,15 @@ function App() {
               onFilesAdded={handlePlaylistFilesAdded}
             />
           </div>
+        )}
+
+        {/* Storage Library */}
+        {showStorageLibrary && (
+          <StoragePlaylist
+            onAddToPlaylist={handleAddToPlaylist}
+            onLoadAndPlay={handleStorageLoadAndPlay}
+            isDarkMode={isDarkMode}
+          />
         )}
 
         <div className="mt-8 text-center text-xs opacity-50">
