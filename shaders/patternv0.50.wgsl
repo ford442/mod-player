@@ -29,10 +29,8 @@ struct Uniforms {
 
 // DURA: Note duration constants
 const NOTE_MIN: u32 = 1u;
-const NOTE_MAX: u32 = 96u;
-const NOTE_OFF: u32 = 97u;
-const NOTE_CUT: u32 = 98u;
-const NOTE_FADE: u32 = 99u;
+const NOTE_MAX: u32 = 119u;
+const NOTE_OFF_MIN: u32 = 120u;
 
 @group(0) @binding(0) var<storage, read> cells: array<u32>;
 @group(0) @binding(1) var<uniform> uniforms: Uniforms;
@@ -193,41 +191,28 @@ fn calculateSustainBrightness(info: NoteDurationInfo, baseIntensity: f32) -> f32
   return baseIntensity * (0.4 + 0.2 * (1.0 - progress));
 }
 
-// DURA: Check if this cell is part of an active sustain
-fn isSustaining(info: NoteDurationInfo, hasNote: bool) -> bool {
-  return hasNote && (info.duration > 1u) && (info.rowOffset < info.duration);
-}
-
-// DURA: Calculate blue LED intensity for note trigger/sustain
-fn calculateBlueIntensity(
-  info: NoteDurationInfo, 
-  hasNote: bool, 
-  isPlayhead: bool,
+// AMBER-BLUE: Calculate top-emitter intensity for note-on / expression-only / sustain
+fn calculateTopIntensity(
+  isNoteOn: bool,
+  isExprOnly: bool,
+  isSustain: bool,
+  isMuted: bool,
   trigger: u32,
-  beatPhase: f32
+  bloom: f32,
+  beat: f32
 ) -> f32 {
   var intensity = 0.0;
-  
-  if (isPlayhead) {
-    // Playhead row always gets some blue glow
-    intensity = 0.6;
-  }
-  
-  if (hasNote) {
-    if (info.rowOffset == 0u) {
-      // Note-on trigger: bright flash
-      if (trigger > 0u) {
-        intensity = 1.0 + beatPhase * 0.3; // Pulse with beat
-      } else {
-        intensity = 0.8;
-      }
-    } else if (isSustaining(info, hasNote)) {
-      // Sustain tail: dim blue glow that fades
-      let sustainBrightness = calculateSustainBrightness(info, 0.5);
-      intensity = max(intensity, sustainBrightness);
+  if (isNoteOn) {
+    intensity = 1.0 + bloom * 2.0;
+    if (trigger > 0u) {
+      intensity += beat * 0.3;
     }
+  } else if (isExprOnly) {
+    intensity = 0.7 + bloom * 1.0;
+  } else if (isSustain) {
+    intensity = 0.1 + bloom * 0.2;
   }
-  
+  if (isMuted) { intensity *= 0.2; }
   return intensity;
 }
 
@@ -508,71 +493,75 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     dInfo.rowOffset = durationFlags >> 1u;
     dInfo.isNoteOff = (durationFlags & 1u) != 0u;
 
-    // DURA: Note state detection
-    let hasNote = (note >= NOTE_MIN && note <= NOTE_MAX);
-    let isNoteOffCmd = (note == NOTE_OFF || note == NOTE_CUT || note == NOTE_FADE);
-    let hasExpression = (volCmd > 0u) || (effCmd > 0u) || (volCmdFull > 0u);
+    // AMBER-BLUE: Cell-type classification
+    let isNoteOn   = (note > 0u && note < NOTE_OFF_MIN && dInfo.rowOffset == 0u);
+    let isNoteOff  = (note >= NOTE_OFF_MIN);
+    let isExprOnly = (!isNoteOn && !isNoteOff && isExpressionOnly);
+    let isSustain  = (note > 0u && note < NOTE_OFF_MIN && dInfo.duration > 1u && dInfo.rowOffset > 0u && !dInfo.isNoteOff);
+    let isDead     = (!isNoteOn && !isExprOnly && !isSustain && !isNoteOff);
+
     let ch = channels[in.channel];
     let isMuted = (ch.isMuted == 1u);
-    
-    // DURA: Check if this cell is part of an active sustain
-    let isSustain = isSustaining(dInfo, hasNote);
-    let isNoteOnRow = hasNote && (dInfo.rowOffset == 0u);
+    let hasExpression = (volCmd > 0u) || (effCmd > 0u) || (volCmdFull > 0u);
 
-    // --- THREE-EMITTER SYSTEM with DURA enhancements ---
-    
-    // EMITTER 1 (TOP): Blue Note-On Indicator with Sustain
-    // DURA: Bright blue on note trigger, dimmer blue glow during sustain
-    let blueColor = vec3<f32>(0.15, 0.5, 1.0);
-    var topIntensity = calculateBlueIntensity(dInfo, hasNote, playheadActivation > 0.5, ch.trigger, beat);
-    if (isMuted) { topIntensity *= 0.2; }
-    let topColor = blueColor * (1.0 + bloom * 2.0);
-    
-    // EMITTER 2 (MIDDLE): Note Color with Duration Visualization
-    // DURA: Full brightness on note-on, 40-60% brightness during sustain
-    // Fade effect on last 2-3 rows of sustain tail
-    var noteColor = vec3<f32>(0.15);
-    var midIntensity = 0.08; // Base dim glow for empty cells
-    
-    if (hasNote && !isExpressionOnly) {
+    // --- THREE-EMITTER SYSTEM with Amber-vs-Blue differentiation ---
+
+    // EMITTER 1 (TOP): Semantic indicator — Blue for note-on, Amber for expression-only
+    let blueColor  = vec3<f32>(0.05, 0.45, 1.0);  // royal blue #0080FF
+    let amberColor = vec3<f32>(1.0, 0.55, 0.0);   // warm amber #FFA500
+    var topColor = vec3<f32>(0.0);
+    var topIntensity = calculateTopIntensity(isNoteOn, isExprOnly, isSustain, isMuted, ch.trigger, bloom, beat);
+    if (isNoteOn) {
+      topColor = blueColor;
+    } else if (isExprOnly) {
+      topColor = amberColor;
+    } else if (isSustain) {
+      topColor = blueColor;
+    }
+
+    // EMITTER 2 (MIDDLE): Note color (pitch-class) or dark
+    var noteColor = vec3<f32>(0.051, 0.051, 0.051); // #0D0D0D near-black default
+    var midIntensity = 0.02; // Base dim glow for dead/empty cells
+
+    if (isNoteOn || isSustain) {
       let pitchHue = pitchClassFromIndex(note);
       let baseColor = neonPalette(pitchHue);
       let instBand = inst & 15u;
       let instBright = 0.85 + (select(0.0, f32(instBand) / 15.0, instBand > 0u)) * 0.15;
       noteColor = baseColor * instBright;
-      
-      // DURA: Calculate brightness based on sustain position
-      midIntensity = calculateSustainBrightness(dInfo, 0.8 + bloom * 2.0);
-      
+
+      if (isNoteOn) {
+        midIntensity = calculateSustainBrightness(dInfo, 0.8 + bloom * 2.0);
+      } else {
+        // Sustain tail: fixed ~45% intensity
+        midIntensity = 0.45 + bloom * 0.5;
+      }
       if (isMuted) { midIntensity *= 0.25; }
-    } else if (isNoteOffCmd || dInfo.isNoteOff) {
-      // DURA: Note-off rows show dim pulse
+    } else if (isNoteOff) {
       noteColor = vec3<f32>(0.3, 0.3, 0.35);
       midIntensity = 0.2 + 0.1 * sin(uniforms.timeSec * 4.0);
-    } else if (isExpressionOnly) {
-      // Expression-only: subtle amber tint in middle
-      noteColor = vec3<f32>(0.4, 0.25, 0.05);
-      midIntensity = 0.15;
+    } else if (isExprOnly) {
+      // Dark center; amber top emitter illuminates via lens bloom
+      noteColor = vec3<f32>(0.051, 0.051, 0.051);
+      midIntensity = 0.05;
+    } else if (isDead) {
+      noteColor = vec3<f32>(0.051, 0.051, 0.051);
+      midIntensity = 0.02;
     }
     let midColor = noteColor;
-    
-    // EMITTER 3 (BOTTOM): Amber Control Message Indicator
-    // Lights up AMBER for expression-only steps and note-on rows with expression
-    let amberColor = vec3<f32>(1.0, 0.55, 0.1);
+
+    // EMITTER 3 (BOTTOM): Control indicator — suppressed for expression-only (amber moved to top)
     var botIntensity = 0.0;
-    if (!isMuted && hasExpression) {
-      if (isExpressionOnly) {
-        // Expression-only steps: amber at 60% intensity
-        botIntensity = 0.6 + bloom * 0.8;
-      } else if (isNoteOnRow) {
-        // DURA: Brighter amber on note-on rows with expression
-        botIntensity = 1.0 + bloom * 1.5;
-      } else {
-        // Steps with note AND expression: subtle amber
-        botIntensity = 0.4 + bloom * 0.6;
+    var botColor = vec3<f32>(0.0);
+    if (!isMuted && !isExprOnly) {
+      if (isNoteOn && hasExpression) {
+        botIntensity = 0.5 + bloom * 0.8;
+        botColor = amberColor;
+      } else if (isSustain && hasExpression) {
+        botIntensity = 0.3 + bloom * 0.4;
+        botColor = amberColor;
       }
     }
-    let botColor = amberColor * (1.0 + bloom * 2.0);
     
     // --- DRAW UNIFIED LENS CAP ---
     let lensUV = btnUV - vec2<f32>(0.5, 0.5);
@@ -588,10 +577,10 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     
     finalColor = mix(finalColor, unifiedLens.rgb, unifiedLens.a);
 
-    // DURA: Enhanced external glow for sustained notes
-    if (playheadActivation > 0.5 && (hasNote || isSustain)) {
+    // AMBER-BLUE: Enhanced external glow for active notes
+    if (playheadActivation > 0.5 && (isNoteOn || isSustain)) {
       let pulseColor = mix(blueColor, noteColor, 0.5 + 0.5 * sin(beat * 6.2832));
-      let sustainBoost = select(1.0, 1.5, isSustain && !isNoteOnRow);
+      let sustainBoost = select(1.0, 1.5, isSustain && !isNoteOn);
       finalColor += pulseColor * playheadActivation * 0.15 * sustainBoost;
     }
   }
