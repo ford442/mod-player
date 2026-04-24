@@ -23,7 +23,7 @@ struct Uniforms {
   invertChannels: u32,
   dimFactor: f32,
   gridRect: vec4<f32>,
-  colorPalette: u32,
+  stepsLength: u32,     // 32 or 64 steps visible per page
 };
 
 @group(0) @binding(0) var<storage, read> cells: array<u32>;
@@ -55,7 +55,7 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
   let row = instanceIndex / numChannels;
   let channel = instanceIndex % numChannels;
 
-  let stepsPerPage = 32.0;
+  let stepsPerPage = select(32.0, f32(uniforms.stepsLength), uniforms.stepsLength >= 32u);
   // Use floor on the float, then multiply to get the page start
   let pageStart = floor(uniforms.playheadRow / stepsPerPage) * stepsPerPage;
   let localRow = f32(row) - pageStart;

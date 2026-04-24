@@ -47,6 +47,7 @@ export interface WebGLOverlayParams {
   channels?: ChannelShadowState[];
   bloomIntensity?: number;
   playbackStateRef?: React.MutableRefObject<PlaybackState>;
+  stepsLength?: number;
 }
 
 type DebugInfo = {
@@ -995,8 +996,8 @@ export function useWebGLOverlay(
 
       // Override layout for v0.21 (it's horizontal but not in getLayoutModeFromShader)
       let layoutMode = getLayoutModeFromShader(p.shaderFile);
-      if (p.shaderFile.includes('v0.21')) {
-        layoutMode = LAYOUT_MODES.HORIZONTAL_32;
+      if (p.shaderFile.includes('v0.21') || p.shaderFile.includes('v0.39') || p.shaderFile.includes('v0.40')) {
+        layoutMode = p.stepsLength === 64 ? LAYOUT_MODES.HORIZONTAL_64 : LAYOUT_MODES.HORIZONTAL_32;
       }
       const channelCount = cols;
 
