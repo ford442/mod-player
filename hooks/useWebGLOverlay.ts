@@ -370,6 +370,7 @@ export function useWebGLOverlay(
     const uint NOTE_CUT = 98u;
     const uint NOTE_FADE = 99u;
     const bool USE_NOTE_SUSTAIN_TAIL_MODE = ${useNoteSustainTailMode ? 'true' : 'false'};
+    const bool IS_V021 = ${isV021 ? 'true' : 'false'};
 
     uniform sampler2D u_capTexture;
     uniform float u_bloomIntensity;
@@ -627,7 +628,7 @@ export function useWebGLOverlay(
             topColor = blueColor * (1.5 + bloom * 2.0);
 
             // EMITTER 2 (MIDDLE): Pitch-colored note indicator
-            noteColor = vec3(0.15);
+            vec3 noteColor = vec3(0.15);
             midIntensity = 0.12;
             if (hasNote && !isExpressionOnly) {
                 float pitchHue = pitchClassFromIndex(note);
