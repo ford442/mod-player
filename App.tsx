@@ -26,6 +26,8 @@ import {
 } from './types/bloomPresets';
 
 // Shader Definitions
+const DEFAULT_SHADER = 'patternv0.50.wgsl';
+
 const SHADER_GROUPS = {
   SQUARE: [
     { id: 'patternv0.44.wgsl', label: 'v0.44 (Frosted Wall 64)' },
@@ -53,8 +55,30 @@ const SHADER_GROUPS = {
   ]
 };
 
+// Flat set of all valid shader IDs (used for localStorage validation)
+const ALL_SHADER_IDS = new Set<string>([
+  ...SHADER_GROUPS.SQUARE.map(s => s.id),
+  ...SHADER_GROUPS.CIRCULAR.map(s => s.id),
+  ...SHADER_GROUPS.VIDEO.map(s => s.id),
+]);
+
+// Compute a fast, dependency-free hash from the first 16 bytes of a module buffer.
+// Used as a stable per-module key for localStorage shader memory.
+function computeModuleHash(data: Uint8Array): string {
+  return Array.from(data.slice(0, 16))
+    .map(b => b.toString(16).padStart(2, '0'))
+    .join('');
+}
+
 function App() {
-  const [shaderFile, setShaderFile] = useState<string>('patternv0.50.wgsl');
+  // Tier 1: global last-used shader — persisted across page reloads
+  const [_storedShader, _setStoredShader] = useLocalStorage<string>('xasm1_last_shader', DEFAULT_SHADER);
+  // Validate: fall back to default if the stored shader was removed from the selector list
+  const shaderFile = ALL_SHADER_IDS.has(_storedShader) ? _storedShader : DEFAULT_SHADER;
+
+  // Tier 2: per-module shader memory — keyed by first-16-byte hash of the loaded file
+  const [moduleHash, setModuleHash] = useState<string | null>(null);
+
   const [volume, setVolume] = useState<number>(0.5);
   const [pan, setPan] = useState<number>(0.0);
 
@@ -136,23 +160,54 @@ function App() {
     };
   }, [isModuleLoaded, sequencerMatrix, status, activeEngine, totalPatternRows]);
 
+  // Shader change handler — Tier 1 (global) + Tier 2 (per-module) write
+  const setShaderFile = useCallback((shader: string) => {
+    _setStoredShader(shader);
+    if (moduleHash) {
+      try {
+        localStorage.setItem(`xasm1_module_shader_${moduleHash}`, shader);
+      } catch {
+        // Ignore quota/security errors
+      }
+    }
+  }, [_setStoredShader, moduleHash]);
+
+  // Tier 2: restore per-module shader whenever the loaded module changes
+  useEffect(() => {
+    if (!moduleHash) return;
+    try {
+      const saved = localStorage.getItem(`xasm1_module_shader_${moduleHash}`);
+      if (saved !== null && ALL_SHADER_IDS.has(saved)) {
+        _setStoredShader(saved);
+      }
+    } catch (e) {
+      console.warn('[xasm1] Failed to read per-module shader from localStorage', e);
+    }
+  }, [moduleHash, _setStoredShader]);
+
+  // Wrapper: compute per-module hash then load — used by all load call sites
+  const loadFileWithHash = useCallback((fileData: Uint8Array, fileName: string) => {
+    setModuleHash(computeModuleHash(fileData));
+    loadFile(fileData, fileName);
+  }, [loadFile]);
+
   // Playlist
   const playlist = usePlaylist();
 
   const handlePlaylistSelect = useCallback((index: number) => {
     const item = playlist.select(index);
-    if (item) loadFile(item.fileData, item.fileName);
-  }, [playlist, loadFile]);
+    if (item) loadFileWithHash(item.fileData, item.fileName);
+  }, [playlist, loadFileWithHash]);
 
   const handlePlaylistNext = useCallback(() => {
     const item = playlist.next();
-    if (item) loadFile(item.fileData, item.fileName);
-  }, [playlist, loadFile]);
+    if (item) loadFileWithHash(item.fileData, item.fileName);
+  }, [playlist, loadFileWithHash]);
 
   const handlePlaylistPrev = useCallback(() => {
     const item = playlist.prev();
-    if (item) loadFile(item.fileData, item.fileName);
-  }, [playlist, loadFile]);
+    if (item) loadFileWithHash(item.fileData, item.fileName);
+  }, [playlist, loadFileWithHash]);
 
   const handlePlaylistFilesAdded = useCallback((files: FileList) => {
     playlist.addFiles(files);
@@ -163,8 +218,8 @@ function App() {
   }, [playlist]);
 
   const handleStorageLoadAndPlay = useCallback((fileData: Uint8Array, fileName: string) => {
-    loadFile(fileData, fileName);
-  }, [loadFile]);
+    loadFileWithHash(fileData, fileName);
+  }, [loadFileWithHash]);
 
   // Sync pan with library
   useEffect(() => { setLibPan(pan); }, [pan, setLibPan]);
@@ -253,7 +308,7 @@ function App() {
   const handleFileSelected = async (file: File) => {
     const arrayBuffer = await file.arrayBuffer();
     const data = new Uint8Array(arrayBuffer);
-    loadFile(data, file.name);
+    loadFileWithHash(data, file.name);
   };
 
   const handleMediaAdd = (file: File) => {
