@@ -7,6 +7,7 @@ interface UsePlaylistReturn {
   shuffle: boolean;
   repeat: 'none' | 'all' | 'one';
   addFiles: (files: FileList) => void;
+  addItem: (item: PlaylistItem) => void;
   select: (index: number) => PlaylistItem | null;
   remove: (index: number) => void;
   clear: () => void;
@@ -46,6 +47,10 @@ export function usePlaylist(): UsePlaylistReturn {
     Promise.all(readers).then(() => {
       setItems(prev => [...prev, ...newItems]);
     });
+  }, []);
+
+  const addItem = useCallback((item: PlaylistItem) => {
+    setItems(prev => [...prev, item]);
   }, []);
 
   const select = useCallback((index: number): PlaylistItem | null => {
@@ -156,6 +161,7 @@ export function usePlaylist(): UsePlaylistReturn {
     shuffle,
     repeat,
     addFiles,
+    addItem,
     select,
     remove,
     clear,
