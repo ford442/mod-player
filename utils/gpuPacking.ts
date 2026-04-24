@@ -54,6 +54,8 @@ export const fillUniformPayload = (
     bloomThreshold?: number;
     invertChannels?: boolean;
     dimFactor?: number;
+    innerRadius?: number;
+    outerRadius?: number;
     colorPalette?: number;
     analyserNode?: AnalyserNode | null;
     gridRect?: { x: number; y: number; w: number; h: number };
@@ -91,7 +93,9 @@ export const fillUniformPayload = (
     float[22] = params.gridRect?.w ?? GRID_RECT.w;
     float[23] = params.gridRect?.h ?? GRID_RECT.h;
     uint[24] = Math.max(0, params.colorPalette ?? 0) >>> 0;
-    return 100;
+    float[25] = params.innerRadius ?? 0.0;
+    float[26] = params.outerRadius ?? 0.0;
+    return 108;
   }
 
   uint[0] = Math.max(0, params.numRows) >>> 0;

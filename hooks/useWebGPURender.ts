@@ -107,12 +107,13 @@ export function useWebGPURender(
   const layoutTypeRef = useRef(getLayoutType(shaderFile));
   const videoRef = useRef<HTMLVideoElement | HTMLImageElement | null>(null);
   const videoTextureRef = useRef<GPUTexture | null>(null);
+  const renderFrameCountRef = useRef<number>(0);
   const bezelPipelineRef = useRef<GPURenderPipeline | null>(null);
   const bezelBindGroupRef = useRef<GPUBindGroup | null>(null);
   const bezelUniformBufferRef = useRef<GPUBuffer | null>(null);
 
   // Persistent typed arrays to avoid GC pressure
-  const uniformBufferDataRef = useRef(new ArrayBuffer(100));
+  const uniformBufferDataRef = useRef(new ArrayBuffer(108));
   const uniformUintRef = useRef(new Uint32Array(uniformBufferDataRef.current));
   const uniformFloatRef = useRef(new Float32Array(uniformBufferDataRef.current));
   const bezelBufferDataRef = useRef(new ArrayBuffer(128));
@@ -278,7 +279,7 @@ export function useWebGPURender(
           pipelineRef.current = device.createRenderPipeline({ layout: device.createPipelineLayout({ bindGroupLayouts: [bindGroupLayout] }), vertex: { module, entryPoint: 'vertex_main' }, fragment: { module, entryPoint: 'fragment_main', targets }, primitive: { topology: 'triangle-list' } });
         }
 
-        const uniformSize = layoutType === 'extended' ? 100 : (layoutType === 'texture' ? 64 : 32);
+        const uniformSize = layoutType === 'extended' ? 108 : (layoutType === 'texture' ? 64 : 32);
         const uniformBuffer = device.createBuffer({ size: alignTo(uniformSize, 256), usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
 
         if (shouldUseBackgroundPass(shaderFile)) {
@@ -461,6 +462,18 @@ export function useWebGPURender(
       const liveGrooveAmount = refState?.grooveAmount ?? p.grooveAmount;
       const liveTimeSec = refState?.timeSec ?? p.timeSec;
 
+      // DIAGNOSTIC: log playhead every 60 frames to verify animation
+      renderFrameCountRef.current++;
+      if (renderFrameCountRef.current % 60 === 0) {
+        console.log(
+          '[PatternDisplay render] playheadRow=%s matrix=%s numRows=%d isPlaying=%s',
+          livePlayheadRow.toFixed(2),
+          p.matrix ? `order=${p.matrix.order} rows=${p.matrix.numRows} ch=${p.matrix.numChannels}` : 'null',
+          numRows,
+          p.isPlaying
+        );
+      }
+
       const tickRow = clampPlayhead(livePlayheadRow, rowLimit);
       const computedTickOffset = tickRow - Math.floor(tickRow);
       const fractionalTick = Math.min(1, Math.max(0, Number.isFinite(computedTickOffset) ? computedTickOffset : p.tickOffset));
@@ -478,6 +491,10 @@ export function useWebGPURender(
         effectiveCellW = actualCanvasW / 32.0;
         effectiveCellH = actualCanvasH / numChannels;
       }
+
+      const minDim = Math.min(actualCanvasW, actualCanvasH);
+      const innerRadius = minDim * 0.15;
+      const outerRadius = minDim * 0.40;
 
       const uniformByteLength = fillUniformPayload(layoutTypeRef.current, {
         numRows, numChannels,
@@ -497,6 +514,8 @@ export function useWebGPURender(
         bloomThreshold: p.bloomThreshold,
         invertChannels: p.invertChannels,
         dimFactor: p.dimFactor,
+        innerRadius,
+        outerRadius,
         colorPalette: p.colorPalette ?? 0,
         gridRect: GRID_RECT,
       }, uniformUintRef.current, uniformFloatRef.current);

@@ -37,6 +37,7 @@ export interface AudioGraphRefs {
   audioClockStartRef:  React.MutableRefObject<number>;
   workletTimeAtStartRef: React.MutableRefObject<number>;
   driftAccumulatorRef: React.MutableRefObject<number>;
+  updateUIRef:         React.MutableRefObject<(() => void) | null>;
 }
 
 export interface AudioGraphCallbacks {
@@ -440,7 +441,7 @@ export async function startAudioPlayback(
                 callbacks.setIsPlaying(true);
                 callbacks.setStatus("Playing (ScriptProcessor fallback)...");
                 if (refs.animationFrameHandle.current) cancelAnimationFrame(refs.animationFrameHandle.current);
-                refs.animationFrameHandle.current = requestAnimationFrame(callbacks.updateUI);
+                refs.animationFrameHandle.current = requestAnimationFrame(refs.updateUIRef.current!);
               } else {
                 callbacks.setStatus("Error: no module loaded for ScriptProcessor fallback");
               }
@@ -456,7 +457,7 @@ export async function startAudioPlayback(
             callbacks.setIsPlaying(true);
             callbacks.setStatus("Playing...");
             if (refs.animationFrameHandle.current) cancelAnimationFrame(refs.animationFrameHandle.current);
-            refs.animationFrameHandle.current = requestAnimationFrame(callbacks.updateUI);
+            refs.animationFrameHandle.current = requestAnimationFrame(refs.updateUIRef.current!);
           } else if (type === 'seekAck') {
             // TIMING FIX: Worklet acknowledged seek
             refs.seekAcknowledgedRef.current = true;
@@ -508,7 +509,7 @@ export async function startAudioPlayback(
       refs.isPlayingRef.current = true;
       callbacks.setIsPlaying(true);
       callbacks.setStatus("Playing...");
-      refs.animationFrameHandle.current = requestAnimationFrame(callbacks.updateUI);
+      refs.animationFrameHandle.current = requestAnimationFrame(refs.updateUIRef.current!);
     }
 
   } catch (e) {

@@ -144,6 +144,9 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
       lib._openmpt_module_set_render_param(this.modulePtr, 2, 8);
 
       log('Module loaded ✅ ptr=', this.modulePtr);
+      // Reset position reporting timer so the new module starts sending
+      // position messages immediately instead of waiting for the old interval.
+      this.lastPositionReportTime = 0;
       this.port.postMessage({ type: 'loaded' });
     } catch (err) {
       error('loadModule error:', err);

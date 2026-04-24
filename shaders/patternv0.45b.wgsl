@@ -30,6 +30,10 @@ struct Uniforms {
   _r2: f32,
   _r3: f32,
   colorPalette: u32,
+
+  // === NEW: Exact pixel radii for perfect alignment ===
+  innerRadius: f32,
+  outerRadius: f32,
 };
 
 // Note constants for numeric note values
@@ -75,6 +79,7 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
       return out;
   }
 
+  // --- DATA CELL PASS ---
   var quad = array<vec2<f32>, 6>(
     vec2<f32>(0.0, 0.0), vec2<f32>(1.0, 0.0), vec2<f32>(0.0, 1.0),
     vec2<f32>(0.0, 1.0), vec2<f32>(1.0, 0.0), vec2<f32>(1.0, 1.0)
@@ -90,10 +95,10 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
   }
 
   let center = vec2<f32>(uniforms.canvasW * 0.5, uniforms.canvasH * 0.5);
-  let minDim = min(uniforms.canvasW, uniforms.canvasH);
 
-  let maxRadius = minDim * 0.40;
-  let minRadius = minDim * 0.15;
+  // === CLEANER & MORE PRECISE RING CALCULATION ===
+  let maxRadius = uniforms.outerRadius;
+  let minRadius = uniforms.innerRadius;
   let ringDepth = (maxRadius - minRadius) / f32(numChannels);
 
   let radius = minRadius + f32(ringIndex) * ringDepth;
@@ -103,38 +108,31 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
   let theta = -1.570796 + f32(row % uniforms.numRows) * anglePerStep;
 
   let circumference = 2.0 * 3.14159265 * radius;
-  let arcLength = circumference / totalSteps;
+  let cellArc = circumference / totalSteps;
 
-  let btnW = arcLength * 0.92;
-  let btnH = ringDepth * 0.92;
+  let cellWidth = cellArc * 0.92;
+  let cellHeight = ringDepth * 0.88;
 
-  let lp = quad[vertexIndex];
-  let localPos = (lp - 0.5) * vec2<f32>(btnW, btnH);
+  let localPos = quad[vertexIndex] * vec2<f32>(cellWidth, cellHeight) - vec2<f32>(cellWidth * 0.5, cellHeight * 0.5);
 
-  let rotAng = theta + 1.570796;
-  let cA = cos(rotAng);
-  let sA = sin(rotAng);
+  let worldPos = center + vec2<f32>(
+    cos(theta) * radius + localPos.x * cos(theta) - localPos.y * sin(theta),
+    sin(theta) * radius + localPos.x * sin(theta) + localPos.y * cos(theta)
+  );
 
-  let rotX = localPos.x * cA - localPos.y * sA;
-  let rotY = localPos.x * sA + localPos.y * cA;
+  let ndc = vec2<f32>(
+    (worldPos.x / uniforms.canvasW) * 2.0 - 1.0,
+    1.0 - (worldPos.y / uniforms.canvasH) * 2.0
+  );
 
-  let worldX = center.x + cos(theta) * radius + rotX;
-  let worldY = center.y + sin(theta) * radius + rotY;
-
-  let clipX = (worldX / uniforms.canvasW) * 2.0 - 1.0;
-  let clipY = 1.0 - (worldY / uniforms.canvasH) * 2.0;
-
-  let idx = instanceIndex * 2u;
-  let a = cells[idx];
-  let b = cells[idx + 1u];
-
-  out.position = vec4<f32>(clipX, clipY, 0.0, 1.0);
+  out.position = vec4<f32>(ndc, 0.0, 1.0);
   out.row = row;
   out.channel = channel;
-  out.uv = lp;
-  out.packedA = a;
-  out.packedB = b;
+  out.uv = quad[vertexIndex];
+  out.packedA = cells[instanceIndex * 2u];
+  out.packedB = cells[instanceIndex * 2u + 1u];
   out.isUI = 0u;
+
   return out;
 }
 

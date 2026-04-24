@@ -114,6 +114,9 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
   // Track whether the worklet module is loaded on the current AudioContext
   const workletLoadedRef = useRef<boolean>(false);
 
+  // Stabilize updateUI callback so startAudioPlayback always calls the latest version
+  const updateUIRef = useRef<(() => void) | null>(null);
+
   // Track if user has manually loaded a module (to prevent default from overwriting)
   const userModuleLoadedRef = useRef<boolean>(false);
 
@@ -243,6 +246,17 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
     pendingSeekRef.current = null;
     seekAcknowledgedRef.current = true;
 
+    // Reset playback state ref so PatternDisplay doesn't show stale playhead
+    playbackStateRef.current = {
+      playheadRow: 0,
+      currentOrder: 0,
+      timeSec: 0,
+      beatPhase: 0,
+      kickTrigger: 0,
+      grooveAmount: 0.5,
+      lastUpdateTimestamp: 0
+    };
+
     setIsModuleLoaded(true);
     setStatus(`Loaded "${title || fileName}"`);
 
@@ -369,6 +383,10 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
     animationFrameHandle.current = requestAnimationFrame(updateUI);
   }, [isPlaying, activeEngine, sequencerMatrix, kickTrigger, grooveAmount, playbackRowFraction]);
 
+  // Keep updateUIRef always pointing to the latest updateUI so
+  // startAudioPlayback can schedule the most current callback.
+  updateUIRef.current = updateUI;
+
   const stopMusic = useCallback((destroy: boolean = false) => {
     isPlayingRef.current = false;
     setIsPlaying(false);
@@ -491,6 +509,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
       spLeftBufPtr, spRightBufPtr, isPlayingRef, animationFrameHandle,
       currentModulePtr, channelStatesRef, patternMatricesRef,
       audioClockStartRef, workletTimeAtStartRef, driftAccumulatorRef,
+      updateUIRef,
     };
     const audioCbs: AudioGraphCallbacks = {
       setStatus, setIsPlaying, setActiveEngine, setModuleInfo, setSequencerMatrix,
