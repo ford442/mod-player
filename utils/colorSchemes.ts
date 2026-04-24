@@ -12,12 +12,13 @@ export function getChannelHue(channelIndex: number, scheme: ColorScheme): number
       // Map to chromatic scale: 12 positions
       return (channelIndex % 12) / 12;
       
-    case 'golden':
+    case 'golden': {
       // Golden ratio progression for maximum distinction
       const PHI = 0.6180339887498949;
       return (channelIndex * PHI) % 1;
-      
-    case 'warmcool':
+    }
+
+    case 'warmcool': {
       // Alternating warm (0.0-0.2) and cool (0.5-0.7) hues
       const isWarm = channelIndex % 2 === 0;
       const group = Math.floor(channelIndex / 2);
@@ -28,6 +29,7 @@ export function getChannelHue(channelIndex: number, scheme: ColorScheme): number
         // Cool: blue, cyan, purple range
         return (0.55 + (group * 0.15) % 0.2);
       }
+    }
       
     case 'rainbow':
     default:

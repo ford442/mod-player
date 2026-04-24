@@ -126,6 +126,7 @@ const Shader021_3DMaterial = shaderMaterial(
 extend({ Shader021_3DMaterial });
 
 declare global {
+  // eslint-disable-next-line @typescript-eslint/no-namespace
   namespace JSX {
     interface IntrinsicElements {
       shader021_3DMaterial: ReactThreeFiber.Object3DNode<THREE.ShaderMaterial, typeof Shader021_3DMaterial> & {
