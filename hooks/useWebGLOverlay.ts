@@ -377,13 +377,13 @@ export function useWebGLOverlay(
 
     out vec4 fragColor;
 
-    // --- Pitch-to-color (neonPalette from v0.50) ---
-    vec3 neonPalette(float hue) {
-        float h6 = hue * 6.0;
-        float r = clamp(abs(h6 - 3.0) - 1.0, 0.0, 1.0);
-        float g = clamp(2.0 - abs(h6 - 2.0), 0.0, 1.0);
-        float b = clamp(2.0 - abs(h6 - 4.0), 0.0, 1.0);
-        return vec3(r, g, b) * 1.2 + 0.1;
+    // --- Pitch-to-color: cosine palette matching WGSL shaders (Bug 4 fix) ---
+    vec3 neonPalette(float t) {
+        vec3 a = vec3(0.5, 0.5, 0.5);
+        vec3 b = vec3(0.5, 0.5, 0.5);
+        vec3 c = vec3(1.0, 1.0, 1.0);
+        vec3 d = vec3(0.0, 0.33, 0.67);
+        return a + b * cos(6.28318 * (c * t + d));
     }
 
     float pitchClassFromIndex(uint note) {

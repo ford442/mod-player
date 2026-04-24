@@ -22,7 +22,8 @@ struct Uniforms {
   bloomThreshold: f32,
   invertChannels: u32,
   dimFactor: f32,
-  gridRect: vec4<f32>, 
+  gridRect: vec4<f32>,
+  colorPalette: u32,
 };
 
 @group(0) @binding(0) var<storage, read> cells: array<u32>;
@@ -107,8 +108,7 @@ fn neonPalette(t: f32) -> vec3<f32> {
     let b = vec3<f32>(0.5, 0.5, 0.5);
     let c = vec3<f32>(1.0, 1.0, 1.0);
     let d = vec3<f32>(0.0, 0.33, 0.67);
-    let beatDrift = uniforms.beatPhase * 0.1;
-    return a + b * cos(6.28318 * (c * (t + beatDrift) + d));
+    return a + b * cos(6.28318 * (c * t + d));
 }
 
 fn sdRoundedBox(p: vec2<f32>, b: vec2<f32>, r: f32) -> f32 {

@@ -38,6 +38,7 @@ struct Uniforms {
   bloomIntensity: f32,
   bloomThreshold: f32,
   invertChannels: u32,
+  colorPalette: u32,
 };
 
 @group(0) @binding(0) var<storage, read> cells: array<u32>;
@@ -118,13 +119,25 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-fn neonPalette(t: f32) -> vec3<f32> {
+fn selectPalette(id: u32, t: f32) -> vec3<f32> {
   let a = vec3<f32>(0.5, 0.5, 0.5);
   let b = vec3<f32>(0.5, 0.5, 0.5);
   let c = vec3<f32>(1.0, 1.0, 1.0);
-  let d = vec3<f32>(0.0, 0.33, 0.67);
-  let beatDrift = uniforms.beatPhase * 0.08;
-  return a + b * cos(6.28318 * (c * (t + beatDrift) + d));
+  if (id == 1u) {
+    // Warm: reds, oranges, yellows
+    return a + b * cos(6.28318 * (c * t + vec3<f32>(0.0, 0.1, 0.2)));
+  } else if (id == 2u) {
+    // Cool: blues, cyans, purples
+    return a + b * cos(6.28318 * (c * t + vec3<f32>(0.5, 0.7, 0.9)));
+  } else if (id == 3u) {
+    // Neon: pink, cyan, green
+    return a + b * cos(6.28318 * (c * t + vec3<f32>(0.0, 0.5, 1.0)));
+  } else if (id == 4u) {
+    // Acid: green, yellow, chartreuse
+    return a + b * cos(6.28318 * (c * t + vec3<f32>(0.3, 0.0, 0.7)));
+  }
+  // Default palette 0: Rainbow
+  return a + b * cos(6.28318 * (c * t + vec3<f32>(0.0, 0.33, 0.67)));
 }
 
 fn sdRoundedBox(p: vec2<f32>, b: vec2<f32>, r: f32) -> f32 {
@@ -394,19 +407,25 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
 
   if (inButton > 0.5) {
     let note = (in.packedA >> 24) & 255u;
-    let inst = (in.packedA >> 16) & 255u;
-    let volCmd = (in.packedA >> 8) & 255u;
-    let effCmd = (in.packedB >> 8) & 255u;
-    let effVal = in.packedB & 255u;
+    let instRaw = (in.packedA >> 16) & 255u;
+    // High-precision packing: packedA bits 8-15 = duration (not volCmd)
+    // Effect data is in packedB: [effCmd:8][effVal:8][durationFlags:7][reserved:1][volCmdFull:8]
+    let effCmd = (in.packedB >> 24) & 255u;
+    let effVal = (in.packedB >> 16) & 255u;
+    let volCmdFull = in.packedB & 255u;
 
-    let hasNote = (note > 0u);
-    let hasExpression = (volCmd > 0u) || (effCmd > 0u);
+    // Unpack expression-only flag from bit 7 of inst field (EXPR-001)
+    let isExpressionOnly = (instRaw & 128u) != 0u;
+    let inst = instRaw & 127u;
+
+    let hasNote = (note > 0u && note < 120u);
+    let hasExpression = (volCmdFull > 0u) || (effCmd > 0u);
 
     // Housing color: tint by note presence (restore color-per-note display)
     var housingColor = fs.bgColor;
     if (hasNote) {
       let pitchHue = pitchClassFromIndex(note);
-      let baseColor = neonPalette(pitchHue);
+      let baseColor = selectPalette(uniforms.colorPalette, pitchHue);
       let instBand = inst & 15u;
       let instBright = 0.85 + (select(0.0, f32(instBand) / 15.0, instBand > 0u)) * 0.15;
       let tintColor = baseColor * instBright;
@@ -423,50 +442,59 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     }
     let isMuted = (ch.isMuted == 1u);
 
+    let blueColor  = vec3<f32>(0.15, 0.5, 1.0);
+    let amberColor = vec3<f32>(1.0, 0.55, 0.1);
+
     // --- THREE-EMITTER SYSTEM ---
-    
-    // EMITTER 1 (TOP): Blue Note-On Indicator
-    // Lights up BLUE when note is triggered or playhead is on this step
-    let blueColor = vec3<f32>(0.15, 0.5, 1.0);
+    // EMITTER 1 (TOP): Blue Note-On or Amber Expression-Only indicator
+    var topColor = blueColor;
     var topIntensity = 0.0;
     if (!isMuted) {
-      if (ch.trigger > 0u) {
+      if (isExpressionOnly) {
+        // Amber top emitter for expression-only cells
+        topColor = amberColor;
+        topIntensity = 1.0 + bloom * 2.0;
+      } else if (ch.trigger > 0u) {
+        topColor = blueColor;
         topIntensity = 3.0 + kick * 0.5;
       } else if (hasNote) {
+        topColor = blueColor;
         topIntensity = playheadActivation * 0.8;
       }
     }
-    let topColor = blueColor * (1.5 + bloom * 2.0);
+    let topEmitColor = topColor * (1.5 + bloom * 2.0);
     
-    // EMITTER 2 (MIDDLE): Steady Note Color
-    // Shows pitch color steadily whenever there's a note (does NOT blink)
+    // EMITTER 2 (MIDDLE): Steady Note Color (off for expression-only)
     var noteColor = vec3<f32>(0.15);
     var midIntensity = 0.12; // Base dim glow
-    if (hasNote) {
+    if (hasNote && !isExpressionOnly) {
       let pitchHue = pitchClassFromIndex(note);
-      let baseColor = neonPalette(pitchHue);
+      let baseColor = selectPalette(uniforms.colorPalette, pitchHue);
       let instBand = inst & 15u;
       let instBright = 0.85 + (select(0.0, f32(instBand) / 15.0, instBand > 0u)) * 0.15;
       noteColor = baseColor * instBright;
-      
-      // Steady indication - no flashing, just presence
       midIntensity = 0.6 + bloom * 2.0;
       if (isMuted) { midIntensity *= 0.3; }
+    } else if (isExpressionOnly) {
+      // Dark middle for expression-only; amber top handles the visual
+      noteColor = vec3<f32>(0.051, 0.051, 0.051);
+      midIntensity = 0.0;
     }
     let midColor = noteColor;
     
     // EMITTER 3 (BOTTOM): Amber Control Message Indicator
-    // Lights up AMBER when there's an effect or volume command
-    let amberColor = vec3<f32>(1.0, 0.55, 0.1);
+    // Suppressed for expression-only (amber moved to top emitter)
     var botIntensity = 0.0;
-    if (!isMuted) {
+    var botColor = vec3<f32>(0.0);
+    if (!isMuted && !isExpressionOnly) {
       if (hasExpression) {
-        botIntensity = 2.0;
+        botIntensity = 1.0 + bloom * 2.0;
+        botColor = amberColor * (1.5 + bloom * 2.0);
       } else if (hasNote && playheadActivation > 0.5) {
         botIntensity = 0.6;
+        botColor = amberColor * (1.5 + bloom * 2.0);
       }
     }
-    let botColor = amberColor * (1.5 + bloom * 2.0);
     
     // --- DRAW UNIFIED LENS CAP ---
     let lensUV = btnUV - vec2<f32>(0.5, 0.5);
@@ -474,26 +502,26 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     
     let unifiedLens = drawUnifiedLensCap(
         lensUV, lensSize,
-        vec4<f32>(topColor, topIntensity),    // Top: Blue note-on
-        vec4<f32>(midColor, midIntensity),    // Middle: Steady note color
-        vec4<f32>(botColor, botIntensity),    // Bottom: Amber control
+        vec4<f32>(topEmitColor, topIntensity),    // Top: Blue note-on or Amber expr-only
+        vec4<f32>(midColor, midIntensity),         // Middle: Steady note color
+        vec4<f32>(botColor, botIntensity),         // Bottom: Amber control
         aa
     );
     
     finalColor = mix(finalColor, unifiedLens.rgb, unifiedLens.a);
 
     // External glow when note is playing on playhead
-    if (playheadActivation > 0.5 && hasNote) {
+    if (playheadActivation > 0.5 && hasNote && !isExpressionOnly) {
       let pulseColor = mix(blueColor, amberColor, 0.5 + 0.5 * sin(beat * 6.2832));
       finalColor += pulseColor * playheadActivation * 0.4;
     }
 
     // Blue LED: bloom-independent external glow for active channels
-    if (!isMuted && ch.trigger > 0u) {
+    if (!isMuted && ch.trigger > 0u && !isExpressionOnly) {
       finalColor += blueColor * 0.4 * exp(-length(p) * 3.5);
     }
     // Amber LED: bloom-independent external glow for expression data
-    if (!isMuted && hasExpression) {
+    if (!isMuted && (hasExpression || isExpressionOnly)) {
       finalColor += amberColor * 0.3 * exp(-length(p) * 3.5);
     }
   }

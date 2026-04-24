@@ -26,6 +26,7 @@ struct Uniforms {
   bloomThreshold: f32,  // [17]
   invertChannels: u32,  // [18]
   dimFactor:      f32,  // [19]
+  colorPalette:   u32,  // [20]
 };
 
 @group(0) @binding(0) var<storage, read> cells:    array<u32>;

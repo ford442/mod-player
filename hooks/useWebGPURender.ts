@@ -76,6 +76,7 @@ export interface WebGPURenderParams {
   playbackStateRef?: React.MutableRefObject<PlaybackState>;
   canvasMetrics: { width: number; height: number };
   totalRows?: number;
+  colorPalette?: number;
 }
 
 export function useWebGPURender(
@@ -111,7 +112,7 @@ export function useWebGPURender(
   const bezelUniformBufferRef = useRef<GPUBuffer | null>(null);
 
   // Persistent typed arrays to avoid GC pressure
-  const uniformBufferDataRef = useRef(new ArrayBuffer(96));
+  const uniformBufferDataRef = useRef(new ArrayBuffer(100));
   const uniformUintRef = useRef(new Uint32Array(uniformBufferDataRef.current));
   const uniformFloatRef = useRef(new Float32Array(uniformBufferDataRef.current));
   const bezelBufferDataRef = useRef(new ArrayBuffer(128));
@@ -277,7 +278,7 @@ export function useWebGPURender(
           pipelineRef.current = device.createRenderPipeline({ layout: device.createPipelineLayout({ bindGroupLayouts: [bindGroupLayout] }), vertex: { module, entryPoint: 'vertex_main' }, fragment: { module, entryPoint: 'fragment_main', targets }, primitive: { topology: 'triangle-list' } });
         }
 
-        const uniformSize = layoutType === 'extended' ? 96 : (layoutType === 'texture' ? 64 : 32);
+        const uniformSize = layoutType === 'extended' ? 100 : (layoutType === 'texture' ? 64 : 32);
         const uniformBuffer = device.createBuffer({ size: alignTo(uniformSize, 256), usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
 
         if (shouldUseBackgroundPass(shaderFile)) {
@@ -496,6 +497,7 @@ export function useWebGPURender(
         bloomThreshold: p.bloomThreshold,
         invertChannels: p.invertChannels,
         dimFactor: p.dimFactor,
+        colorPalette: p.colorPalette ?? 0,
         gridRect: GRID_RECT,
       }, uniformUintRef.current, uniformFloatRef.current);
       device.queue.writeBuffer(uniformBufferRef.current, 0, uniformBufferDataRef.current, 0, uniformByteLength);

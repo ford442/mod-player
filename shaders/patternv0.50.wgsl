@@ -25,6 +25,7 @@ struct Uniforms {
   bloomIntensity: f32,
   bloomThreshold: f32,
   invertChannels: u32,
+  colorPalette: u32,
 };
 
 // DURA: Note duration constants
@@ -113,13 +114,25 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
   return out;
 }
 
-fn neonPalette(t: f32) -> vec3<f32> {
+fn selectPalette(id: u32, t: f32) -> vec3<f32> {
   let a = vec3<f32>(0.5, 0.5, 0.5);
   let b = vec3<f32>(0.5, 0.5, 0.5);
   let c = vec3<f32>(1.0, 1.0, 1.0);
-  let d = vec3<f32>(0.0, 0.33, 0.67);
-  let beatDrift = uniforms.beatPhase * 0.1;
-  return a + b * cos(6.28318 * (c * (t + beatDrift) + d));
+  if (id == 1u) {
+    // Warm: reds, oranges, yellows
+    return a + b * cos(6.28318 * (c * t + vec3<f32>(0.0, 0.1, 0.2)));
+  } else if (id == 2u) {
+    // Cool: blues, cyans, purples
+    return a + b * cos(6.28318 * (c * t + vec3<f32>(0.5, 0.7, 0.9)));
+  } else if (id == 3u) {
+    // Neon: pink, cyan, green
+    return a + b * cos(6.28318 * (c * t + vec3<f32>(0.0, 0.5, 1.0)));
+  } else if (id == 4u) {
+    // Acid: green, yellow, chartreuse
+    return a + b * cos(6.28318 * (c * t + vec3<f32>(0.3, 0.0, 0.7)));
+  }
+  // Default palette 0: Rainbow
+  return a + b * cos(6.28318 * (c * t + vec3<f32>(0.0, 0.33, 0.67)));
 }
 
 fn sdRoundedBox(p: vec2<f32>, b: vec2<f32>, r: f32) -> f32 {
@@ -208,7 +221,7 @@ fn calculateTopIntensity(
       intensity += beat * 0.3;
     }
   } else if (isExprOnly) {
-    intensity = 0.7 + bloom * 1.0;
+    intensity = 1.0 + bloom * 2.0;
   } else if (isSustain) {
     intensity = 0.1 + bloom * 0.2;
   }
@@ -525,7 +538,7 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
 
     if (isNoteOn || isSustain) {
       let pitchHue = pitchClassFromIndex(note);
-      let baseColor = neonPalette(pitchHue);
+      let baseColor = selectPalette(uniforms.colorPalette, pitchHue);
       let instBand = inst & 15u;
       let instBright = 0.85 + (select(0.0, f32(instBand) / 15.0, instBand > 0u)) * 0.15;
       noteColor = baseColor * instBright;
@@ -543,7 +556,7 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     } else if (isExprOnly) {
       // Dark center; amber top emitter illuminates via lens bloom
       noteColor = vec3<f32>(0.051, 0.051, 0.051);
-      midIntensity = 0.05;
+      midIntensity = 0.0;
     } else if (isDead) {
       noteColor = vec3<f32>(0.051, 0.051, 0.051);
       midIntensity = 0.02;
@@ -555,10 +568,10 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     var botColor = vec3<f32>(0.0);
     if (!isMuted && !isExprOnly) {
       if (isNoteOn && hasExpression) {
-        botIntensity = 0.5 + bloom * 0.8;
+        botIntensity = 1.0 + bloom * 2.0;
         botColor = amberColor;
       } else if (isSustain && hasExpression) {
-        botIntensity = 0.3 + bloom * 0.4;
+        botIntensity = 0.6 + bloom * 1.0;
         botColor = amberColor;
       }
     }
