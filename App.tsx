@@ -239,7 +239,7 @@ function App() {
 
   // Keyboard shortcuts
   useKeyboardShortcuts({
-    onPlayPause: () => { isPlaying ? stopMusic(false) : play(); },
+    onPlayPause: () => { if (isPlaying) { stopMusic(false); } else { play(); } },
     // Issue #135 binding table: ArrowLeft/Right seek one row
     onSeekForward: () => seekToStep(Math.floor(playbackRowFraction) + 1),
     onSeekBackward: () => seekToStep(Math.max(0, Math.floor(playbackRowFraction) - 1)),

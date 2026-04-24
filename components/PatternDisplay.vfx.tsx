@@ -282,7 +282,7 @@ export const PatternDisplayVFX: React.FC<{
       />
       
       {/* VFX Debug Overlay */}
-      {/* @ts-ignore - process may not be defined in browser */}
+      {/* @ts-expect-error - process may not be defined in browser */}
       {typeof process !== 'undefined' && process.env?.NODE_ENV === 'development' && (
         <div className="absolute top-2 right-2 bg-black/50 text-white text-xs font-mono p-2 rounded">
           <div>Frame: {frameTime.toFixed(2)}ms</div>

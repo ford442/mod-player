@@ -340,7 +340,7 @@ export function useWebGPURender(
       bindGroupRef.current = null;
       pipelineRef.current = null;
       if (bezelUniformBufferRef.current) {
-        try { bezelUniformBufferRef.current.destroy(); } catch (e) {}
+        try { bezelUniformBufferRef.current.destroy(); } catch { /* ignore */ }
         bezelUniformBufferRef.current = null;
       }
       bezelBindGroupRef.current = null;
@@ -352,11 +352,11 @@ export function useWebGPURender(
       channelsBufferRef.current = null;
       textureResourcesRef.current = null;
       if (videoTextureRef.current) {
-        try { videoTextureRef.current.destroy(); } catch (e) {}
+        try { videoTextureRef.current.destroy(); } catch { /* ignore */ }
         videoTextureRef.current = null;
       }
       if (deviceRef.current) {
-        try { deviceRef.current.destroy(); } catch (e) {}
+        try { deviceRef.current.destroy(); } catch { /* ignore */ }
       }
       deviceRef.current = null;
       contextRef.current = null;
@@ -544,7 +544,7 @@ export function useWebGPURender(
           textureResourcesRef.current = { sampler: device.createSampler({ magFilter: 'linear', minFilter: 'linear' }), view: videoTextureRef.current.createView() };
           refreshBindGroup(device);
         }
-        try { if (videoTextureRef.current) device.queue.copyExternalImageToTexture({ source, flipY: true }, { texture: videoTextureRef.current }, [sourceWidth, sourceHeight, 1]); } catch (e) {}
+        try { if (videoTextureRef.current) device.queue.copyExternalImageToTexture({ source, flipY: true }, { texture: videoTextureRef.current }, [sourceWidth, sourceHeight, 1]); } catch { /* ignore */ }
       }
     }
 

@@ -161,10 +161,10 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
       setIsPlaying(false);
       if (animationFrameHandle.current) cancelAnimationFrame(animationFrameHandle.current);
       if (audioContextRef.current) {
-        try { audioContextRef.current.suspend(); } catch (e) { }
+        try { audioContextRef.current.suspend(); } catch { /* ignore */ }
       }
       if (audioWorkletNodeRef.current) {
-        try { audioWorkletNodeRef.current.disconnect(); } catch (e) { }
+        try { audioWorkletNodeRef.current.disconnect(); } catch { /* ignore */ }
         audioWorkletNodeRef.current = null;
       }
     }
