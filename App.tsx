@@ -90,6 +90,7 @@ function App() {
   // Bloom and Color Scheme State
   const [bloomPreset, setBloomPreset] = useState<BloomPreset>(DEFAULT_BLOOM_PRESET);
   const [colorScheme, setColorScheme] = useState<ColorScheme>(DEFAULT_COLOR_SCHEME);
+  const [colorPalette, setColorPalette] = useState<number>(0);
 
   const {
     isReady,
@@ -536,6 +537,23 @@ function App() {
                         {SHADER_GROUPS.VIDEO.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
                     </select>
                 </div>
+                <div className={`w-px h-6 ${isDarkMode ? 'bg-gray-800' : 'bg-gray-300'}`}></div>
+
+                {/* Color Palette Selector */}
+                <div className="flex items-center gap-1">
+                    <span className="text-[10px] font-bold text-gray-500 uppercase px-1">Palette</span>
+                    <select
+                        className={`text-xs font-mono p-1 rounded border outline-none ${isDarkMode ? 'bg-gray-800 border-gray-600 text-white' : 'bg-white border-gray-300 text-black'}`}
+                        value={colorPalette}
+                        onChange={(e) => setColorPalette(parseInt(e.target.value, 10))}
+                    >
+                        <option value={0}>Rainbow</option>
+                        <option value={1}>Warm</option>
+                        <option value={2}>Cool</option>
+                        <option value={3}>Neon</option>
+                        <option value={4}>Acid</option>
+                    </select>
+                </div>
             </div>
         </div>
 
@@ -578,6 +596,7 @@ function App() {
              // Bloom settings from preset
              bloomIntensity={bloomPreset.intensity}
              bloomThreshold={bloomPreset.threshold}
+             colorPalette={colorPalette}
            />
 
            <MediaOverlay

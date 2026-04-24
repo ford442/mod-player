@@ -24,6 +24,11 @@ struct Uniforms {
   bloomThreshold: f32,
   invertChannels: u32,
   dimFactor: f32,
+  _r0: f32,
+  _r1: f32,
+  _r2: f32,
+  _r3: f32,
+  colorPalette: u32,
 };
 
 @group(0) @binding(0) var<storage, read> cells: array<u32>;
@@ -125,13 +130,25 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
   return out;
 }
 
-fn neonPalette(t: f32) -> vec3<f32> {
+fn selectPalette(id: u32, t: f32) -> vec3<f32> {
   let a = vec3<f32>(0.5, 0.5, 0.5);
   let b = vec3<f32>(0.5, 0.5, 0.5);
   let c = vec3<f32>(1.0, 1.0, 1.0);
-  let d = vec3<f32>(0.0, 0.33, 0.67);
-  let beatDrift = uniforms.beatPhase * 0.1;
-  return a + b * cos(6.28318 * (c * (t + beatDrift) + d));
+  if (id == 1u) {
+    // Warm: reds, oranges, yellows
+    return a + b * cos(6.28318 * (c * t + vec3<f32>(0.0, 0.1, 0.2)));
+  } else if (id == 2u) {
+    // Cool: blues, cyans, purples
+    return a + b * cos(6.28318 * (c * t + vec3<f32>(0.5, 0.7, 0.9)));
+  } else if (id == 3u) {
+    // Neon: pink, cyan, green
+    return a + b * cos(6.28318 * (c * t + vec3<f32>(0.0, 0.5, 1.0)));
+  } else if (id == 4u) {
+    // Acid: green, yellow, chartreuse
+    return a + b * cos(6.28318 * (c * t + vec3<f32>(0.3, 0.0, 0.7)));
+  }
+  // Default palette 0: Rainbow
+  return a + b * cos(6.28318 * (c * t + vec3<f32>(0.0, 0.33, 0.67)));
 }
 
 fn sdRoundedBox(p: vec2<f32>, b: vec2<f32>, r: f32) -> f32 {
@@ -249,7 +266,7 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
 
   if (hasNote) {
       let pitchHue = pitchClassFromPacked(in.packedA);
-      let baseCol  = neonPalette(pitchHue);
+      let baseCol  = selectPalette(uniforms.colorPalette, pitchHue);
       capColor = mix(capColor, baseCol * 0.55, 0.5);
 
       if (playheadActivation > 0.0) {

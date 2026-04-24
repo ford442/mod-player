@@ -121,8 +121,7 @@ fn neonPalette(t: f32) -> vec3<f32> {
   let c = vec3<f32>(1.0, 1.0, 1.0);
   let d = vec3<f32>(0.0, 0.33, 0.67);
   // Add time drift for beat-reactive color cycling
-  let beatDrift = uniforms.beatPhase * 0.1;
-  return a + b * cos(6.28318 * (c * (t + beatDrift) + d));
+  return a + b * cos(6.28318 * (c * t + d));
 }
 
 fn sdRoundedBox(p: vec2<f32>, b: vec2<f32>, r: f32) -> f32 {

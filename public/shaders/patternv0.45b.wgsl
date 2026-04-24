@@ -25,6 +25,11 @@ struct Uniforms {
   bloomThreshold: f32,
   invertChannels: u32,
   dimFactor: f32,
+  _r0: f32,
+  _r1: f32,
+  _r2: f32,
+  _r3: f32,
+  colorPalette: u32,
 };
 
 // Note constants for numeric note values
@@ -133,13 +138,25 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
   return out;
 }
 
-fn neonPalette(t: f32) -> vec3<f32> {
+fn selectPalette(id: u32, t: f32) -> vec3<f32> {
   let a = vec3<f32>(0.5, 0.5, 0.5);
   let b = vec3<f32>(0.5, 0.5, 0.5);
   let c = vec3<f32>(1.0, 1.0, 1.0);
-  let d = vec3<f32>(0.0, 0.33, 0.67);
-  let beatDrift = uniforms.beatPhase * 0.1;
-  return a + b * cos(6.28318 * (c * (t + beatDrift) + d));
+  if (id == 1u) {
+    // Warm: reds, oranges, yellows
+    return a + b * cos(6.28318 * (c * t + vec3<f32>(0.0, 0.1, 0.2)));
+  } else if (id == 2u) {
+    // Cool: blues, cyans, purples
+    return a + b * cos(6.28318 * (c * t + vec3<f32>(0.5, 0.7, 0.9)));
+  } else if (id == 3u) {
+    // Neon: pink, cyan, green
+    return a + b * cos(6.28318 * (c * t + vec3<f32>(0.0, 0.5, 1.0)));
+  } else if (id == 4u) {
+    // Acid: green, yellow, chartreuse
+    return a + b * cos(6.28318 * (c * t + vec3<f32>(0.3, 0.0, 0.7)));
+  }
+  // Default palette 0: Rainbow
+  return a + b * cos(6.28318 * (c * t + vec3<f32>(0.0, 0.33, 0.67)));
 }
 
 fn sdRoundedBox(p: vec2<f32>, b: vec2<f32>, r: f32) -> f32 {
@@ -250,9 +267,12 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   var capColor = vec3<f32>(0.15, 0.16, 0.18); // Inactive plastic
   var glow = 0.0;
 
-  // Read numeric note value from high-precision packing
+  // Read numeric note value and expression-only flag from high-precision packing
   let note = (in.packedA >> 24) & 255u;
+  let instByte = (in.packedA >> 16) & 255u;
   let hasNote = (note >= NOTE_MIN && note <= NOTE_MAX);
+  // Bit 7 of instByte is set by gpuPacking.ts for expression-only cells (EXPR-001)
+  let isExpressionOnly = !hasNote && ((instByte & 128u) != 0u);
 
   // Wrapped playhead position for this pattern
   let maxRows = f32(uniforms.numRows);
@@ -269,7 +289,7 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
 
   if (hasNote) {
       let pitchHue = pitchClassFromIndex(note);
-      let baseCol = neonPalette(pitchHue);
+      let baseCol = selectPalette(uniforms.colorPalette, pitchHue);
 
       // Base note color (subtle, always on for note cells)
       capColor = mix(capColor, baseCol, 0.4);
@@ -311,6 +331,19 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
           let expGlow = exp(-distFromCenter * 4.0) * sustainGlow;
           capColor += baseCol * expGlow * 0.6;
           glow += expGlow * 0.5;
+      }
+  } else if (isExpressionOnly) {
+      // ---- EXPRESSION-ONLY AMBER GLOW ----
+      // Cells with volume/effect commands but no note get an amber indicator
+      let amberCol = vec3<f32>(0.9, 0.45, 0.05);
+      capColor = mix(capColor, amberCol, 0.2);
+      if (abs(delta) < 0.5) {
+          glow = 0.5;
+          capColor = mix(capColor, amberCol, 0.7);
+          let pExpr = uv - 0.5;
+          let expGlow = exp(-length(pExpr) * 4.0);
+          capColor += amberCol * expGlow * 0.4;
+          glow += expGlow * 0.3;
       }
   }
 

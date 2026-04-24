@@ -42,6 +42,7 @@ interface PatternDisplayProps {
   debugPanelOpen?: boolean;
   onCloseDebug?: () => void;
   onOpenDebug?: () => void;
+  colorPalette?: number;
 }
 
 export const PatternDisplay: React.FC<PatternDisplayProps> = ({
@@ -80,6 +81,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   debugPanelOpen = false,
   onCloseDebug,
   onOpenDebug,
+  colorPalette = 0,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const glCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -210,6 +212,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     invertChannels, clickedButton, cellWidth, cellHeight, playheadRow,
     localTime, isHorizontal, externalVideoSource,
     canvasMetrics,
+    colorPalette,
     ...(totalRows !== undefined ? { totalRows } : {}),
     ...(playbackStateRef ? { playbackStateRef } : {}),
   });
@@ -220,6 +223,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     invertChannels, clickedButton, cellWidth, cellHeight, playheadRow,
     localTime, isHorizontal, externalVideoSource,
     canvasMetrics,
+    colorPalette,
     ...(totalRows !== undefined ? { totalRows } : {}),
     ...(playbackStateRef ? { playbackStateRef } : {}),
   };
