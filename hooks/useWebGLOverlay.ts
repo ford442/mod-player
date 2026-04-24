@@ -153,6 +153,8 @@ export function useWebGLOverlay(
     uniform float u_playhead;
     uniform int u_invertChannels;
     uniform int u_layoutMode; // 1=Circ, 2=Horiz32, 3=Horiz64
+    uniform float u_innerRadius;
+    uniform float u_outerRadius;
     uniform highp usampler2D u_cellData;    // RG32UI: (packedA, packedB)
     uniform highp sampler2D u_channelState; // RGBA32F: row0=(vol,pan,freq,trig), row1=(age,eff,effVal,muted)
 
@@ -281,9 +283,8 @@ export function useWebGLOverlay(
             if (u_invertChannels == 0) { trackIndexF = numTracks - 1.0 - trackIndexF; }
 
             // Match WGSL: no floor() — keeps sub-pixel parity with the GPU grid
-            float minDim = min(u_resolution.x, u_resolution.y);
-            float maxRadius = minDim * 0.45;
-            float minRadius = minDim * 0.15;
+            float maxRadius = u_outerRadius;
+            float minRadius = u_innerRadius;
             float ringDepth = (maxRadius - minRadius) / numTracks;
 
             // Match WGSL: cell center is at ring-start, not ring-center
@@ -791,12 +792,14 @@ export function useWebGLOverlay(
         u_capTexture: gl.getUniformLocation(prog, 'u_capTexture'),
         u_bloomIntensity: gl.getUniformLocation(prog, 'u_bloomIntensity'),
         u_timeSec: gl.getUniformLocation(prog, 'u_timeSec'),
+        u_innerRadius: gl.getUniformLocation(prog, 'u_innerRadius'),
+        u_outerRadius: gl.getUniformLocation(prog, 'u_outerRadius'),
       };
 
       console.log(`[WebGL] Shader: ${shaderFile}, Layout: ${getLayoutType(shaderFile)}`);
 
       const coreUniforms = ['u_resolution', 'u_cellData', 'u_cols', 'u_playhead'];
-      const variantUniforms = ['u_layoutMode', 'u_invertChannels', 'u_cellSize', 'u_offset', 'u_capTexture', 'u_rows', 'u_channelState', 'u_bloomIntensity', 'u_timeSec'];
+      const variantUniforms = ['u_layoutMode', 'u_invertChannels', 'u_cellSize', 'u_offset', 'u_capTexture', 'u_rows', 'u_channelState', 'u_bloomIntensity', 'u_timeSec', 'u_innerRadius', 'u_outerRadius'];
 
       const missingCore: string[] = [];
       const missingVariant: string[] = [];
@@ -961,6 +964,15 @@ export function useWebGLOverlay(
         // New uniforms
         setUniform('u_bloomIntensity', uniforms.u_bloomIntensity, gl.uniform1f.bind(gl), p.bloomIntensity ?? 1.0);
         setUniform('u_timeSec', uniforms.u_timeSec, gl.uniform1f.bind(gl), performance.now() / 1000.0);
+
+        // Dynamic radius uniforms — mirror WebGPU shader values
+        const minDim = Math.min(gl.canvas.width, gl.canvas.height);
+        const innerRadius = minDim * 0.15;
+        const outerRadius = minDim * 0.45;
+        setUniform('u_innerRadius', uniforms.u_innerRadius, gl.uniform1f.bind(gl), innerRadius);
+        setUniform('u_outerRadius', uniforms.u_outerRadius, gl.uniform1f.bind(gl), outerRadius);
+        uniformVals['u_innerRadius'] = innerRadius.toFixed(2);
+        uniformVals['u_outerRadius'] = outerRadius.toFixed(2);
 
         if (!hasResolution || !hasCols || !hasPlayhead) {
           const missing = ['u_resolution', 'u_cols', 'u_playhead'].filter((_, i) =>

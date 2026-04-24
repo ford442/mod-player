@@ -104,7 +104,7 @@ fn vs(
   let maxRadius = minDim * 0.45;
   let minRadius = minDim * 0.15;
   let ringDepth = (maxRadius - minRadius) / f32(numChannels);
-  let radius    = minRadius + f32(ringIndex) * ringDepth + ringDepth * 0.5;
+  let radius    = minRadius + f32(ringIndex) * ringDepth;
 
   let totalSteps = f32(uniforms.numRows);
   let anglePerStep = TWO_PI / totalSteps;

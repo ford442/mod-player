@@ -73,9 +73,9 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
   let circumference = 2.0 * 3.14159265 * radius;
   let arcLength = circumference / totalSteps;
 
-  // Sizing: 0.95 factor matches WebGL2 overlay for fuller squares
-  let btnW = arcLength * 0.95;
-  let btnH = ringDepth * 0.95;
+  // Sizing: 0.88/0.92 factors match WebGL2 overlay CAP_SCALE_FACTOR
+  let btnW = arcLength * 0.88;
+  let btnH = ringDepth * 0.92;
 
   let lp = quad[vertexIndex];
   let localPos = (lp - 0.5) * vec2<f32>(btnW, btnH);

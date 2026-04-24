@@ -494,7 +494,9 @@ export function useWebGPURender(
 
       const minDim = Math.min(actualCanvasW, actualCanvasH);
       const innerRadius = minDim * 0.15;
-      const outerRadius = minDim * 0.40;
+      // v0.45 (non-b) intentionally shrinks to 0.40 to make room for buttons;
+      // all other circular shaders (including v0.45b) use 0.45 to align with the WebGL2 overlay.
+      const outerRadius = (shaderFile.includes('v0.45') && !shaderFile.includes('v0.45b')) ? minDim * 0.40 : minDim * 0.45;
 
       const uniformByteLength = fillUniformPayload(layoutTypeRef.current, {
         numRows, numChannels,

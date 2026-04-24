@@ -105,7 +105,7 @@ fn vs(
   let maxRadius = minDim * 0.45;
   let minRadius = minDim * 0.15;
   let ringDepth = (maxRadius - minRadius) / f32(numChannels);
-  let radius    = minRadius + f32(ringIndex) * ringDepth + ringDepth * 0.5;
+  let radius    = minRadius + f32(ringIndex) * ringDepth;
 
   let anglePerStep = TWO_PI / TOTAL_STEPS;
   let theta        = -HALF_PI + f32(row % 64u) * anglePerStep;

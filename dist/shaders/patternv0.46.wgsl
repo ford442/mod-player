@@ -81,8 +81,8 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
   let circumference = 2.0 * 3.14159265 * radius;
   let arcLength = circumference / totalSteps;
 
-  let btnW = arcLength * 0.95;
-  let btnH = ringDepth * 0.95;
+  let btnW = arcLength * 0.88;
+  let btnH = ringDepth * 0.92;
 
   let lp = quad[vertexIndex];
   let localPos = (lp - vec2<f32>(0.5, 0.5)) * vec2<f32>(btnW, btnH);

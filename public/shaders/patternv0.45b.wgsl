@@ -92,8 +92,8 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
   let center = vec2<f32>(uniforms.canvasW * 0.5, uniforms.canvasH * 0.5);
   let minDim = min(uniforms.canvasW, uniforms.canvasH);
 
-  let maxRadius = minDim * 0.40;
-  let minRadius = minDim * 0.15;
+  let maxRadius = uniforms.outerRadius;
+  let minRadius = uniforms.innerRadius;
   let ringDepth = (maxRadius - minRadius) / f32(numChannels);
 
   let radius = minRadius + f32(ringIndex) * ringDepth;
@@ -105,7 +105,7 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
   let circumference = 2.0 * 3.14159265 * radius;
   let arcLength = circumference / totalSteps;
 
-  let btnW = arcLength * 0.92;
+  let btnW = arcLength * 0.88;
   let btnH = ringDepth * 0.92;
 
   let lp = quad[vertexIndex];

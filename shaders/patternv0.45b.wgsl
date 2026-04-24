@@ -110,14 +110,20 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
   let circumference = 2.0 * 3.14159265 * radius;
   let cellArc = circumference / totalSteps;
 
-  let cellWidth = cellArc * 0.92;
-  let cellHeight = ringDepth * 0.88;
+  let cellWidth = cellArc * 0.88;
+  let cellHeight = ringDepth * 0.92;
 
   let localPos = quad[vertexIndex] * vec2<f32>(cellWidth, cellHeight) - vec2<f32>(cellWidth * 0.5, cellHeight * 0.5);
 
+  let rotAng = theta + 1.570796;
+  let cA = cos(rotAng);
+  let sA = sin(rotAng);
+  let rotX = localPos.x * cA - localPos.y * sA;
+  let rotY = localPos.x * sA + localPos.y * cA;
+
   let worldPos = center + vec2<f32>(
-    cos(theta) * radius + localPos.x * cos(theta) - localPos.y * sin(theta),
-    sin(theta) * radius + localPos.x * sin(theta) + localPos.y * cos(theta)
+    cos(theta) * radius + rotX,
+    sin(theta) * radius + rotY
   );
 
   let ndc = vec2<f32>(
