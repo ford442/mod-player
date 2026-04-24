@@ -1,12 +1,12 @@
 # Weekly Plan - XASM-1 (patternv0.50 "Trap Frosted Lens")
 
 ## Today's focus
-**Fix First — channel-count buffer mismatch in the pattern packing pipeline.**
-The packer (`packPatternMatrixHighPrecision`) emits `64 × 5 = 320` cells while `PatternDisplay` allocates `64 × 4 = 256`. Fifth-channel / metadata-row data is silently dropped or overruns the buffer, which directly blocks the note-duration visualization feature (the DURA pipeline writes duration/rowOffset/isNoteOff into exactly that column). Land a verified fix today so downstream shader work can trust its inputs.
+**User Idea — Amber-vs-blue emitter differentiation for expression-only steps.**
+The DURA-001/002/003 packing pipeline (landed in PR #138) now reliably delivers `note`, `volCmd`, `effCmd`, and `durationRaw` to the GPU. The shader (v0.50) needs to consume this: route note-trigger rows to bright royal-blue top emitter, expression-only rows (volCmd>0 or effCmd>0, note==0) to amber top emitter, and sustain-tail rows to the current sustain color at reduced intensity. Target: new variant `patternv0.51.wgsl` (or in-place v0.50 edit if the change is additive-only) with verified visual output on a real MOD file.
 
 ## Ideas
 <!-- User-written ideas Noah accumulates during the week. Routine prioritizes these. -->
-- [ ] Amber-vs-blue emitter differentiation for expression-only steps (narrative §Note-Duration and §Graphical 2; partial groundwork in v0.50 three-LED rewrite Apr 12)
+- [in progress — 2026-04-24] Amber-vs-blue emitter differentiation for expression-only steps (narrative §Note-Duration and §Graphical 2; partial groundwork in v0.50 three-LED rewrite Apr 12)
 - [ ] Animated playhead scan-line arc at the current row in circular shaders (narrative §Graphical 4)
 - [ ] Fractional-row interpolation for smooth 144 Hz playhead (`smoothPlayhead = row + fraction`) via `useRef`, bypass React state (narrative §Advanced 1)
 - [ ] SharedArrayBuffer oscilloscope pipeline from worklet → GPU texture (narrative §Advanced 4)
@@ -20,11 +20,11 @@ The packer (`packPatternMatrixHighPrecision`) emits `64 × 5 = 320` cells while 
 
 ## Backlog
 <!-- Unfinished items, known bugs, deferred work. -->
-- [ ] **[in progress — 2026-04-17]** Bug 1: 5-channel packer vs 4-channel buffer mismatch — today's Fix First
-- [ ] Bug 3: PatternDisplay debug panel shows `Mode: NONE` while v0.50 renders (UI/state disconnect)
-- [ ] Bug 4: ▶️ Play button scrolls canvas off-screen (focus/scroll side effect)
-- [ ] Verify Bug 5 (shader `.bak`/`.kate-swp` files) actually cleaned — current `ls` shows 58 `.wgsl` files with no backups visible; confirm and add `.gitignore` patterns if missing
-- [ ] Verify Bug 2 (ScriptProcessor fallback) fully resolved by #131 `refactor(worklet): remove registerProcessor hack` — spot-check on prod
+- [ ] Bug 3: PatternDisplay debug panel shows `Mode: NONE` while v0.50 renders (UI/state disconnect — `components/PatternDisplay.tsx` debug state not updated on shader load)
+- [ ] Bug 4: ▶️ Play button scrolls canvas off-screen (focus/scroll side effect — likely `autoFocus` or `scrollIntoView` on play button element)
+- [ ] Verify Bug 5 (shader `.bak`/`.kate-swp` files) — 59 .wgsl files visible now (was 58); confirm no swp/bak committed; add `.gitignore` patterns if missing
+- [ ] Verify Bug 2 (ScriptProcessor fallback) fully resolved by #131 — spot-check on prod at `test.1ink.us/xm-player/`
+- [ ] Draft PR #142 (StoragePlaylist) — still open as draft; needs test plan verification before merge
 - [ ] CRT scanline / phosphor post-process shader (narrative §Shader)
 - [ ] Dynamic per-instrument color palettes (narrative §Shader / §UI)
 - [ ] Compute-shader port of note-duration calculation (narrative §Performance)
@@ -32,6 +32,10 @@ The packer (`packPatternMatrixHighPrecision`) emits `64 × 5 = 320` cells while 
 - [ ] Storage-manager integration: `/api/shaders`, `/api/songs`, rating hookup (narrative §Integration)
 
 ## Done
+- [x] 2026-04-24 — StoragePlaylist cloud MOD browser component, `usePlaylist.addItem()` method (#141)
+- [x] 2026-04-24 — v0.23 shader global aspect-ratio correction (#140)
+- [x] 2026-04-24 — `useWebGLOverlay` uniform extraction optimization (#139)
+- [x] 2026-04-24 — Note-sustain-glow fix: dynamic buffer sizing from packed data, DURA-001/002/003 pipeline, v0.45b sustain logic stabilized (#138)
 - [x] 2026-04-17 — WebGL2 overlay coordinate alignment with WebGPU shader steps (#132)
 - [x] 2026-04-17 — Outstanding TypeScript errors swept (#133)
 - [x] 2026-04-16 — Worklet registerProcessor hack removed, formal `processorOptions` path (#131)
@@ -47,10 +51,10 @@ The packer (`packPatternMatrixHighPrecision`) emits `64 × 5 = 320` cells while 
 - [x] 2026-04-10 — Stale channel buffer + bind-group refresh fix; shader animation on second-song-load fix
 
 ## Last run
-Date: 2026-04-17 (first run under new routine template)
-Mode: Fix First
-Focus: 5-channel / 4-channel buffer mismatch in `packPatternMatrixHighPrecision` ↔ `PatternDisplay` cells buffer.
-Outcome: kickoff dispatch generated; kimi-cli swarm task, Copilot issue draft, 3 chat-model expansions, Claude Code deploy-dry-run task, and Jules wrap-up template all queued. Awaiting kimi-cli run.
+Date: 2026-04-24
+Mode: User Idea
+Focus: Amber-vs-blue emitter differentiation for expression-only steps (patternv0.51 / v0.50 edit)
+Outcome: Full dispatch generated. Fix First (buffer mismatch) confirmed resolved by PR #138 — moved to Done. New developments since 04-17: PRs #138-#141 (sustain glow, uniform opt, aspect fix, StoragePlaylist). Copilot issue targeting localStorage shader persistence. Jules wrap-up template queued for end of day.
 
 ---
 
