@@ -159,6 +159,14 @@ fn selectPalette(id: u32, t: f32) -> vec3<f32> {
   return a + b * cos(6.28318 * (c * t + vec3<f32>(0.0, 0.33, 0.67)));
 }
 
+fn neonPalette(t: f32) -> vec3<f32> {
+  let a = vec3<f32>(0.5, 0.5, 0.5);
+  let b = vec3<f32>(0.5, 0.5, 0.5);
+  let c = vec3<f32>(1.0, 1.0, 1.0);
+  let d = vec3<f32>(0.0, 0.33, 0.67);
+  return a + b * cos(6.28318 * (c * t + d));
+}
+
 fn sdRoundedBox(p: vec2<f32>, b: vec2<f32>, r: f32) -> f32 {
   let q = abs(p) - b + r;
   return length(max(q, vec2<f32>(0.0))) + min(max(q.x, q.y), 0.0) - r;
@@ -215,24 +223,21 @@ fn unpackDurationInfo(packedA: u32, packedB: u32) -> NoteDurationInfo {
 @fragment
 fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   if (in.channel >= uniforms.numChannels) { return vec4<f32>(1.0, 0.0, 0.0, 1.0); }
+
   let dimFactor = uniforms.dimFactor;
   let bloom = uniforms.bloomIntensity;
   let isPlaying = (uniforms.isPlaying == 1u);
-
   let uv = in.uv;
 
-  // --- UI RENDER ---
+  // === UI PASS (unchanged) ===
   if (in.isUI == 1u) {
       let gridBottom = 0.85;
-      if (uv.y <= gridBottom) {
-          discard;
-      }
+      if (uv.y <= gridBottom) { discard; }
 
       var col = vec3<f32>(0.0);
       let aspect = uniforms.canvasW / uniforms.canvasH;
       let ctrlH = 1.0 - gridBottom;
       let ctrlUV = vec2<f32>(uv.x, (uv.y - gridBottom) / ctrlH);
-
       let btnY = 0.5;
 
       // Play
@@ -248,7 +253,7 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
       let dStop = sdBox(pStop * 4.0, vec2<f32>(0.25));
       col = mix(col, vec3<f32>(0.8, 0.1, 0.1), 1.0 - smoothstep(0.0, 0.05, dStop));
 
-      // Loop (Circle)
+      // Loop
       var pLoop = ctrlUV - vec2<f32>(0.4, btnY);
       pLoop.x *= aspect * (ctrlH / 1.0);
       let dLoop = abs(sdCircle(pLoop * 4.0, 0.25)) - 0.05;
@@ -256,120 +261,118 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
       return vec4<f32>(col * dimFactor, 1.0);
   }
 
-  // Frosted Cap Shape
+  // === FROSTED CAP ===
   let dBox = sdRoundedBox(uv - 0.5, vec2<f32>(0.42), 0.1);
-  let isCap = dBox < 0.0;
+  if (dBox > 0.0) { discard; }
 
-  if (!isCap) {
-      discard;
-  }
-
-  var capColor = vec3<f32>(0.15, 0.16, 0.18); // Inactive plastic
+  var capColor = vec3<f32>(0.11, 0.12, 0.14);
   var glow = 0.0;
 
-  // Read numeric note value and expression-only flag from high-precision packing
+  // === UNPACK ===
   let note = (in.packedA >> 24) & 255u;
   let instByte = (in.packedA >> 16) & 255u;
   let hasNote = (note >= NOTE_MIN && note <= NOTE_MAX);
-  // Bit 7 of instByte is set by gpuPacking.ts for expression-only cells (EXPR-001)
-  let isExpressionOnly = !hasNote && ((instByte & 128u) != 0u);
+  let isExpressionOnly = (instByte & 128u) != 0u;
 
-  // Wrapped playhead position for this pattern
   let maxRows = f32(uniforms.numRows);
   let playheadStep = uniforms.playheadRow - floor(uniforms.playheadRow / maxRows) * maxRows;
-
-  // Signed delta: how many rows ahead the playhead is from this cell.
-  // Wrapped so forward-in-time deltas are always >= 0.
   var delta = playheadStep - f32(in.row);
-  if (delta < -maxRows * 0.5) {
-      delta += maxRows;
-  } else if (delta > maxRows * 0.5) {
-      delta -= maxRows;
-  }
+  if (delta < -maxRows * 0.5) { delta += maxRows; }
+  else if (delta > maxRows * 0.5) { delta -= maxRows; }
 
   if (hasNote) {
       let pitchHue = pitchClassFromIndex(note);
-      let baseCol = selectPalette(uniforms.colorPalette, pitchHue);
+      let baseCol = neonPalette(pitchHue);
 
-      // Base note color (subtle, always on for note cells)
-      capColor = mix(capColor, baseCol, 0.4);
+      capColor = mix(capColor, baseCol, 0.36);
 
-      // Unpack duration info from packed cell data
       let dInfo = unpackDurationInfo(in.packedA, in.packedB);
       let isNoteOffCmd = note == NOTE_OFF || note == NOTE_CUT || note == NOTE_FADE;
-      let isNoteOnCell = (dInfo.rowOffset == 0u && !dInfo.isNoteOff && !isNoteOffCmd);
+      let isNoteOnCell = dInfo.rowOffset == 0u && !dInfo.isNoteOff && !isNoteOffCmd;
 
-      // ---- NOTE-ON SUSTAIN ----
-      // Cell illuminates when playhead hits the note-on row,
-      // stays lit for the note's duration, then turns off.
       let durationF = f32(dInfo.duration);
       var sustainGlow = 0.0;
+
       if (isNoteOnCell && durationF > 0.0 && delta >= 0.0 && delta <= durationF) {
           sustainGlow = 1.0;
       }
 
+      // === SUSTAIN + FADE OUT (last 10%) ===
       if (sustainGlow > 0.0) {
-          glow = max(glow, sustainGlow);
-          // Deepen color while sustained
-          capColor = mix(capColor, baseCol, 0.85);
+          glow = max(glow, sustainGlow * 0.92);
+
+          // Brighter own-color mix
+          let brightSustain = clamp(baseCol * 1.68, vec3<f32>(0.0), vec3<f32>(1.0));
+          capColor = mix(capColor, brightSustain, 0.87);
+
+          // Gentle shimmer
+          let shimmer = sin(uniforms.timeSec * 5.5 + f32(in.row) * 0.65) * 0.07 + 0.93;
+          capColor *= shimmer;
+
+          // Fade out in final 10% of duration
+          if (delta > durationF * 0.9) {
+              let fadeT = (delta - durationF * 0.9) / (durationF * 0.1);
+              let fade = smoothstep(1.0, 0.0, fadeT);
+              capColor *= fade;
+          }
       }
 
-      // ---- TRIGGER FLASH ----
-      // Bright flash on the exact note-on row
+      // === TRIGGER FLASH (bright own color) ===
       let ch = channels[in.channel];
       if (ch.trigger > 0u && isNoteOnCell) {
-          glow += 1.0;
-          capColor += vec3<f32>(0.5);
+          glow += 1.4;
+          let brightFlash = clamp(baseCol * 2.15, vec3<f32>(0.0), vec3<f32>(1.0));
+          capColor = mix(capColor, brightFlash, 0.96);
       }
 
-      // ---- EXP LED GLOW ----
-      // Exponential radial glow emanating from cell center while sustained.
-      // Creates a soft "LED bloom" effect on active note cells.
+      // === ORGANIC LED BLOOM (tunable radius) ===
       if (sustainGlow > 0.0) {
           let p = uv - 0.5;
-          let distFromCenter = length(p);
-          let expGlow = exp(-distFromCenter * 4.0) * sustainGlow;
-          capColor += baseCol * expGlow * 0.6;
-          glow += expGlow * 0.5;
+          let dist = length(p);
+          let expGlow = exp2(-dist * 3.6) * sustainGlow;
+          capColor += baseCol * expGlow * 0.58;
+          glow += expGlow * 0.48;
       }
-  } else if (isExpressionOnly) {
-      // ---- EXPRESSION-ONLY AMBER GLOW ----
-      // Cells with volume/effect commands but no note get an amber indicator
-      let amberCol = vec3<f32>(0.9, 0.45, 0.05);
-      capColor = mix(capColor, amberCol, 0.2);
+
+      // Rim light on active notes
+      if (sustainGlow > 0.0 || (ch.trigger > 0u && isNoteOnCell)) {
+          let rim = pow(1.0 - abs(dBox) * 7.5, 2.2) * 0.22;
+          capColor += baseCol * rim;
+      }
+  }
+  // === EXPRESSION-ONLY ===
+  else if (isExpressionOnly) {
+      let expressionCol = vec3<f32>(0.88, 0.47, 0.09);
       if (abs(delta) < 0.5) {
-          glow = 0.5;
-          capColor = mix(capColor, amberCol, 0.7);
-          let pExpr = uv - 0.5;
-          let expGlow = exp(-length(pExpr) * 4.0);
-          capColor += amberCol * expGlow * 0.4;
-          glow += expGlow * 0.3;
+          glow = 0.48;
+          capColor = mix(capColor, expressionCol, 0.68);
+      } else {
+          capColor = mix(capColor, expressionCol, 0.17);
       }
   }
 
-  // ---- KICK REACTIVE GLOW ----
-  // Global kick pulse (always active, independent of notes)
+  // === RHYTHMIC KICK PULSE ===
   let p = uv - 0.5;
-  let kickPulse = uniforms.kickTrigger * exp(-length(p) * 3.0) * 0.3;
-  capColor += vec3<f32>(0.9, 0.2, 0.4) * kickPulse * bloom;
+  let kickPulse = max(0.0, sin(3.14159 * uniforms.timeSec * 1.8)) * uniforms.kickTrigger;
+  capColor += vec3<f32>(0.92, 0.22, 0.42) * kickPulse * bloom * 0.9;
 
-  // ---- FROSTED MATERIAL ----
-  let edge = smoothstep(0.0, 0.1, -dBox);
-  let light = vec3<f32>(0.5, -0.8, 1.0);
-  let n = normalize(vec3<f32>((uv.x - 0.5), (uv.y - 0.5), 0.5));
-  let diff = max(0.0, dot(n, normalize(light)));
+  // === FROSTED MATERIAL + LIGHTING ===
+  let edge = smoothstep(0.0, 0.022, -dBox);
+  let lightDir = normalize(vec3<f32>(0.35, -0.85, 0.65));
+  let n = normalize(vec3<f32>(uv.x - 0.5, uv.y - 0.5, 0.55));
+  let diff = max(0.0, dot(n, lightDir));
+  let fresnel = pow(1.0 - max(0.0, dot(n, vec3<f32>(0.0, 0.0, 1.0))), 2.8) * 0.32;
 
-  capColor *= (0.5 + 0.5 * diff);
-  capColor += vec3<f32>(glow * 0.5);
+  capColor = capColor * (0.52 + 0.48 * diff) + fresnel * 0.11;
+  capColor += vec3<f32>(glow * 0.58);
 
-  // Bloom boost
   if (glow > 0.0) {
-      capColor *= (1.0 + bloom);
+      capColor *= (1.0 + bloom * 0.75);
   }
 
-  // Dithering for night mode
-  let noise = fract(sin(dot(in.uv * uniforms.timeSec, vec2<f32>(12.9898, 78.233))) * 43758.5453);
-  capColor += (noise - 0.5) * 0.01;
+  // Light dither
+  let noise = fract(sin(dot(in.uv * uniforms.timeSec * 0.7, vec2<f32>(12.9898, 78.233))) * 43758.5453);
+  capColor += (noise - 0.5) * 0.007;
 
   return vec4<f32>(capColor * dimFactor, edge);
 }
