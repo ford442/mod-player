@@ -77,6 +77,7 @@ export interface WebGPURenderParams {
   canvasMetrics: { width: number; height: number };
   totalRows?: number;
   colorPalette?: number;
+  stepsLength?: number;
 }
 
 export function useWebGPURender(
@@ -484,11 +485,12 @@ export function useWebGPURender(
 
       let effectiveCellW = p.cellWidth;
       let effectiveCellH = p.cellHeight;
+      const stepsCount = p.stepsLength ?? 32;
       if (shaderFile.includes('v0.21') || shaderFile.includes('v0.40') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.47') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49') || shaderFile.includes('v0.50')) {
-        effectiveCellW = (GRID_RECT.w * actualCanvasW) / 32.0;
+        effectiveCellW = (GRID_RECT.w * actualCanvasW) / stepsCount;
         effectiveCellH = (GRID_RECT.h * actualCanvasH) / numChannels;
       } else if (shaderFile.includes('v0.39')) {
-        effectiveCellW = actualCanvasW / 32.0;
+        effectiveCellW = actualCanvasW / stepsCount;
         effectiveCellH = actualCanvasH / numChannels;
       }
 
@@ -519,6 +521,7 @@ export function useWebGPURender(
         innerRadius,
         outerRadius,
         colorPalette: p.colorPalette ?? 0,
+        stepsLength: p.stepsLength ?? 32,
         gridRect: GRID_RECT,
       }, uniformUintRef.current, uniformFloatRef.current);
       device.queue.writeBuffer(uniformBufferRef.current, 0, uniformBufferDataRef.current, 0, uniformByteLength);

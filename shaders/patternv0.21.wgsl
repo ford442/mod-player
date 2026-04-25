@@ -24,6 +24,7 @@ struct Uniforms {
   invertChannels: u32,
   dimFactor: f32,
   gridRect: vec4<f32>,  // x, y, w, h (normalized)
+  stepsLength: u32,     // 32 or 64 steps visible per page
 };
 
 @group(0) @binding(0) var<storage, read> cells: array<u32>;
@@ -59,7 +60,7 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
   // Horizontal Layout: X = Row (Time), Y = Channel
   // Static Paged Grid: We only render active page of 32 steps.
   
-  let stepsPerPage = 32.0;
+  let stepsPerPage = select(32.0, f32(uniforms.stepsLength), uniforms.stepsLength >= 32u);
   let pageStart = floor(f32(uniforms.playheadRow) / stepsPerPage) * stepsPerPage;
   
   // Calculate row local to current page (0..31)
