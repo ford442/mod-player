@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { LibOpenMPT, ModuleInfo, PatternMatrix, ChannelShadowState, PlaybackState } from '../types';
 import { OpenMPTWorkletEngine } from '../audio-worklet/OpenMPTWorkletEngine';
-import { getPatternMatrix } from '../utils/patternExtractor';
+import { getPatternMatrix, computeNoteAges } from '../utils/patternExtractor';
 import { startAudioPlayback, AudioGraphRefs, AudioGraphCallbacks, AudioGraphConfig } from './useAudioGraph';
 import { useWorkletLoader, getWorkletUrl } from './useWorkletLoader';
 
@@ -354,6 +354,36 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
     // TIMING FIX: Smooth row fraction for visual display
     const smoothedRowFraction = rowFraction * ROW_INTERPOLATION_SMOOTHING + (playbackRowFraction * (1 - ROW_INTERPOLATION_SMOOTHING));
     setPlaybackRowFraction(smoothedRowFraction);
+
+    // Compute note ages for hardware choke in shader (only update React state when integer ages change)
+    const currentMatrix = patternMatricesRef.current[order];
+    const numChannels = channelStatesRef.current.length;
+    if (currentMatrix && numChannels > 0) {
+      const playheadRow = row + smoothedRowFraction;
+      const noteAges = computeNoteAges(currentMatrix, playheadRow);
+      let changed = false;
+      for (let c = 0; c < numChannels; c++) {
+        const newAge = noteAges[c] ?? 1000;
+        const oldAge = channelStatesRef.current[c]?.noteAge ?? 1000;
+        if (Math.floor(newAge) !== Math.floor(oldAge)) {
+          changed = true;
+        }
+        const existing = channelStatesRef.current[c];
+        channelStatesRef.current[c] = {
+          volume: existing?.volume ?? 0,
+          pan: existing?.pan ?? 128,
+          freq: existing?.freq ?? 0,
+          trigger: existing?.trigger ?? 0,
+          noteAge: newAge,
+          activeEffect: existing?.activeEffect ?? 0,
+          effectValue: existing?.effectValue ?? 0,
+          isMuted: existing?.isMuted ?? 0,
+        };
+      }
+      if (changed) {
+        setChannelStates([...channelStatesRef.current]);
+      }
+    }
 
     // Calculate beat phase based on actual audio time
     const beatPhaseValue = (time * 2) % 1;

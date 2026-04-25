@@ -2,7 +2,8 @@
 // Frosted Bloom with Note-On Cell Sustain + Exp LEDs
 // - Note-on cell brightens and stays lit for the note's duration
 // - Exponential LED glow on active note cells
-// - No playhead trail — simple on/off per note duration
+// - Hardware choke: only the most recent note per channel sustains
+// - Strict exclusive bounds (delta < duration) to prevent boundary overlap
 
 struct Uniforms {
   numRows: u32,
@@ -294,10 +295,13 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
       let isNoteOffCmd = note == NOTE_OFF || note == NOTE_CUT || note == NOTE_FADE;
       let isNoteOnCell = dInfo.rowOffset == 0u && !dInfo.isNoteOff && !isNoteOffCmd;
 
+      let ch = channels[in.channel];
       let durationF = f32(dInfo.duration);
       var sustainGlow = 0.0;
 
-      if (isNoteOnCell && durationF > 0.0 && delta >= 0.0 && delta <= durationF) {
+      // Hardware choke: only the most recent active note on this channel may sustain
+      let isCurrentNote = abs(delta - ch.noteAge) < 1.0;
+      if (isNoteOnCell && durationF > 0.0 && delta >= 0.0 && delta < durationF && isCurrentNote) {
           sustainGlow = 1.0;
       }
 
@@ -322,7 +326,6 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
       }
 
       // === TRIGGER FLASH (bright own color) ===
-      let ch = channels[in.channel];
       if (ch.trigger > 0u && isNoteOnCell) {
           glow += 1.4;
           let brightFlash = clamp(baseCol * 2.15, vec3<f32>(0.0), vec3<f32>(1.0));

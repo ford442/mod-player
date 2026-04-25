@@ -67,3 +67,37 @@ export function getPatternMatrix(
 
   return { order: orderIndex, patternIndex, numRows, numChannels, rows };
 }
+
+/** Compute per-channel noteAge: how many rows ago the most recent note-on occurred.
+ *  Returns an array where each entry is the age in rows (0 = current row).
+ *  If no recent note-on is found, age defaults to 1000 (effectively "no note").
+ */
+export function computeNoteAges(matrix: PatternMatrix, playheadRow: number): number[] {
+  const numChannels = matrix.numChannels;
+  const numRows = matrix.numRows;
+  const ages = new Array(numChannels).fill(1000);
+  const row = Math.floor(playheadRow);
+
+  for (let c = 0; c < numChannels; c++) {
+    // Scan backwards from current row for most recent note-on
+    for (let r = row; r >= 0; r--) {
+      const cell = matrix.rows[r]?.[c];
+      if (cell && cell.note && cell.note >= 1 && cell.note <= 96) {
+        ages[c] = playheadRow - r;
+        break;
+      }
+    }
+    // If not found, scan wrap-around from bottom of pattern
+    if (ages[c] === 1000) {
+      for (let r = numRows - 1; r > row; r--) {
+        const cell = matrix.rows[r]?.[c];
+        if (cell && cell.note && cell.note >= 1 && cell.note <= 96) {
+          ages[c] = playheadRow + (numRows - r);
+          break;
+        }
+      }
+    }
+  }
+
+  return ages;
+}

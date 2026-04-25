@@ -6,6 +6,7 @@ import { LibOpenMPT, PatternMatrix, ChannelShadowState, ModuleInfo, PatternCell 
 import { OpenMPTWorkletEngine } from '../audio-worklet/OpenMPTWorkletEngine';
 import type { WorkletPositionData } from '../audio-worklet/types';
 import { getWorkletUrl } from './useWorkletLoader';
+import { computeNoteAges } from '../utils/patternExtractor';
 
 export interface AudioGraphRefs {
   libopenmptRef:       React.MutableRefObject<LibOpenMPT | null>;
@@ -188,8 +189,11 @@ export async function startAudioPlayback(
             refs.pendingSeekRef.current = null;
           }
 
-          // Update channel VU data
+          // Update channel VU data + noteAge for hardware choke
           const numCh = data.numChannels;
+          const matrix = refs.patternMatricesRef.current[data.currentOrder];
+          const playheadRow = data.currentRow;
+          const noteAges = matrix ? computeNoteAges(matrix, playheadRow) : null;
           for (let c = 0; c < numCh && c < refs.channelStatesRef.current.length; c++) {
             const existing = refs.channelStatesRef.current[c];
             refs.channelStatesRef.current[c] = {
@@ -197,7 +201,7 @@ export async function startAudioPlayback(
               pan: existing?.pan ?? 128,
               freq: existing?.freq ?? 0,
               trigger: (data.channelVU[c] || 0) > 0.05 ? 1 : 0,
-              noteAge: existing?.noteAge ?? 0,
+              noteAge: noteAges?.[c] ?? existing?.noteAge ?? 1000,
               activeEffect: existing?.activeEffect ?? 0,
               effectValue: existing?.effectValue ?? 0,
               isMuted: existing?.isMuted ?? 0,
@@ -379,6 +383,25 @@ export async function startAudioPlayback(
                 row === refs.pendingSeekRef.current.row) {
               refs.seekAcknowledgedRef.current = true;
               refs.pendingSeekRef.current = null;
+            }
+
+            // Compute note ages for hardware choke in shader
+            const matrix = refs.patternMatricesRef.current[order];
+            if (matrix) {
+              const noteAges = computeNoteAges(matrix, row);
+              for (let c = 0; c < noteAges.length && c < refs.channelStatesRef.current.length; c++) {
+                const existing = refs.channelStatesRef.current[c];
+                refs.channelStatesRef.current[c] = {
+                  volume: existing?.volume ?? 0,
+                  pan: existing?.pan ?? 128,
+                  freq: existing?.freq ?? 0,
+                  trigger: existing?.trigger ?? 0,
+                  noteAge: noteAges[c] ?? existing?.noteAge ?? 1000,
+                  activeEffect: existing?.activeEffect ?? 0,
+                  effectValue: existing?.effectValue ?? 0,
+                  isMuted: existing?.isMuted ?? 0,
+                };
+              }
             }
           } else if (type === 'ended') {
             console.log('[PLAY] Worklet reported module ended');
