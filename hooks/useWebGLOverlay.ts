@@ -22,6 +22,9 @@ import {
 const DEFAULT_ROWS = 64;
 const DEFAULT_CHANNELS = 4;
 
+const CORE_UNIFORMS = new Set(['u_resolution', 'u_cellData', 'u_cols', 'u_playhead']);
+const VARIANT_UNIFORMS = new Set(['u_layoutMode', 'u_invertChannels', 'u_cellSize', 'u_offset', 'u_capTexture', 'u_rows', 'u_channelState', 'u_bloomIntensity', 'u_timeSec', 'u_innerRadius', 'u_outerRadius']);
+
 // Runtime base URL detection for subdirectory deployment (e.g., /xm-player/)
 const detectRuntimeBase = (): string => {
   const viteBase = import.meta.env.BASE_URL;
@@ -799,16 +802,13 @@ export function useWebGLOverlay(
 
       console.log(`[WebGL] Shader: ${shaderFile}, Layout: ${getLayoutType(shaderFile)}`);
 
-      const coreUniforms = ['u_resolution', 'u_cellData', 'u_cols', 'u_playhead'];
-      const variantUniforms = ['u_layoutMode', 'u_invertChannels', 'u_cellSize', 'u_offset', 'u_capTexture', 'u_rows', 'u_channelState', 'u_bloomIntensity', 'u_timeSec', 'u_innerRadius', 'u_outerRadius'];
-
       const missingCore: string[] = [];
       const missingVariant: string[] = [];
       for (const [name, loc] of Object.entries(uniformLocs)) {
         if (loc === null) {
-          if (coreUniforms.includes(name)) {
+          if (CORE_UNIFORMS.has(name)) {
             missingCore.push(name);
-          } else if (variantUniforms.includes(name)) {
+          } else if (VARIANT_UNIFORMS.has(name)) {
             missingVariant.push(name);
           }
         }
