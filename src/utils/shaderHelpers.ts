@@ -42,13 +42,14 @@ export function getBackgroundShaderForPattern(shaderFile: string): string | null
     return 'chassis_frosted.wgsl';
   }
   
-  // Circular hardware bezel (v0.45-v0.50)
+  // Circular hardware bezel (v0.45-v0.51)
   if (shaderFile.includes('v0.45') || 
       shaderFile.includes('v0.46') || 
       shaderFile.includes('v0.47') || 
       shaderFile.includes('v0.48') || 
       shaderFile.includes('v0.49') || 
-      shaderFile.includes('v0.50')) {
+      shaderFile.includes('v0.50') || 
+      shaderFile.includes('v0.51')) {
     return 'bezel.wgsl';
   }
   
@@ -106,8 +107,9 @@ export const SHADER_CATEGORIES = {
     'patternv0.45.wgsl',
   ],
   
-  // Circular layouts with trap/bezel effect (v0.47-v0.50)
+  // Circular layouts with trap/bezel effect (v0.47-v0.51)
   TRAP_CIRCULAR: [
+    'patternv0.51.wgsl',
     'patternv0.50.wgsl',
     'patternv0.49.wgsl',
     'patternv0.48.wgsl',
@@ -134,7 +136,7 @@ export function getShaderDescription(shaderFile: string): string {
   if (shaderFile.includes('v0.46')) return 'Frosted glass circular overlay with bezel ring';
   if (shaderFile.includes('v0.45')) return 'Frosted glass circular with bloom';
   if (shaderFile.includes('v0.47') || shaderFile.includes('v0.48')) return 'Trapcode-style frosted disc';
-  if (shaderFile.includes('v0.49') || shaderFile.includes('v0.50')) return 'Trapcode-style frosted lens';
+  if (shaderFile.includes('v0.49') || shaderFile.includes('v0.50') || shaderFile.includes('v0.51')) return 'Trapcode-style frosted lens';
   if (shaderFile.includes('v0.40') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44')) return 'Frosted glass wall panel';
   if (shaderFile.includes('v0.38')) return 'Glass circular';
   if (shaderFile.includes('v0.23') || shaderFile.includes('v0.24')) return 'Video/cloud tunnel';
