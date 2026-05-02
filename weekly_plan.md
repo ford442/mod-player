@@ -1,20 +1,20 @@
 # Weekly Plan - XASM-1 (patternv0.50 "Trap Frosted Lens")
 
 ## Today's focus
-**User Idea — Amber-vs-blue emitter differentiation for expression-only steps.**
-The DURA-001/002/003 packing pipeline (landed in PR #138) now reliably delivers `note`, `volCmd`, `effCmd`, and `durationRaw` to the GPU. The shader (v0.50) needs to consume this: route note-trigger rows to bright royal-blue top emitter, expression-only rows (volCmd>0 or effCmd>0, note==0) to amber top emitter, and sustain-tail rows to the current sustain color at reduced intensity. Target: new variant `patternv0.51.wgsl` (or in-place v0.50 edit if the change is additive-only) with verified visual output on a real MOD file.
+**User Idea — Animated playhead scan-line arc at the current row in circular shaders (patternv0.51).**
+v0.50 now has working amber/blue LED differentiation (PR #148) and color-palette switching. Next visual priority: add a glowing "radar sweep" arc — a clock-hand-style indicator marking the currently-playing row angle in the circular display. Target: `patternv0.51.wgsl` forked from v0.50, adding a thin illuminated arc spanning the full channel-ring radius at the current-row angle, with additive glow falloff, without disturbing the existing LED cell geometry.
 
 ## Ideas
 <!-- User-written ideas Noah accumulates during the week. Routine prioritizes these. -->
-- [in progress — 2026-04-24] Amber-vs-blue emitter differentiation for expression-only steps (narrative §Note-Duration and §Graphical 2; partial groundwork in v0.50 three-LED rewrite Apr 12)
-- [ ] Animated playhead scan-line arc at the current row in circular shaders (narrative §Graphical 4)
+- [done — 2026-05-01] Amber-vs-blue emitter differentiation for expression-only steps (landed PR #148: amber LED block, isExpressionOnly flag, colorPalette uniform + multi-palette selector)
+- [in progress — 2026-05-01] Animated playhead scan-line arc at the current row in circular shaders (narrative §Graphical 4)
 - [ ] Fractional-row interpolation for smooth 144 Hz playhead (`smoothPlayhead = row + fraction`) via `useRef`, bypass React state (narrative §Advanced 1)
 - [ ] SharedArrayBuffer oscilloscope pipeline from worklet → GPU texture (narrative §Advanced 4)
 - [ ] Move initial module parse off the main thread into a Web Worker to avoid 300 ms–1 s freezes on large `.it` files (narrative §Advanced 3)
 - [ ] Darker-chassis toggle + drop shadow for white-chassis contrast (narrative §Graphical 6)
 - [ ] Collapsible / default-hidden PatternDisplay debug panel (narrative §Graphical 8)
 - [ ] Keyboard shortcut set: space/arrows/1–9 for play/seek/order jump (narrative §UI/UX)
-- [ ] Persist last-used shader in localStorage + per-module memory (narrative §Quick wins)
+- [done — 2026-04-24] Persist last-used shader in localStorage + per-module memory (PR #145)
 - [ ] Thumbnail previews + favorites in shader selector (narrative §Shader UI)
 - [ ] Multi-layer bloom: separate passes for triggers / sustains / expression (narrative §Shader 2)
 
@@ -22,9 +22,9 @@ The DURA-001/002/003 packing pipeline (landed in PR #138) now reliably delivers 
 <!-- Unfinished items, known bugs, deferred work. -->
 - [ ] Bug 3: PatternDisplay debug panel shows `Mode: NONE` while v0.50 renders (UI/state disconnect — `components/PatternDisplay.tsx` debug state not updated on shader load)
 - [ ] Bug 4: ▶️ Play button scrolls canvas off-screen (focus/scroll side effect — likely `autoFocus` or `scrollIntoView` on play button element)
-- [ ] Verify Bug 5 (shader `.bak`/`.kate-swp` files) — 59 .wgsl files visible now (was 58); confirm no swp/bak committed; add `.gitignore` patterns if missing
+- [ ] Verify Bug 5 (shader `.bak`/`.kate-swp` files) — confirm no swp/bak committed; add `.gitignore` patterns if missing
 - [ ] Verify Bug 2 (ScriptProcessor fallback) fully resolved by #131 — spot-check on prod at `test.1ink.us/xm-player/`
-- [ ] Draft PR #142 (StoragePlaylist) — still open as draft; needs test plan verification before merge
+- [ ] 32/64 step-length toggle not yet ported to v0.50 (landed in v0.21/v0.39/v0.40 via PR #149)
 - [ ] CRT scanline / phosphor post-process shader (narrative §Shader)
 - [ ] Dynamic per-instrument color palettes (narrative §Shader / §UI)
 - [ ] Compute-shader port of note-duration calculation (narrative §Performance)
@@ -32,7 +32,12 @@ The DURA-001/002/003 packing pipeline (landed in PR #138) now reliably delivers 
 - [ ] Storage-manager integration: `/api/shaders`, `/api/songs`, rating hookup (narrative §Integration)
 
 ## Done
-- [x] 2026-04-24 — StoragePlaylist cloud MOD browser component, `usePlaylist.addItem()` method (#141)
+- [x] 2026-05-01 — Expression LED amber/blue differentiation: `isExpressionOnly` flag, amber LED block in v0.45b + v0.50, colorPalette uniform + multi-palette selector (Rainbow/Warm/Cool/Neon/Acid), colorPalette byte-offset alignment fix across v0.42–v0.50 (#148)
+- [x] 2026-04-24 — Persist last-used shader in localStorage + per-module shader memory (#145)
+- [x] 2026-04-24 — Pipeline hygiene pass: formatting, lint, dead code, build verified (#146)
+- [x] 2026-04-24 — 32/64 step-length toggle for patternv0.21, v0.39, v0.40 (#149)
+- [x] 2026-05-01 — WebGL overlay missing-uniform check optimization (#150)
+- [x] 2026-04-24 — StoragePlaylist cloud MOD browser component, `usePlaylist.addItem()` method (#141, #142)
 - [x] 2026-04-24 — v0.23 shader global aspect-ratio correction (#140)
 - [x] 2026-04-24 — `useWebGLOverlay` uniform extraction optimization (#139)
 - [x] 2026-04-24 — Note-sustain-glow fix: dynamic buffer sizing from packed data, DURA-001/002/003 pipeline, v0.45b sustain logic stabilized (#138)
@@ -51,10 +56,10 @@ The DURA-001/002/003 packing pipeline (landed in PR #138) now reliably delivers 
 - [x] 2026-04-10 — Stale channel buffer + bind-group refresh fix; shader animation on second-song-load fix
 
 ## Last run
-Date: 2026-04-24
+Date: 2026-05-01
 Mode: User Idea
-Focus: Amber-vs-blue emitter differentiation for expression-only steps (patternv0.51 / v0.50 edit)
-Outcome: Full dispatch generated. Fix First (buffer mismatch) confirmed resolved by PR #138 — moved to Done. New developments since 04-17: PRs #138-#141 (sustain glow, uniform opt, aspect fix, StoragePlaylist). Copilot issue targeting localStorage shader persistence. Jules wrap-up template queued for end of day.
+Focus: Animated playhead scan-line arc at the current row in circular shaders (patternv0.51)
+Outcome: Full dispatch generated. Reconciled: amber/blue LED differentiation DONE (PR #148), localStorage shader persistence DONE (PR #145), PR #149 step-length toggle (bonus), PR #150 WebGL overlay opt. StoragePlaylist PR #142 confirmed merged — removed from backlog. Copilot issue targeting keyboard shortcuts (useKeyboardShortcuts.ts). Jules wrap-up template queued for end of day.
 
 ---
 
