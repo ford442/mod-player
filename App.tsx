@@ -64,8 +64,13 @@ const ALL_SHADER_IDS = new Set<string>([
   ...SHADER_GROUPS.VIDEO.map(s => s.id),
 ]);
 
-// Available UI themes
+// Available UI themes.
+// Each theme value maps to a `data-theme` attribute on <html> and a CSS selector
+// in index.css that overrides the --panel-*, --text-*, --edge-*, and --meter-* variables.
 export type AppTheme = 'light' | 'dark' | 'precision' | 'amber-mono' | 'beige-classic';
+
+/** Themes that use light backgrounds (isDarkMode = false for these). */
+const LIGHT_THEMES: ReadonlySet<AppTheme> = new Set(['light', 'beige-classic']);
 
 const THEME_OPTIONS: { value: AppTheme; label: string }[] = [
   { value: 'light',         label: '☀️ Light' },
@@ -100,7 +105,7 @@ function App() {
   // 3D View State
   const [is3DMode, setIs3DMode] = useState<boolean>(false);
   const [theme, setTheme] = useLocalStorage<AppTheme>('xasm1_theme', 'dark');
-  const isDarkMode = theme !== 'light' && theme !== 'beige-classic';
+  const isDarkMode = !LIGHT_THEMES.has(theme);
   const [viewMode, setViewMode] = useState<'device' | 'wall'>('device');
 
   // Apply data-theme attribute to <html> so CSS variables cascade globally
