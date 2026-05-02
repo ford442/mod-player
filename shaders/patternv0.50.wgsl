@@ -155,9 +155,17 @@ fn sdEllipse(p: vec2<f32>, ab: vec2<f32>) -> f32 {
 }
 
 fn pitchClassFromIndex(note: u32) -> f32 {
-  if (note == 0u) { return 0.0; }
+  if (note == 0u || note > 96u) { return 0.0; }
   let semi = (note - 1u) % 12u;
   return f32(semi) / 12.0;
+}
+
+fn neonPalette(t: f32) -> vec3<f32> {
+  let a = vec3<f32>(0.5, 0.5, 0.5);
+  let b = vec3<f32>(0.5, 0.5, 0.5);
+  let c = vec3<f32>(1.0, 1.0, 1.0);
+  let d = vec3<f32>(0.0, 0.33, 0.67);
+  return a + b * cos(6.28318 * (c * t + d));
 }
 
 // DURA: Structure to hold unpacked note duration info
@@ -543,7 +551,7 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
 
     if (isNoteOn || isSustain) {
       let pitchHue = pitchClassFromIndex(note);
-      let baseColor = selectPalette(uniforms.colorPalette, pitchHue);
+      let baseColor = neonPalette(pitchHue);
       let instBand = inst & 15u;
       let instBright = 0.85 + (select(0.0, f32(instBand) / 15.0, instBand > 0u)) * 0.15;
       noteColor = baseColor * instBright;
