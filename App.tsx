@@ -1,10 +1,10 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Header } from './components/Header';
 import { Controls } from './components/Controls';
 import { PatternDisplay } from './components/PatternDisplay';
 import { MediaOverlay } from './components/MediaOverlay';
 import { Studio3D } from './components/Studio3D';
-import { CheatsheetModal } from './components/CheatsheetModal';
+import { KeyboardShortcutHelp } from './components/KeyboardShortcutHelp';
 
 import { ChannelMeters } from './components/ChannelMeters';
 import { MetadataPanel } from './components/MetadataPanel';
@@ -81,6 +81,8 @@ function App() {
 
   const [volume, setVolume] = useState<number>(0.5);
   const [pan, setPan] = useState<number>(0.0);
+  const [isMuted, setIsMuted] = useState<boolean>(false);
+  const preMuteVolumeRef = useRef<number>(0.5);
 
   // 3D View State
   const [is3DMode, setIs3DMode] = useState<boolean>(false);
@@ -238,27 +240,66 @@ function App() {
     seekToStep(Math.max(0, targetStep));
   }, [seekToStep, sequencerMatrix?.numRows]);
 
-  // Keyboard shortcuts
+  // Keyboard shortcuts — stable callbacks via useCallback
+  const onKbdPlayPause = useCallback(() => {
+    if (isPlaying) { stopMusic(false); } else { play(); }
+  }, [isPlaying, stopMusic, play]);
+
+  const onKbdPlay = useCallback(() => { play(); }, [play]);
+  const onKbdPause = useCallback(() => { stopMusic(false); }, [stopMusic]);
+
+  const onKbdSeekForward = useCallback(() => seekToStep(Math.floor(playbackRowFraction) + 1),
+    [seekToStep, playbackRowFraction]);
+  const onKbdSeekBackward = useCallback(() => seekToStep(Math.max(0, Math.floor(playbackRowFraction) - 1)),
+    [seekToStep, playbackRowFraction]);
+
+  const onKbdVolumeUp = useCallback(() => setVolume(v => Math.min(1, v + 0.05)), []);
+  const onKbdVolumeDown = useCallback(() => setVolume(v => Math.max(0, v - 0.05)), []);
+
+  const onKbdToggleMute = useCallback(() => {
+    if (isMuted) {
+      setVolume(preMuteVolumeRef.current > 0 ? preMuteVolumeRef.current : 0.5);
+      setIsMuted(false);
+    } else {
+      preMuteVolumeRef.current = volume;
+      setVolume(0);
+      setIsMuted(true);
+    }
+  }, [isMuted, volume]);
+
+  const onKbdToggleLoop = useCallback(() => setIsLooping(l => !l), [setIsLooping]);
+
+  const onKbdToggleFullscreen = useCallback(() => {
+    if (document.fullscreenElement) document.exitFullscreen();
+    else document.documentElement.requestFullscreen();
+  }, []);
+
+  const onKbdSeekNextOrder = useCallback(() => seekByOrderDelta(1), [seekByOrderDelta]);
+  const onKbdSeekPrevOrder = useCallback(() => seekByOrderDelta(-1), [seekByOrderDelta]);
+  const onKbdToggleDebugPanel = useCallback(() => setDebugPanelOpen(!debugPanelOpen), [setDebugPanelOpen, debugPanelOpen]);
+  const onKbdToggleCheatsheet = useCallback(() => setCheatsheetOpen(open => !open), []);
+  const onKbdCloseCheatsheet = useCallback(() => setCheatsheetOpen(false), []);
+
   useKeyboardShortcuts({
-    onPlayPause: () => { if (isPlaying) { stopMusic(false); } else { play(); } },
+    onPlayPause: onKbdPlayPause,
+    onPlay: onKbdPlay,
+    onPause: onKbdPause,
     // Issue #135 binding table: ArrowLeft/Right seek one row
-    onSeekForward: () => seekToStep(Math.floor(playbackRowFraction) + 1),
-    onSeekBackward: () => seekToStep(Math.max(0, Math.floor(playbackRowFraction) - 1)),
-    onSeekNextOrder: () => seekByOrderDelta(1),
-    onSeekPrevOrder: () => seekByOrderDelta(-1),
-    onPreviousOrder: () => seekByOrderDelta(-1),
-    onNextOrder: () => seekByOrderDelta(1),
+    onSeekForward: onKbdSeekForward,
+    onSeekBackward: onKbdSeekBackward,
+    onSeekNextOrder: onKbdSeekNextOrder,
+    onSeekPrevOrder: onKbdSeekPrevOrder,
+    onPreviousOrder: onKbdSeekPrevOrder,
+    onNextOrder: onKbdSeekNextOrder,
     onJumpToOrder: jumpToOrder,
-    onVolumeUp: () => setVolume(v => Math.min(1, v + 0.05)),
-    onVolumeDown: () => setVolume(v => Math.max(0, v - 0.05)),
-    onToggleLoop: () => setIsLooping(!isLooping),
-    onToggleFullscreen: () => {
-      if (document.fullscreenElement) document.exitFullscreen();
-      else document.documentElement.requestFullscreen();
-    },
-    onToggleDebugPanel: () => setDebugPanelOpen(!debugPanelOpen),
-    onToggleCheatsheet: () => setCheatsheetOpen((open) => !open),
-    onCloseCheatsheet: () => setCheatsheetOpen(false),
+    onVolumeUp: onKbdVolumeUp,
+    onVolumeDown: onKbdVolumeDown,
+    onToggleMute: onKbdToggleMute,
+    onToggleLoop: onKbdToggleLoop,
+    onToggleFullscreen: onKbdToggleFullscreen,
+    onToggleDebugPanel: onKbdToggleDebugPanel,
+    onToggleCheatsheet: onKbdToggleCheatsheet,
+    onCloseCheatsheet: onKbdCloseCheatsheet,
     cheatsheetOpen,
   });
 
@@ -449,7 +490,7 @@ function App() {
           }
           playheadX={playbackSeconds * 10.0}
         />
-        {cheatsheetOpen && <CheatsheetModal onClose={() => setCheatsheetOpen(false)} />}
+        {cheatsheetOpen && <KeyboardShortcutHelp onClose={() => setCheatsheetOpen(false)} />}
       </>
     );
   }
@@ -741,7 +782,7 @@ function App() {
              <p>WebGPU required for visualization.</p>
         </div>
       </div>
-      {cheatsheetOpen && <CheatsheetModal onClose={() => setCheatsheetOpen(false)} />}
+      {cheatsheetOpen && <KeyboardShortcutHelp onClose={() => setCheatsheetOpen(false)} />}
     </div>
   );
 }

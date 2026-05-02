@@ -1,7 +1,9 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useLayoutEffect, useRef } from 'react';
 
 interface KeyboardShortcutActions {
   onPlayPause: () => void;
+  onPlay: () => void;
+  onPause: () => void;
   onSeekForward: () => void;
   onSeekBackward: () => void;
   onSeekNextOrder: () => void;
@@ -12,6 +14,7 @@ interface KeyboardShortcutActions {
   onVolumeUp: () => void;
   onVolumeDown: () => void;
   onToggleLoop: () => void;
+  onToggleMute: () => void;
   onToggleFullscreen: () => void;
   onToggleDebugPanel: () => void;
   onToggleCheatsheet: () => void;
@@ -19,26 +22,35 @@ interface KeyboardShortcutActions {
   cheatsheetOpen: boolean;
 }
 
-export function useKeyboardShortcuts(actions: KeyboardShortcutActions) {
-  const actionsRef = useRef(actions);
-  actionsRef.current = actions;
+export function useKeyboardShortcuts(callbacks: KeyboardShortcutActions) {
+  const callbacksRef = useRef(callbacks);
+  useLayoutEffect(() => { callbacksRef.current = callbacks; });
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Focus guard
+      if (e.isComposing || e.keyCode === 229) return;
       const target = e.target as HTMLElement | null;
       const tag = target?.tagName ?? '';
-      if (['INPUT', 'TEXTAREA', 'SELECT'].includes(tag)) return;
-      if ((e.key === ' ' || e.key === 'Enter') && tag === 'BUTTON') return;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
       if (target?.isContentEditable) return;
-      if (e.isComposing || e.keyCode === 229) return;
+      if ((e.key === ' ' || e.key === 'Enter') && tag === 'BUTTON') return;
       if ((e.ctrlKey || e.metaKey) && e.key !== 'Escape') return;
 
-      const a = actionsRef.current;
+      const a = callbacksRef.current;
       if (a.cheatsheetOpen && e.key !== 'Escape') {
         e.preventDefault();
         return;
       }
 
+      // Space — use event.code for layout independence
+      if (e.code === 'Space') {
+        e.preventDefault();
+        a.onPlayPause();
+        return;
+      }
+
+      // Digit 1–9 → jump to order 0–8
       const digitMatch = e.code.match(/^Digit([1-9])$/);
       if (digitMatch) {
         e.preventDefault();
@@ -47,10 +59,6 @@ export function useKeyboardShortcuts(actions: KeyboardShortcutActions) {
       }
 
       switch (e.key) {
-        case ' ':
-          e.preventDefault();
-          a.onPlayPause();
-          break;
         case 'ArrowRight':
           e.preventDefault();
           if (e.shiftKey) {
@@ -87,6 +95,10 @@ export function useKeyboardShortcuts(actions: KeyboardShortcutActions) {
         case 'L':
           a.onToggleLoop();
           break;
+        case 'm':
+        case 'M':
+          a.onToggleMute();
+          break;
         case 'f':
         case 'F':
           a.onToggleFullscreen();
@@ -116,6 +128,23 @@ export function useKeyboardShortcuts(actions: KeyboardShortcutActions) {
     };
 
     window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+
+    // Media Session API — lets OS media keys / lock-screen controls work
+    if ('mediaSession' in navigator) {
+      navigator.mediaSession.setActionHandler('play', () => callbacksRef.current.onPlay());
+      navigator.mediaSession.setActionHandler('pause', () => callbacksRef.current.onPause());
+      navigator.mediaSession.setActionHandler('seekforward', () => callbacksRef.current.onSeekForward());
+      navigator.mediaSession.setActionHandler('seekbackward', () => callbacksRef.current.onSeekBackward());
+    }
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      if ('mediaSession' in navigator) {
+        navigator.mediaSession.setActionHandler('play', null);
+        navigator.mediaSession.setActionHandler('pause', null);
+        navigator.mediaSession.setActionHandler('seekforward', null);
+        navigator.mediaSession.setActionHandler('seekbackward', null);
+      }
+    };
   }, []);
 }
