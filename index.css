@@ -3,11 +3,114 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ============================================================
+   XASM-1 Theming System — CSS Custom Properties
+   Themes: light (default) | dark | precision | amber-mono | beige-classic
+   Switch by setting data-theme attribute on <html> or a wrapper.
+   ============================================================ */
+
+@layer base {
+  :root {
+    /* Surface hierarchy */
+    --panel-base:         #f3f4f6;
+    --panel-raised:       #ffffff;
+    --panel-inset:        #e5e7eb;
+    --panel-border:       rgba(0, 0, 0, 0.08);
+    --panel-border-strong: rgba(0, 0, 0, 0.15);
+
+    /* Text */
+    --text-primary:   #111827;
+    --text-secondary: #6b7280;
+    --text-accent:    #0891b2;
+
+    /* Hardware accents */
+    --edge-highlight: rgba(255, 255, 255, 0.6);
+    --edge-shadow:    rgba(0, 0, 0, 0.12);
+    --glow-color:     rgba(8, 145, 178, 0.25);
+
+    /* Tracker-specific */
+    --meter-bg:   #111827;
+    --meter-fill: #34d399;
+    --meter-peak: #f87171;
+  }
+
+  [data-theme="dark"] {
+    --panel-base:         #0f172a;
+    --panel-raised:       #1e293b;
+    --panel-inset:        #0b1221;
+    --panel-border:       rgba(255, 255, 255, 0.06);
+    --panel-border-strong: rgba(255, 255, 255, 0.12);
+    --text-primary:   #f8fafc;
+    --text-secondary: #94a3b8;
+    --text-accent:    #22d3ee;
+    --edge-highlight: rgba(255, 255, 255, 0.05);
+    --edge-shadow:    rgba(0, 0, 0, 0.5);
+    --glow-color:     rgba(34, 211, 238, 0.2);
+    --meter-bg:   #020617;
+    --meter-fill: #34d399;
+    --meter-peak: #f87171;
+  }
+
+  [data-theme="precision"] {
+    --panel-base:         #0a0a0a;
+    --panel-raised:       #171717;
+    --panel-inset:        #000000;
+    --panel-border:       rgba(255, 255, 255, 0.08);
+    --panel-border-strong: rgba(255, 255, 255, 0.14);
+    --text-primary:   #e5e5e5;
+    --text-secondary: #737373;
+    --text-accent:    #a3e635;
+    --edge-highlight: rgba(255, 255, 255, 0.04);
+    --edge-shadow:    rgba(0, 0, 0, 0.6);
+    --glow-color:     rgba(163, 230, 53, 0.15);
+    --meter-bg:   #0a0a0a;
+    --meter-fill: #a3e635;
+    --meter-peak: #f87171;
+  }
+
+  [data-theme="amber-mono"] {
+    --panel-base:         #1a1005;
+    --panel-raised:       #2a1b0a;
+    --panel-inset:        #120a02;
+    --panel-border:       rgba(251, 191, 36, 0.15);
+    --panel-border-strong: rgba(251, 191, 36, 0.28);
+    --text-primary:   #fef3c7;
+    --text-secondary: #d97706;
+    --text-accent:    #fbbf24;
+    --edge-highlight: rgba(251, 191, 36, 0.08);
+    --edge-shadow:    rgba(0, 0, 0, 0.5);
+    --glow-color:     rgba(251, 191, 36, 0.2);
+    --meter-bg:   #120a02;
+    --meter-fill: #fbbf24;
+    --meter-peak: #f87171;
+  }
+
+  [data-theme="beige-classic"] {
+    --panel-base:         #d6d3d1;
+    --panel-raised:       #e7e5e4;
+    --panel-inset:        #c4c0bc;
+    --panel-border:       rgba(0, 0, 0, 0.10);
+    --panel-border-strong: rgba(0, 0, 0, 0.18);
+    --text-primary:   #292524;
+    --text-secondary: #78716c;
+    --text-accent:    #dc2626;
+    --edge-highlight: rgba(255, 255, 255, 0.5);
+    --edge-shadow:    rgba(0, 0, 0, 0.15);
+    --glow-color:     rgba(220, 38, 38, 0.15);
+    --meter-bg:   #c4c0bc;
+    --meter-fill: #16a34a;
+    --meter-peak: #dc2626;
+  }
+}
+
 /* Custom styles for a dark, tracker-like theme */
 body {
+  background-color: var(--panel-base);
+  color: var(--text-primary);
   font-family: 'Inter', sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  transition: background-color 0.3s ease, color 0.3s ease;
 }
 html { font-family: 'Inter', sans-serif; }
 @supports (font-variation-settings: normal) {
