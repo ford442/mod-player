@@ -13,10 +13,12 @@ import { Playlist } from './components/Playlist';
 import type { PlaylistItem } from './components/Playlist';
 import { StoragePlaylist } from './components/StoragePlaylist';
 import { SeekBar } from './components/SeekBar';
+import { Panel } from './components/Panel';
 import { useLibOpenMPT } from './hooks/useLibOpenMPT';
 import { usePlaylist } from './hooks/usePlaylist';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { useLocalStorage } from './hooks/useLocalStorage';
+import { cn } from './utils/cn';
 import type { MediaItem } from './types';
 import { 
   DEFAULT_BLOOM_PRESET, 
@@ -62,6 +64,17 @@ const ALL_SHADER_IDS = new Set<string>([
   ...SHADER_GROUPS.VIDEO.map(s => s.id),
 ]);
 
+// Available UI themes
+export type AppTheme = 'light' | 'dark' | 'precision' | 'amber-mono' | 'beige-classic';
+
+const THEME_OPTIONS: { value: AppTheme; label: string }[] = [
+  { value: 'light',         label: '☀️ Light' },
+  { value: 'dark',          label: '🌙 Dark' },
+  { value: 'precision',     label: '🖤 Precision' },
+  { value: 'amber-mono',    label: '🟡 Amber' },
+  { value: 'beige-classic', label: '🤍 Classic' },
+];
+
 // Compute a fast, dependency-free hash from the first 16 bytes of a module buffer.
 // Used as a stable per-module key for localStorage shader memory.
 function computeModuleHash(data: Uint8Array): string {
@@ -86,8 +99,14 @@ function App() {
 
   // 3D View State
   const [is3DMode, setIs3DMode] = useState<boolean>(false);
-  const [isDarkMode, setIsDarkMode] = useState<boolean>(false);
+  const [theme, setTheme] = useLocalStorage<AppTheme>('xasm1_theme', 'dark');
+  const isDarkMode = theme !== 'light' && theme !== 'beige-classic';
   const [viewMode, setViewMode] = useState<'device' | 'wall'>('device');
+
+  // Apply data-theme attribute to <html> so CSS variables cascade globally
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+  }, [theme]);
 
   // Bloom and Color Scheme State
   const [bloomPreset, setBloomPreset] = useState<BloomPreset>(DEFAULT_BLOOM_PRESET);
@@ -389,14 +408,14 @@ function App() {
         <Studio3D
           darkMode={isDarkMode}
           viewMode={viewMode}
-          onDarkModeToggle={() => setIsDarkMode(!isDarkMode)}
+          onDarkModeToggle={() => setTheme(isDarkMode ? 'light' : 'dark')}
           onViewModeToggle={() => setViewMode(viewMode === 'device' ? 'wall' : 'device')}
           onExitStudio={() => setIs3DMode(false)}
           dimFactor={dimFactor}
           headerContent={
             <div className="scale-75 origin-top-left">
             <Header status={status} isModuleLoaded={isModuleLoaded} />
-            <div className={`mb-2 inline-flex flex-col rounded border px-2 py-1 text-[10px] font-mono ${isDarkMode ? 'border-gray-700 bg-black/50 text-gray-300' : 'border-gray-300 bg-white/80 text-gray-700'}`}>
+            <div className={cn('mb-2 inline-flex flex-col rounded border px-2 py-1 text-[10px] font-mono', isDarkMode ? 'border-gray-700 bg-black/50 text-gray-300' : 'border-gray-300 bg-white/80 text-gray-700')}>
               <span>sync mode: {syncDebug.mode}</span>
               <span>buffer: {syncDebug.bufferMs.toFixed(1)}ms</span>
               <span>drift: {syncDebug.driftMs.toFixed(1)}ms</span>
@@ -497,7 +516,7 @@ function App() {
 
   // 2D Mode Render
   return (
-    <div className={`min-h-screen ${isDarkMode ? 'bg-gray-900 text-white' : 'bg-gray-100 text-black'} p-4 flex flex-col items-center transition-colors duration-300`}>
+    <div className="min-h-screen bg-panel-base text-[var(--text-primary)] p-4 flex flex-col items-center transition-colors duration-300">
       <div className="w-full max-w-[1280px]">
         <Header status={status} isModuleLoaded={isModuleLoaded} />
 
@@ -510,12 +529,22 @@ function App() {
                 >
                   🎬 3D Mode
                 </button>
-                <button
-                  onClick={() => setIsDarkMode(!isDarkMode)}
-                  className={`px-4 py-2 text-sm font-mono rounded-lg shadow-lg transition-colors border ${isDarkMode ? 'bg-gray-800 text-white border-gray-700 hover:bg-gray-700' : 'bg-white text-black border-gray-300 hover:bg-gray-50'}`}
+                {/* Theme selector */}
+                <select
+                  value={theme}
+                  onChange={(e) => setTheme(e.target.value as AppTheme)}
+                  className={cn(
+                    'px-3 py-2 text-sm font-mono rounded-lg shadow-lg transition-colors border outline-none cursor-pointer',
+                    isDarkMode
+                      ? 'bg-gray-800 text-white border-gray-700 hover:bg-gray-700'
+                      : 'bg-white text-black border-gray-300 hover:bg-gray-50',
+                  )}
+                  title="Switch UI theme"
                 >
-                  {isDarkMode ? '☀️ Light' : '🌙 Dark'}
-                </button>
+                  {THEME_OPTIONS.map(opt => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
+                </select>
                 <button
                   onClick={toggleAudioEngine}
                   disabled={!isWorkletSupported || !!workletLoadError}
@@ -535,12 +564,12 @@ function App() {
             </div>
 
             {/* Categorized Shader Selectors */}
-            <div className={`flex flex-wrap gap-2 p-2 rounded-xl border ${isDarkMode ? 'bg-black border-gray-800' : 'bg-gray-200 border-gray-300'}`}>
+            <div className={cn('flex flex-wrap gap-2 p-2 rounded-xl border', isDarkMode ? 'bg-black border-gray-800' : 'bg-gray-200 border-gray-300')}>
                 {/* Square Group */}
                 <div className="flex items-center gap-1">
                     <span className="text-[10px] font-bold text-gray-500 uppercase px-1">Square</span>
                     <select
-                        className={`text-xs font-mono p-1 rounded border outline-none ${isDarkMode ? 'bg-gray-800 border-gray-600 text-white' : 'bg-white border-gray-300 text-black'}`}
+                        className={cn('text-xs font-mono p-1 rounded border outline-none', isDarkMode ? 'bg-gray-800 border-gray-600 text-white' : 'bg-white border-gray-300 text-black')}
                         value={SHADER_GROUPS.SQUARE.some(s => s.id === shaderFile) ? shaderFile : ''}
                         onChange={(e) => e.target.value && setShaderFile(e.target.value)}
                     >
@@ -549,13 +578,13 @@ function App() {
                     </select>
                 </div>
 
-                <div className={`w-px h-6 ${isDarkMode ? 'bg-gray-800' : 'bg-gray-300'}`}></div>
+                <div className={cn('w-px h-6', isDarkMode ? 'bg-gray-800' : 'bg-gray-300')}></div>
 
                 {/* Circular Group */}
                 <div className="flex items-center gap-1">
                     <span className="text-[10px] font-bold text-gray-500 uppercase px-1">Circular</span>
                     <select
-                        className={`text-xs font-mono p-1 rounded border outline-none ${isDarkMode ? 'bg-gray-800 border-gray-600 text-white' : 'bg-white border-gray-300 text-black'}`}
+                        className={cn('text-xs font-mono p-1 rounded border outline-none', isDarkMode ? 'bg-gray-800 border-gray-600 text-white' : 'bg-white border-gray-300 text-black')}
                         value={SHADER_GROUPS.CIRCULAR.some(s => s.id === shaderFile) ? shaderFile : ''}
                         onChange={(e) => e.target.value && setShaderFile(e.target.value)}
                     >
@@ -564,13 +593,13 @@ function App() {
                     </select>
                 </div>
 
-                <div className={`w-px h-6 ${isDarkMode ? 'bg-gray-800' : 'bg-gray-300'}`}></div>
+                <div className={cn('w-px h-6', isDarkMode ? 'bg-gray-800' : 'bg-gray-300')}></div>
 
                 {/* Video Group */}
                 <div className="flex items-center gap-1">
                     <span className="text-[10px] font-bold text-gray-500 uppercase px-1">Video</span>
                     <select
-                        className={`text-xs font-mono p-1 rounded border outline-none ${isDarkMode ? 'bg-gray-800 border-gray-600 text-white' : 'bg-white border-gray-300 text-black'}`}
+                        className={cn('text-xs font-mono p-1 rounded border outline-none', isDarkMode ? 'bg-gray-800 border-gray-600 text-white' : 'bg-white border-gray-300 text-black')}
                         value={SHADER_GROUPS.VIDEO.some(s => s.id === shaderFile) ? shaderFile : ''}
                         onChange={(e) => e.target.value && setShaderFile(e.target.value)}
                     >
@@ -578,13 +607,13 @@ function App() {
                         {SHADER_GROUPS.VIDEO.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
                     </select>
                 </div>
-                <div className={`w-px h-6 ${isDarkMode ? 'bg-gray-800' : 'bg-gray-300'}`}></div>
+                <div className={cn('w-px h-6', isDarkMode ? 'bg-gray-800' : 'bg-gray-300')}></div>
 
                 {/* Color Palette Selector */}
                 <div className="flex items-center gap-1">
                     <span className="text-[10px] font-bold text-gray-500 uppercase px-1">Palette</span>
                     <select
-                        className={`text-xs font-mono p-1 rounded border outline-none ${isDarkMode ? 'bg-gray-800 border-gray-600 text-white' : 'bg-white border-gray-300 text-black'}`}
+                        className={cn('text-xs font-mono p-1 rounded border outline-none', isDarkMode ? 'bg-gray-800 border-gray-600 text-white' : 'bg-white border-gray-300 text-black')}
                         value={colorPalette}
                         onChange={(e) => setColorPalette(parseInt(e.target.value, 10))}
                     >
@@ -599,7 +628,7 @@ function App() {
         </div>
 
         {/* Main Display Area */}
-        <div className={`relative rounded-xl overflow-hidden shadow-2xl mb-6 border ${isDarkMode ? 'bg-black border-gray-800' : 'bg-white border-gray-300'}`}>
+        <div className={cn('relative rounded-xl overflow-hidden shadow-2xl mb-6 border', isDarkMode ? 'bg-black border-gray-800' : 'bg-white border-gray-300')}>
            <PatternDisplay
              key={shaderFile}
              matrix={sequencerMatrix}
@@ -700,13 +729,14 @@ function App() {
             <button
               key={key}
               onClick={() => toggle(!state)}
-              className={`px-3 py-1 text-xs font-mono rounded-lg border transition-colors ${
+              className={cn(
+                'px-3 py-1 text-xs font-mono rounded-lg border transition-colors',
                 state
                   ? 'bg-cyan-900/30 text-cyan-300 border-cyan-800'
                   : isDarkMode
                     ? 'bg-gray-800 text-gray-500 border-gray-700 hover:text-gray-300'
-                    : 'bg-gray-200 text-gray-500 border-gray-300 hover:text-gray-700'
-              }`}
+                    : 'bg-gray-200 text-gray-500 border-gray-300 hover:text-gray-700',
+              )}
             >
               {label}
             </button>
@@ -715,34 +745,33 @@ function App() {
 
         {/* Virtual Hardware Panels */}
         <div className="mt-4 grid grid-cols-1 lg:grid-cols-3 gap-4">
-          {/* Left Column: Visualizer placeholder (optional) */}
-          <div className="lg:col-span-2">
-            {/* Hardware display area - PatternDisplay is already shown above */}
-            <div className="h-full min-h-[200px] flex items-center justify-center text-gray-500 text-sm">
-              {/* Virtual hardware display active */}
-            </div>
-          </div>
+          {/* Left Column: placeholder — PatternDisplay is rendered above */}
+          <div className="lg:col-span-2" />
 
           {/* Right Column: Metadata + VU Meters */}
           <div className="flex flex-col gap-4">
             {showMetadata && (
-              <MetadataPanel
-                metadata={moduleMetadata}
-                currentOrder={sequencerMatrix?.order ?? 0}
-                currentRow={Math.floor(playbackRowFraction)}
-                currentPattern={sequencerMatrix?.patternIndex ?? 0}
-                matrix={sequencerMatrix}
-                isPlaying={isPlaying}
-                playbackSeconds={playbackSeconds}
-              />
+              <Panel variant="bezel" title="Module Info" titleAccent>
+                <MetadataPanel
+                  metadata={moduleMetadata}
+                  currentOrder={sequencerMatrix?.order ?? 0}
+                  currentRow={Math.floor(playbackRowFraction)}
+                  currentPattern={sequencerMatrix?.patternIndex ?? 0}
+                  matrix={sequencerMatrix}
+                  isPlaying={isPlaying}
+                  playbackSeconds={playbackSeconds}
+                />
+              </Panel>
             )}
             {showChannelMeters && (
-              <ChannelMeters
-                channelVU={channelVU}
-                numChannels={sequencerMatrix?.numChannels ?? 4}
-                analyserNode={analyserNode}
-                isPlaying={isPlaying}
-              />
+              <Panel variant="bezel" title="VU Meters" titleAccent>
+                <ChannelMeters
+                  channelVU={channelVU}
+                  numChannels={sequencerMatrix?.numChannels ?? 4}
+                  analyserNode={analyserNode}
+                  isPlaying={isPlaying}
+                />
+              </Panel>
             )}
           </div>
         </div>
@@ -750,31 +779,35 @@ function App() {
         {/* Playlist */}
         {showPlaylist && (
           <div className="mt-4">
-            <Playlist
-              items={playlist.items}
-              currentIndex={playlist.currentIndex}
-              isPlaying={isPlaying}
-              shuffle={playlist.shuffle}
-              repeat={playlist.repeat}
-              onSelect={handlePlaylistSelect}
-              onRemove={playlist.remove}
-              onClear={playlist.clear}
-              onPrev={handlePlaylistPrev}
-              onNext={handlePlaylistNext}
-              onShuffleToggle={playlist.toggleShuffle}
-              onRepeatCycle={playlist.cycleRepeat}
-              onFilesAdded={handlePlaylistFilesAdded}
-            />
+            <Panel variant="raised" title="Playlist">
+              <Playlist
+                items={playlist.items}
+                currentIndex={playlist.currentIndex}
+                isPlaying={isPlaying}
+                shuffle={playlist.shuffle}
+                repeat={playlist.repeat}
+                onSelect={handlePlaylistSelect}
+                onRemove={playlist.remove}
+                onClear={playlist.clear}
+                onPrev={handlePlaylistPrev}
+                onNext={handlePlaylistNext}
+                onShuffleToggle={playlist.toggleShuffle}
+                onRepeatCycle={playlist.cycleRepeat}
+                onFilesAdded={handlePlaylistFilesAdded}
+              />
+            </Panel>
           </div>
         )}
 
         {/* Storage Library */}
         {showStorageLibrary && (
-          <StoragePlaylist
-            onAddToPlaylist={handleAddToPlaylist}
-            onLoadAndPlay={handleStorageLoadAndPlay}
-            isDarkMode={isDarkMode}
-          />
+          <Panel variant="raised" title="Storage Library" className="mt-4">
+            <StoragePlaylist
+              onAddToPlaylist={handleAddToPlaylist}
+              onLoadAndPlay={handleStorageLoadAndPlay}
+              isDarkMode={isDarkMode}
+            />
+          </Panel>
         )}
 
         <div className="mt-8 text-center text-xs opacity-50">
