@@ -363,32 +363,67 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
     setPlaybackRowFraction(smoothedPlayhead);
 
     // Compute note ages for hardware choke in shader (only update React state when integer ages change)
+    const playheadRow = row + smoothedRowFraction;
     const currentMatrix = patternMatricesRef.current[order];
     const numChannels = channelStatesRef.current.length;
     if (currentMatrix && numChannels > 0) {
-      const playheadRow = smoothedPlayhead;
-      const noteAges = computeNoteAges(currentMatrix, playheadRow);
-      let changed = false;
-      for (let c = 0; c < numChannels; c++) {
-        const newAge = noteAges[c] ?? 1000;
-        const oldAge = channelStatesRef.current[c]?.noteAge ?? 1000;
-        if (Math.floor(newAge) !== Math.floor(oldAge)) {
-          changed = true;
+    // TIMING FIX: Smooth row fraction for visual display
+    const targetPlayhead = row + rowFraction;
+    const prevPlayhead = playbackStateRef.current.playheadRow;
+    let smoothedPlayhead = prevPlayhead + (targetPlayhead - prevPlayhead) * ROW_INTERPOLATION_SMOOTHING;
+
+    // Snap if jump is too large (seek or pattern change)
+    if (Math.abs(targetPlayhead - prevPlayhead) > 2.0) {
+      smoothedPlayhead = targetPlayhead;
+    }
+
+    setPlaybackRowFraction(smoothedPlayhead);
+
+    // Compute note ages for hardware choke / shaders
+    const playheadRow = smoothedPlayhead;
+    const currentMatrix = patternMatricesRef.current[order];
+    const numChannels = channelStatesRef.current.length;
+
+    if (currentMatrix && numChannels > 0) {
+      // PERFORMANCE: Only recompute on row boundary crossings
+      const prev = playbackStateRef.current;
+      const rowChanged = (order !== prev.currentOrder) ||
+                        (Math.floor(playheadRow) !== Math.floor(prev.playheadRow));
+
+      if (rowChanged) {
+        const noteAges = computeNoteAges(currentMatrix, playheadRow);
+        let changed = false;
+
+        for (let c = 0; c < numChannels; c++) {
+          const newAge = noteAges[c] ?? 1000;
+          const existing = channelStatesRef.current[c];
+          if (!existing) continue;
+
+          if ((newAge | 0) !== (existing.noteAge | 0)) {
+            changed = true;
+          }
+
+          // Update ref (mutable for shaders)
+          channelStatesRef.current[c] = {
+            ...existing,
+            noteAge: newAge,
+          };
         }
-        const existing = channelStatesRef.current[c];
-        channelStatesRef.current[c] = {
-          volume: existing?.volume ?? 0,
-          pan: existing?.pan ?? 128,
-          freq: existing?.freq ?? 0,
-          trigger: existing?.trigger ?? 0,
-          noteAge: newAge,
-          activeEffect: existing?.activeEffect ?? 0,
-          effectValue: existing?.effectValue ?? 0,
-          isMuted: existing?.isMuted ?? 0,
-        };
-      }
-      if (changed) {
-        setChannelStates([...channelStatesRef.current]);
+
+        if (changed) {
+          setChannelStates([...channelStatesRef.current]);
+        }
+      } else {
+        // Smooth fractional ages between rows (no allocation)
+        const delta = playheadRow - prev.playheadRow;
+        if (delta > 0) {
+          for (let c = 0; c < numChannels; c++) {
+            const state = channelStatesRef.current[c];
+            if (state && state.noteAge < 999) {
+              state.noteAge += delta;
+            }
+          }
+        }
       }
     }
 
