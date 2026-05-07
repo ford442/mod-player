@@ -356,32 +356,51 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
     setPlaybackRowFraction(smoothedRowFraction);
 
     // Compute note ages for hardware choke in shader (only update React state when integer ages change)
+    const playheadRow = row + smoothedRowFraction;
     const currentMatrix = patternMatricesRef.current[order];
     const numChannels = channelStatesRef.current.length;
     if (currentMatrix && numChannels > 0) {
-      const playheadRow = row + smoothedRowFraction;
-      const noteAges = computeNoteAges(currentMatrix, playheadRow);
-      let changed = false;
-      for (let c = 0; c < numChannels; c++) {
-        const newAge = noteAges[c] ?? 1000;
-        const oldAge = channelStatesRef.current[c]?.noteAge ?? 1000;
-        if (Math.floor(newAge) !== Math.floor(oldAge)) {
-          changed = true;
+      // PERFORMANCE: Only check for integer age changes if the row boundary has been crossed.
+      // This avoids redundant Math.floor calls and expensive matrix scans on every frame.
+      const prev = playbackStateRef.current;
+      const rowChanged = (order !== prev.currentOrder) || (Math.floor(playheadRow) !== Math.floor(prev.playheadRow));
+
+      if (rowChanged) {
+        const noteAges = computeNoteAges(currentMatrix, playheadRow);
+        let changed = false;
+
+        for (let c = 0; c < numChannels; c++) {
+          const newAge = noteAges[c] ?? 1000;
+          const existing = channelStatesRef.current[c];
+          if (!existing) continue;
+
+          // Optimization: bitwise floor comparison is faster and less redundant
+          if ((newAge | 0) !== (existing.noteAge | 0)) {
+            changed = true;
+          }
+
+          // Respect React immutability for the state update
+          channelStatesRef.current[c] = {
+            ...existing,
+            noteAge: newAge,
+          };
         }
-        const existing = channelStatesRef.current[c];
-        channelStatesRef.current[c] = {
-          volume: existing?.volume ?? 0,
-          pan: existing?.pan ?? 128,
-          freq: existing?.freq ?? 0,
-          trigger: existing?.trigger ?? 0,
-          noteAge: newAge,
-          activeEffect: existing?.activeEffect ?? 0,
-          effectValue: existing?.effectValue ?? 0,
-          isMuted: existing?.isMuted ?? 0,
-        };
-      }
-      if (changed) {
-        setChannelStates([...channelStatesRef.current]);
+
+        if (changed) {
+          setChannelStates([...channelStatesRef.current]);
+        }
+      } else {
+        // PERFORMANCE: Smoothly update fractional ages in the ref for shaders between row boundaries.
+        // This avoids 64 object allocations and expensive computeNoteAges calls per frame.
+        const delta = playheadRow - prev.playheadRow;
+        if (delta > 0) {
+          for (let c = 0; c < numChannels; c++) {
+            const state = channelStatesRef.current[c];
+            if (state && state.noteAge < 999) {
+              state.noteAge += delta;
+            }
+          }
+        }
       }
     }
 
@@ -392,7 +411,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
     // TIMING FIX: Atomic update of playbackStateRef with timestamp
     const now = audioCtx?.currentTime || performance.now() / 1000;
     playbackStateRef.current = {
-      playheadRow: row + smoothedRowFraction,
+      playheadRow,
       currentOrder: order,
       timeSec: time,
       beatPhase: beatPhaseValue,
