@@ -79,12 +79,12 @@ export const SeekBar: React.FC<SeekBarProps> = ({
         />
         {/* Row-based fill */}
         <div
-          className="absolute top-0 left-0 h-full rounded-full bg-cyan-600/80 transition-[width] duration-75"
+          className="absolute top-0 left-0 h-full rounded-full bg-cyan-600/80"
           style={{ width: `${rowPct}%` }}
         />
         {/* Playhead dot */}
         <div
-          className="absolute top-1/2 -translate-y-1/2 w-3 h-3 bg-cyan-400 rounded-full shadow-lg shadow-cyan-500/30 transition-[left] duration-75"
+          className="absolute top-1/2 -translate-y-1/2 w-3 h-3 bg-cyan-400 rounded-full shadow-lg shadow-cyan-500/30"
           style={{ left: `calc(${rowPct}% - 6px)` }}
         />
         {/* Hover indicator */}

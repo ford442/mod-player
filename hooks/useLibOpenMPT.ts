@@ -352,14 +352,21 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
     setSequencerGlobalRow(globalRow + row);
 
     // TIMING FIX: Smooth row fraction for visual display
-    const smoothedRowFraction = rowFraction * ROW_INTERPOLATION_SMOOTHING + (playbackRowFraction * (1 - ROW_INTERPOLATION_SMOOTHING));
-    setPlaybackRowFraction(smoothedRowFraction);
+    const targetPlayhead = row + rowFraction;
+    const prevPlayhead = playbackStateRef.current.playheadRow;
+    let smoothedPlayhead = prevPlayhead + (targetPlayhead - prevPlayhead) * ROW_INTERPOLATION_SMOOTHING;
+
+    // Snap if jump is too large (seek or pattern change)
+    if (Math.abs(targetPlayhead - prevPlayhead) > 2.0) {
+      smoothedPlayhead = targetPlayhead;
+    }
+    setPlaybackRowFraction(smoothedPlayhead);
 
     // Compute note ages for hardware choke in shader (only update React state when integer ages change)
     const currentMatrix = patternMatricesRef.current[order];
     const numChannels = channelStatesRef.current.length;
     if (currentMatrix && numChannels > 0) {
-      const playheadRow = row + smoothedRowFraction;
+      const playheadRow = smoothedPlayhead;
       const noteAges = computeNoteAges(currentMatrix, playheadRow);
       let changed = false;
       for (let c = 0; c < numChannels; c++) {
@@ -392,7 +399,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
     // TIMING FIX: Atomic update of playbackStateRef with timestamp
     const now = audioCtx?.currentTime || performance.now() / 1000;
     playbackStateRef.current = {
-      playheadRow: row + smoothedRowFraction,
+      playheadRow: smoothedPlayhead,
       currentOrder: order,
       timeSec: time,
       beatPhase: beatPhaseValue,
@@ -411,7 +418,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
 
     lastUpdateTimeRef.current = performance.now() / 1000;
     animationFrameHandle.current = requestAnimationFrame(updateUI);
-  }, [isPlaying, activeEngine, sequencerMatrix, kickTrigger, grooveAmount, playbackRowFraction]);
+  }, [isPlaying, activeEngine, sequencerMatrix, kickTrigger, grooveAmount]);
 
   // Keep updateUIRef always pointing to the latest updateUI so
   // startAudioPlayback can schedule the most current callback.
@@ -508,6 +515,8 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
     setModuleInfo((prev: ModuleInfo) => ({ ...prev, order: targetOrder, row: targetRow }));
     setSequencerCurrentRow(targetRow);
     setSequencerGlobalRow(step);
+    setPlaybackRowFraction(targetRow);
+    playbackStateRef.current.playheadRow = targetRow;
 
     // TIMING FIX: Reset drift accumulator on seek
     driftAccumulatorRef.current = 0;
