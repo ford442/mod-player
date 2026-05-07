@@ -474,6 +474,8 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
     audioClockStartRef.current = 0;
     workletTimeAtStartRef.current = 0;
     driftAccumulatorRef.current = 0;
+    lastCorrectedTimeRef.current = 0;
+    lastWorkletUpdateRef.current = 0;
     pendingSeekRef.current = null;
     seekAcknowledgedRef.current = true;
 
