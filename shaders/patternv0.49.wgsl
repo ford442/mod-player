@@ -1,9 +1,8 @@
-// patternv0.48.wgsl
+// patternv0.49.wgsl
 // Three-Emitter LED Indicator System - Blue Note-On, Steady Note Color, Amber Control
 // Circular Layout with Unified Glass Cap Lens
-// Based on v0.36 (disc layout with direct Note/Instr/Vol/Effect integer data)
-// PackedA: [Note(8) | Instr(8) | VolCmd(8) | VolVal(8)]
-// PackedB: [Unused(16) | EffCmd(8) | EffVal(8)]
+// Based on v0.38 (circular layout with padTopChannel=true)
+// Note: Requires padTopChannel=true in PatternDisplay to shift music channels 1-32.
 
 struct Uniforms {
   numRows: u32,
@@ -74,9 +73,9 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
 
   let radius = minRadius + f32(ringIndex) * ringDepth;
 
-  let totalSteps = 64.0;
+  let totalSteps = f32(uniforms.numRows);
   let anglePerStep = 6.2831853 / totalSteps;
-  let theta = -1.570796 + f32(row % 64u) * anglePerStep;
+  let theta = -1.570796 + f32(row % uniforms.numRows) * anglePerStep;
 
   let circumference = 2.0 * 3.14159265 * radius;
   let arcLength = circumference / totalSteps;
@@ -142,6 +141,11 @@ fn sdRoundedBox(p: vec2<f32>, b: vec2<f32>, r: f32) -> f32 {
 
 fn sdCircle(p: vec2<f32>, r: f32) -> f32 {
   return length(p) - r;
+}
+
+fn sdEllipse(p: vec2<f32>, ab: vec2<f32>) -> f32 {
+  let k = length(p / ab);
+  return (k - 1.0) * min(ab.x, ab.y);
 }
 
 fn pitchClassFromIndex(note: u32) -> f32 {
@@ -297,13 +301,19 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   let kick = uniforms.kickTrigger;
   let beat = uniforms.beatPhase;
 
+  // Hardware Layering: Discard pixels over UI
+  if (in.position.y > uniforms.canvasH * 0.88) {
+    discard;
+  }
+
   // Smooth playhead position
-  let playheadStep = uniforms.playheadRow - floor(uniforms.playheadRow / 64.0) * 64.0;
-  let rowDistRaw = abs(f32(in.row % 64u) - playheadStep);
-  let rowDist = min(rowDistRaw, 64.0 - rowDistRaw);
+  let maxRows = f32(uniforms.numRows);
+  let playheadStep = uniforms.playheadRow - floor(uniforms.playheadRow / maxRows) * maxRows;
+  let rowDistRaw = abs(f32(in.row % uniforms.numRows) - playheadStep);
+  let rowDist = min(rowDistRaw, maxRows - rowDistRaw);
   let playheadActivation = 1.0 - smoothstep(0.0, 1.5, rowDist);
 
-  // --- INDICATOR RING ---
+  // CHANNEL 0 is the Indicator Ring (padTopChannel shifts music to 1-32)
   if (in.channel == 0u) {
     let onPlayhead = playheadActivation > 0.5;
     let indSize = vec2<f32>(0.3, 0.3);
@@ -323,6 +333,7 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     return vec4<f32>(col, clamp(alpha, 0.0, 1.0));
   }
 
+  // --- MUSIC CHANNELS (1-32) with THREE-EMITTER LED SYSTEM ---
   let dHousing = sdRoundedBox(p, fs.housingSize * 0.5, 0.06);
   let housingMask = 1.0 - smoothstep(0.0, aa * 1.5, dHousing);
 
@@ -335,7 +346,6 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     inButton = 1.0;
   }
 
-  // --- DECODE PACKED DATA ---
   if (inButton > 0.5) {
     let note = (in.packedA >> 24) & 255u;
     let inst = (in.packedA >> 16) & 255u;
@@ -348,11 +358,7 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     let hasNote = (note > 0u);
     let hasExpression = (volCmd > 0u) || (effCmd > 0u);
 
-    // Bounds check for channel state array access
-    var ch = ChannelState(0.0, 0.0, 0.0, 0u, 1000.0, 0u, 0.0, 0u);
-    if (in.channel < arrayLength(&channels)) {
-      ch = channels[in.channel];
-    }
+    let ch = channels[in.channel];
     let isMuted = (ch.isMuted == 1u);
 
     // --- THREE-EMITTER SYSTEM ---
@@ -421,7 +427,7 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   let kickPulse = uniforms.kickTrigger * exp(-length(p) * 3.0) * 0.3;
   finalColor += vec3<f32>(0.9, 0.2, 0.4) * kickPulse * uniforms.bloomIntensity;
 
-  // Dithering
+  // Dithering for night mode
   let noise = fract(sin(dot(in.uv * uniforms.timeSec, vec2<f32>(12.9898, 78.233))) * 43758.5453);
   finalColor += (noise - 0.5) * 0.01;
 

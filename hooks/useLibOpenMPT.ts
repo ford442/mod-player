@@ -1,25 +1,17 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { LibOpenMPT, ModuleInfo, PatternMatrix, ChannelShadowState, PlaybackState } from '../types';
+import { LibOpenMPT, ModuleInfo, PatternMatrix, ChannelShadowState, PlaybackState, SyncDebugInfo } from '../types';
 import { OpenMPTWorkletEngine } from '../audio-worklet/OpenMPTWorkletEngine';
 import { getPatternMatrix, computeNoteAges } from '../utils/patternExtractor';
 import { startAudioPlayback, AudioGraphRefs, AudioGraphCallbacks, AudioGraphConfig } from './useAudioGraph';
-import { useWorkletLoader, getWorkletUrl, getNativeGlueUrl } from './useWorkletLoader';
-
-interface SyncDebugInfo {
-  mode: string;
-  bufferMs: number;
-  driftMs: number;
-  row: number;
-  starvationCount: number;
-}
+import { useWorkletLoader, getWorkletUrl } from './useWorkletLoader';
 
 // Use Vite BASE_URL for correct resolution under subdirectory deployment
 const DEFAULT_MODULE_URL = `${import.meta.env.BASE_URL}4-mat_madness.mod`;
 
-// AUDIO-001 FIX COMPLETE: Use centralized worklet URL construction from useWorkletLoader
+// AUDIO-001 FIX: Use centralized worklet URL construction from useWorkletLoader
 const WORKLET_URL = getWorkletUrl();
 
-// AUDIO-001 FIX COMPLETE: Enhanced logging for diagnostics
+// AUDIO-001 FIX: Enhanced logging for diagnostics
 console.log('[AudioWorklet] Configuration:', {
   workletUrl: WORKLET_URL,
   viteBaseUrl: import.meta.env.BASE_URL,
@@ -57,12 +49,29 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
   const [isWorkletSupported, setIsWorkletSupported] = useState<boolean>(false);
   const [isNativeWorkletAvailable, setIsNativeWorkletAvailable] = useState<boolean>(false);
   const [restartPlayback, setRestartPlayback] = useState<boolean>(false);
-  const [syncDebug, setSyncDebug] = useState<SyncDebugInfo>({ mode: "none", bufferMs: 0, driftMs: 0, row: 0, starvationCount: 0 });
+  const [syncDebug, setSyncDebug] = useState<SyncDebugInfo>({
+    mode: "none",
+    bufferMs: 0,
+    driftMs: 0,
+    row: 0,
+    starvationCount: 0,
+    audioContextState: 'none',
+    sampleRate: 0,
+    baseLatency: 0,
+    outputLatency: 0,
+    workletSupported: typeof AudioWorklet !== 'undefined',
+    wasmSupported: typeof WebAssembly !== 'undefined',
+    driftAccumulator: 0,
+    lastCorrectedTime: 0,
+    lastWorkletUpdate: 0,
+    seekPending: false,
+    bufferHealth: 0,
+  });
   
-  // AUDIO-001 FIX COMPLETE: Track worklet load errors for UI feedback
+  // AUDIO-001 FIX: Track worklet load errors for UI feedback
   const [workletLoadError, setWorkletLoadError] = useState<string | null>(null);
   
-  // AUDIO-001 FIX COMPLETE: Initialize worklet loader with diagnostics
+  // AUDIO-001 FIX: Initialize worklet loader with diagnostics
   const { verifyWorkletFile, isAudioWorkletSupported: checkWorkletSupport } = useWorkletLoader({
     debug: true,
   });
@@ -100,8 +109,6 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
   const audioClockStartRef = useRef<number>(0);
   const workletTimeAtStartRef = useRef<number>(0);
   const driftAccumulatorRef = useRef<number>(0);
-  const workletBufferHealthRef = useRef<number>(0);
-  const workletStarvationCountRef = useRef<number>(0);
   const lastCorrectedTimeRef = useRef<number>(0);
 
   // TIMING FIX: Seek synchronization
@@ -301,31 +308,34 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
           const rowsPerSecond = currentBpm / 60 / 4;
           rowFraction = Math.min(1, elapsedSinceWorkletUpdate * rowsPerSecond);
 
-          // TIMING FIX COMPLETE: Apply drift correction
-          // 'now' is audioCtx.currentTime (hardware master clock)
+          // TIMING FIX: Apply drift correction
+          // 'now' is audioCtx.currentTime (the hardware master clock)
           const elapsedHardwareTime = now - audioClockStartRef.current;
           const expectedTime = workletTimeAtStartRef.current + elapsedHardwareTime;
 
-          // Tracker's reported time (last worklet update + time since that update)
+          // The tracker's actual time (last known worklet time + extrapolated UI frame time)
           const actualTrackerTime = workletTimeRef.current + elapsedSinceWorkletUpdate;
 
-          // True drift
+          // True clock drift: positive means tracker is ahead, negative means tracker is lagging
           const drift = actualTrackerTime - expectedTime;
+
+          // Accumulate the true drift (low-pass filter to smooth out micro-jitters)
           driftAccumulatorRef.current = driftAccumulatorRef.current * 0.9 + drift * 0.1;
 
+          // Apply correction
           if (Math.abs(driftAccumulatorRef.current) > MAX_DRIFT_SECONDS) {
-            // Major desync -> hard snap to hardware clock
+            // A major desync occurred (tab backgrounded, CPU spike, etc.).
+            // Snap the UI to exactly where the hardware audio clock is.
             time = expectedTime;
+
+            // Optionally reset the baselines here to prevent perpetual snapping
             audioClockStartRef.current = now;
             workletTimeAtStartRef.current = workletTimeRef.current;
             driftAccumulatorRef.current = 0;
             lastCorrectedTimeRef.current = now;
-
-            console.log('[Drift] Major correction applied', { drift: driftAccumulatorRef.current });
           } else {
-            // Normal smooth correction
+            // Normal operation: Smoothly subtract the drift so the UI aligns with the audio
             time = actualTrackerTime - driftAccumulatorRef.current;
-            lastCorrectedTimeRef.current = now;   // important for lastUpdateTimestamp
           }
           lastCorrectedTimeRef.current = now;
         } else {
@@ -369,8 +379,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
     setSequencerGlobalRow(globalRow + row);
 
     // TIMING FIX: Smooth row fraction for visual display
-    const prevFraction = playbackStateRef.current.playheadRow % 1;
-    const smoothedRowFraction = rowFraction * ROW_INTERPOLATION_SMOOTHING + (prevFraction * (1 - ROW_INTERPOLATION_SMOOTHING));
+    const smoothedRowFraction = rowFraction * ROW_INTERPOLATION_SMOOTHING + (playbackRowFraction * (1 - ROW_INTERPOLATION_SMOOTHING));
     setPlaybackRowFraction(smoothedRowFraction);
 
     // Compute note ages for hardware choke in shader (only update React state when integer ages change)
@@ -444,13 +453,21 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
       driftMs: Math.round(driftAccumulatorRef.current * 1000),
       row: row,
       mode: activeEngine,
-      bufferMs: Math.round(workletBufferHealthRef.current * 5000),
-      starvationCount: workletStarvationCountRef.current
+      audioContextState: audioContextRef.current?.state || 'none',
+      sampleRate: audioContextRef.current?.sampleRate || 0,
+      baseLatency: audioContextRef.current?.baseLatency ?? 0,
+      outputLatency: audioContextRef.current?.outputLatency ?? 0,
+      workletSupported: typeof AudioWorklet !== 'undefined',
+      wasmSupported: typeof WebAssembly !== 'undefined',
+      driftAccumulator: driftAccumulatorRef.current,
+      lastCorrectedTime: lastCorrectedTimeRef.current,
+      lastWorkletUpdate: lastWorkletUpdateRef.current,
+      seekPending: !!pendingSeekRef.current,
     }));
 
     lastUpdateTimeRef.current = performance.now() / 1000;
     animationFrameHandle.current = requestAnimationFrame(updateUI);
-  }, [isPlaying, activeEngine, sequencerMatrix, kickTrigger, grooveAmount]);
+  }, [isPlaying, activeEngine, sequencerMatrix, kickTrigger, grooveAmount, playbackRowFraction]);
 
   // Keep updateUIRef always pointing to the latest updateUI so
   // startAudioPlayback can schedule the most current callback.
@@ -494,23 +511,8 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
     audioClockStartRef.current = 0;
     workletTimeAtStartRef.current = 0;
     driftAccumulatorRef.current = 0;
-    lastCorrectedTimeRef.current = 0;
     pendingSeekRef.current = null;
     seekAcknowledgedRef.current = true;
-
-    // Reset worklet update timestamp to prevent interpolation jumps and monotonicity locks
-    const audioCtx = audioContextRef.current;
-    lastWorkletUpdateRef.current = audioCtx ? audioCtx.currentTime : (performance.now() / 1000);
-
-    // Snap UI cleanly to zero immediately on stop
-    workletTimeRef.current = 0;
-    workletOrderRef.current = 0;
-    workletRowRef.current = 0;
-
-    console.log('[stopMusic] Timing refs reset', {
-      lastWorkletUpdate: lastWorkletUpdateRef.current,
-      lastCorrected: lastCorrectedTimeRef.current
-    });
 
     if (destroy && currentModulePtr.current !== 0 && libopenmptRef.current) {
       libopenmptRef.current._openmpt_module_destroy(currentModulePtr.current);
@@ -596,7 +598,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
       seekAcknowledgedRef, workletTimestampRef, spFallbackTriggered, scriptProcessorRef,
       spLeftBufPtr, spRightBufPtr, isPlayingRef, animationFrameHandle,
       currentModulePtr, channelStatesRef, patternMatricesRef,
-      audioClockStartRef, workletTimeAtStartRef, driftAccumulatorRef, workletBufferHealthRef, workletStarvationCountRef,
+      audioClockStartRef, workletTimeAtStartRef, driftAccumulatorRef,
       updateUIRef,
     };
     const audioCbs: AudioGraphCallbacks = {
@@ -614,7 +616,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
   // so processModuleData (which memoises over different deps) can call it without stale closure
   playRef.current = play;
 
-  // AUDIO-001 FIX COMPLETE: Enhanced toggle function with better engine state management
+  // AUDIO-001 FIX: Enhanced toggle function with better engine state management
   const toggleAudioEngine = useCallback(() => {
     // Cycle: native-worklet → worklet → native-worklet (if available)
     let newEngine: 'worklet' | 'native-worklet';
@@ -696,7 +698,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
         libopenmptRef.current = lib;
         setIsReady(true);
 
-        // AUDIO-001 FIX COMPLETE: Enhanced AudioWorklet support check with detailed diagnostics
+        // AUDIO-001 FIX: Enhanced AudioWorklet support check with detailed diagnostics
         console.log("[INIT] Testing AudioWorklet support...");
         try {
           const hasWorkletSupport = checkWorkletSupport();
@@ -707,7 +709,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
             userAgent: navigator.userAgent.substring(0, 50) + '...',
           });
 
-          // AUDIO-001 FIX COMPLETE: Verify the worklet file is accessible
+          // AUDIO-001 FIX: Verify the worklet file is accessible
           if (hasWorkletSupport) {
             const fileAccessible = await verifyWorkletFile();
             
@@ -738,7 +740,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
         // Note: enabling this requires building the wasm engine using
         // ./scripts/build-wasm.sh (Emscripten SDK must be installed).
         try {
-          const nativeGlueUrl = getNativeGlueUrl();
+          const nativeGlueUrl = `${import.meta.env.BASE_URL}worklets/openmpt-native.js`;
           console.log('[INIT] Probing for native engine at:', nativeGlueUrl);
           const probeResp = await fetch(nativeGlueUrl, { method: 'HEAD' });
           if (probeResp.ok) {
@@ -833,7 +835,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
     // PERFORMANCE OPTIMIZATION: Export ref for high-frequency updates
     // PatternDisplay reads directly from this to this ref - avoids React re-renders
     playbackStateRef,
-    // AUDIO-001 FIX COMPLETE: Export worklet diagnostics
+    // AUDIO-001 FIX: Export worklet diagnostics
     workletLoadError,
   };
 }

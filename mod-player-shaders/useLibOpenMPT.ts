@@ -1,4 +1,3 @@
-// @ts-nocheck
 
 /// <reference types="vite/client" />
 
@@ -7,9 +6,6 @@ import { ModuleMetadata, PatternMatrix } from '../types';
 import { OpenMPTWorkletEngine } from '../audio-worklet/OpenMPTWorkletEngine';
 import { getPatternMatrix } from './utils/patternExtractor';
 import { processModuleData as processModuleDataFn, startAudioPlayback } from './hooks/useAudioGraph';
-import { getWorkletUrl, getNativeGlueUrl } from '../hooks/useWorkletLoader';
-
-import { getWorkletUrl } from '../hooks/useWorkletLoader';
 
 interface SyncDebugInfo {
   mode: string;
@@ -21,9 +17,19 @@ interface SyncDebugInfo {
 
 const DEFAULT_MODULE_URL = './4-mat_madness.mod';
 
-const WORKLET_URL = getWorkletUrl();
-console.log('[AudioWorklet] Worklet URL resolved:', WORKLET_URL);
+const detectRuntimeBase = (): string => {
+  const viteBase = import.meta.env.BASE_URL;
+  if (viteBase && viteBase !== '/') {
+    return viteBase.endsWith('/') ? viteBase : `${viteBase}/`;
+  }
+  const pathSegments = window.location.pathname.split('/').filter(Boolean);
+  if (pathSegments.length > 0) return `/${pathSegments[0]}/`;
+  return '/';
+};
 
+const RUNTIME_BASE_URL = detectRuntimeBase();
+const WORKLET_URL = `${RUNTIME_BASE_URL}worklets/openmpt-worklet.js`;
+console.log('[AudioWorklet] Worklet URL resolved:', WORKLET_URL);
 
 const MAX_DRIFT_SECONDS = 0.1;
 const ROW_INTERPOLATION_SMOOTHING = 0.3;
@@ -234,20 +240,14 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
           const actualTrackerTime = workletTimeRef.current + elapsed;
           const drift = actualTrackerTime - expectedTime;
           driftAccumulatorRef.current = driftAccumulatorRef.current * 0.9 + drift * 0.1;
-
           if (Math.abs(driftAccumulatorRef.current) > MAX_DRIFT_SECONDS) {
-            // Major desync -> hard snap to hardware clock
             time = expectedTime;
             audioClockStartRef.current = now;
             workletTimeAtStartRef.current = workletTimeRef.current;
             driftAccumulatorRef.current = 0;
             lastCorrectedTimeRef.current = now;
-
-            console.log('[Drift] Major correction applied', { drift: driftAccumulatorRef.current });
           } else {
-            // Normal smooth correction
             time = actualTrackerTime - driftAccumulatorRef.current;
-            lastCorrectedTimeRef.current = now;   // important for lastUpdateTimestamp
           }
           lastCorrectedTimeRef.current = now;
         } else {
@@ -280,8 +280,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
     for (let i = 0; i < order; i++) globalRow += patternMatricesRef.current[i]?.numRows || 64;
     setSequencerGlobalRow(globalRow + row);
 
-    const prevFraction = playbackStateRef.current.playheadRow % 1;
-    const smoothedRowFraction = rowFraction * ROW_INTERPOLATION_SMOOTHING + (prevFraction * (1 - ROW_INTERPOLATION_SMOOTHING));
+    const smoothedRowFraction = rowFraction * ROW_INTERPOLATION_SMOOTHING + (playbackRowFraction * (1 - ROW_INTERPOLATION_SMOOTHING));
     setPlaybackRowFraction(smoothedRowFraction);
 
     const beatPhaseValue = (time * 2) % 1;
@@ -304,7 +303,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
 
     lastUpdateTimeRef.current = performance.now() / 1000;
     animationFrameHandle.current = requestAnimationFrame(updateUI);
-  }, [isPlaying, activeEngine, sequencerMatrix, kickTrigger, grooveAmount]);
+  }, [isPlaying, activeEngine, sequencerMatrix, kickTrigger, grooveAmount, playbackRowFraction]);
 
   const stopMusic = useCallback((destroy: boolean = false) => {
     isPlayingRef.current = false;
@@ -318,11 +317,22 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
     if (spLeftBufPtr.current && libopenmptRef.current) { libopenmptRef.current._free(spLeftBufPtr.current); spLeftBufPtr.current = 0; }
     if (spRightBufPtr.current && libopenmptRef.current) { libopenmptRef.current._free(spRightBufPtr.current); spRightBufPtr.current = 0; }
     spFallbackTriggered.current = false;
+    // TIMING FIX COMPLETE: Reset timing refs on stop (full sync with main implementation)
     audioClockStartRef.current = 0;
     workletTimeAtStartRef.current = 0;
     driftAccumulatorRef.current = 0;
+    lastCorrectedTimeRef.current = 0;
     pendingSeekRef.current = null;
     seekAcknowledgedRef.current = true;
+
+    const audioCtx = audioContextRef.current;
+    lastWorkletUpdateRef.current = audioCtx ? audioCtx.currentTime : (performance.now() / 1000);
+
+    workletTimeRef.current = 0;
+    workletOrderRef.current = 0;
+    workletRowRef.current = 0;
+
+    console.log("[stopMusic] Timing refs reset", { lastWorkletUpdate: lastWorkletUpdateRef.current, lastCorrected: lastCorrectedTimeRef.current });
     if (destroy && currentModulePtr.current !== 0 && libopenmptRef.current) {
       libopenmptRef.current._openmpt_module_destroy(currentModulePtr.current);
       currentModulePtr.current = 0;
@@ -512,7 +522,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
         }
 
         try {
-          const nativeGlueUrl = getNativeGlueUrl();
+          const nativeGlueUrl = `${RUNTIME_BASE_URL}worklets/openmpt-native.js`;
           const probeResp = await fetch(nativeGlueUrl, { method: 'HEAD' });
           if (probeResp.ok) {
             const engine = new OpenMPTWorkletEngine();

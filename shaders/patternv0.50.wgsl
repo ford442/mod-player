@@ -1,10 +1,9 @@
-// patternv0.51.wgsl
-// Three-Emitter LED Indicator System with Unified Lens Cap + Playhead Arc
+// patternv0.50.wgsl
+// Three-Emitter LED Indicator System with Unified Lens Cap
 // Top: Blue Note-On | Middle: Steady Note Color | Bottom: Amber Control
-// Based on v0.50 (circular layout with padTopChannel=true)
+// Based on v0.49 (circular layout with padTopChannel=true)
 // Note: Requires padTopChannel=true in PatternDisplay to shift music channels 1-32.
 // DURA UPDATE: Added note duration visualization with sustain tails
-// ARC-001: Added animated playhead scan-line arc at current row
 
 struct Uniforms {
   numRows: u32,
@@ -450,32 +449,6 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     discard;
   }
 
-  // --- PLAYHEAD ARC OVERLAY (ARC-001) ---
-  let minDim = min(uniforms.canvasW, uniforms.canvasH);
-  let rInner = minDim * 0.15;
-  let rOuter = minDim * 0.45;
-
-  let pixelPos = in.position.xy;
-  let center = vec2<f32>(uniforms.canvasW * 0.5, uniforms.canvasH * 0.5);
-  let delta = pixelPos - center;
-  let fragAngle = atan2(delta.y, delta.x);
-  let fragRadius = length(delta);
-
-  let totalSteps = f32(uniforms.numRows);
-  let rowAngle = -1.5707963 + (uniforms.playheadRow / totalSteps) * 6.2831853;
-
-  var angleDelta = fragAngle - rowAngle;
-  angleDelta = atan2(sin(angleDelta), cos(angleDelta));
-
-  let angularMask = smoothstep(0.018, 0.002, abs(angleDelta));
-  let radialMask = smoothstep(rInner - 4.0, rInner + 4.0, fragRadius) *
-                   smoothstep(rOuter + 4.0, rOuter - 4.0, fragRadius);
-
-  let pulse = 1.0 + 0.02 * sin(uniforms.timeSec * 6.0);
-  let arcIntensity = 0.7 * pulse;
-  let arcColor = vec3<f32>(1.0, 0.85, 0.3);
-  let arcContrib = arcColor * angularMask * radialMask * arcIntensity;
-
   // Smooth playhead position
   let maxRows = f32(uniforms.numRows);
   let playheadStep = uniforms.playheadRow - floor(uniforms.playheadRow / maxRows) * maxRows;
@@ -503,7 +476,6 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
       col += glow;
       alpha = max(alpha, smoothstep(0.0, 0.25, length(glow)));
     }
-    col += arcContrib;
     return vec4<f32>(col, clamp(alpha, 0.0, 1.0));
   }
 
@@ -642,9 +614,6 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   // Kick reactive glow
   let kickPulse = uniforms.kickTrigger * exp(-length(p) * 3.0) * 0.3;
   finalColor += vec3<f32>(0.9, 0.2, 0.4) * kickPulse * uniforms.bloomIntensity;
-
-  // Add playhead arc overlay
-  finalColor += arcContrib;
 
   // Dithering for night mode
   let noise = fract(sin(dot(in.uv * uniforms.timeSec, vec2<f32>(12.9898, 78.233))) * 43758.5453);
