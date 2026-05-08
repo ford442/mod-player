@@ -16,10 +16,10 @@ interface SyncDebugInfo {
 // Use Vite BASE_URL for correct resolution under subdirectory deployment
 const DEFAULT_MODULE_URL = `${import.meta.env.BASE_URL}4-mat_madness.mod`;
 
-// AUDIO-001 FIX: Use centralized worklet URL construction from useWorkletLoader
+// AUDIO-001 FIX COMPLETE: Use centralized worklet URL construction from useWorkletLoader
 const WORKLET_URL = getWorkletUrl();
 
-// AUDIO-001 FIX: Enhanced logging for diagnostics
+// AUDIO-001 FIX COMPLETE: Enhanced logging for diagnostics
 console.log('[AudioWorklet] Configuration:', {
   workletUrl: WORKLET_URL,
   viteBaseUrl: import.meta.env.BASE_URL,
@@ -59,10 +59,10 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
   const [restartPlayback, setRestartPlayback] = useState<boolean>(false);
   const [syncDebug, setSyncDebug] = useState<SyncDebugInfo>({ mode: "none", bufferMs: 0, driftMs: 0, row: 0, starvationCount: 0 });
   
-  // AUDIO-001 FIX: Track worklet load errors for UI feedback
+  // AUDIO-001 FIX COMPLETE: Track worklet load errors for UI feedback
   const [workletLoadError, setWorkletLoadError] = useState<string | null>(null);
   
-  // AUDIO-001 FIX: Initialize worklet loader with diagnostics
+  // AUDIO-001 FIX COMPLETE: Initialize worklet loader with diagnostics
   const { verifyWorkletFile, isAudioWorkletSupported: checkWorkletSupport } = useWorkletLoader({
     debug: true,
   });
@@ -577,7 +577,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
   // so processModuleData (which memoises over different deps) can call it without stale closure
   playRef.current = play;
 
-  // AUDIO-001 FIX: Enhanced toggle function with better engine state management
+  // AUDIO-001 FIX COMPLETE: Enhanced toggle function with better engine state management
   const toggleAudioEngine = useCallback(() => {
     // Cycle: native-worklet → worklet → native-worklet (if available)
     let newEngine: 'worklet' | 'native-worklet';
@@ -659,7 +659,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
         libopenmptRef.current = lib;
         setIsReady(true);
 
-        // AUDIO-001 FIX: Enhanced AudioWorklet support check with detailed diagnostics
+        // AUDIO-001 FIX COMPLETE: Enhanced AudioWorklet support check with detailed diagnostics
         console.log("[INIT] Testing AudioWorklet support...");
         try {
           const hasWorkletSupport = checkWorkletSupport();
@@ -670,7 +670,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
             userAgent: navigator.userAgent.substring(0, 50) + '...',
           });
 
-          // AUDIO-001 FIX: Verify the worklet file is accessible
+          // AUDIO-001 FIX COMPLETE: Verify the worklet file is accessible
           if (hasWorkletSupport) {
             const fileAccessible = await verifyWorkletFile();
             
@@ -796,7 +796,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
     // PERFORMANCE OPTIMIZATION: Export ref for high-frequency updates
     // PatternDisplay reads directly from this to this ref - avoids React re-renders
     playbackStateRef,
-    // AUDIO-001 FIX: Export worklet diagnostics
+    // AUDIO-001 FIX COMPLETE: Export worklet diagnostics
     workletLoadError,
   };
 }
