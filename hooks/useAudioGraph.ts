@@ -62,7 +62,7 @@ export interface AudioGraphConfig {
   WORKLET_URL:            string;
 }
 
-// AUDIO-001 FIX: Enhanced logging helper
+// AUDIO-001 FIX COMPLETE: Enhanced logging helper
 const logWorkletDiagnostics = (ctx: AudioContext, workletUrl: string) => {
   console.log('[WORKLET_DIAGNOSTICS]', {
     audioContextState: ctx.state,
@@ -75,7 +75,7 @@ const logWorkletDiagnostics = (ctx: AudioContext, workletUrl: string) => {
   });
 };
 
-// AUDIO-001 FIX: Centralized worklet URL from useWorkletLoader
+// AUDIO-001 FIX COMPLETE: Centralized worklet URL from useWorkletLoader
 const WORKLET_URL = getWorkletUrl();
 
 export async function startAudioPlayback(
@@ -112,7 +112,7 @@ export async function startAudioPlayback(
     const ctx = refs.audioContextRef.current;
     console.log('[PLAY] AudioContext state:', ctx.state);
     
-    // AUDIO-001 FIX: Log diagnostics
+    // AUDIO-001 FIX COMPLETE: Log diagnostics
     logWorkletDiagnostics(ctx, config.WORKLET_URL);
 
     if (ctx.state === 'suspended') {
@@ -270,7 +270,7 @@ export async function startAudioPlayback(
       console.log('[PLAY] Using AudioWorklet engine...');
 
       try {
-        // AUDIO-001 FIX: Enhanced worklet module loading with better error handling
+        // AUDIO-001 FIX COMPLETE: Enhanced worklet module loading with better error handling
         if (ctx.audioWorklet && !refs.workletLoadedRef.current) {
           // Use centralized WORKLET_URL for consistency
           const workletUrl = WORKLET_URL || config.WORKLET_URL;
@@ -282,7 +282,7 @@ export async function startAudioPlayback(
           console.log('[PLAY] ==================================================');
           
           try {
-            // AUDIO-001 FIX: Add timeout for worklet loading to detect hanging
+            // AUDIO-001 FIX COMPLETE: Add timeout for worklet loading to detect hanging
             const loadTimeout = new Promise<never>((_, reject) => {
               setTimeout(() => reject(new Error('Worklet module load timeout (10s)')), 10000);
             });
@@ -296,7 +296,7 @@ export async function startAudioPlayback(
             console.error('[PLAY] ❌ Failed to load AudioWorklet module:', loadError);
             console.error('[PLAY] URL attempted:', workletUrl);
             
-            // AUDIO-001 FIX: Provide helpful diagnostics for common issues
+            // AUDIO-001 FIX COMPLETE: Provide helpful diagnostics for common issues
             const errorMsg = (loadError as Error).message || 'Unknown error';
             
             // Check for 404 errors
@@ -343,7 +343,7 @@ export async function startAudioPlayback(
         }
         if (wasmMemory) processorOptions.memory = wasmMemory;
         
-        // AUDIO-001 FIX: Wrap node creation in try-catch for better diagnostics
+        // AUDIO-001 FIX COMPLETE: Wrap node creation in try-catch for better diagnostics
         let node: AudioWorkletNode;
         try {
           node = new AudioWorkletNode(ctx, 'openmpt-processor', {
@@ -512,7 +512,7 @@ export async function startAudioPlayback(
         console.error("[PLAY] Failed to create/load AudioWorkletNode:", e);
         refs.workletLoadedRef.current = false;
         
-        // AUDIO-001 FIX: Better error messages based on error type
+        // AUDIO-001 FIX COMPLETE: Better error messages based on error type
         const errorMsg = (e as Error).message || 'Unknown error';
         if (errorMsg.includes('timeout')) {
           callbacks.setStatus("Error: AudioWorklet load timeout (check network)");
