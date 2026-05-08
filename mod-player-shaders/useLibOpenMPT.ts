@@ -9,6 +9,8 @@ import { getPatternMatrix } from './utils/patternExtractor';
 import { processModuleData as processModuleDataFn, startAudioPlayback } from './hooks/useAudioGraph';
 import { getWorkletUrl, getNativeGlueUrl } from '../hooks/useWorkletLoader';
 
+import { getWorkletUrl } from '../hooks/useWorkletLoader';
+
 interface SyncDebugInfo {
   mode: string;
   bufferMs: number;
@@ -21,6 +23,7 @@ const DEFAULT_MODULE_URL = './4-mat_madness.mod';
 
 const WORKLET_URL = getWorkletUrl();
 console.log('[AudioWorklet] Worklet URL resolved:', WORKLET_URL);
+
 
 const MAX_DRIFT_SECONDS = 0.1;
 const ROW_INTERPOLATION_SMOOTHING = 0.3;
