@@ -64,7 +64,23 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
   const [isWorkletSupported, setIsWorkletSupported] = useState(false);
   const [isNativeWorkletAvailable, setIsNativeWorkletAvailable] = useState(false);
   const [restartPlayback, setRestartPlayback] = useState(false);
-  const [syncDebug, setSyncDebug] = useState({ mode: "none", bufferMs: 0, driftMs: 0, row: 0, starvationCount: 0 });
+  const [syncDebug, setSyncDebug] = useState({
+    mode: "none",
+    bufferMs: 0,
+    driftMs: 0,
+    row: 0,
+    starvationCount: 0,
+    audioContextState: 'none',
+    sampleRate: 0,
+    baseLatency: 0,
+    outputLatency: 0,
+    workletSupported: false,
+    wasmSupported: false,
+    driftAccumulator: 0,
+    lastCorrectedTime: 0,
+    lastWorkletUpdate: 0,
+    seekPending: false,
+  });
 
   const libopenmptRef = useRef<any>(null);
   const currentModulePtr = useRef<any>(0);
@@ -296,9 +312,20 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
     setSyncDebug(prev => ({
       ...prev,
       driftMs: Math.round(driftAccumulatorRef.current * 1000),
-      row, mode: activeEngine,
-      bufferMs: Math.round(workletBufferHealthRef.current * 5000),
-      starvationCount: workletStarvationCountRef.current,
+      row,
+      mode: activeEngine,
+      audioContextState: audioContextRef.current?.state || 'none',
+      sampleRate: audioContextRef.current?.sampleRate || 0,
+      baseLatency: audioContextRef.current?.baseLatency ?? 0,
+      outputLatency: audioContextRef.current?.outputLatency ?? 0,
+      workletSupported: typeof AudioWorklet !== 'undefined',
+      wasmSupported: typeof WebAssembly !== 'undefined',
+      driftAccumulator: driftAccumulatorRef.current,
+      lastCorrectedTime: lastCorrectedTimeRef.current,
+      lastWorkletUpdate: lastWorkletUpdateRef.current,
+      seekPending: !!pendingSeekRef.current,
+      bufferMs: Math.round((workletBufferHealthRef.current ?? 0) * 5000),
+      starvationCount: workletStarvationCountRef.current ?? 0,
     }));
 
     lastUpdateTimeRef.current = performance.now() / 1000;

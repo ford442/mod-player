@@ -421,12 +421,21 @@ function App() {
           headerContent={
             <div className="scale-75 origin-top-left">
             <Header status={status} isModuleLoaded={isModuleLoaded} />
-            <div className={cn('mb-2 inline-flex flex-col rounded border px-2 py-1 text-[10px] font-mono', isDarkMode ? 'border-gray-700 bg-black/50 text-gray-300' : 'border-gray-300 bg-white/80 text-gray-700')}>
-              <span>sync mode: {syncDebug.mode}</span>
-              <span>buffer: {syncDebug.bufferMs.toFixed(1)}ms</span>
-              <span>drift: {syncDebug.driftMs.toFixed(1)}ms</span>
-              <span>row: {syncDebug.row.toFixed(2)}</span>
-              <span>starvations: {syncDebug.starvationCount}</span>
+            {/* === AUDIO ENGINE DIAGNOSTICS === */}
+            <div className={cn("debug-section audio-diagnostics mb-2 inline-flex flex-col rounded border px-2 py-1 text-[10px] font-mono", isDarkMode ? "border-gray-700 bg-black/50 text-gray-300" : "border-gray-300 bg-white/80 text-gray-700")}>
+              <h4 className="m-0 mb-1 border-b pb-1 font-bold">🎛️ Audio Engine</h4>
+              <div className="debug-grid grid grid-cols-2 gap-x-4 gap-y-1">
+                <div><strong>Context:</strong> {syncDebug.audioContextState}</div>
+                <div><strong>Sample Rate:</strong> {syncDebug.sampleRate} Hz</div>
+                <div><strong>Base Latency:</strong> {syncDebug.baseLatency.toFixed(2)} ms</div>
+                <div><strong>Output Latency:</strong> {syncDebug.outputLatency.toFixed(2)} ms</div>
+                <div><strong>Drift:</strong> {syncDebug.driftMs} ms <span style={{color: Math.abs(syncDebug.driftAccumulator) > 0.008 ? "#ff4444" : "#44ff88"}}>({syncDebug.driftAccumulator.toFixed(4)})</span></div>
+                <div><strong>Last Corrected:</strong> {syncDebug.lastCorrectedTime.toFixed(3)} s</div>
+                <div><strong>Last Worklet Update:</strong> {syncDebug.lastWorkletUpdate.toFixed(3)} s</div>
+                <div><strong>Seek Pending:</strong> <span style={{color: syncDebug.seekPending ? "#ffaa00" : "#44ff88"}}>{syncDebug.seekPending ? "YES" : "No"}</span></div>
+                <div><strong>Buffer:</strong> {(syncDebug.bufferMs / 1000).toFixed(2)} s</div>
+                <div><strong>Starvation Count:</strong> {syncDebug.starvationCount}</div>
+              </div>
             </div>
             </div>
           }
