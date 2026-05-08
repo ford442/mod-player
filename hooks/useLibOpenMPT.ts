@@ -100,6 +100,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
   const workletOrderRef = useRef<number>(0);
   const workletRowRef = useRef<number>(0);
   const workletTimeRef = useRef<number>(0);
+  const workletTimestampRef = useRef<number>(0);
   // TIMING FIX: Track worklet BPM for accurate row interpolation
   const workletBpmRef = useRef<number>(125);
   const lastWorkletUpdateRef = useRef<number>(0);
@@ -336,6 +337,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
             // Normal operation: Smoothly subtract the drift so the UI aligns with the audio
             time = actualTrackerTime - driftAccumulatorRef.current;
           }
+          lastCorrectedTimeRef.current = now;
         } else {
           // Worklet hasn't updated recently - use last known values
           rowFraction = 0;
@@ -433,8 +435,8 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
     const beatPhaseValue = (time * 2) % 1;
     setBeatPhase(beatPhaseValue);
 
-    // TIMING FIX: Atomic update of playbackStateRef with timestamp
-    const now = audioCtx?.currentTime || performance.now() / 1000;
+    // TIMING FIX COMPLETE: Atomic update of playbackStateRef with worklet-provided timestamp
+    const now = workletTimestampRef.current || (audioCtx?.currentTime || performance.now() / 1000);
     playbackStateRef.current = {
       playheadRow: row + smoothedRowFraction,
       currentOrder: order,
@@ -593,7 +595,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
       stereoPannerRef, gainNodeRef, analyserRef, audioWorkletNodeRef,
       nativeEngineRef, wasmMemoryRef, workletOrderRef, workletRowRef,
       workletTimeRef, lastWorkletUpdateRef, workletBpmRef, pendingSeekRef,
-      seekAcknowledgedRef, spFallbackTriggered, scriptProcessorRef,
+      seekAcknowledgedRef, workletTimestampRef, spFallbackTriggered, scriptProcessorRef,
       spLeftBufPtr, spRightBufPtr, isPlayingRef, animationFrameHandle,
       currentModulePtr, channelStatesRef, patternMatricesRef,
       audioClockStartRef, workletTimeAtStartRef, driftAccumulatorRef,

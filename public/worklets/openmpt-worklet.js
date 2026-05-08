@@ -108,6 +108,17 @@ class OpenMPTProcessor extends AudioWorkletProcessor {
       const frequency = 440;
       const amplitude = 0.1;
 
+      this.port.postMessage({
+        type: 'position',
+        order,
+        row,
+        positionSeconds: posSec,
+        bpm,
+        workletTime: currentTime,
+        bufferHealth: this.ringBuffer.health,
+        starvationCount: this.starvationCount
+      });
+      this.lastPositionReportTime = currentTime;
       for (let i = 0; i < numFrames; i++) {
         const sample = Math.sin(2 * Math.PI * frequency * (this.positionSeconds + i / this.sampleRate)) * amplitude;
         if (leftChannel) leftChannel[i] = sample;
