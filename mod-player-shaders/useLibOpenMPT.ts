@@ -8,6 +8,8 @@ import { OpenMPTWorkletEngine } from '../audio-worklet/OpenMPTWorkletEngine';
 import { getPatternMatrix } from './utils/patternExtractor';
 import { processModuleData as processModuleDataFn, startAudioPlayback } from './hooks/useAudioGraph';
 
+import { getWorkletUrl } from '../hooks/useWorkletLoader';
+
 interface SyncDebugInfo {
   mode: string;
   bufferMs: number;
@@ -18,19 +20,9 @@ interface SyncDebugInfo {
 
 const DEFAULT_MODULE_URL = './4-mat_madness.mod';
 
-const detectRuntimeBase = (): string => {
-  const viteBase = import.meta.env.BASE_URL;
-  if (viteBase && viteBase !== '/') {
-    return viteBase.endsWith('/') ? viteBase : `${viteBase}/`;
-  }
-  const pathSegments = window.location.pathname.split('/').filter(Boolean);
-  if (pathSegments.length > 0) return `/${pathSegments[0]}/`;
-  return '/';
-};
-
-const RUNTIME_BASE_URL = detectRuntimeBase();
-const WORKLET_URL = `${RUNTIME_BASE_URL}worklets/openmpt-worklet.js`;
+const WORKLET_URL = getWorkletUrl();
 console.log('[AudioWorklet] Worklet URL resolved:', WORKLET_URL);
+
 
 const MAX_DRIFT_SECONDS = 0.1;
 const ROW_INTERPOLATION_SMOOTHING = 0.3;
