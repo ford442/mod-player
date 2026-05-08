@@ -3,7 +3,7 @@ import { LibOpenMPT, ModuleInfo, PatternMatrix, ChannelShadowState, PlaybackStat
 import { OpenMPTWorkletEngine } from '../audio-worklet/OpenMPTWorkletEngine';
 import { getPatternMatrix, computeNoteAges } from '../utils/patternExtractor';
 import { startAudioPlayback, AudioGraphRefs, AudioGraphCallbacks, AudioGraphConfig } from './useAudioGraph';
-import { useWorkletLoader, getWorkletUrl } from './useWorkletLoader';
+import { useWorkletLoader, getWorkletUrl, getNativeGlueUrl } from './useWorkletLoader';
 
 interface SyncDebugInfo {
   mode: string;
@@ -719,7 +719,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
         // Note: enabling this requires building the wasm engine using
         // ./scripts/build-wasm.sh (Emscripten SDK must be installed).
         try {
-          const nativeGlueUrl = `${import.meta.env.BASE_URL}worklets/openmpt-native.js`;
+          const nativeGlueUrl = getNativeGlueUrl();
           console.log('[INIT] Probing for native engine at:', nativeGlueUrl);
           const probeResp = await fetch(nativeGlueUrl, { method: 'HEAD' });
           if (probeResp.ok) {
