@@ -511,8 +511,16 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
     audioClockStartRef.current = 0;
     workletTimeAtStartRef.current = 0;
     driftAccumulatorRef.current = 0;
+    lastCorrectedTimeRef.current = 0;
     pendingSeekRef.current = null;
     seekAcknowledgedRef.current = true;
+
+    const audioCtx = audioContextRef.current;
+    lastWorkletUpdateRef.current = audioCtx ? audioCtx.currentTime : (performance.now() / 1000);
+
+    workletTimeRef.current = 0;
+    workletOrderRef.current = 0;
+    workletRowRef.current = 0;
 
     if (destroy && currentModulePtr.current !== 0 && libopenmptRef.current) {
       libopenmptRef.current._openmpt_module_destroy(currentModulePtr.current);

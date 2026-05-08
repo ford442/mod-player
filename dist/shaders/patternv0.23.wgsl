@@ -19,7 +19,7 @@ struct VertOut { @builtin(position) pos: vec4<f32>, @location(0) uv: vec2<f32> }
   // Y is inverted in some pipelines, assuming standard -1..1 here.
   let scale = vec2<f32>(0.91, 0.74); // Slightly smaller than bezel hole to avoid overlap
   let offset = vec2<f32>(0.0, 0.2); // Shift up
-  
+
   out.pos = vec4(rawPos * scale + offset, 0.0, 1.0);
   out.uv = rawPos * 0.5 + 0.5; // UV still 0..1 for internal shader logic
   return out;
