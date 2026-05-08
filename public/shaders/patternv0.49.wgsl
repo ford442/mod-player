@@ -73,9 +73,9 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
 
   let radius = minRadius + f32(ringIndex) * ringDepth;
 
-  let totalSteps = 64.0;
+  let totalSteps = f32(uniforms.numRows);
   let anglePerStep = 6.2831853 / totalSteps;
-  let theta = -1.570796 + f32(row % 64u) * anglePerStep;
+  let theta = -1.570796 + f32(row % uniforms.numRows) * anglePerStep;
 
   let circumference = 2.0 * 3.14159265 * radius;
   let arcLength = circumference / totalSteps;
@@ -301,10 +301,16 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   let kick = uniforms.kickTrigger;
   let beat = uniforms.beatPhase;
 
-  // Smooth playhead position — compute BEFORE any early discard
-  let playheadStep = uniforms.playheadRow - floor(uniforms.playheadRow / 64.0) * 64.0;
-  let rowDistRaw = abs(f32(in.row % 64u) - playheadStep);
-  let rowDist = min(rowDistRaw, 64.0 - rowDistRaw);
+  // Hardware Layering: Discard pixels over UI
+  if (in.position.y > uniforms.canvasH * 0.88) {
+    discard;
+  }
+
+  // Smooth playhead position
+  let maxRows = f32(uniforms.numRows);
+  let playheadStep = uniforms.playheadRow - floor(uniforms.playheadRow / maxRows) * maxRows;
+  let rowDistRaw = abs(f32(in.row % uniforms.numRows) - playheadStep);
+  let rowDist = min(rowDistRaw, maxRows - rowDistRaw);
   let playheadActivation = 1.0 - smoothstep(0.0, 1.5, rowDist);
 
   // CHANNEL 0 is the Indicator Ring (padTopChannel shifts music to 1-32)
@@ -352,25 +358,7 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     let hasNote = (note > 0u);
     let hasExpression = (volCmd > 0u) || (effCmd > 0u);
 
-    // Housing color: tint by note presence (restore color-per-note display)
-    var housingColor = fs.bgColor;
-    if (hasNote) {
-      let pitchHue = pitchClassFromIndex(note);
-      let baseColor = selectPalette(uniforms.colorPalette, pitchHue);
-      let instBand = inst & 15u;
-      let instBright = 0.85 + (select(0.0, f32(instBand) / 15.0, instBand > 0u)) * 0.15;
-      let tintColor = baseColor * instBright;
-      housingColor = mix(fs.bgColor, tintColor, 0.35);
-    }
-
-    // Start with tinted housing background
-    finalColor = housingColor;
-
-    // Bounds check for channel state array access
-    var ch = ChannelState(0.0, 0.0, 0.0, 0u, 1000.0, 0u, 0.0, 0u);
-    if (in.channel < arrayLength(&channels)) {
-      ch = channels[in.channel];
-    }
+    let ch = channels[in.channel];
     let isMuted = (ch.isMuted == 1u);
 
     // --- THREE-EMITTER SYSTEM ---
@@ -381,9 +369,9 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     var topIntensity = 0.0;
     if (!isMuted) {
       if (ch.trigger > 0u) {
-        topIntensity = 2.5;
-      } else if (hasNote) {
-        topIntensity = playheadActivation * 1.5;
+        topIntensity = 1.0 + bloom;
+      } else if (playheadActivation > 0.5) {
+        topIntensity = playheadActivation * 0.6;
       }
     }
 
@@ -407,12 +395,8 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     // Lights up when there's an effect or volume command
     let amberColor = vec3<f32>(1.0, 0.55, 0.1);
     var botIntensity = 0.0;
-    if (!isMuted) {
-      if (hasExpression) {
-        botIntensity = 2.0;
-      } else if (hasNote && playheadActivation > 0.5) {
-        botIntensity = 0.6;
-      }
+    if (!isMuted && hasExpression) {
+      botIntensity = 0.8 + bloom;
     }
 
     // --- RENDER UNIFIED GLASS LENS ---
@@ -429,20 +413,13 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
 
     finalColor = mix(finalColor, lens.rgb, lens.a);
 
-    // External glow — bloom-independent so LEDs are always visible
+    // Add external glow when active
     if (topIntensity > 0.0 || botIntensity > 0.0 || midIntensity > 0.5) {
       let totalActivity = topIntensity + botIntensity + (midIntensity - 0.12);
       let glowColor = mix(midColor, blueColor, topIntensity * 0.5);
       let glowColor2 = mix(glowColor, amberColor, botIntensity * 0.5);
-      let externalGlow = glowColor2 * totalActivity * (0.3 + bloom * 1.5) * exp(-length(p) * 4.0);
+      let externalGlow = glowColor2 * totalActivity * bloom * 2.0 * exp(-length(p) * 4.0);
       finalColor += externalGlow;
-    }
-    // Direct LED glow independent of bloom
-    if (!isMuted && ch.trigger > 0u) {
-      finalColor += blueColor * 0.4 * exp(-length(p) * 3.5);
-    }
-    if (!isMuted && hasExpression) {
-      finalColor += amberColor * 0.3 * exp(-length(p) * 3.5);
     }
   }
 

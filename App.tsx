@@ -48,6 +48,7 @@ const SHADER_GROUPS = {
     { id: 'patternv0.45b.wgsl', label: 'v0.45b (Note-On Sustain)' },
     { id: 'patternv0.42.wgsl', label: 'v0.42 (Frosted Disc)' },
     { id: 'patternv0.38.wgsl', label: 'v0.38 (Glass)' },
+    { id: 'pattern_bloom.wgsl', label: 'Bloom (Unified)' },
     { id: 'patternv0.35_bloom.wgsl', label: 'v0.35 (Bloom)' },
     { id: 'patternv0.30.wgsl', label: 'v0.30 (Disc)' },
   ],

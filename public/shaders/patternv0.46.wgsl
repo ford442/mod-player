@@ -58,9 +58,9 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
   let row = instanceIndex / numChannels;
   let channel = instanceIndex % numChannels;
 
-  // Cull instances not in current 64-step page to prevent alpha/z-fighting
-  let pageStart = u32(uniforms.playheadRow / 64.0) * 64u;
-  var isVisible = (row >= pageStart && row < pageStart + 64u);
+  // Cull instances not in current pattern-length page to prevent alpha/z-fighting
+  let pageStart = u32(uniforms.playheadRow / f32(uniforms.numRows)) * uniforms.numRows;
+  var isVisible = (row >= pageStart && row < pageStart + uniforms.numRows);
 
   let invertedChannel = numChannels - 1u - channel;
   let ringIndex = select(invertedChannel, channel, (uniforms.invertChannels == 1u));
@@ -74,9 +74,9 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
 
   let radius = minRadius + f32(ringIndex) * ringDepth;
 
-  let totalSteps = 64.0;
+  let totalSteps = f32(uniforms.numRows);
   let anglePerStep = 6.2831853 / totalSteps;
-  let theta = -1.570796 + f32(row % 64u) * anglePerStep;
+  let theta = -1.570796 + f32(row % uniforms.numRows) * anglePerStep;
 
   let circumference = 2.0 * 3.14159265 * radius;
   let arcLength = circumference / totalSteps;
@@ -208,6 +208,7 @@ fn drawFrostedGlassCap(uv: vec2<f32>, size: vec2<f32>, color: vec3<f32>, isOn: b
     finalColor += fresnel * color * noteGlow * 0.3;
     return vec4<f32>(finalColor, edgeAlpha);
 }
+
 @fragment
 fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   // Compute derivatives in uniform control flow (before any early returns)
@@ -215,35 +216,19 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   let p = uv - vec2<f32>(0.5, 0.5);
   let aa = fwidth(p.y) * 0.33;
   
-  if (in.channel >= uniforms.numChannels) { return vec4<f32>(0.0); }
-  
+  if (in.channel >= uniforms.numChannels) { return vec4<f32>(1.0, 0.0, 0.0, 1.0); }
   let fs = getFragmentConstants();
   let bloom = uniforms.bloomIntensity;
 
-  // ── Playhead proximity ────────────────────────────────────────────────────
-  let totalSteps = 64.0;
-  let playheadStep = uniforms.playheadRow - floor(uniforms.playheadRow / totalSteps) * totalSteps;
-  let rowF = f32(in.row % 64u);
-  let rowDistRaw = abs(rowF - playheadStep);
-  let rowDist = min(rowDistRaw, totalSteps - rowDistRaw);
-  let playheadHit = 1.0 - smoothstep(0.0, 2.0, rowDist);
-
-  // NOTE: Early discard moved to after derivative computation to avoid undefined behavior in fwidth()
-  // Clip UI strip at bottom of canvas — SAFE HERE after derivatives computed
-  if (in.position.y > uniforms.canvasH * 0.88) { discard; }
-
-  // ── Trailing sweep ────────────────────────────────────────────────────────
-  let stepsBehind = fract((playheadStep - rowF) / totalSteps) * totalSteps;
-  let trailGlow = select(
-    0.0,
-    exp(-stepsBehind * 0.40),
-    stepsBehind > 0.001 && stepsBehind < 14.0
-  );
+  if (in.position.y > uniforms.canvasH * 0.88) {
+    discard;
+  }
 
   if (in.channel == 0u) {
-    let playheadStep = uniforms.playheadRow - floor(uniforms.playheadRow / 64.0) * 64.0;
-    let rowDistRaw = abs(f32(in.row % 64u) - playheadStep);
-    let rowDist = min(rowDistRaw, 64.0 - rowDistRaw);
+    let maxRows = f32(uniforms.numRows);
+    let playheadStep = uniforms.playheadRow - floor(uniforms.playheadRow / maxRows) * maxRows;
+    let rowDistRaw = abs(f32(in.row % uniforms.numRows) - playheadStep);
+    let rowDist = min(rowDistRaw, maxRows - rowDistRaw);
     let playheadActivation = 1.0 - smoothstep(0.0, 1.5, rowDist);
     let onPlayhead = playheadActivation > 0.5;
     
@@ -284,13 +269,19 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     let ch            = channels[in.channel];
     let isMuted       = (ch.isMuted == 1u);
 
+    // Playhead proximity (wrap-safe, dynamic page)
+    let maxRows = f32(uniforms.numRows);
+    let playheadStep      = uniforms.playheadRow - floor(uniforms.playheadRow / maxRows) * maxRows;
+    let rowDistRaw        = abs(f32(in.row % uniforms.numRows) - playheadStep);
+    let rowDist           = min(rowDistRaw, maxRows - rowDistRaw);
+    let playheadActivation = 1.0 - smoothstep(0.0, 1.5, rowDist);
+
     if (!isMuted) {
       if (hasNote) {
         let pitchHue = pitchClassFromIndex(note);
         let noteCol  = selectPalette(uniforms.colorPalette, pitchHue);
-        // playheadHit already computed above (0..1 proximity)
-        var noteGlow = playheadHit;
-        if (ch.trigger > 0u && playheadHit > 0.5) { noteGlow += 1.0; }
+        var noteGlow = playheadActivation;
+        if (ch.trigger > 0u && playheadActivation > 0.5) { noteGlow += 1.0; }
 
         let mainUV  = btnUV - vec2<f32>(0.5, 0.5);
         let mainSz  = vec2<f32>(0.60, 0.60);
@@ -302,14 +293,15 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
       }
 
       if (hasExpression) {
+        // Small cyan expression dot near top of housing
         let exprCenter = p - vec2<f32>(0.0, -0.32);
         let exprMask   = 1.0 - smoothstep(0.04, 0.07, length(exprCenter));
         let exprCol    = vec3<f32>(0.0, 0.75, 1.0) * (0.9 + bloom * 0.4);
         finalColor     = mix(finalColor, exprCol, exprMask * 0.85);
       }
 
-      if (playheadHit > 0.0) {
-        finalColor += vec3<f32>(0.04, 0.04, 0.08) * playheadHit;
+      if (playheadActivation > 0.0) {
+        finalColor += vec3<f32>(0.04, 0.04, 0.08) * playheadActivation;
       }
     } else {
       finalColor *= 0.3;
