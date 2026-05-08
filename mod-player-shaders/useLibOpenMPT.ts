@@ -254,8 +254,8 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
     }
 
     if (pendingSeekRef.current && !seekAcknowledgedRef.current) {
-      const seekAge = audioCtx ? audioCtx.currentTime - pendingSeekRef.current.timestamp : 0;
-      if (seekAge > 0.5) { seekAcknowledgedRef.current = true; pendingSeekRef.current = null; }
+      const seekAgeMs = performance.now() - pendingSeekRef.current.timestamp;
+      if (seekAgeMs > 500) { seekAcknowledgedRef.current = true; pendingSeekRef.current = null; }
     }
 
     if (sequencerMatrix?.order !== order) {
@@ -388,7 +388,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
     }
 
     const audioCtx = audioContextRef.current;
-    pendingSeekRef.current = { order: targetOrder, row: targetRow, timestamp: audioCtx ? audioCtx.currentTime : performance.now() / 1000 };
+    pendingSeekRef.current = { order: targetOrder, row: targetRow, timestamp: performance.now() };
     seekAcknowledgedRef.current = false;
     lib._openmpt_module_set_position_order_row(modPtr, targetOrder, targetRow);
     workletOrderRef.current = targetOrder;
