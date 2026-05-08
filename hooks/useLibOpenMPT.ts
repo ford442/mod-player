@@ -99,6 +99,8 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
   const audioClockStartRef = useRef<number>(0);
   const workletTimeAtStartRef = useRef<number>(0);
   const driftAccumulatorRef = useRef<number>(0);
+  const workletBufferHealthRef = useRef<number>(0);
+  const workletStarvationCountRef = useRef<number>(0);
   const lastCorrectedTimeRef = useRef<number>(0);
 
   // TIMING FIX: Seek synchronization
@@ -441,7 +443,9 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
       ...prev,
       driftMs: Math.round(driftAccumulatorRef.current * 1000),
       row: row,
-      mode: activeEngine
+      mode: activeEngine,
+      bufferMs: Math.round(workletBufferHealthRef.current * 5000),
+      starvationCount: workletStarvationCountRef.current
     }));
 
     lastUpdateTimeRef.current = performance.now() / 1000;
@@ -577,7 +581,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
       seekAcknowledgedRef, spFallbackTriggered, scriptProcessorRef,
       spLeftBufPtr, spRightBufPtr, isPlayingRef, animationFrameHandle,
       currentModulePtr, channelStatesRef, patternMatricesRef,
-      audioClockStartRef, workletTimeAtStartRef, driftAccumulatorRef,
+      audioClockStartRef, workletTimeAtStartRef, driftAccumulatorRef, workletBufferHealthRef, workletStarvationCountRef,
       updateUIRef,
     };
     const audioCbs: AudioGraphCallbacks = {
