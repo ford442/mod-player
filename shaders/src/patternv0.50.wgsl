@@ -1,6 +1,6 @@
 // ============================================================
-// patternv0.51.wgsl — Source file
-// Three-Emitter LED Indicator System with Unified Lens Cap + Playhead Arc
+// patternv0.50.wgsl — Source file
+// Three-Emitter LED Indicator System with Unified Lens Cap
 //
 // Assembled via build-shaders.mjs from:
 //   #include "common.wgsl"
@@ -11,8 +11,6 @@
 //   #include "led_drawing.wgsl"
 //
 // Note: Requires padTopChannel=true in PatternDisplay to shift music channels 1-32.
-// DURA UPDATE: Added note duration visualization with sustain tails
-// ARC-001: Added animated playhead scan-line arc at current row
 // ============================================================
 
 #include "common.wgsl"
@@ -21,10 +19,6 @@
 #include "bloom_effects.wgsl"
 #include "duration_system.wgsl"
 #include "led_drawing.wgsl"
-
-// --- MAIN ENTRY POINT (v0.51-specific logic) ---
-// This is the ONLY part that changes between versions.
-// Everything above is shared with v0.50, v0.49, etc.
 
 @fragment
 fn fs(in: VertexOut) -> @location(0) vec4<f32> {
@@ -43,34 +37,7 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     discard;
   }
 
-  // ── PLAYHEAD ARC OVERLAY (ARC-001) ──
-  // Unique to v0.51: animated scan-line arc at the current playhead row.
-  let minDim = min(uniforms.canvasW, uniforms.canvasH);
-  let rInner = minDim * 0.15;
-  let rOuter = minDim * 0.45;
-
-  let pixelPos = in.position.xy;
-  let center = vec2<f32>(uniforms.canvasW * 0.5, uniforms.canvasH * 0.5);
-  let delta = pixelPos - center;
-  let fragAngle = atan2(delta.y, delta.x);
-  let fragRadius = length(delta);
-
-  let totalSteps = f32(uniforms.numRows);
-  let rowAngle = -PI_HALF + (uniforms.playheadRow / totalSteps) * TAU;
-
-  var angleDelta = fragAngle - rowAngle;
-  angleDelta = atan2(sin(angleDelta), cos(angleDelta));
-
-  let angularMask = smoothstep(0.018, 0.002, abs(angleDelta));
-  let radialMask = smoothstep(rInner - 4.0, rInner + 4.0, fragRadius) *
-                   smoothstep(rOuter + 4.0, rOuter - 4.0, fragRadius);
-
-  let pulse = 1.0 + 0.02 * sin(uniforms.timeSec * 6.0);
-  let arcIntensity = 0.7 * pulse;
-  let arcColor = vec3<f32>(1.0, 0.85, 0.3);
-  let arcContrib = arcColor * angularMask * radialMask * arcIntensity;
-
-  // Smooth playhead position for per-cell activation
+  // Smooth playhead position
   let maxRows = f32(uniforms.numRows);
   let playheadStep = uniforms.playheadRow - floor(uniforms.playheadRow / maxRows) * maxRows;
   let rowDistRaw = abs(f32(in.row % uniforms.numRows) - playheadStep);
@@ -81,6 +48,7 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   // CHANNEL 0 — Indicator Ring
   // ═══════════════════════════════════════════════════════════
   if (in.channel == 0u) {
+    let onPlayhead = playheadActivation > 0.5;
     let indSize = vec2<f32>(0.3, 0.3);
     let indColor = mix(vec3<f32>(0.15), fs.ledOnColor * 1.3, playheadActivation);
     let indLed = drawUnifiedLensCap(
@@ -98,7 +66,6 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
       col += glow;
       alpha = max(alpha, smoothstep(0.0, 0.25, length(glow)));
     }
-    col += arcContrib;
     return vec4<f32>(col, clamp(alpha, 0.0, 1.0));
   }
 
@@ -227,9 +194,6 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
 
   // Kick reactive bloom flash
   finalColor += kickReactiveGlow(p, kick, bloom);
-
-  // Playhead arc overlay
-  finalColor += arcContrib;
 
   // Dithering for night mode
   finalColor += ditherNoise(in.uv, uniforms.timeSec);

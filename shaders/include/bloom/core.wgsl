@@ -1,3 +1,4 @@
+#pragma once
 // ============================================================
 // bloom/core.wgsl — Shared uniforms, bindings, and circular
 // vertex shader for the unified bloom pattern system.

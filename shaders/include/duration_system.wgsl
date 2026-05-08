@@ -1,16 +1,9 @@
 #pragma once
 // ============================================================
-// pattern_base.wgsl — Core pattern generation and LED logic.
+// duration_system.wgsl — Note Duration Unpacking (DURA)
+//                        and three-emitter intensity logic.
 //
-// Include AFTER common.wgsl, sdf_primitives, color_palettes,
-// bloom_effects, and led_drawing.
-//
-// Defines:
-//   • Note duration unpacking (DURA)
-//   • Cell-type classification helpers
-//   • Three-emitter LED intensity calculations
-//
-// The main shader only needs to supply its own @fragment fn fs().
+// Include AFTER common.wgsl or bloom/core.wgsl.
 // ============================================================
 
 // ── Note Duration Info (DURA) ──

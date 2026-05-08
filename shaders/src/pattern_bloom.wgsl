@@ -16,21 +16,25 @@
 //
 // Assembled via build-shaders.mjs from:
 //   #include "bloom/core.wgsl"
-//   #include "bloom/math.wgsl"
-//   #include "bloom/chrome.wgsl"
-//   #include "bloom/utils.wgsl"
+//   #include "sdf_primitives.wgsl"
+//   #include "color_palettes.wgsl"
+//   #include "note_parsing.wgsl"
+//   #include "bloom_effects.wgsl"
+//   #include "led_drawing.wgsl"
 // ============================================================
 
 #include "bloom/core.wgsl"
-#include "bloom/math.wgsl"
-#include "bloom/chrome.wgsl"
-#include "bloom/utils.wgsl"
+#include "sdf_primitives.wgsl"
+#include "color_palettes.wgsl"
+#include "note_parsing.wgsl"
+#include "bloom_effects.wgsl"
+#include "led_drawing.wgsl"
 
 // --- MAIN ENTRY POINT (Preset-driven bloom) ---
 
 @fragment
 fn fs(in: VertexOut) -> @location(0) vec4<f32> {
-  let fs = getFragmentConstants();
+  let fs = getBloomFragmentConstants();
   let uv = in.uv;
   let p = uv - 0.5;
   let aa = fwidth(p.y) * 0.5;

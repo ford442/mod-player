@@ -26,12 +26,15 @@
 //
 // Assembled via build-shaders.mjs from:
 //   #include "bloom/core.wgsl"
-//   #include "bloom/math.wgsl"
-//   #include "bloom/chrome.wgsl"
-//   #include "bloom/utils.wgsl"
+//   #include "sdf_primitives.wgsl"
+//   #include "color_palettes.wgsl"
+//   #include "note_parsing.wgsl"
+//   #include "bloom_effects.wgsl"
+//   #include "led_drawing.wgsl"
 // ============================================================
 
 // >>> begin include "bloom/core.wgsl"  (shaders/include/bloom/core.wgsl)
+// #pragma once  (shaders/include/bloom/core.wgsl)
 // ============================================================
 // bloom/core.wgsl — Shared uniforms, bindings, and circular
 // vertex shader for the unified bloom pattern system.
@@ -174,27 +177,84 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
 }
 
 // <<< end include "bloom/core.wgsl"  (shaders/include/bloom/core.wgsl)
-// >>> begin include "bloom/math.wgsl"  (shaders/include/bloom/math.wgsl)
+// >>> begin include "sdf_primitives.wgsl"  (shaders/include/sdf_primitives.wgsl)
+// #pragma once  (shaders/include/sdf_primitives.wgsl)
 // ============================================================
-// bloom/math.wgsl — SDF primitives, palettes, and note helpers
-// for the unified bloom pattern system.
+// sdf_primitives.wgsl — Signed-distance field primitives.
 //
-// Requires bloom/core.wgsl to be included first.
+// Include AFTER common.wgsl or bloom/core.wgsl.
+// No bindings or uniforms are declared here.
 // ============================================================
 
-// --- SDF Primitives ---
+/// Signed distance to a rounded rectangle.
 fn sdRoundedBox(p: vec2<f32>, b: vec2<f32>, r: f32) -> f32 {
   let q = abs(p) - b + r;
   return length(max(q, vec2<f32>(0.0))) + min(max(q.x, q.y), 0.0) - r;
 }
 
-// --- Palette Helpers ---
-fn neonPalette(t: f32) -> vec3<f32> {
+/// Signed distance to a circle.
+fn sdCircle(p: vec2<f32>, r: f32) -> f32 {
+  return length(p) - r;
+}
+
+/// Signed distance to an ellipse.
+fn sdEllipse(p: vec2<f32>, ab: vec2<f32>) -> f32 {
+  let k = length(p / ab);
+  return (k - 1.0) * min(ab.x, ab.y);
+}
+
+/// Signed distance to an axis-aligned box.
+fn sdBox(p: vec2<f32>, b: vec2<f32>) -> f32 {
+  let d = abs(p) - b;
+  return length(max(d, vec2<f32>(0.0))) + min(max(d.x, d.y), 0.0);
+}
+
+/// Signed distance to an equilateral triangle (pointing up).
+fn sdTriangle(p: vec2<f32>, r: f32) -> f32 {
+  let k = sqrt(3.0);
+  var p2 = p;
+  p2.x = abs(p2.x) - r;
+  p2.y = p2.y + r / k;
+  if (p2.x + k * p2.y > 0.0) { p2 = vec2<f32>(p2.x - k * p2.y, -k * p2.x - p2.y) / 2.0; }
+  p2.x = p2.x - clamp(p2.x, -2.0 * r, 0.0);
+  return -length(p2) * sign(p2.y);
+}
+
+// <<< end include "sdf_primitives.wgsl"  (shaders/include/sdf_primitives.wgsl)
+// >>> begin include "color_palettes.wgsl"  (shaders/include/color_palettes.wgsl)
+// #pragma once  (shaders/include/color_palettes.wgsl)
+// ============================================================
+// color_palettes.wgsl — Color palette and pitch-class helpers.
+//
+// Include AFTER common.wgsl or bloom/core.wgsl (needs TAU).
+// ============================================================
+
+/// Select a color palette by ID (0–4). All palettes use the same
+/// cosine gradient basis with different phase offsets.
+fn selectPalette(id: u32, t: f32) -> vec3<f32> {
   let a = vec3<f32>(0.5, 0.5, 0.5);
   let b = vec3<f32>(0.5, 0.5, 0.5);
   let c = vec3<f32>(1.0, 1.0, 1.0);
-  let d = vec3<f32>(0.0, 0.33, 0.67);
-  return a + b * cos(TAU * (c * t + d));
+  if (id == 1u) {
+    // Warm: reds, oranges, yellows
+    return a + b * cos(TAU * (c * t + vec3<f32>(0.0, 0.1, 0.2)));
+  } else if (id == 2u) {
+    // Cool: blues, cyans, purples
+    return a + b * cos(TAU * (c * t + vec3<f32>(0.5, 0.7, 0.9)));
+  } else if (id == 3u) {
+    // Neon: pink, cyan, green
+    return a + b * cos(TAU * (c * t + vec3<f32>(0.0, 0.5, 1.0)));
+  } else if (id == 4u) {
+    // Acid: green, yellow, chartreuse
+    return a + b * cos(TAU * (c * t + vec3<f32>(0.3, 0.0, 0.7)));
+  }
+  // Default palette 0: Rainbow
+  return a + b * cos(TAU * (c * t + vec3<f32>(0.0, 0.33, 0.67)));
+}
+
+/// Classic rainbow cosine gradient. Equivalent to selectPalette(0u, t).
+fn neonPalette(t: f32) -> vec3<f32> {
+  return selectPalette(0u, t);
 }
 
 /// Map a tracker note index (1–119) to a pitch-class hue [0,1).
@@ -204,9 +264,53 @@ fn pitchClassFromIndex(note: u32) -> f32 {
   return f32(semi) / 12.0;
 }
 
+// <<< end include "color_palettes.wgsl"  (shaders/include/color_palettes.wgsl)
+// >>> begin include "note_parsing.wgsl"  (shaders/include/note_parsing.wgsl)
+// #pragma once  (shaders/include/note_parsing.wgsl)
+// ============================================================
+// note_parsing.wgsl — Note and effect parsing helpers.
+//
+// Include AFTER common.wgsl or bloom/core.wgsl.
+// ============================================================
+
+/// Convert an ASCII character to uppercase (A–Z / a–z only).
+fn toUpperAscii(code: u32) -> u32 {
+  if (code >= 97u && code <= 122u) {
+    return code - 32u;
+  }
+  return code;
+}
+
+/// Map an ASCII-packed note representation to a pitch-class hue [0,1).
+/// Used by high-precision shaders where the note is stored as ASCII
+/// characters in the upper bytes of packedA.
+fn pitchClassFromPacked(packed: u32) -> f32 {
+  let c0 = toUpperAscii((packed >> 24) & 255u);
+  var semitone: i32 = 0;
+  var valid = true;
+  switch (c0) {
+    case 65u: { semitone = 9; }   // A
+    case 66u: { semitone = 11; }  // B
+    case 67u: { semitone = 0; }   // C
+    case 68u: { semitone = 2; }   // D
+    case 69u: { semitone = 4; }   // E
+    case 70u: { semitone = 5; }   // F
+    case 71u: { semitone = 7; }   // G
+    default: { valid = false; }
+  }
+  if (!valid) { return 0.0; }
+  let c1 = toUpperAscii((packed >> 16) & 255u);
+  if ((c1 == 35u) || (c1 == 43u)) {        // # or +
+    semitone = (semitone + 1) % 12;
+  } else if (c1 == 66u) {                  // b (flat)
+    semitone = (semitone + 11) % 12;
+  }
+  return f32(semitone) / 12.0;
+}
+
 /// Convert an effect command code (ASCII) to a tinted color.
 fn effectColorFromCode(code: u32, fallback: vec3<f32>) -> vec3<f32> {
-  let c = code & 255u;
+  let c = toUpperAscii(code & 255u);
   switch c {
     case 49u: { return mix(fallback, vec3<f32>(0.2, 0.85, 0.4), 0.75); } // 1xx Porta Up — Green
     case 50u: { return mix(fallback, vec3<f32>(0.85, 0.3, 0.3), 0.75); } // 2xx Porta Down — Red
@@ -217,16 +321,60 @@ fn effectColorFromCode(code: u32, fallback: vec3<f32>) -> vec3<f32> {
   }
 }
 
-// <<< end include "bloom/math.wgsl"  (shaders/include/bloom/math.wgsl)
-// >>> begin include "bloom/chrome.wgsl"  (shaders/include/bloom/chrome.wgsl)
+// <<< end include "note_parsing.wgsl"  (shaders/include/note_parsing.wgsl)
+// >>> begin include "bloom_effects.wgsl"  (shaders/include/bloom_effects.wgsl)
+// #pragma once  (shaders/include/bloom_effects.wgsl)
 // ============================================================
-// bloom/chrome.wgsl — Chrome dome indicator with bezel,
-// lens optics, and dimming support.
+// bloom_effects.wgsl — Bloom intensity curves, glow kernels,
+// kick-reactive flash, and film-grain dither.
 //
-// This is the evolved v0.35 drawChromeIndicator (with early-out
-// bounding-box and dimFactor) shared across all bloom presets.
-// Requires bloom/core.wgsl and bloom/math.wgsl before this file.
+// Include AFTER common.wgsl or bloom/core.wgsl.
 // ============================================================
+
+/// High-intensity boost: base + bloom * 2.0
+fn bloomBoost(base: f32, bloom: f32) -> f32 {
+  return base + bloom * 2.0;
+}
+
+/// Medium boost: base + bloom * 1.0
+fn bloomBoostMedium(base: f32, bloom: f32) -> f32 {
+  return base + bloom * 1.0;
+}
+
+/// Soft ambient boost: base + bloom * 0.2
+fn bloomSoft(base: f32, bloom: f32) -> f32 {
+  return base + bloom * 0.2;
+}
+
+/// Exponential radial glow kernel.
+fn pointGlow(p: vec2<f32>, color: vec3<f32>, intensity: f32, falloff: f32) -> vec3<f32> {
+  return color * intensity * exp(-length(p) * falloff);
+}
+
+/// Kick-reactive magenta bloom flash.
+fn kickReactiveGlow(p: vec2<f32>, kick: f32, bloom: f32) -> vec3<f32> {
+  let kickPulse = kick * exp(-length(p) * 3.0) * 0.3;
+  return vec3<f32>(0.9, 0.2, 0.4) * kickPulse * bloom;
+}
+
+/// Film-grain dither to reduce banding in dark regions.
+fn ditherNoise(uv: vec2<f32>, time: f32) -> f32 {
+  let noise = fract(sin(dot(uv * time, vec2<f32>(12.9898, 78.233))) * 43758.5453);
+  return (noise - 0.5) * 0.01;
+}
+
+// <<< end include "bloom_effects.wgsl"  (shaders/include/bloom_effects.wgsl)
+// >>> begin include "led_drawing.wgsl"  (shaders/include/led_drawing.wgsl)
+// #pragma once  (shaders/include/led_drawing.wgsl)
+// ============================================================
+// led_drawing.wgsl — LED emitter and lens-cap drawing primitives.
+//
+// Include AFTER sdf_primitives.wgsl and common.wgsl / bloom/core.wgsl.
+// Defines FragmentConstants, multiple lens styles, and the chrome
+// dome indicator shared across classic and bloom families.
+// ============================================================
+
+// ── Fragment Constants ──
 
 struct FragmentConstants {
   bgColor: vec3<f32>,
@@ -236,8 +384,19 @@ struct FragmentConstants {
   housingSize: vec2<f32>,
 };
 
-/// Cyan/Teal chrome palette from the v0.35 bloom family.
+/// Blue/Orange trap palette: primary indicator is warm orange.
 fn getFragmentConstants() -> FragmentConstants {
+  var c: FragmentConstants;
+  c.bgColor = GLASS_BG;
+  c.ledOnColor = vec3<f32>(1.0, 0.55, 0.1);
+  c.ledOffColor = DIODE_HOUSING;
+  c.borderColor = vec3<f32>(0.0, 0.0, 0.0);
+  c.housingSize = vec2<f32>(0.92, 0.92);
+  return c;
+}
+
+/// Cyan/Teal chrome palette from the v0.35 bloom family.
+fn getBloomFragmentConstants() -> FragmentConstants {
   var c: FragmentConstants;
   c.bgColor = vec3<f32>(0.15, 0.16, 0.18);
   c.ledOnColor = vec3<f32>(0.0, 0.85, 0.95);
@@ -247,9 +406,379 @@ fn getFragmentConstants() -> FragmentConstants {
   return c;
 }
 
-/// Chrome dome + bezel indicator. Supports dimming via dimFactor.
-/// dimFactor=1.0 leaves chrome at full brightness;
-/// dimFactor<1.0 darkens housing and off-state lens.
+// ── Emitter Diode Shape ──
+
+/// Draw a single LED emitter (rounded box die + housing).
+/// Returns RGBA where alpha is the diode mask.
+fn drawEmitterDiode(uv: vec2<f32>, intensity: f32, color: vec3<f32>, isOn: bool) -> vec4<f32> {
+  let diodeSize = vec2<f32>(0.28, 0.14);
+
+  let p = uv;
+  let dDiode = sdRoundedBox(p, diodeSize * 0.5, 0.06);
+
+  // Smaller "die" inside the diode for a distinct dot appearance
+  let dieSize = vec2<f32>(0.10, 0.05);
+  let dDie = sdRoundedBox(p, dieSize * 0.5, 0.02);
+
+  let diodeMask = 1.0 - smoothstep(0.0, 0.015, dDiode);
+  let dieMask = 1.0 - smoothstep(0.0, 0.008, dDie);
+
+  var diodeColor = DIODE_HOUSING;
+
+  if (isOn) {
+    let dieGlow = color * (1.0 + intensity * 4.0);
+    let housingGlow = color * 0.12 * intensity;
+    diodeColor = mix(housingGlow, dieGlow, dieMask);
+    let hotspot = exp(-length(p / vec2<f32>(0.06, 0.03)) * 2.5) * intensity;
+    diodeColor += color * hotspot * 0.6;
+  }
+
+  return vec4<f32>(diodeColor, diodeMask);
+}
+
+// ── Unified Three-Emitter Lens Cap ──
+
+/// Single glass surface covering three vertical emitters (top, mid, bot).
+/// Creates optical effects: refraction, fresnel reflection, subsurface
+/// scattering, and per-emitter fringe glow.
+fn drawUnifiedLensCap(
+    uv: vec2<f32>,
+    lensSize: vec2<f32>,
+    topEmitter: vec4<f32>,    // rgb=color, a=intensity (Blue note-on)
+    midEmitter: vec4<f32>,    // rgb=color, a=intensity (Note color)
+    botEmitter: vec4<f32>,    // rgb=color, a=intensity (Amber control)
+    aa: f32
+) -> vec4<f32> {
+  let p = uv;
+  let dBox = sdRoundedBox(p, lensSize * 0.5, 0.12);
+
+  if (dBox > 0.0) {
+    return vec4<f32>(0.0);
+  }
+
+  // Emitter positions under the lens (vertical arrangement)
+  let topPos = vec2<f32>(0.0, -0.28);
+  let midPos = vec2<f32>(0.0, 0.0);
+  let botPos = vec2<f32>(0.0, 0.28);
+
+  // Glass surface properties
+  let radial = length(p / (lensSize * 0.5));
+  let edgeThickness = 0.18 + radial * 0.12;
+  let centerThickness = 0.06;
+  let thickness = mix(centerThickness, edgeThickness, radial * radial);
+
+  let n = normalize(vec3<f32>(p.x * 2.5 / lensSize.x, p.y * 2.5 / lensSize.y, 0.35));
+  let viewDir = vec3<f32>(0.0, 0.0, 1.0);
+  let fresnel = pow(1.0 - abs(dot(n, viewDir)), 2.5);
+
+  // Draw individual emitters under the lens
+  let topDiode = drawEmitterDiode(uv - topPos, topEmitter.a, topEmitter.rgb, topEmitter.a > 0.05);
+  let midDiode = drawEmitterDiode(uv - midPos, midEmitter.a, midEmitter.rgb, midEmitter.a > 0.05);
+  let botDiode = drawEmitterDiode(uv - botPos, botEmitter.a, botEmitter.rgb, botEmitter.a > 0.05);
+
+  // Composite emitters back-to-front
+  var combinedDiode = DIODE_HOUSING;
+  if (botDiode.a > 0.0) {
+    combinedDiode = mix(combinedDiode, botDiode.rgb, botDiode.a);
+  }
+  if (midDiode.a > 0.0) {
+    combinedDiode = mix(combinedDiode, midDiode.rgb, midDiode.a);
+  }
+  if (topDiode.a > 0.0) {
+    combinedDiode = mix(combinedDiode, topDiode.rgb, topDiode.a);
+  }
+  let diodeMask = max(max(topDiode.a, midDiode.a), botDiode.a);
+
+  // Refraction offset
+  let refractionStrength = (1.0 - radial * 0.6) * 0.04;
+  let refractOffset = p * refractionStrength;
+
+  // Subsurface scattering — per-emitter with tightened falloffs
+  var subsurfaceGlow = vec3<f32>(0.0);
+
+  let distTop = length(uv - topPos - refractOffset * 0.3);
+  let scatterTop = exp(-distTop * 9.0) * topEmitter.a;
+  subsurfaceGlow += topEmitter.rgb * scatterTop * 2.2;
+
+  let distMid = length(uv - midPos - refractOffset * 0.5);
+  let scatterMid = exp(-distMid * 7.5) * midEmitter.a;
+  subsurfaceGlow += midEmitter.rgb * scatterMid * 3.0;
+
+  let distBot = length(uv - botPos - refractOffset * 0.3);
+  let scatterBot = exp(-distBot * 9.0) * botEmitter.a;
+  subsurfaceGlow += botEmitter.rgb * scatterBot * 2.2;
+
+  // Per-emitter fringe glow (replaces shared diffusion that smeared all three)
+  subsurfaceGlow += topEmitter.rgb * exp(-distTop * 6.0) * topEmitter.a * 0.15;
+  subsurfaceGlow += midEmitter.rgb * exp(-distMid * 6.0) * midEmitter.a * 0.15;
+  subsurfaceGlow += botEmitter.rgb * exp(-distBot * 6.0) * botEmitter.a * 0.15;
+
+  // Active color tint for the glass body
+  var activeColor = midEmitter.rgb * midEmitter.a;
+  activeColor = mix(activeColor, topEmitter.rgb, topEmitter.a * 0.5);
+  activeColor = mix(activeColor, botEmitter.rgb, botEmitter.a * 0.5);
+
+  let totalGlow = topEmitter.a + midEmitter.a + botEmitter.a;
+  let litTint = mix(vec3<f32>(0.92, 0.93, 0.98), activeColor, min(totalGlow * 0.4, 0.4));
+  let glassBaseColor = mix(GLASS_BG * 0.12, litTint, 0.88);
+
+  // Edge alpha
+  let edgeAlpha = smoothstep(0.0, aa * 2.0, -dBox);
+
+  // Glass transparency
+  let diodeVisibility = diodeMask * 0.55;
+  let baseAlpha = 0.72 + 0.28 * fresnel;
+  let alpha = mix(baseAlpha, 0.32, diodeVisibility) * edgeAlpha;
+
+  // Directional lighting
+  let lightDir = vec3<f32>(0.4, -0.7, 0.6);
+  let diff = max(0.0, dot(n, normalize(lightDir)));
+  let spec = pow(max(0.0, dot(reflect(-normalize(lightDir), n), viewDir)), 40.0);
+
+  let litGlassColor = glassBaseColor * (0.45 + 0.55 * diff) + vec3<f32>(spec * 0.25);
+
+  // Final composition
+  var finalColor = GLASS_BG;
+
+  let diodeBlend = diodeMask * (1.0 - alpha * 0.65);
+  finalColor = mix(finalColor, combinedDiode, diodeBlend);
+  finalColor = mix(finalColor, litGlassColor, alpha);
+  finalColor += subsurfaceGlow * 1.8;
+
+  // Concentrated glow halos around active emitters
+  if (midEmitter.a > 0.05) {
+    let midGlowDist = length(uv - midPos - refractOffset * 0.5);
+    let midGlow = (1.0 - smoothstep(0.0, 0.18, midGlowDist)) * midEmitter.a * 0.5;
+    finalColor += midEmitter.rgb * midGlow;
+  }
+  if (topEmitter.a > 0.05) {
+    let topGlowDist = length(uv - topPos - refractOffset * 0.3);
+    let topGlow = (1.0 - smoothstep(0.0, 0.14, topGlowDist)) * topEmitter.a * 0.3;
+    finalColor += topEmitter.rgb * topGlow;
+  }
+  if (botEmitter.a > 0.05) {
+    let botGlowDist = length(uv - botPos - refractOffset * 0.3);
+    let botGlow = (1.0 - smoothstep(0.0, 0.14, botGlowDist)) * botEmitter.a * 0.3;
+    finalColor += botEmitter.rgb * botGlow;
+  }
+
+  finalColor += fresnel * vec3<f32>(0.9, 0.95, 1.0) * 0.18 * (1.0 + radial * 0.5);
+
+  // Horizontal separator shadows between emitter zones
+  let sepShadowTop = (1.0 - smoothstep(0.0, 0.015, abs(p.y - (-0.14)))) * 0.35;
+  let sepShadowBot = (1.0 - smoothstep(0.0, 0.015, abs(p.y - 0.14))) * 0.35;
+  finalColor -= finalColor * (sepShadowTop + sepShadowBot);
+
+  let vignette = 1.0 - radial * radial * 0.25;
+  finalColor *= vignette;
+
+  return vec4<f32>(finalColor, edgeAlpha);
+}
+
+// ── Frosted Glass Cap (single emitter) ──
+
+/// Shows the diode shape underneath with proper translucency.
+/// Used by v0.47 / v0.48 family shaders.
+fn drawFrostedGlassCap(
+    uv: vec2<f32>,
+    size: vec2<f32>,
+    color: vec3<f32>,
+    isOn: bool,
+    aa: f32,
+    noteGlow: f32,
+    diodeColor: vec3<f32>,
+    diodeIntensity: f32
+) -> vec4<f32> {
+  let p = uv;
+  let dBox = sdRoundedBox(p, size * 0.5, 0.08);
+
+  if (dBox > 0.0) {
+    return vec4<f32>(0.0);
+  }
+
+  // Draw the emitter diode underneath
+  let diode = drawEmitterDiode(uv, diodeIntensity, diodeColor, isOn);
+
+  // Glass surface normal for reflections
+  let n = normalize(vec3<f32>(p.x * 2.0 / size.x, p.y * 2.0 / size.y, 0.4));
+  let viewDir = vec3<f32>(0.0, 0.0, 1.0);
+  let fresnel = pow(1.0 - abs(dot(n, viewDir)), 2.0);
+  let radial = length(p / (size * 0.5));
+
+  // Glass thickness varies - thicker at edges
+  let edgeThickness = 0.15 + radial * 0.08;
+  let centerThickness = 0.08;
+  let thickness = mix(centerThickness, edgeThickness, radial);
+
+  // Subsurface scattering - light travels through the glass
+  let emitterPos = vec2<f32>(0.0, 0.22);
+  let distFromEmitter = length(uv - emitterPos);
+  let lightTravel = exp(-distFromEmitter * 4.0) * noteGlow;
+
+  // Light concentrates upward from the emitter
+  let upwardBias = smoothstep(0.0, -0.3, uv.y - emitterPos.y);
+  let subsurface = lightTravel * upwardBias * (1.0 - radial * 0.3);
+
+  // Glass tint varies with light passing through
+  let litTint = mix(vec3<f32>(0.95, 0.95, 1.0), color, noteGlow * 0.3);
+  let glassBaseColor = mix(GLASS_BG * 0.15, litTint, 0.85);
+
+  // Edge alpha with anti-aliasing
+  let edgeAlpha = smoothstep(0.0, aa * 2.0, -dBox);
+
+  // Glass is more transparent where the diode is visible
+  let diodeVisibility = diode.a * 0.6;
+  let baseAlpha = 0.75 + 0.25 * fresnel;
+  let alpha = mix(baseAlpha, 0.35, diodeVisibility) * edgeAlpha;
+
+  // Directional lighting from top-left
+  let lightDir = vec3<f32>(0.4, -0.7, 0.6);
+  let diff = max(0.0, dot(n, normalize(lightDir)));
+  let spec = pow(max(0.0, dot(reflect(-normalize(lightDir), n), viewDir)), 32.0);
+
+  let litGlassColor = glassBaseColor * (0.5 + 0.5 * diff) + vec3<f32>(spec * 0.3);
+
+  // Start with background
+  var finalColor = GLASS_BG;
+
+  // Layer the diode underneath
+  let diodeBlend = diode.a * (1.0 - alpha * 0.7);
+  finalColor = mix(finalColor, diode.rgb, diodeBlend);
+
+  // Apply glass layer
+  finalColor = mix(finalColor, litGlassColor, alpha);
+
+  // Add subsurface glow from light passing through
+  finalColor += subsurface * color * 2.5;
+
+  // Inner glow when on - concentrated above the diode
+  if (isOn) {
+    let glowCenter = vec2<f32>(0.0, -0.1);
+    let glowDist = length(uv - glowCenter);
+    let innerGlow = (1.0 - smoothstep(0.0, 0.4, glowDist)) * noteGlow * 0.35;
+    finalColor += color * innerGlow;
+  }
+
+  // Fresnel rim highlight
+  finalColor += fresnel * vec3<f32>(0.9, 0.95, 1.0) * 0.15;
+
+  return vec4<f32>(finalColor, edgeAlpha);
+}
+
+// ── Three-Emitter Lens (v0.49 style) ──
+
+/// Three vertically-stacked emitters with a unified glass surface.
+/// Slightly different optical model from drawUnifiedLensCap.
+fn drawThreeEmitterLens(
+  uv: vec2<f32>,
+  size: vec2<f32>,
+  topColor: vec3<f32>,
+  topIntensity: f32,
+  midColor: vec3<f32>,
+  midIntensity: f32,
+  botColor: vec3<f32>,
+  botIntensity: f32,
+  aa: f32
+) -> vec4<f32> {
+  let p = uv;
+  let dBox = sdRoundedBox(p, size * 0.5, 0.08);
+
+  if (dBox > 0.0) {
+    return vec4<f32>(0.0);
+  }
+
+  // Emitter positions within the lens
+  let topPos = vec2<f32>(0.0, -0.28);
+  let midPos = vec2<f32>(0.0, 0.0);
+  let botPos = vec2<f32>(0.0, 0.28);
+
+  // Calculate distance to each emitter for light propagation
+  let distTop = length(uv - topPos);
+  let distMid = length(uv - midPos);
+  let distBot = length(uv - botPos);
+
+  // Glass surface normal for reflections
+  let n = normalize(vec3<f32>(p.x * 2.0 / size.x, p.y * 2.0 / size.y, 0.4));
+  let viewDir = vec3<f32>(0.0, 0.0, 1.0);
+  let fresnel = pow(1.0 - abs(dot(n, viewDir)), 2.0);
+  let radial = length(p / (size * 0.5));
+
+  // Glass thickness varies - thicker at edges
+  let edgeThickness = 0.15 + radial * 0.08;
+  let centerThickness = 0.08;
+  let thickness = mix(centerThickness, edgeThickness, radial);
+
+  // Background
+  let bgColor = GLASS_BG;
+
+  // Calculate light contribution from each emitter
+  let topGlow = exp(-distTop * 5.0) * topIntensity;
+  let topDownwardBias = smoothstep(0.0, 0.4, uv.y - topPos.y);
+  let topContribution = topGlow * topDownwardBias * topColor;
+
+  let midGlow = exp(-distMid * 4.0) * midIntensity;
+  let midContribution = midGlow * midColor;
+
+  let botGlow = exp(-distBot * 5.0) * botIntensity;
+  let botUpwardBias = smoothstep(0.0, 0.4, botPos.y - uv.y);
+  let botContribution = botGlow * botUpwardBias * botColor;
+
+  // Combine all light contributions
+  var totalLight = vec3<f32>(0.0);
+  totalLight += topContribution * 2.5;
+  totalLight += midContribution * 3.0;
+  totalLight += botContribution * 2.5;
+
+  // Glass tint varies with light passing through
+  var litTint = vec3<f32>(0.95, 0.95, 1.0);
+  if (topIntensity > 0.0) { litTint = mix(litTint, topColor, topIntensity * 0.25); }
+  if (midIntensity > 0.0) { litTint = mix(litTint, midColor, midIntensity * 0.3); }
+  if (botIntensity > 0.0) { litTint = mix(litTint, botColor, botIntensity * 0.25); }
+
+  let glassBaseColor = mix(bgColor * 0.15, litTint, 0.85);
+
+  // Edge alpha with anti-aliasing
+  let edgeAlpha = smoothstep(0.0, aa * 2.0, -dBox);
+
+  // Glass alpha varies with emitter intensity (brighter = more transparent)
+  let totalIntensity = topIntensity + midIntensity + botIntensity;
+  let baseAlpha = 0.75 + 0.25 * fresnel;
+  let alpha = mix(baseAlpha, 0.45, totalIntensity * 0.5) * edgeAlpha;
+
+  // Directional lighting from top-left
+  let lightDir = vec3<f32>(0.4, -0.7, 0.6);
+  let diff = max(0.0, dot(n, normalize(lightDir)));
+  let spec = pow(max(0.0, dot(reflect(-normalize(lightDir), n), viewDir)), 32.0);
+
+  let litGlassColor = glassBaseColor * (0.5 + 0.5 * diff) + vec3<f32>(spec * 0.3);
+
+  // Start with background
+  var finalColor = bgColor;
+
+  // Apply the combined light through the glass
+  finalColor += totalLight * 0.8;
+
+  // Apply glass layer
+  finalColor = mix(finalColor, litGlassColor, alpha);
+
+  // Add emitter hot spots where the actual LEDs are
+  let topHotspot = exp(-distTop * 12.0) * topIntensity;
+  let midHotspot = exp(-distMid * 10.0) * midIntensity;
+  let botHotspot = exp(-distBot * 12.0) * botIntensity;
+
+  finalColor += topColor * topHotspot * 1.5;
+  finalColor += midColor * midHotspot * 1.2;
+  finalColor += botColor * botHotspot * 1.5;
+
+  // Fresnel rim highlight
+  finalColor += fresnel * vec3<f32>(0.9, 0.95, 1.0) * 0.15;
+
+  return vec4<f32>(finalColor, edgeAlpha);
+}
+
+// ── Chrome Dome Indicator ──
+
+/// HDR chrome dome indicator with bezel, lens optics, and dimming support.
 fn drawChromeIndicator(
     uv: vec2<f32>,
     size: vec2<f32>,
@@ -309,54 +838,13 @@ fn drawChromeIndicator(
   return vec4<f32>(col, alpha);
 }
 
-// <<< end include "bloom/chrome.wgsl"  (shaders/include/bloom/chrome.wgsl)
-// >>> begin include "bloom/utils.wgsl"  (shaders/include/bloom/utils.wgsl)
-// ============================================================
-// bloom/utils.wgsl — Bloom intensity curves, glow kernels,
-// kick-reactive flash, and film-grain dither.
-//
-// Requires bloom/core.wgsl before this file.
-// ============================================================
-
-/// High-intensity boost: base + bloom * 2.0
-fn bloomBoost(base: f32, bloom: f32) -> f32 {
-  return base + bloom * 2.0;
-}
-
-/// Medium boost: base + bloom * 1.0
-fn bloomBoostMedium(base: f32, bloom: f32) -> f32 {
-  return base + bloom * 1.0;
-}
-
-/// Soft ambient boost: base + bloom * 0.2
-fn bloomSoft(base: f32, bloom: f32) -> f32 {
-  return base + bloom * 0.2;
-}
-
-/// Exponential radial glow kernel.
-fn pointGlow(p: vec2<f32>, color: vec3<f32>, intensity: f32, falloff: f32) -> vec3<f32> {
-  return color * intensity * exp(-length(p) * falloff);
-}
-
-/// Kick-reactive magenta bloom flash.
-fn kickReactiveGlow(p: vec2<f32>, kick: f32, bloom: f32) -> vec3<f32> {
-  let kickPulse = kick * exp(-length(p) * 3.0) * 0.3;
-  return vec3<f32>(0.9, 0.2, 0.4) * kickPulse * bloom;
-}
-
-/// Film-grain dither to reduce banding in dark regions.
-fn ditherNoise(uv: vec2<f32>, time: f32) -> f32 {
-  let noise = fract(sin(dot(uv * time, vec2<f32>(12.9898, 78.233))) * 43758.5453);
-  return (noise - 0.5) * 0.01;
-}
-
-// <<< end include "bloom/utils.wgsl"  (shaders/include/bloom/utils.wgsl)
+// <<< end include "led_drawing.wgsl"  (shaders/include/led_drawing.wgsl)
 
 // --- MAIN ENTRY POINT (Preset-driven bloom) ---
 
 @fragment
 fn fs(in: VertexOut) -> @location(0) vec4<f32> {
-  let fs = getFragmentConstants();
+  let fs = getBloomFragmentConstants();
   let uv = in.uv;
   let p = uv - 0.5;
   let aa = fwidth(p.y) * 0.5;

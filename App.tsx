@@ -51,6 +51,9 @@ const SHADER_GROUPS = {
     { id: 'pattern_bloom.wgsl', label: 'Bloom (Unified)' },
     { id: 'patternv0.35_bloom.wgsl', label: 'v0.35 (Bloom)' },
     { id: 'patternv0.30.wgsl', label: 'v0.30 (Disc)' },
+    { id: 'patternv0.52_night.wgsl', label: 'v0.52 (Night Mode)' },
+    { id: 'patternv0.53_midnight.wgsl', label: 'v0.53 (Midnight Mode)' },
+    { id: 'patternv0.54_neon.wgsl', label: 'v0.54 (Neon Night)' },
   ],
   VIDEO: [
     { id: 'patternv0.23.wgsl', label: 'v0.23 (Clouds)' },

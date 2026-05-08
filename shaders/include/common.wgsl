@@ -1,10 +1,11 @@
+#pragma once
 // ============================================================
-// common.wgsl — Shared uniforms, structs, vertex shader,
-//               SDF primitives, and color helpers.
+// common.wgsl — Shared uniforms, structs, bindings, and
+//               circular vertex shader for classic pattern shaders.
 //
-// Include this FIRST in any pattern shader. It defines all
-// bindings, the vertex stage, and pure math utilities that
-// have no dependencies on higher-level pattern logic.
+// Include this FIRST. It defines Uniforms, bindings, VertexOut,
+// and the circular-layout vertex stage. Pure math utilities
+// (SDFs, palettes) have been moved to dedicated includes.
 // ============================================================
 
 // ── Math Constants ──
@@ -154,58 +155,6 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
   return out;
 }
 
-// ── SDF Primitives ──
-
-/// Signed distance to a rounded rectangle.
-fn sdRoundedBox(p: vec2<f32>, b: vec2<f32>, r: f32) -> f32 {
-  let q = abs(p) - b + r;
-  return length(max(q, vec2<f32>(0.0))) + min(max(q.x, q.y), 0.0) - r;
-}
-
-/// Signed distance to a circle.
-fn sdCircle(p: vec2<f32>, r: f32) -> f32 {
-  return length(p) - r;
-}
-
-/// Signed distance to an ellipse.
-fn sdEllipse(p: vec2<f32>, ab: vec2<f32>) -> f32 {
-  let k = length(p / ab);
-  return (k - 1.0) * min(ab.x, ab.y);
-}
-
-// ── Palette Helpers ──
-
-/// Select a color palette by ID (0–4). All palettes use the same
-/// cosine gradient basis with different phase offsets.
-fn selectPalette(id: u32, t: f32) -> vec3<f32> {
-  let a = vec3<f32>(0.5, 0.5, 0.5);
-  let b = vec3<f32>(0.5, 0.5, 0.5);
-  let c = vec3<f32>(1.0, 1.0, 1.0);
-  if (id == 1u) {
-    // Warm: reds, oranges, yellows
-    return a + b * cos(TAU * (c * t + vec3<f32>(0.0, 0.1, 0.2)));
-  } else if (id == 2u) {
-    // Cool: blues, cyans, purples
-    return a + b * cos(TAU * (c * t + vec3<f32>(0.5, 0.7, 0.9)));
-  } else if (id == 3u) {
-    // Neon: pink, cyan, green
-    return a + b * cos(TAU * (c * t + vec3<f32>(0.0, 0.5, 1.0)));
-  } else if (id == 4u) {
-    // Acid: green, yellow, chartreuse
-    return a + b * cos(TAU * (c * t + vec3<f32>(0.3, 0.0, 0.7)));
-  }
-  // Default palette 0: Rainbow
-  return a + b * cos(TAU * (c * t + vec3<f32>(0.0, 0.33, 0.67)));
-}
-
-/// Classic rainbow cosine gradient. Equivalent to selectPalette(0u, t).
-fn neonPalette(t: f32) -> vec3<f32> {
-  return selectPalette(0u, t);
-}
-
-/// Map a tracker note index (1–96) to a pitch-class hue [0,1).
-fn pitchClassFromIndex(note: u32) -> f32 {
-  if (note == 0u || note > 96u) { return 0.0; }
-  let semi = (note - 1u) % 12u;
-  return f32(semi) / 12.0;
-}
+// ── Include helpers (move to dedicated includes) ──
+//   sdf_primitives.wgsl  — sdRoundedBox, sdCircle, sdEllipse
+//   color_palettes.wgsl  — selectPalette, neonPalette, pitchClassFromIndex

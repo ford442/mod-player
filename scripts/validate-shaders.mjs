@@ -28,6 +28,9 @@ const ACTIVE_SHADERS = new Set([
   'patternv0.38.wgsl', 'pattern_bloom.wgsl', 'patternv0.35_bloom.wgsl', 'patternv0.30.wgsl',
   'patternv0.23.wgsl', 'patternv0.24.wgsl',
   'patternv0.51.wgsl', // new unified source
+  'patternv0.52_night.wgsl', // premium night mode
+  'patternv0.53_midnight.wgsl', // midnight mode
+  'patternv0.54_neon.wgsl', // neon night
   // Background shaders
   'bezel.wgsl', 'chassis_frosted.wgsl', 'chassis_dark.wgsl',
   'chassis_video.wgsl', 'chassisv0.1.wgsl',
