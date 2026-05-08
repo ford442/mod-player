@@ -1,30 +1,31 @@
-# Weekly Plan - XASM-1 (patternv0.50 "Trap Frosted Lens")
+# Weekly Plan - XASM-1 (patternv0.51 "Playhead Arc" + AUDIO-001 timing)
 
 ## Today's focus
-**User Idea — Animated playhead scan-line arc at the current row in circular shaders (patternv0.51).**
-v0.50 now has working amber/blue LED differentiation (PR #148) and color-palette switching. Next visual priority: add a glowing "radar sweep" arc — a clock-hand-style indicator marking the currently-playing row angle in the circular display. Target: `patternv0.51.wgsl` forked from v0.50, adding a thin illuminated arc spanning the full channel-ring radius at the current-row angle, with additive glow falloff, without disturbing the existing LED cell geometry.
+**User Idea — Multi-layer bloom: separate threshold+blur+composite passes for note triggers, sustains, and expression-only steps.**
+v0.51 now has a three-emitter LED system with semantically distinct categories (blue trigger, sustain tail, amber expression). The existing `BloomPostProcessor` does a single-threshold pass that treats all emitted light uniformly. The goal: extend `BloomPostProcessor` to accept a `layers` config array (one entry per semantic category, each with its own threshold, blur radius, and tint color), run separate threshold→blur chains per layer, and composite them additively. This gives note-on triggers a tight bright halo, sustain tails a wide soft glow, and expression steps an amber-tinted bloom — matching the visual intent of the LED system.
 
 ## Ideas
 <!-- User-written ideas Noah accumulates during the week. Routine prioritizes these. -->
 - [done — 2026-05-01] Amber-vs-blue emitter differentiation for expression-only steps (landed PR #148: amber LED block, isExpressionOnly flag, colorPalette uniform + multi-palette selector)
-- [in progress — 2026-05-01] Animated playhead scan-line arc at the current row in circular shaders (narrative §Graphical 4)
-- [ ] Fractional-row interpolation for smooth 144 Hz playhead (`smoothPlayhead = row + fraction`) via `useRef`, bypass React state (narrative §Advanced 1)
+- [done — 2026-05-08] Animated playhead scan-line arc at the current row in circular shaders — ARC-001 tag; v0.51.wgsl live in shaders/src + public/shaders, integrated in PatternDisplay.tsx version chain
+- [done — 2026-05-08] Fractional-row interpolation for smooth 144 Hz playhead — `playbackRowFraction` implemented in AUDIO-001 timing work, passed to PatternDisplay as `playheadRow`
+- [done — 2026-05-08] Keyboard shortcut set: space/arrows/1–9/L/M/F/D/? fully implemented in useKeyboardShortcuts.ts with cheatsheet + Media Session API
 - [ ] SharedArrayBuffer oscilloscope pipeline from worklet → GPU texture (narrative §Advanced 4)
 - [ ] Move initial module parse off the main thread into a Web Worker to avoid 300 ms–1 s freezes on large `.it` files (narrative §Advanced 3)
 - [ ] Darker-chassis toggle + drop shadow for white-chassis contrast (narrative §Graphical 6)
 - [ ] Collapsible / default-hidden PatternDisplay debug panel (narrative §Graphical 8)
-- [ ] Keyboard shortcut set: space/arrows/1–9 for play/seek/order jump (narrative §UI/UX)
 - [done — 2026-04-24] Persist last-used shader in localStorage + per-module memory (PR #145)
 - [ ] Thumbnail previews + favorites in shader selector (narrative §Shader UI)
-- [ ] Multi-layer bloom: separate passes for triggers / sustains / expression (narrative §Shader 2)
+- [in progress — 2026-05-08] Multi-layer bloom: separate passes for triggers / sustains / expression (narrative §Shader 2)
 
 ## Backlog
 <!-- Unfinished items, known bugs, deferred work. -->
-- [ ] Bug 3: PatternDisplay debug panel shows `Mode: NONE` while v0.50 renders (UI/state disconnect — `components/PatternDisplay.tsx` debug state not updated on shader load)
+- [ ] Bug 3: PatternDisplay debug panel shows `Mode: NONE` while v0.50+ renders (UI/state disconnect — `components/PatternDisplay.tsx` debug state not updated on shader load)
 - [ ] Bug 4: ▶️ Play button scrolls canvas off-screen (focus/scroll side effect — likely `autoFocus` or `scrollIntoView` on play button element)
 - [ ] Verify Bug 5 (shader `.bak`/`.kate-swp` files) — confirm no swp/bak committed; add `.gitignore` patterns if missing
-- [ ] Verify Bug 2 (ScriptProcessor fallback) fully resolved by #131 — spot-check on prod at `test.1ink.us/xm-player/`
-- [ ] 32/64 step-length toggle not yet ported to v0.50 (landed in v0.21/v0.39/v0.40 via PR #149)
+- [ ] Verify Bug 2 (ScriptProcessor fallback) — AUDIO-001 timing saga (PRs #160–177) may have resolved this; spot-check on prod at `test.1ink.us/xm-player/`
+- [ ] 32/64 step-length toggle not yet ported to v0.50+ shaders (landed in v0.21/v0.39/v0.40 via PR #149)
+- [ ] v0.52 (Night), v0.53 (Midnight), v0.54 (Neon Night) shaders created (in shaders/src + public/shaders, registered in App.tsx) — verify they render correctly end-to-end in prod
 - [ ] CRT scanline / phosphor post-process shader (narrative §Shader)
 - [ ] Dynamic per-instrument color palettes (narrative §Shader / §UI)
 - [ ] Compute-shader port of note-duration calculation (narrative §Performance)
@@ -32,6 +33,11 @@ v0.50 now has working amber/blue LED differentiation (PR #148) and color-palette
 - [ ] Storage-manager integration: `/api/shaders`, `/api/songs`, rating hookup (narrative §Integration)
 
 ## Done
+- [x] 2026-05-08 — AUDIO-001 audio timing pipeline: drift correction, worklet timestamp sync (atomic playbackStateRef update), seek acknowledgment from AudioWorklet to main thread, centralized worklet URL construction (PRs #160–177)
+- [x] 2026-05-08 — Fractional-row interpolation (`playbackRowFraction`): smooth sub-row playhead position passed from useLibOpenMPT to PatternDisplay (AUDIO-001 work)
+- [x] 2026-05-08 — patternv0.51 "Playhead Arc": three-emitter LED system + ARC-001 animated scan-line arc at current row angle; assembled via build-shaders.mjs; integrated in PatternDisplay.tsx version chain
+- [x] 2026-05-08 — Keyboard shortcut set: space/arrows/shift+arrows/1–9/L/M/F/D/?/Esc in useKeyboardShortcuts.ts with cheatsheet overlay + Media Session API support
+- [x] 2026-05-08 — v0.52 (Night Mode), v0.53 (Midnight Mode), v0.54 (Neon Night) shaders: created in shaders/src + public/shaders, registered in App.tsx shader selector
 - [x] 2026-05-01 — Expression LED amber/blue differentiation: `isExpressionOnly` flag, amber LED block in v0.45b + v0.50, colorPalette uniform + multi-palette selector (Rainbow/Warm/Cool/Neon/Acid), colorPalette byte-offset alignment fix across v0.42–v0.50 (#148)
 - [x] 2026-04-24 — Persist last-used shader in localStorage + per-module shader memory (#145)
 - [x] 2026-04-24 — Pipeline hygiene pass: formatting, lint, dead code, build verified (#146)
@@ -56,10 +62,10 @@ v0.50 now has working amber/blue LED differentiation (PR #148) and color-palette
 - [x] 2026-04-10 — Stale channel buffer + bind-group refresh fix; shader animation on second-song-load fix
 
 ## Last run
-Date: 2026-05-01
+Date: 2026-05-08
 Mode: User Idea
-Focus: Animated playhead scan-line arc at the current row in circular shaders (patternv0.51)
-Outcome: Full dispatch generated. Reconciled: amber/blue LED differentiation DONE (PR #148), localStorage shader persistence DONE (PR #145), PR #149 step-length toggle (bonus), PR #150 WebGL overlay opt. StoragePlaylist PR #142 confirmed merged — removed from backlog. Copilot issue targeting keyboard shortcuts (useKeyboardShortcuts.ts). Jules wrap-up template queued for end of day.
+Focus: Multi-layer bloom (separate threshold/blur/composite passes for triggers, sustains, expression-only steps)
+Outcome: Reconciled — v0.51 playhead arc DONE, fractional-row interpolation DONE (AUDIO-001 side effect), keyboard shortcuts DONE, v0.52–v0.54 shaders created. AUDIO-001 timing saga (PRs #160–177) was the dominant work since last run: drift correction, atomic worklet timestamp, seek acknowledgment, centralized URL. Multi-layer bloom picked as today's kimi-cli swarm target. Copilot issue targeting collapsible debug panel + darker chassis toggle (fully decoupled from bloom pipeline).
 
 ---
 
