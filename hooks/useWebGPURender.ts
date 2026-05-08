@@ -79,6 +79,7 @@ export interface WebGPURenderParams {
   totalRows?: number;
   colorPalette?: number;
   stepsLength?: number;
+  chassisDark?: boolean;
 }
 
 export function useWebGPURender(
@@ -592,9 +593,15 @@ export function useWebGPURender(
         const bezelData = bezelFloatRef.current;
         bezelData[0] = p.canvasMetrics.width; bezelData[1] = p.canvasMetrics.height;
         bezelData[2] = 0;
-        bezelData[3] = 0.92; bezelData[4] = 0.93; bezelData[5] = 0.95;
-        bezelData[6] = 0.88; bezelData[7] = 0.89; bezelData[8] = 0.91;
-        bezelData[9] = 0.015;
+        if (p.chassisDark) {
+          bezelData[3] = 0.06; bezelData[4] = 0.06; bezelData[5] = 0.07;
+          bezelData[6] = 0.04; bezelData[7] = 0.04; bezelData[8] = 0.05;
+          bezelData[9] = 0.04;
+        } else {
+          bezelData[3] = 0.92; bezelData[4] = 0.93; bezelData[5] = 0.95;
+          bezelData[6] = 0.88; bezelData[7] = 0.89; bezelData[8] = 0.91;
+          bezelData[9] = 0.015;
+        }
         const isCircShader = isCircularLayoutShader(shaderFile);
         bezelData[10] = isCircShader ? 0.0 : 1.0;
         bezelData[11] = isCircShader ? 0.95 : 1.0;

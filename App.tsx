@@ -158,6 +158,7 @@ function App() {
   const [showPlaylist, setShowPlaylist] = useState<boolean>(true);
   const [showStorageLibrary, setShowStorageLibrary] = useState<boolean>(false);
   const [debugPanelOpen, setDebugPanelOpen] = useLocalStorage<boolean>('xasm1.debugPanel.open', false);
+  const [chassisDark, setChassisDark] = useLocalStorage<boolean>('xasm1_chassisDark', false);
   const [cheatsheetOpen, setCheatsheetOpen] = useState<boolean>(false);
 
   // Channel VU data (from worklet channelStates)
@@ -672,6 +673,7 @@ function App() {
              bloomIntensity={bloomPreset.intensity}
              bloomThreshold={bloomPreset.threshold}
              colorPalette={colorPalette}
+             chassisDark={chassisDark}
            />
 
            <MediaOverlay
@@ -707,6 +709,8 @@ function App() {
           onBloomPresetChange={setBloomPreset}
           colorScheme={colorScheme}
           onColorSchemeChange={setColorScheme}
+          chassisDark={chassisDark}
+          onToggleChassisDark={() => setChassisDark(!chassisDark)}
         />
 
         {/* Seek Bar */}

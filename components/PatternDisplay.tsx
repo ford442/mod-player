@@ -44,6 +44,7 @@ interface PatternDisplayProps {
   onCloseDebug?: () => void;
   onOpenDebug?: () => void;
   colorPalette?: number;
+  chassisDark?: boolean;
 }
 
 export const PatternDisplay: React.FC<PatternDisplayProps> = ({
@@ -83,6 +84,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   onCloseDebug,
   onOpenDebug,
   colorPalette = 0,
+  chassisDark = false,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const glCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -224,6 +226,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     canvasMetrics,
     colorPalette,
     stepsLength,
+    chassisDark,
     ...(totalRows !== undefined ? { totalRows } : {}),
     ...(playbackStateRef ? { playbackStateRef } : {}),
   });
@@ -236,6 +239,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     canvasMetrics,
     colorPalette,
     stepsLength,
+    chassisDark,
     ...(totalRows !== undefined ? { totalRows } : {}),
     ...(playbackStateRef ? { playbackStateRef } : {}),
   };
