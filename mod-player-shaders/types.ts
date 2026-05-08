@@ -170,6 +170,19 @@ export interface SyncDebugInfo {
   driftMs: number;
   row: number;
   starvationCount: number;
+
+  // AUDIO-001 Enhanced diagnostics
+  audioContextState: string;
+  sampleRate: number;
+  baseLatency: number;
+  outputLatency: number;
+  workletSupported: boolean;
+  wasmSupported: boolean;
+  driftAccumulator: number;
+  lastCorrectedTime: number;
+  lastWorkletUpdate: number;
+  seekPending: boolean;
+  bufferHealth?: number;
 }
 
 // Window extensions

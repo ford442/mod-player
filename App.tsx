@@ -48,12 +48,8 @@ const SHADER_GROUPS = {
     { id: 'patternv0.45b.wgsl', label: 'v0.45b (Note-On Sustain)' },
     { id: 'patternv0.42.wgsl', label: 'v0.42 (Frosted Disc)' },
     { id: 'patternv0.38.wgsl', label: 'v0.38 (Glass)' },
-    { id: 'pattern_bloom.wgsl', label: 'Bloom (Unified)' },
     { id: 'patternv0.35_bloom.wgsl', label: 'v0.35 (Bloom)' },
     { id: 'patternv0.30.wgsl', label: 'v0.30 (Disc)' },
-    { id: 'patternv0.52_night.wgsl', label: 'v0.52 (Night Mode)' },
-    { id: 'patternv0.53_midnight.wgsl', label: 'v0.53 (Midnight Mode)' },
-    { id: 'patternv0.54_neon.wgsl', label: 'v0.54 (Neon Night)' },
   ],
   VIDEO: [
     { id: 'patternv0.23.wgsl', label: 'v0.23 (Clouds)' },
@@ -128,6 +124,7 @@ function App() {
     isPlaying,
     isLooping,
     playbackSeconds,
+    playbackRowFraction,
     totalPatternRows,
     sequencerMatrix,
     channelStates,
@@ -275,10 +272,10 @@ function App() {
   const onKbdPlay = useCallback(() => { play(); }, [play]);
   const onKbdPause = useCallback(() => { stopMusic(false); }, [stopMusic]);
 
-  const onKbdSeekForward = useCallback(() => seekToStep(Math.floor(playbackStateRef.current.playheadRow) + 1),
-    [seekToStep, playbackStateRef]);
-  const onKbdSeekBackward = useCallback(() => seekToStep(Math.max(0, Math.floor(playbackStateRef.current.playheadRow) - 1)),
-    [seekToStep, playbackStateRef]);
+  const onKbdSeekForward = useCallback(() => seekToStep(Math.floor(playbackRowFraction) + 1),
+    [seekToStep, playbackRowFraction]);
+  const onKbdSeekBackward = useCallback(() => seekToStep(Math.max(0, Math.floor(playbackRowFraction) - 1)),
+    [seekToStep, playbackRowFraction]);
 
   const onKbdVolumeUp = useCallback(() => setVolume(v => Math.min(1, v + 0.05)), []);
   const onKbdVolumeDown = useCallback(() => setVolume(v => Math.max(0, v - 0.05)), []);
@@ -437,11 +434,11 @@ function App() {
               <PatternDisplay
                 key={shader3D}
                 matrix={sequencerMatrix}
-                playheadRow={playbackStateRef.current.playheadRow}
+                playheadRow={playbackRowFraction}
                 isPlaying={isPlaying}
                 bpm={120}
                 timeSec={playbackSeconds}
-                tickOffset={playbackStateRef.current.playheadRow % 1}
+                tickOffset={playbackRowFraction % 1}
                 channels={channelStates}
                 beatPhase={beatPhase}
                 grooveAmount={grooveAmount}
@@ -640,11 +637,11 @@ function App() {
            <PatternDisplay
              key={shaderFile}
              matrix={sequencerMatrix}
-             playheadRow={playbackStateRef.current.playheadRow}
+             playheadRow={playbackRowFraction}
              isPlaying={isPlaying}
              bpm={120}
              timeSec={playbackSeconds}
-             tickOffset={playbackStateRef.current.playheadRow % 1}
+             tickOffset={playbackRowFraction % 1}
              channels={channelStates}
              beatPhase={beatPhase}
              grooveAmount={grooveAmount}
@@ -718,7 +715,7 @@ function App() {
             <SeekBar
               currentSeconds={playbackSeconds}
               durationSeconds={0}
-              currentRow={Math.floor(playbackStateRef.current.playheadRow)}
+              currentRow={Math.floor(playbackRowFraction)}
               totalRows={totalPatternRows}
               isPlaying={isPlaying}
               onSeekRow={seekToStep}
@@ -763,7 +760,7 @@ function App() {
                 <MetadataPanel
                   metadata={moduleMetadata}
                   currentOrder={sequencerMatrix?.order ?? 0}
-                  currentRow={Math.floor(playbackStateRef.current.playheadRow)}
+                  currentRow={Math.floor(playbackRowFraction)}
                   currentPattern={sequencerMatrix?.patternIndex ?? 0}
                   matrix={sequencerMatrix}
                   isPlaying={isPlaying}
