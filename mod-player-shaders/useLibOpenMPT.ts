@@ -312,11 +312,22 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
     if (spLeftBufPtr.current && libopenmptRef.current) { libopenmptRef.current._free(spLeftBufPtr.current); spLeftBufPtr.current = 0; }
     if (spRightBufPtr.current && libopenmptRef.current) { libopenmptRef.current._free(spRightBufPtr.current); spRightBufPtr.current = 0; }
     spFallbackTriggered.current = false;
+    // TIMING FIX COMPLETE: Reset timing refs on stop (full sync with main implementation)
     audioClockStartRef.current = 0;
     workletTimeAtStartRef.current = 0;
     driftAccumulatorRef.current = 0;
+    lastCorrectedTimeRef.current = 0;
     pendingSeekRef.current = null;
     seekAcknowledgedRef.current = true;
+
+    const audioCtx = audioContextRef.current;
+    lastWorkletUpdateRef.current = audioCtx ? audioCtx.currentTime : (performance.now() / 1000);
+
+    workletTimeRef.current = 0;
+    workletOrderRef.current = 0;
+    workletRowRef.current = 0;
+
+    console.log("[stopMusic] Timing refs reset", { lastWorkletUpdate: lastWorkletUpdateRef.current, lastCorrected: lastCorrectedTimeRef.current });
     if (destroy && currentModulePtr.current !== 0 && libopenmptRef.current) {
       libopenmptRef.current._openmpt_module_destroy(currentModulePtr.current);
       currentModulePtr.current = 0;
