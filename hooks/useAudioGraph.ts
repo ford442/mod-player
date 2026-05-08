@@ -123,7 +123,7 @@ export async function startAudioPlayback(
 
     // TIMING FIX: Initialize audio clock reference
     refs.audioClockStartRef.current = ctx.currentTime;
-    refs.workletTimeAtStartRef.current = 0;
+    refs.workletTimeAtStartRef.current = refs.workletTimeRef.current || 0;
     refs.driftAccumulatorRef.current = 0;
 
     // Setup common nodes

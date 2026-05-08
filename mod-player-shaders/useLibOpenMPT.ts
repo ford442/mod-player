@@ -235,14 +235,19 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
         const elapsed = now - lastWorkletUpdateRef.current;
         if (elapsed < 0.1) {
           rowFraction = Math.min(1, elapsed * (currentBpm / 60 / 4));
-          const expectedTime = workletTimeRef.current + elapsed;
-          const drift = time - expectedTime;
+          const elapsedHardwareTime = now - audioClockStartRef.current;
+          const expectedTime = workletTimeAtStartRef.current + elapsedHardwareTime;
+          const actualTrackerTime = workletTimeRef.current + elapsed;
+          const drift = actualTrackerTime - expectedTime;
           driftAccumulatorRef.current = driftAccumulatorRef.current * 0.9 + drift * 0.1;
           if (Math.abs(driftAccumulatorRef.current) > MAX_DRIFT_SECONDS) {
-            time = expectedTime + driftAccumulatorRef.current * 0.5;
+            time = expectedTime;
+            audioClockStartRef.current = now;
+            workletTimeAtStartRef.current = workletTimeRef.current;
+            driftAccumulatorRef.current = 0;
             lastCorrectedTimeRef.current = now;
           } else {
-            time = expectedTime;
+            time = actualTrackerTime - driftAccumulatorRef.current;
           }
         }
       }
@@ -398,6 +403,8 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
     setSequencerGlobalRow(step);
     driftAccumulatorRef.current = 0;
     lastWorkletUpdateRef.current = audioCtx ? audioCtx.currentTime : 0;
+    audioClockStartRef.current = audioCtx ? audioCtx.currentTime : 0;
+    workletTimeAtStartRef.current = workletTimeRef.current;
 
     if (activeEngine === 'native-worklet' && nativeEngineRef.current) {
       nativeEngineRef.current.seek(targetOrder, targetRow);
