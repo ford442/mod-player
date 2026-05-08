@@ -6,6 +6,7 @@ def verify_xasm1_ui():
         page = browser.new_page()
 
         # Navigate to local server
+        page.goto("http://localhost:4173")
 
         # Mock libopenmptjs.js load to prevent timeouts as requested in AGENTS.md
         page.route("**/libopenmptjs.js", lambda route: route.fulfill(

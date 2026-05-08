@@ -1,10 +1,11 @@
 // patternv0.40.wgsl
-// Horizontal Paged Grid Shader (Time = X, Channels = Y)
+// Mode: "Neon Circular Rings"
+// Advanced circular layout with neon palette, playhead highlighting, and bloom
 
 struct Uniforms {
   numRows: u32,
   numChannels: u32,
-  playheadRow: f32, // CRITICAL FIX: Changed from u32 to f32
+  playheadRow: f32,
   isPlaying: u32,
   cellW: f32,
   cellH: f32,
@@ -22,18 +23,28 @@ struct Uniforms {
   bloomThreshold: f32,
   invertChannels: u32,
   dimFactor: f32,
-  gridRect: vec4<f32>,
-  stepsLength: u32,     // 32 or 64 steps visible per page
+  _r0: f32,
+  _r1: f32,
+  _r2: f32,
+  _r3: f32,
+  colorPalette: u32,
 };
 
 @group(0) @binding(0) var<storage, read> cells: array<u32>;
 @group(0) @binding(1) var<uniform> uniforms: Uniforms;
 @group(0) @binding(2) var<storage, read> rowFlags: array<u32>;
 
-struct ChannelState { volume: f32, pan: f32, freq: f32, trigger: u32, noteAge: f32, activeEffect: u32, effectValue: f32, isMuted: u32 };
+struct ChannelState {
+  volume: f32,
+  pan: f32,
+  freq: f32,
+  trigger: u32,
+  noteAge: f32,
+  activeEffect: u32,
+  effectValue: f32,
+  isMuted: u32
+};
 @group(0) @binding(3) var<storage, read> channels: array<ChannelState>;
-@group(0) @binding(4) var buttonsSampler: sampler;
-@group(0) @binding(5) var buttonsTexture: texture_2d<f32>;
 
 struct VertexOut {
   @builtin(position) position: vec4<f32>,
@@ -44,6 +55,7 @@ struct VertexOut {
   @location(4) @interpolate(flat) packedB: u32,
 };
 
+// ── Vertex Shader: Circular Ring Layout ──
 @vertex
 fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instanceIndex: u32) -> VertexOut {
   var quad = array<vec2<f32>, 6>(
@@ -55,141 +67,111 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
   let row = instanceIndex / numChannels;
   let channel = instanceIndex % numChannels;
 
-  let stepsPerPage = select(32.0, f32(uniforms.stepsLength), uniforms.stepsLength >= 32u);
-  // Use floor on the float, then multiply to get the page start
-  let pageStart = floor(uniforms.playheadRow / stepsPerPage) * stepsPerPage;
-  let localRow = f32(row) - pageStart;
+  let invertedChannel = numChannels - 1u - channel;
+  let ringIndex = select(invertedChannel, channel, (uniforms.invertChannels == 1u));
 
-  let px = localRow * uniforms.cellW;
-  let py = f32(channel) * uniforms.cellH;
+  let center = vec2<f32>(uniforms.canvasW * 0.5, uniforms.canvasH * 0.5);
+  let minDim = min(uniforms.canvasW, uniforms.canvasH);
+  let maxRadius = minDim * 0.45;
+  let minRadius = minDim * 0.15;
+  let ringDepth = (maxRadius - minRadius) / f32(numChannels);
+  let radius = minRadius + f32(ringIndex) * ringDepth;
 
-  var isVisible = 1.0;
-  if (localRow < 0.0 || localRow >= stepsPerPage) {
-      isVisible = 0.0;
-  }
+  let totalSteps = f32(uniforms.numRows);
+  let anglePerStep = TAU / totalSteps;
+  let theta = -PI_HALF + f32(row % uniforms.numRows) * anglePerStep;
 
-  let effectiveChannel = f32(channel);
-  let hasHeader = uniforms.numChannels > 1u && uniforms.gridRect.y > 0.15;
-  let dataChannels = f32(uniforms.numChannels) - select(0.0, 1.0, hasHeader);
-  let channelIndex = select(effectiveChannel, effectiveChannel - 1.0, hasHeader && effectiveChannel > 0.0);
+  let circumference = 2.0 * PI * radius;
+  let arcLength = circumference / totalSteps;
+  let btnW = arcLength * 0.95;
+  let btnH = ringDepth * 0.95;
 
-  let gridX = uniforms.gridRect.x + (localRow / stepsPerPage) * uniforms.gridRect.z;
-  let gridY = uniforms.gridRect.y + (channelIndex / max(1.0, dataChannels)) * uniforms.gridRect.w;
+  let lp = quad[vertexIndex];
+  let localPos = (lp - 0.5) * vec2<f32>(btnW, btnH);
 
-  let cellWidth = uniforms.gridRect.z / stepsPerPage;
-  let cellHeight = uniforms.gridRect.w / max(1.0, dataChannels);
+  let rotAng = theta + PI_HALF;
+  let cA = cos(rotAng);
+  let sA = sin(rotAng);
+  let rotX = localPos.x * cA - localPos.y * sA;
+  let rotY = localPos.x * sA + localPos.y * cA;
 
-  let clipX = gridX * 2.0 - 1.0 + quad[vertexIndex].x * cellWidth * 2.0;
-  let clipY = 1.0 - (gridY * 2.0) - quad[vertexIndex].y * cellHeight * 2.0;
+  let worldX = center.x + cos(theta) * radius + rotX;
+  let worldY = center.y + sin(theta) * radius + rotY;
 
-  let finalPos = select(vec4<f32>(0.0, 0.0, 0.0, 0.0), vec4<f32>(clipX, clipY, 0.0, 1.0), isVisible > 0.5);
+  let clipX = (worldX / uniforms.canvasW) * 2.0 - 1.0;
+  let clipY = 1.0 - (worldY / uniforms.canvasH) * 2.0;
 
   let idx = instanceIndex * 2u;
-  var a = 0u;
-  var b = 0u;
-  // Bounds check safety
-  if (idx + 1u < arrayLength(&cells)) {
-      a = cells[idx];
-      b = cells[idx + 1u];
-  }
+  let a = cells[idx];
+  let b = cells[idx + 1u];
 
   var out: VertexOut;
-  out.position = finalPos;
+  out.position = vec4<f32>(clipX, clipY, 0.0, 1.0);
   out.row = row;
   out.channel = channel;
-  out.uv = quad[vertexIndex];
+  out.uv = lp;
   out.packedA = a;
   out.packedB = b;
   return out;
 }
 
+// ── Helpers (from includes) ──
 fn neonPalette(t: f32) -> vec3<f32> {
-    let a = vec3<f32>(0.5, 0.5, 0.5);
-    let b = vec3<f32>(0.5, 0.5, 0.5);
-    let c = vec3<f32>(1.0, 1.0, 1.0);
-    let d = vec3<f32>(0.0, 0.33, 0.67);
-    return a + b * cos(6.28318 * (c * t + d));
+  let a = vec3<f32>(0.5, 0.5, 0.5);
+  let b = vec3<f32>(0.5, 0.5, 0.5);
+  let c = vec3<f32>(1.0, 1.0, 1.0);
+  let d = vec3<f32>(0.263, 0.416, 0.557);
+  return a + b * cos(6.28318 * (c * t + d));
 }
 
 fn sdRoundedBox(p: vec2<f32>, b: vec2<f32>, r: f32) -> f32 {
-    let q = abs(p) - b + r;
-    return length(max(q, vec2<f32>(0.0, 0.0))) + min(max(q.x, q.y), 0.0) - r;
+  let q = abs(p) - b + r;
+  return length(max(q, vec2<f32>(0.0))) + min(max(q.x, q.y), 0.0) - r;
 }
 
-struct FragmentConstants {
-  bgColor: vec3<f32>,
-  ledOnColor: vec3<f32>,
-  ledOffColor: vec3<f32>,
-  borderColor: vec3<f32>,
-};
-
-fn getFragmentConstants() -> FragmentConstants {
-    var c: FragmentConstants;
-    c.bgColor = vec3<f32>(0.10, 0.11, 0.13);
-    c.ledOnColor = vec3<f32>(0.0, 0.85, 0.95);
-    c.ledOffColor = vec3<f32>(0.08, 0.12, 0.15);
-    c.borderColor = vec3<f32>(0.0, 0.0, 0.0);
-    return c;
-}
-
+// ── Fragment Shader ──
 @fragment
 fn fs(in: VertexOut) -> @location(0) vec4<f32> {
-  // Compute derivatives in uniform control flow (before any early returns)
   let uv = in.uv;
-  let p = uv - vec2<f32>(0.5, 0.5);
+  let p = uv - 0.5;
   let aa = fwidth(p.y) * 0.75;
 
-  if (in.channel >= uniforms.numChannels) { return vec4<f32>(1.0, 0.0, 0.0, 1.0); }
-  let fs = getFragmentConstants();
-
-  if (in.channel == 0u) {
-      var col = fs.bgColor * 0.8;
-      return vec4<f32>(col, 1.0);
+  if (in.channel >= uniforms.numChannels) {
+    return vec4<f32>(1.0, 0.0, 0.0, 1.0);
   }
 
-  let dBox = sdRoundedBox(p, vec2<f32>(0.45, 0.40), 0.05);
-  var col = fs.bgColor;
+  let bgCol = vec3<f32>(0.051, 0.051, 0.051);
+  var col = bgCol;
 
-  col += smoothstep(0.0, 0.1, dBox + 0.5) * 0.02;
-
-  let onPlayhead = (in.row == u32(uniforms.playheadRow));
-
-  let note = (in.packedA >> 24) & 255u;
-  let volCmd = (in.packedA >> 8) & 255u;
-  let effCmd = (in.packedB >> 8) & 255u;
-  let hasNote = note > 0u;
-  let hasExpression = (volCmd > 0u) || (effCmd > 0u);
+  let hasNote = ((in.packedA >> 24) & 255u) > 0u;
   let ch = channels[in.channel];
+  let isPlayhead = (in.row == u32(uniforms.playheadRow));
 
+  // Main cell highlight
+  let dBox = sdRoundedBox(p, vec2<f32>(0.45, 0.40), 0.05);
   if (hasNote) {
-      let noteCol = neonPalette(f32(note % 12u) / 12.0);
-      let dist = length(p);
-      let glow = exp(-dist * 4.0);
-      col += noteCol * glow * 1.5;
-      // Trigger flash: pulse on the exact playhead row
-      if (ch.trigger > 0u && onPlayhead) {
-          col += noteCol * 1.5;
-      }
+    let note = (in.packedA >> 24) & 255u;
+    let noteCol = neonPalette(f32(note % 12u) / 12.0);
+    let dist = length(p);
+    let glow = exp(-dist * 4.0);
+    col += noteCol * glow * 1.5;
+
+    if (ch.trigger > 0u && isPlayhead) {
+      col += noteCol * 1.5;
+    }
   }
 
-  // Expression indicator: subtle cyan tint for cells with vol/effect commands
-  if (hasExpression && ch.isMuted == 0u) {
-      col += vec3<f32>(0.0, 0.04, 0.08) * uniforms.bloomIntensity;
+  // Playhead highlight
+  if (isPlayhead) {
+    col += vec3<f32>(0.8, 0.9, 1.0) * 0.6;
   }
 
-  if (onPlayhead) {
-      col += vec3<f32>(0.2, 0.2, 0.25) * 0.8;
-  }
+  // Border
+  let border = 1.0 - smoothstep(0.0, aa, dBox);
+  col = mix(col, vec3<f32>(0.3, 0.3, 0.35), border * 0.7);
 
-  col = mix(col, fs.borderColor, smoothstep(0.0, aa, dBox));
   col *= uniforms.dimFactor;
-
-  // Kick reactive glow
-  let kickPulse = uniforms.kickTrigger * exp(-length(p) * 3.0) * 0.3;
-  col += vec3<f32>(0.9, 0.2, 0.4) * kickPulse * uniforms.bloomIntensity;
-  // Dithering for night mode
-  let noise = fract(sin(dot(in.uv * uniforms.timeSec, vec2<f32>(12.9898, 78.233))) * 43758.5453);
-  col += (noise - 0.5) * 0.01;
+  col += vec3<f32>(0.9, 0.2, 0.4) * uniforms.kickTrigger * 0.6; // kick flash
 
   return vec4<f32>(col, 1.0);
 }
