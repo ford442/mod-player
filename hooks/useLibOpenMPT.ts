@@ -1,17 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { LibOpenMPT, ModuleInfo, PatternMatrix, ChannelShadowState, PlaybackState } from '../types';
+import { LibOpenMPT, ModuleInfo, PatternMatrix, ChannelShadowState, PlaybackState, SyncDebugInfo } from '../types';
 import { OpenMPTWorkletEngine } from '../audio-worklet/OpenMPTWorkletEngine';
 import { getPatternMatrix, computeNoteAges } from '../utils/patternExtractor';
 import { startAudioPlayback, AudioGraphRefs, AudioGraphCallbacks, AudioGraphConfig } from './useAudioGraph';
 import { useWorkletLoader, getWorkletUrl } from './useWorkletLoader';
-
-interface SyncDebugInfo {
-  mode: string;
-  bufferMs: number;
-  driftMs: number;
-  row: number;
-  starvationCount: number;
-}
 
 // Use Vite BASE_URL for correct resolution under subdirectory deployment
 const DEFAULT_MODULE_URL = `${import.meta.env.BASE_URL}4-mat_madness.mod`;
@@ -57,7 +49,24 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
   const [isWorkletSupported, setIsWorkletSupported] = useState<boolean>(false);
   const [isNativeWorkletAvailable, setIsNativeWorkletAvailable] = useState<boolean>(false);
   const [restartPlayback, setRestartPlayback] = useState<boolean>(false);
-  const [syncDebug, setSyncDebug] = useState<SyncDebugInfo>({ mode: "none", bufferMs: 0, driftMs: 0, row: 0, starvationCount: 0 });
+  const [syncDebug, setSyncDebug] = useState<SyncDebugInfo>({
+    mode: "none",
+    bufferMs: 0,
+    driftMs: 0,
+    row: 0,
+    starvationCount: 0,
+    audioContextState: 'none',
+    sampleRate: 0,
+    baseLatency: 0,
+    outputLatency: 0,
+    workletSupported: typeof AudioWorklet !== 'undefined',
+    wasmSupported: typeof WebAssembly !== 'undefined',
+    driftAccumulator: 0,
+    lastCorrectedTime: 0,
+    lastWorkletUpdate: 0,
+    seekPending: false,
+    bufferHealth: 0,
+  });
   
   // AUDIO-001 FIX: Track worklet load errors for UI feedback
   const [workletLoadError, setWorkletLoadError] = useState<string | null>(null);
@@ -441,7 +450,17 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
       ...prev,
       driftMs: Math.round(driftAccumulatorRef.current * 1000),
       row: row,
-      mode: activeEngine
+      mode: activeEngine,
+      audioContextState: audioContextRef.current?.state || 'none',
+      sampleRate: audioContextRef.current?.sampleRate || 0,
+      baseLatency: audioContextRef.current?.baseLatency ?? 0,
+      outputLatency: audioContextRef.current?.outputLatency ?? 0,
+      workletSupported: typeof AudioWorklet !== 'undefined',
+      wasmSupported: typeof WebAssembly !== 'undefined',
+      driftAccumulator: driftAccumulatorRef.current,
+      lastCorrectedTime: lastCorrectedTimeRef.current,
+      lastWorkletUpdate: lastWorkletUpdateRef.current,
+      seekPending: !!pendingSeekRef.current,
     }));
 
     lastUpdateTimeRef.current = performance.now() / 1000;

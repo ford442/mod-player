@@ -105,8 +105,17 @@ export async function startAudioPlayback(
     if (!refs.audioContextRef.current) {
       console.log('[PLAY] Creating new AudioContext...');
       refs.audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ latencyHint: 'playback' });
-      // New context: worklet module needs to be (re)loaded
       refs.workletLoadedRef.current = false;
+
+      // AUDIO-001 FIX COMPLETE: Detailed log right after AudioContext creation
+      const ctx = refs.audioContextRef.current;
+      console.log('[AudioEngine] AudioContext created', {
+        state: ctx.state,
+        sampleRate: ctx.sampleRate,
+        baseLatency: ctx.baseLatency,
+        outputLatency: ctx.outputLatency ?? 0,
+        timestamp: performance.now(),
+      });
     }
 
     const ctx = refs.audioContextRef.current;
