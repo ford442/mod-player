@@ -353,7 +353,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
 
     // TIMING FIX: Check for pending seek acknowledgment
     if (pendingSeekRef.current && !seekAcknowledgedRef.current) {
-      const seekAge = audioCtx ? audioCtx.currentTime - pendingSeekRef.current.timestamp : 0;
+      const seekAge = (audioCtx ? audioCtx.currentTime : performance.now() / 1000) - pendingSeekRef.current.timestamp;
       // If seek is older than 500ms, consider it acknowledged to prevent stuck state
       if (seekAge > 0.5) {
         seekAcknowledgedRef.current = true;
