@@ -128,7 +128,6 @@ function App() {
     isPlaying,
     isLooping,
     playbackSeconds,
-    playbackRowFraction,
     totalPatternRows,
     sequencerMatrix,
     channelStates,
@@ -276,10 +275,10 @@ function App() {
   const onKbdPlay = useCallback(() => { play(); }, [play]);
   const onKbdPause = useCallback(() => { stopMusic(false); }, [stopMusic]);
 
-  const onKbdSeekForward = useCallback(() => seekToStep(Math.floor(playbackRowFraction) + 1),
-    [seekToStep, playbackRowFraction]);
-  const onKbdSeekBackward = useCallback(() => seekToStep(Math.max(0, Math.floor(playbackRowFraction) - 1)),
-    [seekToStep, playbackRowFraction]);
+  const onKbdSeekForward = useCallback(() => seekToStep(Math.floor(playbackStateRef.current.playheadRow) + 1),
+    [seekToStep, playbackStateRef]);
+  const onKbdSeekBackward = useCallback(() => seekToStep(Math.max(0, Math.floor(playbackStateRef.current.playheadRow) - 1)),
+    [seekToStep, playbackStateRef]);
 
   const onKbdVolumeUp = useCallback(() => setVolume(v => Math.min(1, v + 0.05)), []);
   const onKbdVolumeDown = useCallback(() => setVolume(v => Math.max(0, v - 0.05)), []);
@@ -438,11 +437,11 @@ function App() {
               <PatternDisplay
                 key={shader3D}
                 matrix={sequencerMatrix}
-                playheadRow={playbackRowFraction}
+                playheadRow={playbackStateRef.current.playheadRow}
                 isPlaying={isPlaying}
                 bpm={120}
                 timeSec={playbackSeconds}
-                tickOffset={playbackRowFraction % 1}
+                tickOffset={playbackStateRef.current.playheadRow % 1}
                 channels={channelStates}
                 beatPhase={beatPhase}
                 grooveAmount={grooveAmount}
@@ -641,11 +640,11 @@ function App() {
            <PatternDisplay
              key={shaderFile}
              matrix={sequencerMatrix}
-             playheadRow={playbackRowFraction}
+             playheadRow={playbackStateRef.current.playheadRow}
              isPlaying={isPlaying}
              bpm={120}
              timeSec={playbackSeconds}
-             tickOffset={playbackRowFraction % 1}
+             tickOffset={playbackStateRef.current.playheadRow % 1}
              channels={channelStates}
              beatPhase={beatPhase}
              grooveAmount={grooveAmount}
@@ -719,7 +718,7 @@ function App() {
             <SeekBar
               currentSeconds={playbackSeconds}
               durationSeconds={0}
-              currentRow={Math.floor(playbackRowFraction)}
+              currentRow={Math.floor(playbackStateRef.current.playheadRow)}
               totalRows={totalPatternRows}
               isPlaying={isPlaying}
               onSeekRow={seekToStep}
@@ -764,7 +763,7 @@ function App() {
                 <MetadataPanel
                   metadata={moduleMetadata}
                   currentOrder={sequencerMatrix?.order ?? 0}
-                  currentRow={Math.floor(playbackRowFraction)}
+                  currentRow={Math.floor(playbackStateRef.current.playheadRow)}
                   currentPattern={sequencerMatrix?.patternIndex ?? 0}
                   matrix={sequencerMatrix}
                   isPlaying={isPlaying}

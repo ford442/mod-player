@@ -44,7 +44,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
   const [sequencerGlobalRow, setSequencerGlobalRow] = useState(0);
   const [playbackSeconds, setPlaybackSeconds] = useState(0);
   const [durationSeconds, setDurationSeconds] = useState(0);
-  const [playbackRowFraction, setPlaybackRowFraction] = useState(0);
+  // TIMING FIX: Removed playbackRowFraction React state
   const [totalPatternRows, setTotalPatternRows] = useState(0);
   const [channelStates, setChannelStates] = useState<any[]>([]);
   const [beatPhase, setBeatPhase] = useState(0);
@@ -79,6 +79,9 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
   const workletOrderRef = useRef(0);
   const workletRowRef = useRef(0);
   const workletTimeRef = useRef(0);
+  // TIMING FIX: Refs for absolute visual playhead tracking
+  const visualPlayheadRef = useRef(0);
+  const lastOrderRef = useRef(0);
   const workletBpmRef = useRef(125);
   const lastWorkletUpdateRef = useRef(0);
 
@@ -275,6 +278,20 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
     for (let i = 0; i < order; i++) globalRow += patternMatricesRef.current[i]?.numRows || 64;
     setSequencerGlobalRow(globalRow + row);
 
+    // TIMING FIX COMPLETE: Absolute smoothed playhead
+    const targetPlayhead = row + rowFraction;
+    const currentVisual = visualPlayheadRef.current || targetPlayhead;
+
+    if (order !== lastOrderRef.current || Math.abs(targetPlayhead - currentVisual) > 1.5) {
+      // Big jump -> instant snap (seek, pattern change, loop, etc.)
+      visualPlayheadRef.current = targetPlayhead;
+    } else {
+      // Normal playback -> smooth lerp
+      visualPlayheadRef.current = currentVisual + (targetPlayhead - currentVisual) * ROW_INTERPOLATION_SMOOTHING;
+    }
+    lastOrderRef.current = order;
+
+    const playheadRow = visualPlayheadRef.current;
     const prevFraction = playbackStateRef.current.playheadRow % 1;
     const smoothedRowFraction = rowFraction * ROW_INTERPOLATION_SMOOTHING + (prevFraction * (1 - ROW_INTERPOLATION_SMOOTHING));
     setPlaybackRowFraction(smoothedRowFraction);
@@ -284,7 +301,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
 
     const now = audioCtx?.currentTime || performance.now() / 1000;
     playbackStateRef.current = {
-      playheadRow: row + smoothedRowFraction, currentOrder: order, timeSec: time,
+      playheadRow: visualPlayheadRef.current, currentOrder: order, timeSec: time,
       beatPhase: beatPhaseValue, kickTrigger, grooveAmount, lastUpdateTimestamp: now,
     };
 
@@ -317,6 +334,8 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
     driftAccumulatorRef.current = 0;
     pendingSeekRef.current = null;
     seekAcknowledgedRef.current = true;
+    visualPlayheadRef.current = 0;
+    lastOrderRef.current = 0;
     if (destroy && currentModulePtr.current !== 0 && libopenmptRef.current) {
       libopenmptRef.current._openmpt_module_destroy(currentModulePtr.current);
       currentModulePtr.current = 0;
@@ -405,6 +424,8 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
     lastWorkletUpdateRef.current = audioCtx ? audioCtx.currentTime : 0;
     audioClockStartRef.current = audioCtx ? audioCtx.currentTime : 0;
     workletTimeAtStartRef.current = workletTimeRef.current;
+    visualPlayheadRef.current = targetRow;
+    lastOrderRef.current = targetOrder;
 
     if (activeEngine === 'native-worklet' && nativeEngineRef.current) {
       nativeEngineRef.current.seek(targetOrder, targetRow);
@@ -565,7 +586,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
   return {
     status, isReady, isPlaying, isModuleLoaded, moduleInfo, moduleMetadata, patternData,
     loadFile: loadModule, play, stopMusic, sequencerMatrix, sequencerCurrentRow, sequencerGlobalRow,
-    totalPatternRows, playbackSeconds, durationSeconds, playbackRowFraction, channelStates,
+    totalPatternRows, playbackSeconds, durationSeconds, /* playbackRowFraction removed */ channelStates,
     beatPhase, grooveAmount, kickTrigger, activeChannels,
     isLooping, setIsLooping, seekToStep: seekToStepWrapper, panValue, setPanValue,
     activeEngine, isWorkletSupported, toggleAudioEngine, syncDebug,

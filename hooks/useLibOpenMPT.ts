@@ -43,7 +43,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
   const [sequencerCurrentRow, setSequencerCurrentRow] = useState<number>(0);
   const [sequencerGlobalRow, setSequencerGlobalRow] = useState<number>(0);
   const [playbackSeconds, setPlaybackSeconds] = useState<number>(0);
-  const [playbackRowFraction, setPlaybackRowFraction] = useState<number>(0);
+  // TIMING FIX: Removed playbackRowFraction React state
   const [totalPatternRows, setTotalPatternRows] = useState<number>(0);
   const [channelStates, setChannelStates] = useState<ChannelShadowState[]>([]);
   const [beatPhase, setBeatPhase] = useState<number>(0);
@@ -91,6 +91,9 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
   const workletOrderRef = useRef<number>(0);
   const workletRowRef = useRef<number>(0);
   const workletTimeRef = useRef<number>(0);
+  // TIMING FIX: Refs for absolute visual playhead tracking
+  const visualPlayheadRef = useRef<number>(0);
+  const lastOrderRef = useRef<number>(0);
   // TIMING FIX: Track worklet BPM for accurate row interpolation
   const workletBpmRef = useRef<number>(125);
   const lastWorkletUpdateRef = useRef<number>(0);
@@ -247,6 +250,8 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
     lastCorrectedTimeRef.current = 0;
     pendingSeekRef.current = null;
     seekAcknowledgedRef.current = true;
+    visualPlayheadRef.current = 0;
+    lastOrderRef.current = 0;
 
     // Reset playback state ref so PatternDisplay doesn't show stale playhead
     playbackStateRef.current = {
@@ -366,13 +371,25 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
     }
     setSequencerGlobalRow(globalRow + row);
 
+    // TIMING FIX COMPLETE: Absolute smoothed playhead
+    const targetPlayhead = row + rowFraction;
+    const currentVisual = visualPlayheadRef.current || targetPlayhead;
+
+    if (order !== lastOrderRef.current || Math.abs(targetPlayhead - currentVisual) > 1.5) {
+      // Big jump -> instant snap (seek, pattern change, loop, etc.)
+      visualPlayheadRef.current = targetPlayhead;
+    } else {
+      // Normal playback -> smooth lerp
+      visualPlayheadRef.current = currentVisual + (targetPlayhead - currentVisual) * ROW_INTERPOLATION_SMOOTHING;
+    }
+    lastOrderRef.current = order;
     // TIMING FIX: Smooth row fraction for visual display
     const prevFraction = playbackStateRef.current.playheadRow % 1;
     const smoothedRowFraction = rowFraction * ROW_INTERPOLATION_SMOOTHING + (prevFraction * (1 - ROW_INTERPOLATION_SMOOTHING));
     setPlaybackRowFraction(smoothedRowFraction);
 
     // Compute note ages for hardware choke in shader (only update React state when integer ages change)
-    const playheadRow = row + smoothedRowFraction;
+    const playheadRow = visualPlayheadRef.current;
     const currentMatrix = patternMatricesRef.current[order];
     const numChannels = channelStatesRef.current.length;
     if (currentMatrix && numChannels > 0) {
@@ -427,7 +444,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
     // TIMING FIX: Atomic update of playbackStateRef with timestamp
     const now = audioCtx?.currentTime || performance.now() / 1000;
     playbackStateRef.current = {
-      playheadRow: row + smoothedRowFraction,
+      playheadRow: visualPlayheadRef.current,
       currentOrder: order,
       timeSec: time,
       beatPhase: beatPhaseValue,
@@ -495,6 +512,8 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
     lastCorrectedTimeRef.current = 0;
     pendingSeekRef.current = null;
     seekAcknowledgedRef.current = true;
+    visualPlayheadRef.current = 0;
+    lastOrderRef.current = 0;
 
     // Reset worklet update timestamp to prevent interpolation jumps and monotonicity locks
     const audioCtx = audioContextRef.current;
@@ -568,6 +587,9 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
     // TIMING FIX: Reset baselines on seek to prevent massive drift calculation
     audioClockStartRef.current = audioCtx ? audioCtx.currentTime : 0;
     workletTimeAtStartRef.current = workletTimeRef.current;
+
+    visualPlayheadRef.current = targetRow;
+    lastOrderRef.current = targetOrder;
 
     // Worklet update with acknowledgment tracking
     if (activeEngine === 'native-worklet' && nativeEngineRef.current) {
@@ -824,7 +846,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
   return {
     status, isReady, isPlaying, isModuleLoaded, moduleInfo, patternData,
     loadFile: loadModule, play, stopMusic, sequencerMatrix, sequencerCurrentRow, sequencerGlobalRow,
-    totalPatternRows, playbackSeconds, playbackRowFraction, channelStates, beatPhase, grooveAmount, kickTrigger, activeChannels,
+    totalPatternRows, playbackSeconds, /* playbackRowFraction removed */ channelStates, beatPhase, grooveAmount, kickTrigger, activeChannels,
     isLooping, setIsLooping, seekToStep: seekToStepWrapper, panValue, setPanValue,
     activeEngine, isWorkletSupported, toggleAudioEngine, syncDebug,
     analyserNode: analyserRef.current,
