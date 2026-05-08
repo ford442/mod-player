@@ -485,6 +485,11 @@ export async function startAudioPlayback(
             // TIMING FIX: Worklet acknowledged seek
             refs.seekAcknowledgedRef.current = true;
             refs.pendingSeekRef.current = null;
+            console.log('[seekAck] Received from worklet', {
+              order: e.data.order,
+              row: e.data.row,
+              timestamp: e.data.timestamp
+            });
           }
         };
 
