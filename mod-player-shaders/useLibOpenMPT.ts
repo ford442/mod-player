@@ -7,6 +7,9 @@ import { ModuleMetadata, PatternMatrix } from '../types';
 import { OpenMPTWorkletEngine } from '../audio-worklet/OpenMPTWorkletEngine';
 import { getPatternMatrix } from './utils/patternExtractor';
 import { processModuleData as processModuleDataFn, startAudioPlayback } from './hooks/useAudioGraph';
+import { getWorkletUrl, getNativeGlueUrl } from '../hooks/useWorkletLoader';
+
+import { getWorkletUrl } from '../hooks/useWorkletLoader';
 
 interface SyncDebugInfo {
   mode: string;
@@ -18,19 +21,9 @@ interface SyncDebugInfo {
 
 const DEFAULT_MODULE_URL = './4-mat_madness.mod';
 
-const detectRuntimeBase = (): string => {
-  const viteBase = import.meta.env.BASE_URL;
-  if (viteBase && viteBase !== '/') {
-    return viteBase.endsWith('/') ? viteBase : `${viteBase}/`;
-  }
-  const pathSegments = window.location.pathname.split('/').filter(Boolean);
-  if (pathSegments.length > 0) return `/${pathSegments[0]}/`;
-  return '/';
-};
-
-const RUNTIME_BASE_URL = detectRuntimeBase();
-const WORKLET_URL = `${RUNTIME_BASE_URL}worklets/openmpt-worklet.js`;
+const WORKLET_URL = getWorkletUrl();
 console.log('[AudioWorklet] Worklet URL resolved:', WORKLET_URL);
+
 
 const MAX_DRIFT_SECONDS = 0.1;
 const ROW_INTERPOLATION_SMOOTHING = 0.3;
@@ -243,14 +236,20 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
           const actualTrackerTime = workletTimeRef.current + elapsed;
           const drift = actualTrackerTime - expectedTime;
           driftAccumulatorRef.current = driftAccumulatorRef.current * 0.9 + drift * 0.1;
+
           if (Math.abs(driftAccumulatorRef.current) > MAX_DRIFT_SECONDS) {
+            // Major desync -> hard snap to hardware clock
             time = expectedTime;
             audioClockStartRef.current = now;
             workletTimeAtStartRef.current = workletTimeRef.current;
             driftAccumulatorRef.current = 0;
             lastCorrectedTimeRef.current = now;
+
+            console.log('[Drift] Major correction applied', { drift: driftAccumulatorRef.current });
           } else {
+            // Normal smooth correction
             time = actualTrackerTime - driftAccumulatorRef.current;
+            lastCorrectedTimeRef.current = now;   // important for lastUpdateTimestamp
           }
         }
       }
@@ -293,6 +292,9 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
     lastOrderRef.current = order;
 
     const playheadRow = visualPlayheadRef.current;
+    const prevFraction = playbackStateRef.current.playheadRow % 1;
+    const smoothedRowFraction = rowFraction * ROW_INTERPOLATION_SMOOTHING + (prevFraction * (1 - ROW_INTERPOLATION_SMOOTHING));
+    setPlaybackRowFraction(smoothedRowFraction);
 
     const beatPhaseValue = (time * 2) % 1;
     setBeatPhase(beatPhaseValue);
@@ -313,7 +315,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
 
     lastUpdateTimeRef.current = performance.now() / 1000;
     animationFrameHandle.current = requestAnimationFrame(updateUI);
-  }, [isPlaying, activeEngine, sequencerMatrix, kickTrigger, grooveAmount, ]);
+  }, [isPlaying, activeEngine, sequencerMatrix, kickTrigger, grooveAmount]);
 
   const stopMusic = useCallback((destroy: boolean = false) => {
     isPlayingRef.current = false;
@@ -525,7 +527,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
         }
 
         try {
-          const nativeGlueUrl = `${RUNTIME_BASE_URL}worklets/openmpt-native.js`;
+          const nativeGlueUrl = getNativeGlueUrl();
           const probeResp = await fetch(nativeGlueUrl, { method: 'HEAD' });
           if (probeResp.ok) {
             const engine = new OpenMPTWorkletEngine();

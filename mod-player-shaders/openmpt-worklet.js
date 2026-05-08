@@ -139,8 +139,18 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
           this.lib._openmpt_module_set_position_order_row(
             this.modulePtr, e.data.order, e.data.row
           );
+
+          // TIMING FIX: Acknowledge seek back to main thread
+          this.port.postMessage({
+            type: 'seekAck',
+            order: e.data.order,
+            row: e.data.row,
+            timestamp: e.data.timestamp || currentTime
+          });
         } else {
           error('Cannot seek: module not loaded');
+          // Still send ack so we don't hang
+          this.port.postMessage({ type: 'seekAck', success: false });
         }
       } else if (!type && moduleData) {
         // Legacy fallback
