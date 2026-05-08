@@ -3,6 +3,7 @@ import { ChannelShadowState, PatternMatrix, PlaybackState } from '../types';
 
 import { useWebGLOverlay } from '../hooks/useWebGLOverlay';
 import { useWebGPURender, type WebGPURenderParams, type DebugInfo } from '../hooks/useWebGPURender';
+import { BloomPostProcessor, DEFAULT_LAYERS } from '../utils/bloomPostProcessor';
 
 const DEFAULT_CHANNELS = 4;
 
@@ -87,6 +88,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   const glCanvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const bloomRef = useRef<BloomPostProcessor | null>(null);
 
   const [webgpuAvailable, setWebgpuAvailable] = useState(true);
   const [localTime, setLocalTime] = useState(0);
@@ -250,13 +252,38 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   // explicit deps, guaranteeing the cells buffer is rebuilt when a new module is loaded.
   const { gpuReady, render, deviceRef: gpuDevRef } = useWebGPURender(
     canvasRef, glCanvasRef, shaderFile,
-    syncCanvasSize, renderParamsRef, matrix, padTopChannel, setDebugInfo, setWebgpuAvailable
+    syncCanvasSize, renderParamsRef, matrix, padTopChannel, setDebugInfo, setWebgpuAvailable,
+    bloomRef
   );
 
   // Keep resize reconfiguration refs in sync
   useEffect(() => {
     gpuDeviceRef.current = gpuDevRef.current;
   });
+
+  // Initialize multi-layer bloom post-processor when GPU becomes ready
+  useEffect(() => {
+    const device = gpuDevRef.current;
+    const canvas = canvasRef.current;
+    if (!device || !canvas || !gpuReady) return;
+    const context = canvas.getContext('webgpu') as GPUCanvasContext | null;
+    if (!context) return;
+
+    const bloom = new BloomPostProcessor(device, canvas, context, {
+      layers: DEFAULT_LAYERS,
+    });
+    bloom.setBaseUrl(import.meta.env.BASE_URL);
+    bloom.init().then(() => {
+      bloomRef.current = bloom;
+    }).catch((err: unknown) => {
+      console.warn('BloomPostProcessor init failed:', err);
+    });
+
+    return () => {
+      bloomRef.current?.destroy();
+      bloomRef.current = null;
+    };
+  }, [gpuReady, shaderFile]);
 
   // Canvas click handler for shader-embedded UI interaction
   const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {

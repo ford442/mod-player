@@ -1,8 +1,6 @@
 // utils/bloomPostProcessor.ts
 // Lightweight Bloom post-processor for WebGPU.
-// It expects WGSL code strings for the threshold/blur/composite shaders or will try to fetch them
-// from the server. In a Vite project, you can import them as `import t from './shaders/bloom_threshold.wgsl?raw'`.
-// For subpath deployment, use withBase() from src/lib/paths to construct shader URLs.
+// Supports both single-layer legacy mode and multi-layer semantic-category bloom.
 
 export interface BloomOptions {
   shaderThreshold?: string;
@@ -11,36 +9,73 @@ export interface BloomOptions {
   finalFormat?: GPUTextureFormat; // default 'bgra8unorm'
 }
 
+export interface BloomLayer {
+  label: string;                // e.g. 'trigger' | 'sustain' | 'expression'
+  threshold: number;            // luminance threshold for extraction (0.0–1.0)
+  blurRadius: number;           // relative blur width multiplier (1.0 = current default)
+  tint: [number, number, number]; // RGB tint applied before composite
+  weight: number;               // contribution weight in final composite (0.0–2.0)
+}
+
+export interface LayeredBloomOptions extends BloomOptions {
+  layers?: BloomLayer[];        // if absent, fall back to single-layer legacy behavior
+}
+
+export const DEFAULT_LAYERS: BloomLayer[] = [
+  { label: 'trigger',    threshold: 0.85, blurRadius: 0.8, tint: [0.4, 0.6, 1.0], weight: 1.4 },
+  { label: 'sustain',    threshold: 0.50, blurRadius: 2.0, tint: [0.2, 0.4, 0.8], weight: 0.7 },
+  { label: 'expression', threshold: 0.75, blurRadius: 1.0, tint: [1.0, 0.5, 0.1], weight: 1.0 },
+];
+
+interface LayerResources {
+  thresholdTexture: GPUTexture;
+  blurTextures: [GPUTexture, GPUTexture];
+  thresholdBuffer: GPUBuffer;
+  thresholdBindGroup: GPUBindGroup;
+  hBlurBindGroup: GPUBindGroup;
+  vBlurBindGroup: GPUBindGroup;
+}
+
 export class BloomPostProcessor {
   private device: GPUDevice;
   private canvas: HTMLCanvasElement;
   private context: GPUCanvasContext;
 
+  // Shared resources
   private sceneTexture!: GPUTexture;
+  private linearSampler!: GPUSampler;
+  private blurBuffer!: GPUBuffer;
+
+  // Legacy single-layer resources
   private thresholdTexture!: GPUTexture;
   private blurTextures: GPUTexture[] = [];
-  private linearSampler!: GPUSampler;
+  private thresholdBuffer!: GPUBuffer;
+  private compositeBuffer!: GPUBuffer;
 
+  // Layered resources
+  private layers: BloomLayer[] | null = null;
+  private layerResources: LayerResources[] = [];
+  private layeredCompositeBindGroup!: GPUBindGroup;
+
+  // Pipelines (shared between legacy and layered)
   private thresholdPipeline!: GPURenderPipeline;
   private blurPipeline!: GPURenderPipeline;
   private compositePipeline!: GPURenderPipeline;
 
+  // Legacy bind groups
   private thresholdBindGroup!: GPUBindGroup;
   private hBlurBindGroup!: GPUBindGroup;
   private vBlurBindGroup!: GPUBindGroup;
   private compositeBindGroup!: GPUBindGroup;
 
-  private thresholdBuffer!: GPUBuffer;
-  private blurBuffer!: GPUBuffer;
-  private compositeBuffer!: GPUBuffer;
-
+  // Shader code
   private thresholdShaderCode?: string | undefined;
   private blurShaderCode?: string | undefined;
   private compositeShaderCode?: string | undefined;
 
   private finalFormat: GPUTextureFormat;
 
-  constructor(device: GPUDevice, canvas: HTMLCanvasElement, context: GPUCanvasContext, options: BloomOptions = {}) {
+  constructor(device: GPUDevice, canvas: HTMLCanvasElement, context: GPUCanvasContext, options: LayeredBloomOptions = {}) {
     this.device = device;
     this.canvas = canvas;
     this.context = context;
@@ -50,6 +85,7 @@ export class BloomPostProcessor {
     this.compositeShaderCode = options.shaderComposite;
 
     this.finalFormat = options.finalFormat ?? ('bgra8unorm' as GPUTextureFormat);
+    this.layers = options.layers ?? null;
   }
 
   // Base URL for fetching shaders (set this for subpath deployments)
@@ -61,11 +97,19 @@ export class BloomPostProcessor {
 
   // Call once after construction
   public async init() {
+    const useLayered = this.layers !== null;
+    if (useLayered && this.layers!.length !== 3) {
+      throw new Error(`Layered bloom requires exactly 3 layers (got ${this.layers!.length})`);
+    }
+
+    const thresholdFile = useLayered ? 'bloom_threshold_layered.wgsl' : 'bloom_threshold.wgsl';
+    const compositeFile = useLayered ? 'bloom_composite_layered.wgsl' : 'bloom_composite.wgsl';
+
     // Try to load shader code if not supplied, fetching concurrently if needed
     const [t, b, c] = await Promise.all([
-      this.thresholdShaderCode ? Promise.resolve(this.thresholdShaderCode) : this.tryFetch(`${this.baseUrl}/shaders/bloom_threshold.wgsl`),
+      this.thresholdShaderCode ? Promise.resolve(this.thresholdShaderCode) : this.tryFetch(`${this.baseUrl}/shaders/${thresholdFile}`),
       this.blurShaderCode ? Promise.resolve(this.blurShaderCode) : this.tryFetch(`${this.baseUrl}/shaders/bloom_blur.wgsl`),
-      this.compositeShaderCode ? Promise.resolve(this.compositeShaderCode) : this.tryFetch(`${this.baseUrl}/shaders/bloom_composite.wgsl`)
+      this.compositeShaderCode ? Promise.resolve(this.compositeShaderCode) : this.tryFetch(`${this.baseUrl}/shaders/${compositeFile}`)
     ]);
 
     this.thresholdShaderCode = t;
@@ -75,28 +119,13 @@ export class BloomPostProcessor {
     // Create textures
     const width = this.canvas.width;
     const height = this.canvas.height;
+    const blurSize = { width: Math.floor(width / 2), height: Math.floor(height / 2) };
 
     this.sceneTexture = this.device.createTexture({
       size: { width, height },
       format: 'rgba16float',
       usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
     });
-
-    const blurSize = { width: Math.floor(width / 2), height: Math.floor(height / 2) };
-
-    this.thresholdTexture = this.device.createTexture({
-      size: blurSize,
-      format: 'rgba16float',
-      usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
-    });
-
-    for (let i = 0; i < 2; i++) {
-      this.blurTextures.push(this.device.createTexture({
-        size: blurSize,
-        format: 'rgba16float',
-        usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
-      }));
-    }
 
     this.linearSampler = this.device.createSampler({
       magFilter: 'linear',
@@ -105,14 +134,60 @@ export class BloomPostProcessor {
       addressModeV: 'clamp-to-edge',
     });
 
-    // Buffers (uniform buffers must be multiples of 16 bytes)
-    this.thresholdBuffer = this.device.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     this.blurBuffer = this.device.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
-    this.compositeBuffer = this.device.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
 
-    // Default values
-    this.device.queue.writeBuffer(this.thresholdBuffer, 0, new Float32Array([0.8, 0.2, 0.0, 0.0]));
-    this.device.queue.writeBuffer(this.compositeBuffer, 0, new Float32Array([1.2, 1.0, 0.0, 0.0]));
+    if (useLayered) {
+      this.compositeBuffer = this.device.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+
+      for (let i = 0; i < this.layers!.length; i++) {
+        const thresholdTex = this.device.createTexture({
+          size: blurSize,
+          format: 'rgba16float',
+          usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
+        });
+        const blurTex0 = this.device.createTexture({
+          size: blurSize,
+          format: 'rgba16float',
+          usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
+        });
+        const blurTex1 = this.device.createTexture({
+          size: blurSize,
+          format: 'rgba16float',
+          usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
+        });
+        const thresholdBuf = this.device.createBuffer({ size: 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+
+        this.layerResources.push({
+          thresholdTexture: thresholdTex,
+          blurTextures: [blurTex0, blurTex1] as [GPUTexture, GPUTexture],
+          thresholdBuffer: thresholdBuf,
+          thresholdBindGroup: null as unknown as GPUBindGroup,
+          hBlurBindGroup: null as unknown as GPUBindGroup,
+          vBlurBindGroup: null as unknown as GPUBindGroup,
+        });
+      }
+    } else {
+      this.thresholdTexture = this.device.createTexture({
+        size: blurSize,
+        format: 'rgba16float',
+        usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
+      });
+
+      for (let i = 0; i < 2; i++) {
+        this.blurTextures.push(this.device.createTexture({
+          size: blurSize,
+          format: 'rgba16float',
+          usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
+        }));
+      }
+
+      this.thresholdBuffer = this.device.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+      this.compositeBuffer = this.device.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+
+      // Default values
+      this.device.queue.writeBuffer(this.thresholdBuffer, 0, new Float32Array([0.8, 0.2, 0.0, 0.0]));
+      this.device.queue.writeBuffer(this.compositeBuffer, 0, new Float32Array([1.2, 1.0, 0.0, 0.0]));
+    }
 
     await this.createPipelines();
     this.createBindGroups();
@@ -167,51 +242,107 @@ export class BloomPostProcessor {
   }
 
   private createBindGroups() {
-    // Threshold bind group
-    this.thresholdBindGroup = this.device.createBindGroup({
-      layout: this.thresholdPipeline.getBindGroupLayout(0),
-      entries: [
-        { binding: 0, resource: this.sceneTexture.createView() },
-        { binding: 1, resource: this.linearSampler },
-        { binding: 2, resource: { buffer: this.thresholdBuffer } },
-      ],
-    });
+    if (this.layers) {
+      // Layered bind groups
+      const thresholdLayout = this.thresholdPipeline.getBindGroupLayout(0);
+      const blurLayout = this.blurPipeline.getBindGroupLayout(0);
+      const compositeLayout = this.compositePipeline.getBindGroupLayout(0);
 
-    // Horizontal blur bind group
-    const blurLayout = this.blurPipeline.getBindGroupLayout(0);
-    this.hBlurBindGroup = this.device.createBindGroup({
-      layout: blurLayout,
-      entries: [
-        { binding: 0, resource: this.thresholdTexture.createView() },
-        { binding: 1, resource: this.linearSampler },
-        { binding: 2, resource: { buffer: this.blurBuffer } },
-      ],
-    });
+      for (const layer of this.layerResources) {
+        layer.thresholdBindGroup = this.device.createBindGroup({
+          layout: thresholdLayout,
+          entries: [
+            { binding: 0, resource: this.sceneTexture.createView() },
+            { binding: 1, resource: this.linearSampler },
+            { binding: 2, resource: { buffer: layer.thresholdBuffer } },
+          ],
+        });
 
-    // Vertical blur bind group
-    this.vBlurBindGroup = this.device.createBindGroup({
-      layout: blurLayout,
-      entries: [
-        { binding: 0, resource: (this.blurTextures[0] ?? this.sceneTexture).createView() },
-        { binding: 1, resource: this.linearSampler },
-        { binding: 2, resource: { buffer: this.blurBuffer } },
-      ],
-    });
+        layer.hBlurBindGroup = this.device.createBindGroup({
+          layout: blurLayout,
+          entries: [
+            { binding: 0, resource: layer.thresholdTexture.createView() },
+            { binding: 1, resource: this.linearSampler },
+            { binding: 2, resource: { buffer: this.blurBuffer } },
+          ],
+        });
 
-    // Composite bind group
-    this.compositeBindGroup = this.device.createBindGroup({
-      layout: this.compositePipeline.getBindGroupLayout(0),
-      entries: [
-        { binding: 0, resource: this.sceneTexture.createView() },
-        { binding: 1, resource: this.linearSampler },
-        { binding: 2, resource: (this.blurTextures[1] ?? this.sceneTexture).createView() },
-        { binding: 3, resource: this.linearSampler },
-        { binding: 4, resource: { buffer: this.compositeBuffer } },
-      ],
-    });
+        layer.vBlurBindGroup = this.device.createBindGroup({
+          layout: blurLayout,
+          entries: [
+            { binding: 0, resource: layer.blurTextures[0].createView() },
+            { binding: 1, resource: this.linearSampler },
+            { binding: 2, resource: { buffer: this.blurBuffer } },
+          ],
+        });
+      }
+
+      this.layeredCompositeBindGroup = this.device.createBindGroup({
+        layout: compositeLayout,
+        entries: [
+          { binding: 0, resource: this.sceneTexture.createView() },
+          { binding: 1, resource: this.linearSampler },
+          { binding: 2, resource: this.layerResources[0]!.blurTextures[1].createView() },
+          { binding: 3, resource: this.layerResources[1]!.blurTextures[1].createView() },
+          { binding: 4, resource: this.layerResources[2]!.blurTextures[1].createView() },
+          { binding: 5, resource: { buffer: this.compositeBuffer } },
+        ],
+      });
+    } else {
+      // Legacy bind groups
+      this.thresholdBindGroup = this.device.createBindGroup({
+        layout: this.thresholdPipeline.getBindGroupLayout(0),
+        entries: [
+          { binding: 0, resource: this.sceneTexture.createView() },
+          { binding: 1, resource: this.linearSampler },
+          { binding: 2, resource: { buffer: this.thresholdBuffer } },
+        ],
+      });
+
+      // Horizontal blur bind group
+      const blurLayout = this.blurPipeline.getBindGroupLayout(0);
+      this.hBlurBindGroup = this.device.createBindGroup({
+        layout: blurLayout,
+        entries: [
+          { binding: 0, resource: this.thresholdTexture.createView() },
+          { binding: 1, resource: this.linearSampler },
+          { binding: 2, resource: { buffer: this.blurBuffer } },
+        ],
+      });
+
+      // Vertical blur bind group
+      this.vBlurBindGroup = this.device.createBindGroup({
+        layout: blurLayout,
+        entries: [
+          { binding: 0, resource: (this.blurTextures[0] ?? this.sceneTexture).createView() },
+          { binding: 1, resource: this.linearSampler },
+          { binding: 2, resource: { buffer: this.blurBuffer } },
+        ],
+      });
+
+      // Composite bind group
+      this.compositeBindGroup = this.device.createBindGroup({
+        layout: this.compositePipeline.getBindGroupLayout(0),
+        entries: [
+          { binding: 0, resource: this.sceneTexture.createView() },
+          { binding: 1, resource: this.linearSampler },
+          { binding: 2, resource: (this.blurTextures[1] ?? this.sceneTexture).createView() },
+          { binding: 3, resource: this.linearSampler },
+          { binding: 4, resource: { buffer: this.compositeBuffer } },
+        ],
+      });
+    }
   }
 
   public render(commandEncoder: GPUCommandEncoder, renderScene: (pass: GPURenderPassEncoder) => void) {
+    if (this.layers) {
+      this.renderLayered(commandEncoder, renderScene);
+    } else {
+      this.renderLegacy(commandEncoder, renderScene);
+    }
+  }
+
+  private renderLegacy(commandEncoder: GPUCommandEncoder, renderScene: (pass: GPURenderPassEncoder) => void) {
     // PASS 1: Scene -> HDR scene texture
     const scenePass = commandEncoder.beginRenderPass({
       colorAttachments: [{
@@ -244,7 +375,6 @@ export class BloomPostProcessor {
     const blurSize = { width: blurTex0.width, height: blurTex0.height };
     this.device.queue.writeBuffer(this.blurBuffer, 0, new Float32Array([1, 0, blurSize.width, blurSize.height]));
 
-
     const hBlurPass = commandEncoder.beginRenderPass({
       colorAttachments: [{
         view: (this.blurTextures[0] ?? this.sceneTexture).createView(),
@@ -261,7 +391,6 @@ export class BloomPostProcessor {
     // PASS 4: Vertical blur -> blurTextures[1]
     this.device.queue.writeBuffer(this.blurBuffer, 0, new Float32Array([0, 1, blurSize.width, blurSize.height]));
 
-
     const vBlurPass = commandEncoder.beginRenderPass({
       colorAttachments: [{
         view: (this.blurTextures[1] ?? this.sceneTexture).createView(),
@@ -276,7 +405,6 @@ export class BloomPostProcessor {
     vBlurPass.end();
 
     // PASS 5: Composite -> swapchain
-
     const compositePass = commandEncoder.beginRenderPass({
       colorAttachments: [{
         view: this.context.getCurrentTexture().createView(),
@@ -291,15 +419,164 @@ export class BloomPostProcessor {
     compositePass.end();
   }
 
+  private renderLayered(commandEncoder: GPUCommandEncoder, renderScene: (pass: GPURenderPassEncoder) => void) {
+    // PASS 1: Scene -> HDR scene texture
+    const scenePass = commandEncoder.beginRenderPass({
+      colorAttachments: [{
+        view: this.sceneTexture.createView(),
+        clearValue: { r: 0, g: 0, b: 0, a: 1 },
+        loadOp: 'clear',
+        storeOp: 'store',
+      }],
+    });
+    renderScene(scenePass);
+    scenePass.end();
+
+    // Per-layer threshold + blur passes
+    const blurSize = {
+      width: this.layerResources[0]!.blurTextures[0].width,
+      height: this.layerResources[0]!.blurTextures[0].height,
+    };
+
+    let layerIndex = 0;
+    for (const layer of this.layerResources) {
+      const config = this.layers![layerIndex]!;
+
+      // Write threshold uniform (32 bytes: threshold, knee, tintR, tintG, tintB, pad x3)
+      this.device.queue.writeBuffer(
+        layer.thresholdBuffer, 0,
+        new Float32Array([
+          config.threshold,
+          0.2, // knee
+          config.tint[0],
+          config.tint[1],
+          config.tint[2],
+          0.0,
+          0.0,
+          0.0,
+        ])
+      );
+
+      // Threshold pass: sceneTexture -> layer.thresholdTexture
+      const thresholdPass = commandEncoder.beginRenderPass({
+        colorAttachments: [{
+          view: layer.thresholdTexture.createView(),
+          clearValue: { r: 0, g: 0, b: 0, a: 1 },
+          loadOp: 'clear',
+          storeOp: 'store',
+        }],
+      });
+      thresholdPass.setPipeline(this.thresholdPipeline);
+      thresholdPass.setBindGroup(0, layer.thresholdBindGroup);
+      thresholdPass.draw(6);
+      thresholdPass.end();
+
+      // H-blur: layer.thresholdTexture -> layer.blurTextures[0]
+      this.device.queue.writeBuffer(
+        this.blurBuffer, 0,
+        new Float32Array([config.blurRadius, 0, blurSize.width, blurSize.height])
+      );
+
+      const hBlurPass = commandEncoder.beginRenderPass({
+        colorAttachments: [{
+          view: layer.blurTextures[0].createView(),
+          clearValue: { r: 0, g: 0, b: 0, a: 1 },
+          loadOp: 'clear',
+          storeOp: 'store',
+        }],
+      });
+      hBlurPass.setPipeline(this.blurPipeline);
+      hBlurPass.setBindGroup(0, layer.hBlurBindGroup);
+      hBlurPass.draw(6);
+      hBlurPass.end();
+
+      // V-blur: layer.blurTextures[0] -> layer.blurTextures[1]
+      this.device.queue.writeBuffer(
+        this.blurBuffer, 0,
+        new Float32Array([0, config.blurRadius, blurSize.width, blurSize.height])
+      );
+
+      const vBlurPass = commandEncoder.beginRenderPass({
+        colorAttachments: [{
+          view: layer.blurTextures[1].createView(),
+          clearValue: { r: 0, g: 0, b: 0, a: 1 },
+          loadOp: 'clear',
+          storeOp: 'store',
+        }],
+      });
+      vBlurPass.setPipeline(this.blurPipeline);
+      vBlurPass.setBindGroup(0, layer.vBlurBindGroup);
+      vBlurPass.draw(6);
+      vBlurPass.end();
+
+      layerIndex++;
+    }
+
+    // Composite pass: scene + all blurred layers -> swapchain
+    this.device.queue.writeBuffer(
+      this.compositeBuffer, 0,
+      new Float32Array([
+        1.0, // sceneIntensity
+        this.layers![0]!.weight,
+        this.layers![1]!.weight,
+        this.layers![2]!.weight,
+      ])
+    );
+
+    const compositePass = commandEncoder.beginRenderPass({
+      colorAttachments: [{
+        view: this.context.getCurrentTexture().createView(),
+        clearValue: { r: 0, g: 0, b: 0, a: 1 },
+        loadOp: 'clear',
+        storeOp: 'store',
+      }],
+    });
+    compositePass.setPipeline(this.compositePipeline);
+    compositePass.setBindGroup(0, this.layeredCompositeBindGroup);
+    compositePass.draw(6);
+    compositePass.end();
+  }
+
   public updateUniforms(bloomIntensity: number, threshold: number = 0.8, knee: number = 0.2, sceneIntensity: number = 1.0) {
-    // compositeBuffer: [bloomIntensity, sceneIntensity]
-    this.device.queue.writeBuffer(this.compositeBuffer, 0, new Float32Array([bloomIntensity, sceneIntensity, 0.0, 0.0]));
-    // thresholdBuffer: [threshold, knee]
-    this.device.queue.writeBuffer(this.thresholdBuffer, 0, new Float32Array([threshold, knee, 0.0, 0.0]));
+    if (!this.layers) {
+      // compositeBuffer: [bloomIntensity, sceneIntensity]
+      this.device.queue.writeBuffer(this.compositeBuffer, 0, new Float32Array([bloomIntensity, sceneIntensity, 0.0, 0.0]));
+      // thresholdBuffer: [threshold, knee]
+      this.device.queue.writeBuffer(this.thresholdBuffer, 0, new Float32Array([threshold, knee, 0.0, 0.0]));
+    } else {
+      // Layered mode: update sceneIntensity and keep per-layer weights
+      this.device.queue.writeBuffer(
+        this.compositeBuffer, 0,
+        new Float32Array([
+          sceneIntensity,
+          this.layers![0]!.weight,
+          this.layers![1]!.weight,
+          this.layers![2]!.weight,
+        ])
+      );
+    }
   }
 
   // Apply a bloom preset with all parameters
   public applyPreset(preset: { intensity: number; threshold: number; knee: number }, sceneIntensity: number = 1.0) {
     this.updateUniforms(preset.intensity, preset.threshold, preset.knee, sceneIntensity);
+  }
+
+  public destroy() {
+    this.sceneTexture?.destroy();
+    this.thresholdTexture?.destroy();
+    this.blurTextures.forEach(t => t.destroy());
+    this.blurTextures = [];
+
+    this.thresholdBuffer?.destroy();
+    this.blurBuffer?.destroy();
+    this.compositeBuffer?.destroy();
+
+    for (const layer of this.layerResources) {
+      layer.thresholdTexture?.destroy();
+      layer.blurTextures.forEach(t => t.destroy());
+      layer.thresholdBuffer?.destroy();
+    }
+    this.layerResources = [];
   }
 }

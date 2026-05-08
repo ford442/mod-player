@@ -24,6 +24,7 @@ import {
   DEFAULT_ROWS,
   DEFAULT_CHANNELS,
 } from '../utils/gpuPacking';
+import type { BloomPostProcessor } from '../utils/bloomPostProcessor';
 import { GRID_RECT } from '../utils/geometryConstants';
 
 // Runtime base URL detection for subdirectory deployment
@@ -89,7 +90,8 @@ export function useWebGPURender(
   matrix: import('../types').PatternMatrix | null,
   padTopChannel: boolean,
   setDebugInfo: React.Dispatch<React.SetStateAction<DebugInfo>>,
-  setWebgpuAvailable: (v: boolean) => void
+  setWebgpuAvailable: (v: boolean) => void,
+  bloomProcessorRef?: React.MutableRefObject<BloomPostProcessor | null>
 ) {
   const [gpuReady, setGpuReady] = useState(false);
 
@@ -574,70 +576,79 @@ export function useWebGPURender(
       }
     }
 
-    const encoder = device.createCommandEncoder();
-    const pass = encoder.beginRenderPass({
-      colorAttachments: [{
-        view: context.getCurrentTexture().createView(),
-        loadOp: 'clear',
-        clearValue: { r: 0, g: 0, b: 0, a: 1 },
-        storeOp: 'store',
-      }],
-    });
-
-    // Background pass (bezel/chassis shader)
-    const needsBackground = !isSinglePassCompositeShader(shaderFile);
-    if (bezelPipelineRef.current && bezelBindGroupRef.current && needsBackground && bezelUniformBufferRef.current) {
-      const bezelData = bezelFloatRef.current;
-      bezelData[0] = p.canvasMetrics.width; bezelData[1] = p.canvasMetrics.height;
-      bezelData[2] = 0;
-      bezelData[3] = 0.92; bezelData[4] = 0.93; bezelData[5] = 0.95;
-      bezelData[6] = 0.88; bezelData[7] = 0.89; bezelData[8] = 0.91;
-      bezelData[9] = 0.015;
-      const isCircShader = isCircularLayoutShader(shaderFile);
-      bezelData[10] = isCircShader ? 0.0 : 1.0;
-      bezelData[11] = isCircShader ? 0.95 : 1.0;
-      bezelData[12] = isCircShader ? 0.32 : 0.0;
-      bezelData[13] = isCircShader ? 0.0 : 0.02;
-      bezelData[14] = p.dimFactor ?? 1.0;
-      bezelData[15] = p.isPlaying ? 1.0 : 0.0;
-      bezelData[16] = 1.0; bezelData[17] = 0.5;
-      bezelData[18] = p.bpm ?? 120.0;
-      const bezelUint = bezelUintRef.current;
-      bezelUint[19] = p.isLooping ? 1 : 0;
-      bezelUint[20] = 0;
-      bezelUint[21] = Math.floor(p.playheadRow);
-      bezelUint[22] = 0;
-      bezelData[20] = GRID_RECT.x; bezelData[21] = GRID_RECT.y;
-      bezelData[22] = GRID_RECT.w; bezelData[23] = GRID_RECT.h;
-      device.queue.writeBuffer(bezelUniformBufferRef.current, 0, bezelBufferDataRef.current, 0, 96);
-      pass.setPipeline(bezelPipelineRef.current);
-      pass.setBindGroup(0, bezelBindGroupRef.current);
-      pass.draw(6, 1, 0, 0);
-    }
-
-    pass.setPipeline(pipeline);
-    pass.setBindGroup(0, bindGroup);
+    // Pre-calculate channel/instance counts for debug info
     const numRows = p.matrix?.numRows ?? DEFAULT_ROWS;
     const rawChannels = p.matrix?.numChannels ?? DEFAULT_CHANNELS;
     const numChannels = p.padTopChannel ? rawChannels + 1 : rawChannels;
     let totalInstances = numRows * numChannels;
-
     const isUIShader = shaderFile.includes('v0.45');
     if (isUIShader) totalInstances += 3; // UI_BUTTON_COUNT in shader
 
-    if (totalInstances > 0) {
-      if (isSinglePassCompositeShader(shaderFile)) {
-        if (shaderFile.includes('v0.45')) {
-          pass.draw(6, totalInstances, 0, 0);
+    // Scene render helper — reused by both direct and bloom-wrapped paths
+    const renderScene = (pass: GPURenderPassEncoder) => {
+      // Background pass (bezel/chassis shader)
+      const needsBackground = !isSinglePassCompositeShader(shaderFile);
+      if (bezelPipelineRef.current && bezelBindGroupRef.current && needsBackground && bezelUniformBufferRef.current) {
+        const bezelData = bezelFloatRef.current;
+        bezelData[0] = p.canvasMetrics.width; bezelData[1] = p.canvasMetrics.height;
+        bezelData[2] = 0;
+        bezelData[3] = 0.92; bezelData[4] = 0.93; bezelData[5] = 0.95;
+        bezelData[6] = 0.88; bezelData[7] = 0.89; bezelData[8] = 0.91;
+        bezelData[9] = 0.015;
+        const isCircShader = isCircularLayoutShader(shaderFile);
+        bezelData[10] = isCircShader ? 0.0 : 1.0;
+        bezelData[11] = isCircShader ? 0.95 : 1.0;
+        bezelData[12] = isCircShader ? 0.32 : 0.0;
+        bezelData[13] = isCircShader ? 0.0 : 0.02;
+        bezelData[14] = p.dimFactor ?? 1.0;
+        bezelData[15] = p.isPlaying ? 1.0 : 0.0;
+        bezelData[16] = 1.0; bezelData[17] = 0.5;
+        bezelData[18] = p.bpm ?? 120.0;
+        const bezelUint = bezelUintRef.current;
+        bezelUint[19] = p.isLooping ? 1 : 0;
+        bezelUint[20] = 0;
+        bezelUint[21] = Math.floor(p.playheadRow);
+        bezelUint[22] = 0;
+        bezelData[20] = GRID_RECT.x; bezelData[21] = GRID_RECT.y;
+        bezelData[22] = GRID_RECT.w; bezelData[23] = GRID_RECT.h;
+        device.queue.writeBuffer(bezelUniformBufferRef.current, 0, bezelBufferDataRef.current, 0, 96);
+        pass.setPipeline(bezelPipelineRef.current);
+        pass.setBindGroup(0, bezelBindGroupRef.current);
+        pass.draw(6, 1, 0, 0);
+      }
+
+      pass.setPipeline(pipeline);
+      pass.setBindGroup(0, bindGroup);
+
+      if (totalInstances > 0) {
+        if (isSinglePassCompositeShader(shaderFile)) {
+          if (shaderFile.includes('v0.45')) {
+            pass.draw(6, totalInstances, 0, 0);
+          } else {
+            pass.draw(6, 1, 0, totalInstances);
+            pass.draw(6, totalInstances, 0, 0);
+          }
         } else {
-          pass.draw(6, 1, 0, totalInstances);
           pass.draw(6, totalInstances, 0, 0);
         }
-      } else {
-        pass.draw(6, totalInstances, 0, 0);
       }
+    };
+
+    const encoder = device.createCommandEncoder();
+    if (bloomProcessorRef?.current) {
+      bloomProcessorRef.current.render(encoder, renderScene);
+    } else {
+      const pass = encoder.beginRenderPass({
+        colorAttachments: [{
+          view: context.getCurrentTexture().createView(),
+          loadOp: 'clear',
+          clearValue: { r: 0, g: 0, b: 0, a: 1 },
+          storeOp: 'store',
+        }],
+      });
+      renderScene(pass);
+      pass.end();
     }
-    pass.end();
     device.queue.submit([encoder.finish()]);
 
     // Update debug info - always update regardless of overlay state
