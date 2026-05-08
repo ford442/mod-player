@@ -74,6 +74,7 @@ class OpenMPTProcessor extends AudioWorkletProcessor {
   handleSeek(order, row) {
     this.currentOrder = order;
     this.currentRow = row;
+    this.port.postMessage({ type: 'seekAck' });
   }
 
   process(inputs, outputs, parameters) {
