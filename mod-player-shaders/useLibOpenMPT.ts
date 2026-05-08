@@ -7,6 +7,7 @@ import { ModuleMetadata, PatternMatrix } from '../types';
 import { OpenMPTWorkletEngine } from '../audio-worklet/OpenMPTWorkletEngine';
 import { getPatternMatrix } from './utils/patternExtractor';
 import { processModuleData as processModuleDataFn, startAudioPlayback } from './hooks/useAudioGraph';
+import { getWorkletUrl, getNativeGlueUrl } from '../hooks/useWorkletLoader';
 
 interface SyncDebugInfo {
   mode: string;
@@ -18,18 +19,8 @@ interface SyncDebugInfo {
 
 const DEFAULT_MODULE_URL = './4-mat_madness.mod';
 
-const detectRuntimeBase = (): string => {
-  const viteBase = import.meta.env.BASE_URL;
-  if (viteBase && viteBase !== '/') {
-    return viteBase.endsWith('/') ? viteBase : `${viteBase}/`;
-  }
-  const pathSegments = window.location.pathname.split('/').filter(Boolean);
-  if (pathSegments.length > 0) return `/${pathSegments[0]}/`;
-  return '/';
-};
-
-const RUNTIME_BASE_URL = detectRuntimeBase();
-const WORKLET_URL = `${RUNTIME_BASE_URL}worklets/openmpt-worklet.js`;
+// AUDIO-001 FIX COMPLETE: Use centralized worklet URL construction from useWorkletLoader
+const WORKLET_URL = getWorkletUrl();
 console.log('[AudioWorklet] Worklet URL resolved:', WORKLET_URL);
 
 const MAX_DRIFT_SECONDS = 0.1;
@@ -506,7 +497,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
         }
 
         try {
-          const nativeGlueUrl = `${RUNTIME_BASE_URL}worklets/openmpt-native.js`;
+          const nativeGlueUrl = getNativeGlueUrl();
           const probeResp = await fetch(nativeGlueUrl, { method: 'HEAD' });
           if (probeResp.ok) {
             const engine = new OpenMPTWorkletEngine();
