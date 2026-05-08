@@ -350,6 +350,7 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
         row, 
         positionSeconds: posSec, 
         bpm,
+        workletTime: currentTime,
         bufferHealth: this.ringBuffer.health,
         starvationCount: this.starvationCount
       });

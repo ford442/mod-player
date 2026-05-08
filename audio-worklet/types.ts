@@ -31,6 +31,7 @@ export interface WorkletPatternData {
 
 export interface WorkletPositionData {
     positionMs: number;
+  workletTime?: number;
     currentRow: number;
     currentPattern: number;
     currentOrder: number;

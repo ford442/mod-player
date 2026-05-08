@@ -22,6 +22,7 @@ export interface AudioGraphRefs {
   workletOrderRef:     React.MutableRefObject<number>;
   workletRowRef:       React.MutableRefObject<number>;
   workletTimeRef:      React.MutableRefObject<number>;
+  workletTimestampRef: React.MutableRefObject<number>;
   lastWorkletUpdateRef: React.MutableRefObject<number>;
   workletBpmRef:       React.MutableRefObject<number>;
   pendingSeekRef:      React.MutableRefObject<{ order: number; row: number; timestamp: number } | null>;
@@ -176,6 +177,7 @@ export async function startAudioPlayback(
           refs.workletOrderRef.current = data.currentOrder;
           refs.workletRowRef.current = data.currentRow;
           refs.workletTimeRef.current = data.positionMs / 1000;
+          refs.workletTimestampRef.current = data.workletTime || now;
           refs.lastWorkletUpdateRef.current = now;
 
           // TIMING FIX: Update BPM ref from worklet
@@ -370,6 +372,7 @@ export async function startAudioPlayback(
             refs.workletOrderRef.current = order;
             refs.workletRowRef.current = row;
             refs.workletTimeRef.current = positionSeconds;
+            refs.workletTimestampRef.current = e.data.workletTime || now;
             // TIMING FIX: Use audio context time for consistency
             refs.lastWorkletUpdateRef.current = now;
 
@@ -463,6 +466,7 @@ export async function startAudioPlayback(
                   refs.workletOrderRef.current = mLib._openmpt_module_get_current_order(mPtr);
                   refs.workletRowRef.current   = mLib._openmpt_module_get_current_row(mPtr);
                   refs.workletTimeRef.current  = mLib._openmpt_module_get_position_seconds(mPtr);
+                  refs.workletTimestampRef.current = ctx.currentTime;
                   refs.lastWorkletUpdateRef.current = ctx.currentTime;
                 };
 
