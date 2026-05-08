@@ -233,14 +233,20 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
           const actualTrackerTime = workletTimeRef.current + elapsed;
           const drift = actualTrackerTime - expectedTime;
           driftAccumulatorRef.current = driftAccumulatorRef.current * 0.9 + drift * 0.1;
+
           if (Math.abs(driftAccumulatorRef.current) > MAX_DRIFT_SECONDS) {
+            // Major desync -> hard snap to hardware clock
             time = expectedTime;
             audioClockStartRef.current = now;
             workletTimeAtStartRef.current = workletTimeRef.current;
             driftAccumulatorRef.current = 0;
             lastCorrectedTimeRef.current = now;
+
+            console.log('[Drift] Major correction applied', { drift: driftAccumulatorRef.current });
           } else {
+            // Normal smooth correction
             time = actualTrackerTime - driftAccumulatorRef.current;
+            lastCorrectedTimeRef.current = now;   // important for lastUpdateTimestamp
           }
         }
       }

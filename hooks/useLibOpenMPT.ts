@@ -300,34 +300,31 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
           const rowsPerSecond = currentBpm / 60 / 4;
           rowFraction = Math.min(1, elapsedSinceWorkletUpdate * rowsPerSecond);
 
-          // TIMING FIX: Apply drift correction
-          // 'now' is audioCtx.currentTime (the hardware master clock)
+          // TIMING FIX COMPLETE: Apply drift correction
+          // 'now' is audioCtx.currentTime (hardware master clock)
           const elapsedHardwareTime = now - audioClockStartRef.current;
           const expectedTime = workletTimeAtStartRef.current + elapsedHardwareTime;
 
-          // The tracker's actual time (last known worklet time + extrapolated UI frame time)
+          // Tracker's reported time (last worklet update + time since that update)
           const actualTrackerTime = workletTimeRef.current + elapsedSinceWorkletUpdate;
 
-          // True clock drift: positive means tracker is ahead, negative means tracker is lagging
+          // True drift
           const drift = actualTrackerTime - expectedTime;
-
-          // Accumulate the true drift (low-pass filter to smooth out micro-jitters)
           driftAccumulatorRef.current = driftAccumulatorRef.current * 0.9 + drift * 0.1;
 
-          // Apply correction
           if (Math.abs(driftAccumulatorRef.current) > MAX_DRIFT_SECONDS) {
-            // A major desync occurred (tab backgrounded, CPU spike, etc.).
-            // Snap the UI to exactly where the hardware audio clock is.
+            // Major desync -> hard snap to hardware clock
             time = expectedTime;
-
-            // Optionally reset the baselines here to prevent perpetual snapping
             audioClockStartRef.current = now;
             workletTimeAtStartRef.current = workletTimeRef.current;
             driftAccumulatorRef.current = 0;
             lastCorrectedTimeRef.current = now;
+
+            console.log('[Drift] Major correction applied', { drift: driftAccumulatorRef.current });
           } else {
-            // Normal operation: Smoothly subtract the drift so the UI aligns with the audio
+            // Normal smooth correction
             time = actualTrackerTime - driftAccumulatorRef.current;
+            lastCorrectedTimeRef.current = now;   // important for lastUpdateTimestamp
           }
         } else {
           // Worklet hasn't updated recently - use last known values
