@@ -6,7 +6,7 @@ def verify_xasm1_ui():
         page = browser.new_page()
 
         # Navigate to local server
-        page.goto("http://localhost:5173")
+        page.goto("http://localhost:4173")
 
         # Log content if timeout
         try:
