@@ -38,8 +38,6 @@ export interface AudioGraphRefs {
   audioClockStartRef:  React.MutableRefObject<number>;
   workletTimeAtStartRef: React.MutableRefObject<number>;
   driftAccumulatorRef: React.MutableRefObject<number>;
-  workletBufferHealthRef: React.MutableRefObject<number>;
-  workletStarvationCountRef: React.MutableRefObject<number>;
   updateUIRef:         React.MutableRefObject<(() => void) | null>;
 }
 
@@ -372,7 +370,7 @@ export async function startAudioPlayback(
         console.log('[PLAY] AudioWorkletNode created:', node);
 
         node.port.onmessage = (e) => {
-          const { type, order, row, positionSeconds, message, bpm , bufferHealth, starvationCount } = e.data;
+          const { type, order, row, positionSeconds, message, bpm } = e.data;
 
           if (type === 'position') {
             const now = ctx.currentTime;
@@ -386,13 +384,6 @@ export async function startAudioPlayback(
             if (bpm && bpm > 0) {
               refs.workletBpmRef.current = bpm;
               callbacks.setModuleInfo((prev: ModuleInfo) => ({ ...prev, bpm }));
-            }
-
-            if (bufferHealth !== undefined) {
-              refs.workletBufferHealthRef.current = bufferHealth;
-            }
-            if (starvationCount !== undefined) {
-              refs.workletStarvationCountRef.current = starvationCount;
             }
 
             // TIMING FIX: Check for seek acknowledgment
@@ -503,11 +494,6 @@ export async function startAudioPlayback(
             // TIMING FIX: Worklet acknowledged seek
             refs.seekAcknowledgedRef.current = true;
             refs.pendingSeekRef.current = null;
-            console.log('[seekAck] Received from worklet', {
-              order: e.data.order,
-              row: e.data.row,
-              timestamp: e.data.timestamp
-            });
           }
         };
 

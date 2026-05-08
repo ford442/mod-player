@@ -57,7 +57,7 @@ export function getBackgroundShaderForPattern(shaderFile: string): string | null
   if (shaderFile.includes('v0.37') || 
       shaderFile.includes('v0.38') || 
       shaderFile.includes('v0.39')) {
-    return 'chassis_dark.wgsl';
+    return 'chassisv0.37.wgsl';
   }
   
   // Very legacy layouts
@@ -114,11 +114,6 @@ export const SHADER_CATEGORIES = {
     'patternv0.49.wgsl',
     'patternv0.48.wgsl',
     'patternv0.47.wgsl',
-  ],
-  
-  // Unified bloom shader (replaces v0.30-v0.35 bloom variants)
-  BLOOM: [
-    'pattern_bloom.wgsl',
   ],
   
   // Legacy circular

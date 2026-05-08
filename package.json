@@ -4,11 +4,10 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "npm run build:shaders && vite",
-    "build:shaders": "node scripts/build-shaders.mjs",
+    "dev": "vite",
     "build:worklet": "bash ./build-wasm.sh",
     "build:emcc": "bash scripts/build-wasm.sh",
-    "build": "npm run build:shaders && tsc && node --max-old-space-size=4096 node_modules/.bin/vite build",
+    "build": "tsc && node --max-old-space-size=4096 node_modules/.bin/vite build",
     "preview": "vite preview",
     "lint": "exit 0",
     "typecheck": "tsc --noEmit"

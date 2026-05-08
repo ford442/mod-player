@@ -38,16 +38,6 @@ export interface UseWorkletLoaderOptions {
  * Get the worklet URL with proper base path handling for Vite deployments.
  * Uses Vite's BASE_URL and handles subdirectory deployments correctly.
  */
-/**
- * Get the native glue URL with the same robust base-path handling.
- * Used for openmpt-native.js (the C++ AudioWorklet + Wasm glue).
- */
-export const getNativeGlueUrl = (): string => {
-  const viteBase = import.meta.env.BASE_URL || '/';
-  const base = viteBase.endsWith('/') ? viteBase : `${viteBase}/`;
-  return `${base}worklets/openmpt-native.js`;
-};
-
 export const getWorkletUrl = (): string => {
   // Try multiple strategies for URL construction, ordered by reliability
   
@@ -265,7 +255,6 @@ export function useWorkletLoader(options: UseWorkletLoaderOptions = {}) {
     getDiagnostics,
     getWorkletUrl,
     getAbsoluteWorkletUrl,
-    getNativeGlueUrl,
     isAudioWorkletSupported,
     lastError,
     isLoading,
