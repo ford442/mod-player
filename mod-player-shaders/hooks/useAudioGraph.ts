@@ -301,7 +301,7 @@ export async function startAudioPlayback(refs, callbacks, config) {
     }
 
     audioClockStartRef.current = ctx.currentTime;
-    workletTimeAtStartRef.current = 0;
+    workletTimeAtStartRef.current = workletTimeRef.current || 0;
     driftAccumulatorRef.current = 0;
 
     // Setup audio nodes

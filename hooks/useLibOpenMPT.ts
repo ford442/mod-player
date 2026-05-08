@@ -299,17 +299,33 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
           rowFraction = Math.min(1, elapsedSinceWorkletUpdate * rowsPerSecond);
 
           // TIMING FIX: Apply drift correction
-          const expectedTime = workletTimeRef.current + elapsedSinceWorkletUpdate;
-          const drift = time - expectedTime;
+          // 'now' is audioCtx.currentTime (the hardware master clock)
+          const elapsedHardwareTime = now - audioClockStartRef.current;
+          const expectedTime = workletTimeAtStartRef.current + elapsedHardwareTime;
+
+          // The tracker's actual time (last known worklet time + extrapolated UI frame time)
+          const actualTrackerTime = workletTimeRef.current + elapsedSinceWorkletUpdate;
+
+          // True clock drift: positive means tracker is ahead, negative means tracker is lagging
+          const drift = actualTrackerTime - expectedTime;
+
+          // Accumulate the true drift (low-pass filter to smooth out micro-jitters)
           driftAccumulatorRef.current = driftAccumulatorRef.current * 0.9 + drift * 0.1;
 
-          // Update sync debug info
+          // Apply correction
           if (Math.abs(driftAccumulatorRef.current) > MAX_DRIFT_SECONDS) {
-            // Apply correction
-            time = expectedTime + driftAccumulatorRef.current * 0.5;
+            // A major desync occurred (tab backgrounded, CPU spike, etc.).
+            // Snap the UI to exactly where the hardware audio clock is.
+            time = expectedTime;
+
+            // Optionally reset the baselines here to prevent perpetual snapping
+            audioClockStartRef.current = now;
+            workletTimeAtStartRef.current = workletTimeRef.current;
+            driftAccumulatorRef.current = 0;
             lastCorrectedTimeRef.current = now;
           } else {
-            time = expectedTime;
+            // Normal operation: Smoothly subtract the drift so the UI aligns with the audio
+            time = actualTrackerTime - driftAccumulatorRef.current;
           }
         } else {
           // Worklet hasn't updated recently - use last known values
@@ -531,6 +547,10 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
     // TIMING FIX: Reset drift accumulator on seek
     driftAccumulatorRef.current = 0;
     lastWorkletUpdateRef.current = audioCtx ? audioCtx.currentTime : 0;
+
+    // TIMING FIX: Reset baselines on seek to prevent massive drift calculation
+    audioClockStartRef.current = audioCtx ? audioCtx.currentTime : 0;
+    workletTimeAtStartRef.current = workletTimeRef.current;
 
     // Worklet update with acknowledgment tracking
     if (activeEngine === 'native-worklet' && nativeEngineRef.current) {
