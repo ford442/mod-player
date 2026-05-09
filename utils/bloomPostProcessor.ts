@@ -562,6 +562,71 @@ export class BloomPostProcessor {
     this.updateUniforms(preset.intensity, preset.threshold, preset.knee, sceneIntensity);
   }
 
+  public resize(width: number, height: number) {
+    if (!this.sceneTexture) return;
+
+    const blurSize = { width: Math.floor(width / 2), height: Math.floor(height / 2) };
+
+    // Destroy old textures
+    this.sceneTexture.destroy();
+    this.thresholdTexture?.destroy();
+    this.blurTextures.forEach(t => t.destroy());
+    this.blurTextures = [];
+    for (const layer of this.layerResources) {
+      layer.thresholdTexture.destroy();
+      layer.blurTextures[0]?.destroy();
+      layer.blurTextures[1]?.destroy();
+    }
+
+    // Recreate scene texture
+    this.sceneTexture = this.device.createTexture({
+      size: { width, height },
+      format: 'rgba16float',
+      usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
+    });
+
+    if (this.layers) {
+      // Recreate layered textures
+      for (let i = 0; i < this.layerResources.length; i++) {
+        const layer = this.layerResources[i]!;
+        const thresholdTex = this.device.createTexture({
+          size: blurSize,
+          format: 'rgba16float',
+          usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
+        });
+        const blurTex0 = this.device.createTexture({
+          size: blurSize,
+          format: 'rgba16float',
+          usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
+        });
+        const blurTex1 = this.device.createTexture({
+          size: blurSize,
+          format: 'rgba16float',
+          usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
+        });
+        layer.thresholdTexture = thresholdTex;
+        layer.blurTextures = [blurTex0, blurTex1] as [GPUTexture, GPUTexture];
+      }
+    } else {
+      // Recreate legacy textures
+      this.thresholdTexture = this.device.createTexture({
+        size: blurSize,
+        format: 'rgba16float',
+        usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
+      });
+      for (let i = 0; i < 2; i++) {
+        this.blurTextures.push(this.device.createTexture({
+          size: blurSize,
+          format: 'rgba16float',
+          usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
+        }));
+      }
+    }
+
+    // Recreate bind groups with new texture views
+    this.createBindGroups();
+  }
+
   public destroy() {
     this.sceneTexture?.destroy();
     this.thresholdTexture?.destroy();

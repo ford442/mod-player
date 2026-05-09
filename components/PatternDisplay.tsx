@@ -190,6 +190,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
           console.error('❌ WebGPU context reconfiguration failed:', e);
         }
       }
+      bloomRef.current?.resize(canvas.width, canvas.height);
       resizeTimeoutRef.current = null;
     }, 100);
   }, [syncCanvasSize]);
@@ -275,6 +276,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
 
     const bloom = new BloomPostProcessor(device, canvas, context, {
       layers: DEFAULT_LAYERS,
+      finalFormat: navigator.gpu.getPreferredCanvasFormat(),
     });
     bloom.setBaseUrl(import.meta.env.BASE_URL);
     bloom.init().then(() => {

@@ -304,6 +304,13 @@ export function useWebGPURender(
 
         deviceRef.current = device; contextRef.current = context; uniformBufferRef.current = uniformBuffer;
 
+        device.lost.then((info) => {
+          if (!cancelled) {
+            console.error('WebGPU device lost:', info);
+            setGpuReady(false);
+          }
+        });
+
         const p = renderParamsRef.current;
         const isHighPrec = shaderFile.includes('v0.36') || shaderFile.includes('v0.37') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.47') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49') || shaderFile.includes('v0.50') || shaderFile.includes('v0.51');
         const packFunc = isHighPrec ? packPatternMatrixHighPrecision : packPatternMatrix;
@@ -381,7 +388,7 @@ export function useWebGPURender(
     const numRows = matrix?.numRows ?? DEFAULT_ROWS;
     // DEBUG: cells buffer update
     if (cellsBufferRef.current) cellsBufferRef.current.destroy();
-    const isHighPrec = shaderFile.includes('v0.36') || shaderFile.includes('v0.37') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.47') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49') || shaderFile.includes('v0.50');
+    const isHighPrec = shaderFile.includes('v0.36') || shaderFile.includes('v0.37') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.47') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49') || shaderFile.includes('v0.50') || shaderFile.includes('v0.51');
     const packFunc = isHighPrec ? packPatternMatrixHighPrecision : packPatternMatrix;
     const { packedData } = packFunc(p.matrix, p.padTopChannel);
     // DEBUG: packed data stats
@@ -530,34 +537,6 @@ export function useWebGPURender(
       device.queue.writeBuffer(uniformBufferRef.current, 0, uniformBufferDataRef.current, 0, uniformByteLength);
     }
 
-    if (bezelUniformBufferRef.current) {
-      const buf = bezelFloatRef.current;
-      const actualCanvasW = canvas.width;
-      const actualCanvasH = canvas.height;
-      buf[0] = actualCanvasW; buf[1] = actualCanvasH;
-      const minDim = Math.min(actualCanvasW, actualCanvasH);
-      const circularLayout = isCircularLayoutShader(shaderFile);
-      buf[2] = minDim * (circularLayout ? 0.05 : 0.07);
-      buf[3] = 0.98; buf[4] = 0.98; buf[5] = 0.98;
-      buf[6] = 0.92; buf[7] = 0.92; buf[8] = 0.93;
-      buf[9] = 0.02;
-      if (shaderFile.includes('v0.35')) { buf[10] = 0.0; buf[11] = 0.95; buf[12] = 0.32; }
-      else { buf[10] = circularLayout ? 0.0 : 1.0; buf[11] = circularLayout ? 1.0 : 1.25; buf[12] = circularLayout ? 1.0 : 0.0; }
-      buf[13] = 0.10;
-      buf[14] = p.dimFactor;
-      buf[15] = p.isPlaying ? 1.0 : 0.0;
-      buf[16] = p.volume;
-      buf[17] = p.pan;
-      buf[18] = p.bpm;
-      const uint32View = bezelUintRef.current;
-      uint32View[19] = p.isLooping ? 1 : 0;
-      uint32View[20] = 0;
-      const livePlayheadRow = p.playbackStateRef?.current?.playheadRow ?? p.playheadRow;
-      buf[21] = livePlayheadRow;
-      uint32View[22] = p.clickedButton;
-      device.queue.writeBuffer(bezelUniformBufferRef.current, 0, bezelBufferDataRef.current, 0, 96);
-    }
-
     // Handle video texture source
     const isVideoShader = shaderFile.includes('v0.20') || shaderFile.includes('v0.23') || shaderFile.includes('v0.24') || shaderFile.includes('v0.25');
     const source = p.externalVideoSource;
@@ -590,9 +569,18 @@ export function useWebGPURender(
       // Background pass (bezel/chassis shader)
       const needsBackground = !isSinglePassCompositeShader(shaderFile);
       if (bezelPipelineRef.current && bezelBindGroupRef.current && needsBackground && bezelUniformBufferRef.current) {
+        const actualCanvasW = canvas.width;
+        const actualCanvasH = canvas.height;
+        const minDim = Math.min(actualCanvasW, actualCanvasH);
+        const isCircShader = isCircularLayoutShader(shaderFile);
+        const backgroundShader = getBackgroundShaderFile(shaderFile);
+        const needsUIFields = backgroundShader === 'chassis_frosted.wgsl' || backgroundShader === 'chassisv0.37.wgsl';
+
         const bezelData = bezelFloatRef.current;
-        bezelData[0] = p.canvasMetrics.width; bezelData[1] = p.canvasMetrics.height;
-        bezelData[2] = 0;
+        bezelData[0] = actualCanvasW;
+        bezelData[1] = actualCanvasH;
+        bezelData[2] = minDim * (isCircShader ? 0.05 : 0.07);
+
         if (p.chassisDark) {
           bezelData[3] = 0.06; bezelData[4] = 0.06; bezelData[5] = 0.07;
           bezelData[6] = 0.04; bezelData[7] = 0.04; bezelData[8] = 0.05;
@@ -602,22 +590,42 @@ export function useWebGPURender(
           bezelData[6] = 0.88; bezelData[7] = 0.89; bezelData[8] = 0.91;
           bezelData[9] = 0.015;
         }
-        const isCircShader = isCircularLayoutShader(shaderFile);
-        bezelData[10] = isCircShader ? 0.0 : 1.0;
-        bezelData[11] = isCircShader ? 0.95 : 1.0;
-        bezelData[12] = isCircShader ? 0.32 : 0.0;
-        bezelData[13] = isCircShader ? 0.0 : 0.02;
+
+        if (shaderFile.includes('v0.35')) {
+          bezelData[10] = 0.0; bezelData[11] = 0.95; bezelData[12] = 0.32;
+        } else {
+          bezelData[10] = isCircShader ? 0.0 : 1.0;
+          bezelData[11] = isCircShader ? 0.95 : 1.25;
+          bezelData[12] = isCircShader ? 0.32 : 0.0;
+        }
+        bezelData[13] = shaderFile.includes('v0.35') ? 0.10 : (isCircShader ? 0.0 : 0.02);
         bezelData[14] = p.dimFactor ?? 1.0;
         bezelData[15] = p.isPlaying ? 1.0 : 0.0;
-        bezelData[16] = 1.0; bezelData[17] = 0.5;
-        bezelData[18] = p.bpm ?? 120.0;
-        const bezelUint = bezelUintRef.current;
-        bezelUint[19] = p.isLooping ? 1 : 0;
-        bezelUint[20] = 0;
-        bezelUint[21] = Math.floor(p.playheadRow);
-        bezelUint[22] = 0;
-        bezelData[20] = GRID_RECT.x; bezelData[21] = GRID_RECT.y;
-        bezelData[22] = GRID_RECT.w; bezelData[23] = GRID_RECT.h;
+
+        if (needsUIFields) {
+          const livePlayheadRow = p.playbackStateRef?.current?.playheadRow ?? p.playheadRow;
+          bezelData[16] = p.volume;
+          bezelData[17] = p.pan;
+          bezelData[18] = p.bpm ?? 120.0;
+
+          if (backgroundShader === 'chassis_frosted.wgsl') {
+            // chassis_frosted.wgsl uses f32 for all fields
+            bezelData[19] = p.isLooping ? 1.0 : 0.0;
+            bezelData[20] = 0.0; // currentOrder
+            bezelData[21] = livePlayheadRow;
+            bezelData[22] = p.clickedButton;
+            bezelData[23] = 0.0; // _pad2
+          } else {
+            // chassisv0.37.wgsl uses u32 for indices 19-22
+            const bezelUint = bezelUintRef.current;
+            bezelUint[19] = p.isLooping ? 1 : 0;
+            bezelUint[20] = 0; // currentOrder
+            bezelUint[21] = Math.floor(livePlayheadRow);
+            bezelUint[22] = p.clickedButton;
+            // _pad2 at index 23 can stay as 0.0
+          }
+        }
+
         device.queue.writeBuffer(bezelUniformBufferRef.current, 0, bezelBufferDataRef.current, 0, 96);
         pass.setPipeline(bezelPipelineRef.current);
         pass.setBindGroup(0, bezelBindGroupRef.current);
