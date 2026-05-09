@@ -37,15 +37,20 @@ export interface UseWorkletLoaderOptions {
 /**
  * Get the worklet URL with proper base path handling for Vite deployments.
  * Uses Vite's BASE_URL and handles subdirectory deployments correctly.
+ *
+ * Cache-busting: AudioWorklet modules are cached extremely aggressively by
+ * browsers. A version query parameter forces a fresh load after deploys.
  */
 export const getWorkletUrl = (): string => {
   // Try multiple strategies for URL construction, ordered by reliability
-  
+
   // Strategy 1: Use Vite's BASE_URL (most reliable for Vite builds)
   const viteBase = import.meta.env.BASE_URL || '/';
   const base = viteBase.endsWith('/') ? viteBase : `${viteBase}/`;
-  const url = `${base}worklets/openmpt-worklet.js`;
-  
+  // BUMP this version whenever openmpt-worklet.js changes to bust browser caches
+  const WORKLET_VERSION = '2';
+  const url = `${base}worklets/openmpt-worklet.js?v=${WORKLET_VERSION}`;
+
   return url;
 };
 

@@ -3,25 +3,17 @@
  * Renders libopenmpt audio directly inside the AudioWorklet process() callback.
  *
  * Critical setup for AudioWorklet compatibility:
- * 1. setTimeout/clearTimeout polyfill (missing in AudioWorklet global scope)
- * 2. globalThis.libopenmpt pre-configuration so Emscripten locateFile resolves WASM correctly
- * 3. Dynamic import() of libopenmpt-audioworklet.js (avoids addModule({ type:'module' }) requirement)
+ * 1. globalThis.libopenmpt pre-configuration so Emscripten locateFile resolves WASM correctly
+ * 2. Dynamic import() of libopenmpt-audioworklet.js (avoids addModule({ type:'module' }) requirement)
+ *
+ * NOTE: Chrome 116+ provides setTimeout in AudioWorkletGlobalScope. The old microtask-based
+ * polyfill (Promise.resolve().then) was harmful because it ignored delay arguments,
+ * causing Emscripten timer callbacks to fire immediately and corrupt runtime state.
  */
 
 const DEBUG = true;
 function log(...args) { if (DEBUG) console.log('[Worklet]', ...args); }
 function error(...args) { console.error('[Worklet]', ...args); }
-
-// ── AudioWorklet compatibility polyfills ──────────────────────────
-// Emscripten runtime uses setTimeout in its startup sequence.
-// AudioWorkletGlobalScope does not provide setTimeout natively.
-if (typeof globalThis.setTimeout === 'undefined') {
-  globalThis.setTimeout = function (callback) {
-    Promise.resolve().then(callback);
-    return 0;
-  };
-  globalThis.clearTimeout = function () {};
-}
 
 // ── Emscripten Module pre-configuration ───────────────────────────
 // libopenmpt-audioworklet.js checks "typeof libopenmpt" and uses that
@@ -50,6 +42,7 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
     this.lib = null;
     this.isLibReady = false;
     this.isPlaying = true; // default to playing for backward compat
+    this.hasEnded = false; // prevent spamming 'ended' messages
 
     // 60 Hz position reports
     this.positionReportInterval = 1 / 60;
@@ -62,14 +55,17 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
       log('Received message:', type || '(no-type)', 'bytes:', moduleData?.byteLength);
 
       if (type === 'load' && moduleData) {
+        this.hasEnded = false;
         await this.loadModule(moduleData);
       } else if (type === 'play') {
         this.isPlaying = true;
+        this.hasEnded = false;
         log('Playback started');
       } else if (type === 'pause') {
         this.isPlaying = false;
         log('Playback paused');
       } else if (type === 'seek') {
+        this.hasEnded = false;
         if (this.modulePtr && this.lib) {
           this.lib._openmpt_module_set_position_order_row(
             this.modulePtr, e.data.order, e.data.row
@@ -213,9 +209,13 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
     if (samplesWritten === 0) {
       outL.fill(0);
       outR.fill(0);
-      this.port.postMessage({ type: 'ended' });
+      if (!this.hasEnded) {
+        this.hasEnded = true;
+        this.port.postMessage({ type: 'ended' });
+      }
       return true;
     }
+    this.hasEnded = false;
 
     // Zero-copy view into WASM heap
     outL.set(new Float32Array(this.lib.HEAPF32.buffer, this.leftBufPtr, samplesWritten));

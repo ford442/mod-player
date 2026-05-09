@@ -453,9 +453,16 @@ export async function startAudioPlayback(
                   const mLib = refs.libopenmptRef.current;
                   if (!mLib || !mPtr) { outL.fill(0); outR.fill(0); return; }
 
-                  const written = mLib._openmpt_module_read_float_stereo(
+                  let written = mLib._openmpt_module_read_float_stereo(
                     mPtr, ctx.sampleRate, SP_BUFFER, leftPtr, rightPtr
                   );
+                  if (written === 0 && config.isLooping) {
+                    // Loop back to start when module ends
+                    mLib._openmpt_module_set_position_order_row(mPtr, 0, 0);
+                    written = mLib._openmpt_module_read_float_stereo(
+                      mPtr, ctx.sampleRate, SP_BUFFER, leftPtr, rightPtr
+                    );
+                  }
                   if (written > 0) {
                     outL.set(new Float32Array(mLib.HEAPF32.buffer, leftPtr, written));
                     outR.set(new Float32Array(mLib.HEAPF32.buffer, rightPtr, written));
