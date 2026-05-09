@@ -84,6 +84,10 @@ export function useWebGLOverlay(
 
   const initWebGL = useCallback(() => {
     const shaderFile = paramsRef.current.shaderFile;
+    if (!paramsRef.current.isOverlayActive) {
+      console.log('🔧 Overlay inactive, skipping WebGL init');
+      return;
+    }
     const useNoteSustainTailMode = shaderFile.includes('v0.45b');
     const isV021 = shaderFile.includes('v0.21');
     console.group('🔧 initWebGL');
@@ -876,7 +880,7 @@ export function useWebGLOverlay(
     const p = paramsRef.current;
     const gl = glContextRef.current;
     const res = glResourcesRef.current;
-    if (!gl || !res || !WEBGL_HYBRID_SHADERS.has(p.shaderFile) || !p.matrix) return;
+    if (!p.isOverlayActive || !gl || !res || !WEBGL_HYBRID_SHADERS.has(p.shaderFile) || !p.matrix) return;
 
     const errors: string[] = [];
     const uniformVals: Record<string, number | string> = {};

@@ -4,6 +4,7 @@ import { ChannelShadowState, PatternMatrix, PlaybackState } from '../types';
 import { useWebGLOverlay } from '../hooks/useWebGLOverlay';
 import { useWebGPURender, type WebGPURenderParams, type DebugInfo } from '../hooks/useWebGPURender';
 import { BloomPostProcessor, DEFAULT_LAYERS } from '../utils/bloomPostProcessor';
+import { WEBGL_HYBRID_SHADERS } from '../utils/shaderVersion';
 
 const DEFAULT_CHANNELS = 4;
 
@@ -111,7 +112,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
 
   const numChannels = matrix?.numChannels ?? DEFAULT_CHANNELS;
 
-  const isOverlayActive = shaderFile.includes('v0.21') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.47') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49') || shaderFile.includes('v0.50') || shaderFile.includes('v0.51');
+  const isOverlayActive = WEBGL_HYBRID_SHADERS.has(shaderFile);
 
   const padTopChannel = shaderFile.includes('v0.16') || shaderFile.includes('v0.17') || shaderFile.includes('v0.21') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.47') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49') || shaderFile.includes('v0.50') || shaderFile.includes('v0.51');
 
@@ -371,7 +372,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
       }
       if (gpuReady) {
         renderRef.current?.();
-        drawWebGL();
+        if (isOverlayActive) drawWebGL();
       }
     };
     animationFrameRef.current = requestAnimationFrame(loop);
