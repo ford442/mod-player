@@ -2,6 +2,11 @@
  * OpenMPT AudioWorklet Processor
  * Renders libopenmpt audio directly inside the AudioWorklet process() callback.
  *
+ * ⚠️  WARNING: This file MUST call _openmpt_module_read_float_stereo() in process().
+ *     Do NOT replace this with a stub/test tone. A previous stub (commit 499a862)
+ *     broke all MOD playback by generating a 440Hz sine wave instead of rendering
+ *     the loaded module. See docs/WORKLET_AUDIO_BUG.md for the full post-mortem.
+ *
  * Critical setup for AudioWorklet compatibility:
  * 1. globalThis.libopenmpt pre-configuration so Emscripten locateFile resolves WASM correctly
  * 2. Dynamic import() of libopenmpt-audioworklet.js (avoids addModule({ type:'module' }) requirement)
