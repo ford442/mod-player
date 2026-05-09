@@ -121,9 +121,11 @@ export class BloomPostProcessor {
     const height = this.canvas.height;
     const blurSize = { width: Math.floor(width / 2), height: Math.floor(height / 2) };
 
+    // Use the swapchain format so the rendering pipelines (which target finalFormat)
+    // can write to this texture without a format-mismatch validation error.
     this.sceneTexture = this.device.createTexture({
       size: { width, height },
-      format: 'rgba16float',
+      format: this.finalFormat,
       usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
     });
 
@@ -204,14 +206,25 @@ export class BloomPostProcessor {
   }
 
   private async createPipelines() {
+    // Full-screen triangle vertex shader.
+    // Outputs @builtin(position) for the rasterizer and @location(0) uv in [0,1]
+    // mapped from clip-space so fragment shaders can sample textures correctly.
     const fullscreenVS = `
+      struct VSOut {
+        @builtin(position) pos: vec4<f32>,
+        @location(0) uv: vec2<f32>,
+      };
       @vertex
-      fn vs(@builtin(vertex_index) vertexIndex: u32) -> @location(0) vec2<f32> {
+      fn vs(@builtin(vertex_index) vertexIndex: u32) -> VSOut {
           const pos = array<vec2<f32>, 6>(
-              vec2(-1, -1), vec2(3, -1), vec2(-1, 3),
-              vec2(-1, -1), vec2(-1, 3), vec2(3, -1)
+              vec2<f32>(-1.0, -1.0), vec2<f32>(3.0, -1.0), vec2<f32>(-1.0, 3.0),
+              vec2<f32>(-1.0, -1.0), vec2<f32>(-1.0, 3.0), vec2<f32>(3.0, -1.0)
           );
-          return pos[vertexIndex];
+          let p = pos[vertexIndex];
+          return VSOut(
+              vec4<f32>(p, 0.0, 1.0),
+              vec2<f32>((p.x + 1.0) * 0.5, (1.0 - p.y) * 0.5)
+          );
       }
     `;
 
@@ -578,10 +591,10 @@ export class BloomPostProcessor {
       layer.blurTextures[1]?.destroy();
     }
 
-    // Recreate scene texture
+    // Recreate scene texture with the swapchain format (matching the rendering pipelines)
     this.sceneTexture = this.device.createTexture({
       size: { width, height },
-      format: 'rgba16float',
+      format: this.finalFormat,
       usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
     });
 
