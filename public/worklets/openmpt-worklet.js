@@ -1,130 +1,253 @@
 /**
  * OpenMPT AudioWorklet Processor
- * Handles audio playback for libopenmpt in a Web Audio worklet context
+ * Renders libopenmpt audio directly inside the AudioWorklet process() callback.
+ *
+ * Critical setup for AudioWorklet compatibility:
+ * 1. setTimeout/clearTimeout polyfill (missing in AudioWorklet global scope)
+ * 2. globalThis.libopenmpt pre-configuration so Emscripten locateFile resolves WASM correctly
+ * 3. Dynamic import() of libopenmpt-audioworklet.js (avoids addModule({ type:'module' }) requirement)
  */
 
-class OpenMPTProcessor extends AudioWorkletProcessor {
+const DEBUG = true;
+function log(...args) { if (DEBUG) console.log('[Worklet]', ...args); }
+function error(...args) { console.error('[Worklet]', ...args); }
+
+// ── AudioWorklet compatibility polyfills ──────────────────────────
+// Emscripten runtime uses setTimeout in its startup sequence.
+// AudioWorkletGlobalScope does not provide setTimeout natively.
+if (typeof globalThis.setTimeout === 'undefined') {
+  globalThis.setTimeout = function (callback) {
+    Promise.resolve().then(callback);
+    return 0;
+  };
+  globalThis.clearTimeout = function () {};
+}
+
+// ── Emscripten Module pre-configuration ───────────────────────────
+// libopenmpt-audioworklet.js checks "typeof libopenmpt" and uses that
+// object as its Module. We pre-seed locateFile so it can find the
+// co-located .wasm file (or wasm2js stub) regardless of subdirectory deploys.
+try {
+  const workletBaseUrl = new URL('.', import.meta.url).href;
+  globalThis.libopenmpt = {
+    locateFile: (path) => workletBaseUrl + path,
+  };
+  log('WASM base URL resolved to:', workletBaseUrl);
+} catch (e) {
+  // Fallback: hope the wasm file is at the same path as the page
+  globalThis.libopenmpt = {};
+  error('Failed to resolve worklet base URL, WASM load may fail:', e);
+}
+
+class XMPlayerProcessor extends AudioWorkletProcessor {
   constructor(options) {
     super(options);
 
-    console.log('[OpenMPTWorklet] Processor initialized');
+    this.modulePtr = 0;
+    this.leftBufPtr = 0;
+    this.rightBufPtr = 0;
+    this.maxFrames = 4096;
+    this.lib = null;
+    this.isLibReady = false;
+    this.isPlaying = true; // default to playing for backward compat
 
-    this.moduleData = null;
-    this.isPlaying = false;
-    this.positionSeconds = 0;
-    this.currentOrder = 0;
-    this.currentRow = 0;
-    this.bpm = 125;
+    // 60 Hz position reports
+    this.positionReportInterval = 1 / 60;
+    this.lastPositionReportTime = 0;
 
-    this.sampleRate = 44100;
-    this.numChannels = 2;
-    this.bufferSize = 4096;
+    log('Constructor called, sampleRate:', sampleRate);
 
-    this.port.onmessage = this.handleMessage.bind(this);
-    console.log('[OpenMPTWorklet] Processor ready');
-  }
+    this.port.onmessage = async (e) => {
+      const { type, moduleData } = e.data;
+      log('Received message:', type || '(no-type)', 'bytes:', moduleData?.byteLength);
 
-  handleMessage(event) {
-    const { type } = event.data;
-    switch (type) {
-      case 'load':
-        this.handleLoad(event.data.moduleData);
-        break;
-      case 'play':
-        this.handlePlay();
-        break;
-      case 'pause':
-        this.handlePause();
-        break;
-      case 'seek':
-        this.handleSeek(event.data.order, event.data.row);
-        break;
-      default:
-        console.warn('[OpenMPTWorklet] Unknown message type:', type);
-    }
-  }
-
-  handleLoad(moduleData) {
-    try {
-      console.log('[OpenMPTWorklet] Loading module data:', moduleData?.byteLength || 0, 'bytes');
-      if (!moduleData) {
-        this.port.postMessage({ type: 'error', message: 'No module data provided' });
-        return;
+      if (type === 'load' && moduleData) {
+        await this.loadModule(moduleData);
+      } else if (type === 'play') {
+        this.isPlaying = true;
+        log('Playback started');
+      } else if (type === 'pause') {
+        this.isPlaying = false;
+        log('Playback paused');
+      } else if (type === 'seek') {
+        if (this.modulePtr && this.lib) {
+          this.lib._openmpt_module_set_position_order_row(
+            this.modulePtr, e.data.order, e.data.row
+          );
+          log('Seek executed:', e.data.order, e.data.row);
+        } else {
+          error('Cannot seek: module not loaded');
+        }
+        this.port.postMessage({ type: 'seekAck' });
+      } else if (!type && moduleData) {
+        // Legacy fallback
+        await this.loadModule(moduleData);
       }
-      this.moduleData = new Uint8Array(moduleData);
-      this.isLoaded = true;
-      this.port.postMessage({ type: 'loaded' });
-    } catch (error) {
-      this.port.postMessage({ type: 'error', message: 'Failed to load module: ' + error.message });
+    };
+
+    // Fire-and-forget WASM bootstrap
+    this._libInitPromise = this._initLib();
+  }
+
+  // ── WASM bootstrap ────────────────────────────────────────────────
+  async _initLib() {
+    try {
+      log('Dynamic-importing libopenmpt-audioworklet.js…');
+
+      const mod = await import('./libopenmpt-audioworklet.js');
+      let lib = mod.default;
+
+      if (!lib) throw new Error('dynamic import returned falsy default export');
+
+      // Wait for the async WASM (or wasm2js) runtime to complete initialisation
+      if (!lib._openmpt_module_create_from_memory) {
+        log('Waiting for WASM onRuntimeInitialized…');
+        await new Promise((resolve, reject) => {
+          const timeout = setTimeout(
+            () => reject(new Error('WASM init timeout after 20 s')), 20000
+          );
+          if (lib.calledRun) {
+            clearTimeout(timeout);
+            resolve();
+          } else {
+            const prev = lib.onRuntimeInitialized;
+            lib.onRuntimeInitialized = () => {
+              clearTimeout(timeout);
+              if (typeof prev === 'function') prev();
+              resolve();
+            };
+          }
+        });
+      } else {
+        log('WASM already initialised (functions present)');
+      }
+
+      this.lib = lib;
+      this.isLibReady = true;
+      log('libopenmpt ready ✅');
+    } catch (err) {
+      error('Failed to initialise libopenmpt:', err);
+      this.port.postMessage({ type: 'error', message: 'Lib init failed: ' + String(err) });
     }
   }
 
-  handlePlay() {
-    if (!this.isLoaded) {
-      this.port.postMessage({ type: 'error', message: 'No module loaded' });
+  // ── Module loading ─────────────────────────────────────────────────
+  async loadModule(moduleData) {
+    log('loadModule: awaiting WASM ready…');
+
+    await this._libInitPromise;
+
+    if (!this.isLibReady) {
+      error('WASM library never became ready');
+      this.port.postMessage({ type: 'error', message: 'WASM library init timeout' });
       return;
     }
-    this.isPlaying = true;
-  }
 
-  handlePause() {
-    this.isPlaying = false;
-  }
+    try {
+      const lib = this.lib;
+      log('Loading MOD into libopenmpt:', moduleData.byteLength, 'bytes');
 
-  handleSeek(order, row) {
-    this.currentOrder = order;
-    this.currentRow = row;
-    this.port.postMessage({ type: 'seekAck' });
-  }
-
-  process(inputs, outputs, parameters) {
-    const output = outputs[0];
-    const numFrames = output[0]?.length || 128;
-
-    if (!this.isPlaying || !this.isLoaded) {
-      for (let channel = 0; channel < this.numChannels; channel++) {
-        if (output[channel]) output[channel].fill(0);
+      // Tear down previous module
+      if (this.modulePtr) {
+        lib._openmpt_module_destroy(this.modulePtr);
+        this.modulePtr = 0;
       }
+      if (this.leftBufPtr) { lib._free(this.leftBufPtr); this.leftBufPtr = 0; }
+      if (this.rightBufPtr) { lib._free(this.rightBufPtr); this.rightBufPtr = 0; }
+
+      // Copy file data into WASM heap
+      const filePtr = lib._malloc(moduleData.byteLength);
+      if (!filePtr) throw new Error('_malloc returned 0 – out of WASM heap memory');
+
+      lib.HEAPU8.set(new Uint8Array(moduleData), filePtr);
+      this.modulePtr = lib._openmpt_module_create_from_memory(
+        filePtr, moduleData.byteLength, 0, 0, 0
+      );
+      lib._free(filePtr);
+
+      if (this.modulePtr === 0) {
+        throw new Error('openmpt_module_create_from_memory returned 0 (invalid format?)');
+      }
+
+      // Allocate persistent stereo output buffers in WASM heap
+      this.leftBufPtr = lib._malloc(4 * this.maxFrames);
+      this.rightBufPtr = lib._malloc(4 * this.maxFrames);
+
+      // Best-quality windowed-sinc interpolation
+      lib._openmpt_module_set_render_param(this.modulePtr, 2, 8);
+
+      log('Module loaded ✅ ptr=', this.modulePtr);
+      this.port.postMessage({ type: 'loaded' });
+    } catch (err) {
+      error('loadModule error:', err);
+      this.port.postMessage({ type: 'error', message: String(err) });
+    }
+  }
+
+  // ── Audio process loop ─────────────────────────────────────────────
+  process(_inputs, outputs, _parameters) {
+    const out = outputs[0];
+    const outL = out[0];
+    const outR = out[1];
+
+    if (!outL || !outR) return true;
+
+    // Silence while WASM / module is still initialising or paused
+    if (!this.modulePtr || !this.lib || !this.isPlaying) {
+      outL.fill(0);
+      outR.fill(0);
       return true;
     }
 
-    try {
-      // Update position tracking
-      this.positionSeconds += numFrames / this.sampleRate;
+    const numSamples = outL.length;
+    const framesToRead = Math.min(numSamples, this.maxFrames);
 
-      // Send position update occasionally
-      if (Math.floor(this.positionSeconds * 10) % 5 === 0) {
-        this.port.postMessage({
-          type: 'position',
-          order: this.currentOrder,
-          row: this.currentRow,
-          positionSeconds: this.positionSeconds,
-          bpm: this.bpm,
-          workletTime: currentTime
-        });
-      }
+    const samplesWritten = this.lib._openmpt_module_read_float_stereo(
+      this.modulePtr,
+      sampleRate,
+      framesToRead,
+      this.leftBufPtr,
+      this.rightBufPtr
+    );
 
-      // Generate test tone for now (WASM will replace this)
-      const leftChannel = output[0];
-      const rightChannel = output[1] || output[0];
-      const frequency = 440;
-      const amplitude = 0.1;
+    if (samplesWritten === 0) {
+      outL.fill(0);
+      outR.fill(0);
+      this.port.postMessage({ type: 'ended' });
+      return true;
+    }
 
-      for (let i = 0; i < numFrames; i++) {
-        const sample = Math.sin(2 * Math.PI * frequency * (this.positionSeconds + i / this.sampleRate)) * amplitude;
-        if (leftChannel) leftChannel[i] = sample;
-        if (rightChannel && rightChannel !== leftChannel) rightChannel[i] = sample;
-      }
-    } catch (error) {
-      console.error('[OpenMPTWorklet] Error in process():', error);
-      for (let ch = 0; ch < this.numChannels; ch++) {
-        if (output[ch]) output[ch].fill(0);
-      }
+    // Zero-copy view into WASM heap
+    outL.set(new Float32Array(this.lib.HEAPF32.buffer, this.leftBufPtr, samplesWritten));
+    outR.set(new Float32Array(this.lib.HEAPF32.buffer, this.rightBufPtr, samplesWritten));
+
+    // Silence remainder if libopenmpt rendered fewer frames
+    if (samplesWritten < numSamples) {
+      outL.fill(0, samplesWritten);
+      outR.fill(0, samplesWritten);
+    }
+
+    // Position reporting at ~60 Hz
+    if (currentTime - this.lastPositionReportTime >= this.positionReportInterval) {
+      const order = this.lib._openmpt_module_get_current_order(this.modulePtr);
+      const row = this.lib._openmpt_module_get_current_row(this.modulePtr);
+      const posSec = this.lib._openmpt_module_get_position_seconds(this.modulePtr);
+      const bpm = this.lib._openmpt_module_get_current_estimated_bpm(this.modulePtr);
+
+      this.port.postMessage({
+        type: 'position',
+        order,
+        row,
+        positionSeconds: posSec,
+        bpm,
+        workletTime: currentTime,
+      });
+      this.lastPositionReportTime = currentTime;
     }
 
     return true;
   }
 }
 
-registerProcessor('openmpt-processor', OpenMPTProcessor);
-console.log('[OpenMPTWorklet] Script loaded, processor registered');
+registerProcessor('openmpt-processor', XMPlayerProcessor);
+log('[OpenMPTWorklet] Script loaded, processor registered');

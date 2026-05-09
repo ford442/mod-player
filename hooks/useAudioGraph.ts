@@ -353,6 +353,8 @@ export async function startAudioPlayback(
           refs.wasmMemoryRef.current = wasmMemory;
         }
         if (wasmMemory) processorOptions.memory = wasmMemory;
+        // Pass base URL so the worklet can resolve WASM/co-located assets correctly
+        processorOptions.baseUrl = import.meta.env.BASE_URL || '/';
         
         // AUDIO-001 FIX COMPLETE: Wrap node creation in try-catch for better diagnostics
         let node: AudioWorkletNode;
@@ -494,10 +496,17 @@ export async function startAudioPlayback(
             callbacks.setStatus("Playing...");
             if (refs.animationFrameHandle.current) cancelAnimationFrame(refs.animationFrameHandle.current);
             refs.animationFrameHandle.current = requestAnimationFrame(refs.updateUIRef.current!);
+            // Explicitly tell the worklet to begin rendering (defensive, in case
+            // a future worklet version requires a play signal).
+            node.port.postMessage({ type: 'play' });
           } else if (type === 'seekAck') {
             // TIMING FIX: Worklet acknowledged seek
             refs.seekAcknowledgedRef.current = true;
             refs.pendingSeekRef.current = null;
+          } else if (type === 'needData' || type === 'starvation') {
+            // Defensive: ring-buffer worklets may request refills; we do not
+            // implement a main-thread pump, so log for diagnostics.
+            console.warn(`[PLAY] Worklet ${type}:`, e.data);
           }
         };
 
