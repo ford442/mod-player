@@ -9,6 +9,8 @@ export interface WorkletDiagnostics {
   audioContextSupported: boolean;
   audioWorkletSupported: boolean;
   crossOriginIsolated: boolean;
+  hasSharedArrayBuffer: boolean;
+  hardwareConcurrency: number;
   userAgent: string;
   baseUrl: string;
   workletUrl: string;
@@ -31,8 +33,10 @@ export function getWorkletDiagnostics(workletUrl: string): WorkletDiagnostics {
     audioWorkletSupported: typeof window !== 'undefined' && 
       'AudioContext' in window && 
       'audioWorklet' in AudioContext.prototype,
-    crossOriginIsolated: window.crossOriginIsolated,
-    userAgent: navigator.userAgent,
+    crossOriginIsolated: typeof window !== 'undefined' && window.crossOriginIsolated,
+    hasSharedArrayBuffer: typeof SharedArrayBuffer !== 'undefined',
+    hardwareConcurrency: typeof navigator !== 'undefined' ? navigator.hardwareConcurrency || 0 : 0,
+    userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : 'unknown',
     baseUrl: import.meta.env.BASE_URL,
     workletUrl,
     timestamp: new Date().toISOString(),
@@ -42,16 +46,28 @@ export function getWorkletDiagnostics(workletUrl: string): WorkletDiagnostics {
 /**
  * Log worklet diagnostics to console
  */
-export function logWorkletDiagnostics(workletUrl: string): void {
+export function logWorkletDiagnostics(workletUrl: string, ctx?: AudioContext): void {
   const diag = getWorkletDiagnostics(workletUrl);
   
   console.group('🔊 AudioWorklet Diagnostics');
   console.log('AudioContext Supported:', diag.audioContextSupported ? '✅' : '❌');
   console.log('AudioWorklet Supported:', diag.audioWorkletSupported ? '✅' : '❌');
   console.log('Cross-Origin Isolated:', diag.crossOriginIsolated ? '✅' : '❌');
+  console.log('SharedArrayBuffer:', diag.hasSharedArrayBuffer ? '✅' : '❌');
+  console.log('Hardware Concurrency:', diag.hardwareConcurrency);
   console.log('Base URL:', diag.baseUrl);
   console.log('Worklet URL:', diag.workletUrl);
   console.log('User Agent:', diag.userAgent.substring(0, 80) + '...');
+
+  if (ctx) {
+    console.group('AudioContext State');
+    console.log('State:', ctx.state);
+    console.log('Sample Rate:', ctx.sampleRate);
+    console.log('Base Latency:', ctx.baseLatency);
+    console.log('Output Latency:', (ctx as any).outputLatency ?? 0);
+    console.groupEnd();
+  }
+
   console.groupEnd();
 }
 
