@@ -7,6 +7,7 @@ import { OpenMPTWorkletEngine } from '../audio-worklet/OpenMPTWorkletEngine';
 import type { WorkletPositionData } from '../audio-worklet/types';
 import { getWorkletUrl } from './useWorkletLoader';
 import { computeNoteAges } from '../utils/patternExtractor';
+import { logWorkletDiagnostics } from '../audio-worklet/diagnostics';
 
 export interface AudioGraphRefs {
   libopenmptRef:       React.MutableRefObject<LibOpenMPT | null>;
@@ -63,19 +64,6 @@ export interface AudioGraphConfig {
   WORKLET_URL:            string;
 }
 
-// AUDIO-001 FIX COMPLETE: Enhanced logging helper
-const logWorkletDiagnostics = (ctx: AudioContext, workletUrl: string) => {
-  console.log('[WORKLET_DIAGNOSTICS]', {
-    audioContextState: ctx.state,
-    audioContextSampleRate: ctx.sampleRate,
-    workletUrl,
-    hasAudioWorklet: !!ctx.audioWorklet,
-    baseUrl: import.meta.env.BASE_URL,
-    location: window.location.href,
-    timestamp: new Date().toISOString(),
-  });
-};
-
 // AUDIO-001 FIX COMPLETE: Centralized worklet URL from useWorkletLoader
 const WORKLET_URL = getWorkletUrl();
 
@@ -123,7 +111,7 @@ export async function startAudioPlayback(
     console.log('[PLAY] AudioContext state:', ctx.state);
     
     // AUDIO-001 FIX COMPLETE: Log diagnostics
-    logWorkletDiagnostics(ctx, config.WORKLET_URL);
+    logWorkletDiagnostics(config.WORKLET_URL, ctx);
 
     if (ctx.state === 'suspended') {
       console.log('[PLAY] Resuming suspended AudioContext...');

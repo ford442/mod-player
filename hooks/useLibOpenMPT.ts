@@ -3,20 +3,25 @@ import { LibOpenMPT, ModuleInfo, PatternMatrix, ChannelShadowState, PlaybackStat
 import { OpenMPTWorkletEngine } from '../audio-worklet/OpenMPTWorkletEngine';
 import { getPatternMatrix, computeNoteAges } from '../utils/patternExtractor';
 import { startAudioPlayback, AudioGraphRefs, AudioGraphCallbacks, AudioGraphConfig } from './useAudioGraph';
-import { useWorkletLoader, getWorkletUrl } from './useWorkletLoader';
+import { useWorkletLoader, getWorkletUrl, getAbsoluteWorkletUrl } from './useWorkletLoader';
+import { logWorkletDiagnostics } from '../audio-worklet/diagnostics';
 
 // Use Vite BASE_URL for correct resolution under subdirectory deployment
 const DEFAULT_MODULE_URL = `${import.meta.env.BASE_URL}4-mat_madness.mod`;
 
-// AUDIO-001 FIX: Use centralized worklet URL construction from useWorkletLoader
+// AUDIO-001 FIX COMPLETE: Use centralized worklet URL construction from useWorkletLoader
 const WORKLET_URL = getWorkletUrl();
 
-// AUDIO-001 FIX: Enhanced logging for diagnostics
+// AUDIO-001 FIX COMPLETE: Enhanced logging for diagnostics
 console.log('[AudioWorklet] Configuration:', {
   workletUrl: WORKLET_URL,
+  absoluteWorkletUrl: getAbsoluteWorkletUrl(),
   viteBaseUrl: import.meta.env.BASE_URL,
   currentPath: window.location.pathname,
   origin: window.location.origin,
+  crossOriginIsolated: window.crossOriginIsolated,
+  hasSharedArrayBuffer: typeof SharedArrayBuffer !== 'undefined',
+  hardwareConcurrency: navigator.hardwareConcurrency,
 });
 
 // TIMING FIX: Maximum allowed drift before correction (in seconds)
@@ -706,18 +711,15 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
         libopenmptRef.current = lib;
         setIsReady(true);
 
-        // AUDIO-001 FIX: Enhanced AudioWorklet support check with detailed diagnostics
+        // AUDIO-001 FIX COMPLETE: Enhanced AudioWorklet support check with detailed diagnostics
         console.log("[INIT] Testing AudioWorklet support...");
         try {
           const hasWorkletSupport = checkWorkletSupport();
           
-          console.log('[INIT] AudioWorklet diagnostics:', {
-            hasWorkletSupport,
-            workletUrl: WORKLET_URL,
-            userAgent: navigator.userAgent.substring(0, 50) + '...',
-          });
+          // Use centralized diagnostic logging
+          logWorkletDiagnostics(WORKLET_URL);
 
-          // AUDIO-001 FIX: Verify the worklet file is accessible
+          // AUDIO-001 FIX COMPLETE: Verify the worklet file is accessible
           if (hasWorkletSupport) {
             const fileAccessible = await verifyWorkletFile();
             
