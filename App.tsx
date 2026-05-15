@@ -14,6 +14,7 @@ import type { PlaylistItem } from './components/Playlist';
 import { StoragePlaylist } from './components/StoragePlaylist';
 import { SeekBar } from './components/SeekBar';
 import { Panel } from './components/Panel';
+import { ShaderSelectorPanel } from './components/ShaderSelectorPanel';
 import { useLibOpenMPT } from './hooks/useLibOpenMPT';
 import { usePlaylist } from './hooks/usePlaylist';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
@@ -57,11 +58,15 @@ const SHADER_GROUPS = {
   ]
 };
 
+const ALL_SHADER_OPTIONS = [
+  ...SHADER_GROUPS.SQUARE.map(s => ({ ...s, group: 'Square' as const })),
+  ...SHADER_GROUPS.CIRCULAR.map(s => ({ ...s, group: 'Circular' as const })),
+  ...SHADER_GROUPS.VIDEO.map(s => ({ ...s, group: 'Video' as const })),
+];
+
 // Flat set of all valid shader IDs (used for localStorage validation)
 const ALL_SHADER_IDS = new Set<string>([
-  ...SHADER_GROUPS.SQUARE.map(s => s.id),
-  ...SHADER_GROUPS.CIRCULAR.map(s => s.id),
-  ...SHADER_GROUPS.VIDEO.map(s => s.id),
+  ...ALL_SHADER_OPTIONS.map(s => s.id),
 ]);
 
 // Available UI themes.
@@ -96,6 +101,9 @@ function App() {
 
   // Tier 2: per-module shader memory — keyed by first-16-byte hash of the loaded file
   const [moduleHash, setModuleHash] = useState<string | null>(null);
+  const [shaderFavorites, setShaderFavorites] = useLocalStorage<string[]>('xasm1-shader-favorites', []);
+  const [shaderRecents, setShaderRecents] = useLocalStorage<string[]>('xasm1-shader-recents', []);
+  const [shaderThumbnails, setShaderThumbnails] = useLocalStorage<Record<string, string>>('xasm1-shader-thumbnails', {});
 
   const [volume, setVolume] = useState<number>(0.5);
   const [pan, setPan] = useState<number>(0.0);
@@ -191,6 +199,7 @@ function App() {
   // Shader change handler — Tier 1 (global) + Tier 2 (per-module) write
   const setShaderFile = useCallback((shader: string) => {
     _setStoredShader(shader);
+    setShaderRecents([shader, ...shaderRecents.filter(s => s !== shader)].slice(0, 5));
     if (moduleHash) {
       try {
         localStorage.setItem(`xasm1_module_shader_${moduleHash}`, shader);
@@ -198,7 +207,41 @@ function App() {
         // Ignore quota/security errors
       }
     }
-  }, [_setStoredShader, moduleHash]);
+  }, [_setStoredShader, moduleHash, setShaderRecents, shaderRecents]);
+
+  const toggleShaderFavorite = useCallback((shader: string) => {
+    setShaderFavorites(
+      shaderFavorites.includes(shader)
+        ? shaderFavorites.filter(s => s !== shader)
+        : [shader, ...shaderFavorites].filter((value, index, array) => array.indexOf(value) === index),
+    );
+  }, [setShaderFavorites, shaderFavorites]);
+
+  useEffect(() => {
+    const canvas = document.querySelector<HTMLCanvasElement>('.pattern-display canvas');
+    if (!canvas) return;
+    const timer = window.setTimeout(() => {
+      if (shaderThumbnails[shaderFile]) return;
+      try {
+        const dataUrl = canvas.toDataURL('image/png');
+        if (dataUrl.startsWith('data:image/png')) {
+          setShaderThumbnails({ ...shaderThumbnails, [shaderFile]: dataUrl });
+        }
+      } catch {
+        // Ignore capture/security errors
+      }
+    }, 500);
+    return () => window.clearTimeout(timer);
+  }, [setShaderThumbnails, shaderFile, shaderThumbnails]);
+
+  const validShaderFavorites = useMemo(
+    () => shaderFavorites.filter(shader => ALL_SHADER_IDS.has(shader)),
+    [shaderFavorites],
+  );
+  const validShaderRecents = useMemo(
+    () => shaderRecents.filter(shader => ALL_SHADER_IDS.has(shader)).slice(0, 5),
+    [shaderRecents],
+  );
 
   // Tier 2: restore per-module shader whenever the loaded module changes
   useEffect(() => {
@@ -578,53 +621,18 @@ function App() {
                 </button>
             </div>
 
-            {/* Categorized Shader Selectors */}
             <div className={cn('flex flex-wrap gap-2 p-2 rounded-xl border', isDarkMode ? 'bg-black border-gray-800' : 'bg-gray-200 border-gray-300')}>
-                {/* Square Group */}
-                <div className="flex items-center gap-1">
-                    <span className="text-[10px] font-bold text-gray-500 uppercase px-1">Square</span>
-                    <select
-                        className={cn('text-xs font-mono p-1 rounded border outline-none', isDarkMode ? 'bg-gray-800 border-gray-600 text-white' : 'bg-white border-gray-300 text-black')}
-                        value={SHADER_GROUPS.SQUARE.some(s => s.id === shaderFile) ? shaderFile : ''}
-                        onChange={(e) => e.target.value && setShaderFile(e.target.value)}
-                    >
-                        <option value="" disabled>Select...</option>
-                        {SHADER_GROUPS.SQUARE.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
-                    </select>
-                </div>
-
+                <ShaderSelectorPanel
+                  shaderOptions={ALL_SHADER_OPTIONS}
+                  selectedShader={shaderFile}
+                  onSelectShader={setShaderFile}
+                  favorites={validShaderFavorites}
+                  recents={validShaderRecents}
+                  thumbnails={shaderThumbnails}
+                  onToggleFavorite={toggleShaderFavorite}
+                  isDarkMode={isDarkMode}
+                />
                 <div className={cn('w-px h-6', isDarkMode ? 'bg-gray-800' : 'bg-gray-300')}></div>
-
-                {/* Circular Group */}
-                <div className="flex items-center gap-1">
-                    <span className="text-[10px] font-bold text-gray-500 uppercase px-1">Circular</span>
-                    <select
-                        className={cn('text-xs font-mono p-1 rounded border outline-none', isDarkMode ? 'bg-gray-800 border-gray-600 text-white' : 'bg-white border-gray-300 text-black')}
-                        value={SHADER_GROUPS.CIRCULAR.some(s => s.id === shaderFile) ? shaderFile : ''}
-                        onChange={(e) => e.target.value && setShaderFile(e.target.value)}
-                    >
-                        <option value="" disabled>Select...</option>
-                        {SHADER_GROUPS.CIRCULAR.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
-                    </select>
-                </div>
-
-                <div className={cn('w-px h-6', isDarkMode ? 'bg-gray-800' : 'bg-gray-300')}></div>
-
-                {/* Video Group */}
-                <div className="flex items-center gap-1">
-                    <span className="text-[10px] font-bold text-gray-500 uppercase px-1">Video</span>
-                    <select
-                        className={cn('text-xs font-mono p-1 rounded border outline-none', isDarkMode ? 'bg-gray-800 border-gray-600 text-white' : 'bg-white border-gray-300 text-black')}
-                        value={SHADER_GROUPS.VIDEO.some(s => s.id === shaderFile) ? shaderFile : ''}
-                        onChange={(e) => e.target.value && setShaderFile(e.target.value)}
-                    >
-                        <option value="" disabled>Select...</option>
-                        {SHADER_GROUPS.VIDEO.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
-                    </select>
-                </div>
-                <div className={cn('w-px h-6', isDarkMode ? 'bg-gray-800' : 'bg-gray-300')}></div>
-
-                {/* Color Palette Selector */}
                 <div className="flex items-center gap-1">
                     <span className="text-[10px] font-bold text-gray-500 uppercase px-1">Palette</span>
                     <select
