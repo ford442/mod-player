@@ -52,7 +52,7 @@ export function ShaderSelectorPanel({
   );
 
   const recentShaders = useMemo(
-    () => recents.map(id => optionById.get(id)).filter((option): option is ShaderOption => Boolean(option)),
+    () => recents.map(id => optionById.get(id)).filter((option): option is ShaderOption => Boolean(option)).slice(0, 5),
     [recents, optionById],
   );
 
@@ -108,6 +108,7 @@ export function ShaderSelectorPanel({
     }
     if (event.key === 'Enter') {
       event.preventDefault();
+      if (activeIndex < 0 || activeIndex >= allShaderIds.length) return;
       const target = allShaderIds[activeIndex];
       if (target) {
         onSelectShader(target);
@@ -150,10 +151,11 @@ export function ShaderSelectorPanel({
             height={THUMBNAIL_SIZE}
             className="h-24 w-24 rounded border border-black/30 bg-black object-cover"
             loading="lazy"
-            onError={(event) => {
-              event.currentTarget.src = PLACEHOLDER_THUMBNAIL;
-            }}
-          />
+          onError={(event) => {
+            if (event.currentTarget.src === PLACEHOLDER_THUMBNAIL) return;
+            event.currentTarget.src = PLACEHOLDER_THUMBNAIL;
+          }}
+        />
           <div className="mt-1 text-[10px] text-gray-500">{option.group}</div>
           <div className="text-xs font-mono leading-tight">{option.label}</div>
         </button>

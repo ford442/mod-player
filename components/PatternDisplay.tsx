@@ -426,6 +426,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
 
       <canvas
         ref={canvasRef}
+        data-shader-preview-source="true"
         width={canvasMetrics.width}
         height={canvasMetrics.height}
         onClick={handleCanvasClick}

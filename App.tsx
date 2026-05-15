@@ -199,7 +199,7 @@ function App() {
   // Shader change handler — Tier 1 (global) + Tier 2 (per-module) write
   const setShaderFile = useCallback((shader: string) => {
     _setStoredShader(shader);
-    setShaderRecents([shader, ...shaderRecents.filter(s => s !== shader)].slice(0, 5));
+    setShaderRecents(previousRecents => [shader, ...previousRecents.filter(s => s !== shader)].slice(0, 5));
     if (moduleHash) {
       try {
         localStorage.setItem(`xasm1_module_shader_${moduleHash}`, shader);
@@ -207,25 +207,27 @@ function App() {
         // Ignore quota/security errors
       }
     }
-  }, [_setStoredShader, moduleHash, setShaderRecents, shaderRecents]);
+  }, [_setStoredShader, moduleHash, setShaderRecents]);
 
   const toggleShaderFavorite = useCallback((shader: string) => {
     setShaderFavorites(
-      shaderFavorites.includes(shader)
-        ? shaderFavorites.filter(s => s !== shader)
-        : [shader, ...shaderFavorites].filter((value, index, array) => array.indexOf(value) === index),
+      previousFavorites => (
+        previousFavorites.includes(shader)
+          ? previousFavorites.filter(s => s !== shader)
+          : [shader, ...previousFavorites]
+      ),
     );
-  }, [setShaderFavorites, shaderFavorites]);
+  }, [setShaderFavorites]);
 
   useEffect(() => {
-    const canvas = document.querySelector<HTMLCanvasElement>('.pattern-display canvas');
+    const canvas = document.querySelector<HTMLCanvasElement>('canvas[data-shader-preview-source="true"]');
     if (!canvas) return;
+    if (shaderThumbnails[shaderFile]) return;
     const timer = window.setTimeout(() => {
-      if (shaderThumbnails[shaderFile]) return;
       try {
         const dataUrl = canvas.toDataURL('image/png');
         if (dataUrl.startsWith('data:image/png')) {
-          setShaderThumbnails({ ...shaderThumbnails, [shaderFile]: dataUrl });
+          setShaderThumbnails(previous => ({ ...previous, [shaderFile]: dataUrl }));
         }
       } catch {
         // Ignore capture/security errors
