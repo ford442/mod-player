@@ -41,6 +41,7 @@ interface PatternDisplayProps {
   dimFactor?: number;
   analyserNode?: AnalyserNode | null;
   playbackStateRef?: React.MutableRefObject<PlaybackState>;
+  oscBufferRef?: React.MutableRefObject<Float32Array | null>;
   debugPanelOpen?: boolean;
   onCloseDebug?: () => void;
   onOpenDebug?: () => void;
@@ -81,6 +82,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   dimFactor = 1.0,
   analyserNode,
   playbackStateRef,
+  oscBufferRef,
   debugPanelOpen = false,
   onCloseDebug,
   onOpenDebug,
@@ -114,13 +116,13 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
 
   const isOverlayActive = WEBGL_HYBRID_SHADERS.has(shaderFile);
 
-  const padTopChannel = shaderFile.includes('v0.16') || shaderFile.includes('v0.17') || shaderFile.includes('v0.21') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.47') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49') || shaderFile.includes('v0.50') || shaderFile.includes('v0.51');
+  const padTopChannel = shaderFile.includes('v0.16') || shaderFile.includes('v0.17') || shaderFile.includes('v0.21') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.47') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49') || shaderFile.includes('v0.50') || shaderFile.includes('v0.51') || shaderFile.includes('v0.55');
 
   const isHorizontal = shaderFile.includes('v0.13') || shaderFile.includes('v0.14') || shaderFile.includes('v0.16') || shaderFile.includes('v0.17') || shaderFile.includes('v0.21') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40');
 
   const canvasMetrics = useMemo(() => {
     if (shaderFile.includes('v0.27') || shaderFile.includes('v0.28')) return { width: 1024, height: 1008 };
-    if (shaderFile.includes('v0.21') || shaderFile.includes('v0.37') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.47') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49') || shaderFile.includes('v0.50') || shaderFile.includes('v0.51')) return { width: 1024, height: 1024 };
+    if (shaderFile.includes('v0.21') || shaderFile.includes('v0.37') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.47') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49') || shaderFile.includes('v0.50') || shaderFile.includes('v0.51') || shaderFile.includes('v0.55')) return { width: 1024, height: 1024 };
     if (isHorizontal) return { width: 1024, height: 1024 };
     if (shaderFile.includes('v0.25') || shaderFile.includes('v0.30') || shaderFile.includes('v0.35')) return { width: 1024, height: 1024 };
     return { width: Math.max(800, numChannels * cellWidth), height: 600 };
@@ -128,7 +130,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
 
   // Reset step length when switching to a shader that doesn't support it
   useEffect(() => {
-    if (!shaderFile.includes('v0.21') && !shaderFile.includes('v0.39') && !shaderFile.includes('v0.40') && !shaderFile.includes('v0.51')) {
+    if (!shaderFile.includes('v0.21') && !shaderFile.includes('v0.39') && !shaderFile.includes('v0.40') && !shaderFile.includes('v0.51') && !shaderFile.includes('v0.55')) {
       setStepsLength(32);
     }
   }, [shaderFile]);
@@ -256,16 +258,36 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
 
   // WebGPU render hook — matrix and padTopChannel passed directly so React tracks them as
   // explicit deps, guaranteeing the cells buffer is rebuilt when a new module is loaded.
+  const oscTextureRef = useRef<GPUTexture | null>(null);
+
   const { gpuReady, render, deviceRef: gpuDevRef } = useWebGPURender(
     canvasRef, glCanvasRef, shaderFile,
     syncCanvasSize, renderParamsRef, matrix, padTopChannel, setDebugInfo, setWebgpuAvailable,
-    bloomRef
+    bloomRef,
+    oscTextureRef
   );
 
   // Keep resize reconfiguration refs in sync
   useEffect(() => {
     gpuDeviceRef.current = gpuDevRef.current;
   });
+
+  // Create oscilloscope 1D texture when GPU is ready and v0.55 is active
+  useEffect(() => {
+    const device = gpuDevRef.current;
+    if (!device || !gpuReady || !shaderFile.includes('v0.55')) return;
+    if (!oscTextureRef.current) {
+      oscTextureRef.current = device.createTexture({
+        size: [2048, 1, 1],
+        format: 'r32float',
+        usage: GPUTextureUsage.COPY_DST | GPUTextureUsage.TEXTURE_BINDING,
+      });
+    }
+    return () => {
+      oscTextureRef.current?.destroy();
+      oscTextureRef.current = null;
+    };
+  }, [gpuReady, shaderFile]);
 
   // Initialize multi-layer bloom post-processor when GPU becomes ready
   useEffect(() => {
@@ -369,6 +391,14 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
           freqDataRef.current = new Uint8Array(analyserNode.frequencyBinCount);
         }
         analyserNode.getByteFrequencyData(freqDataRef.current);
+      }
+      if (oscTextureRef.current && oscBufferRef?.current && gpuDevRef.current) {
+        gpuDevRef.current.queue.writeTexture(
+          { texture: oscTextureRef.current },
+          oscBufferRef.current.buffer as ArrayBuffer,
+          { bytesPerRow: 2048 * 4 },
+          { width: 2048, height: 1, depthOrArrayLayers: 1 }
+        );
       }
       if (gpuReady) {
         renderRef.current?.();

@@ -80,11 +80,27 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
           error('Cannot seek: module not loaded');
         }
         this.port.postMessage({ type: 'seekAck' });
+      } else if (type === 'getOscBuffer') {
+        if (this.oscBuffer) {
+          this.port.postMessage({ type: 'oscBuffer', buffer: this.oscBuffer });
+        }
       } else if (!type && moduleData) {
         // Legacy fallback
         await this.loadModule(moduleData);
       }
     };
+
+    // Oscilloscope ring buffer: 2048 floats (8192 bytes)
+    try {
+      this.oscBuffer = new SharedArrayBuffer(2048 * 4);
+    } catch (e) {
+      this.oscBuffer = null;
+    }
+    this.oscView = this.oscBuffer ? new Float32Array(this.oscBuffer) : null;
+    this.oscWritePtr = 0;
+    if (this.oscBuffer) {
+      this.port.postMessage({ type: 'oscBuffer', buffer: this.oscBuffer });
+    }
 
     // Fire-and-forget WASM bootstrap
     this._libInitPromise = this._initLib();
@@ -225,6 +241,15 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
     // Zero-copy view into WASM heap
     outL.set(new Float32Array(this.lib.HEAPF32.buffer, this.leftBufPtr, samplesWritten));
     outR.set(new Float32Array(this.lib.HEAPF32.buffer, this.rightBufPtr, samplesWritten));
+
+    // Copy first 128 samples into oscilloscope ring buffer
+    if (this.oscView && outL) {
+      const framesToCopy = Math.min(128, outL.length);
+      for (let i = 0; i < framesToCopy; i++) {
+        this.oscView[this.oscWritePtr] = outL[i];
+        this.oscWritePtr = (this.oscWritePtr + 1) & 2047; // fast modulo 2048
+      }
+    }
 
     // Silence remainder if libopenmpt rendered fewer frames
     if (samplesWritten < numSamples) {

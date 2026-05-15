@@ -138,6 +138,9 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
   // Native C++/Wasm AudioWorklet engine (Phase 2)
   const nativeEngineRef = useRef<OpenMPTWorkletEngine | null>(null);
 
+  // Oscilloscope SAB view — zero-GC, ref-based pipeline to GPU
+  const oscBufferRef = useRef<Float32Array | null>(null);
+
   // Sync isPlayingRef with the latest React state every render
   isPlayingRef.current = isPlaying;
 
@@ -623,6 +626,20 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
       panValue, volume, isLooping, WORKLET_URL,
     };
     await startAudioPlayback(audioRefs, audioCbs, audioConfig);
+
+    // Request oscilloscope SharedArrayBuffer from worklet (sent once in constructor,
+    // but we may have missed it; getOscBuffer allows re-delivery without re-allocation)
+    const node = audioWorkletNodeRef.current;
+    if (node) {
+      const handler = (e: MessageEvent) => {
+        if (e.data?.type === 'oscBuffer' && e.data.buffer) {
+          oscBufferRef.current = new Float32Array(e.data.buffer);
+          node.port.removeEventListener('message', handler);
+        }
+      };
+      node.port.addEventListener('message', handler);
+      node.port.postMessage({ type: 'getOscBuffer' });
+    }
   }, [activeEngine, isWorkletSupported, isNativeWorkletAvailable, panValue, volume, isLooping, stopMusic, seekToStepWrapper, updateUI]);
 
   // Keep playRef always pointing to the latest play function
@@ -847,5 +864,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
     playbackStateRef,
     // AUDIO-001 FIX: Export worklet diagnostics
     workletLoadError,
+    // Oscilloscope SAB view for GPU texture upload
+    oscBufferRef,
   };
 }

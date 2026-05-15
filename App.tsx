@@ -146,6 +146,7 @@ function App() {
     analyserNode,
     playbackStateRef,
     workletLoadError,
+    oscBufferRef,
   } = useLibOpenMPT(volume);
 
   // Media Overlay State
@@ -475,6 +476,7 @@ function App() {
                 onOpenDebug={() => setDebugPanelOpen(true)}
                 // PERFORMANCE OPTIMIZATION: Pass ref for high-frequency updates
                 playbackStateRef={playbackStateRef}
+                oscBufferRef={oscBufferRef}
                 // Bloom settings from preset
                 bloomIntensity={bloomPreset.intensity}
                 bloomThreshold={bloomPreset.threshold}
@@ -678,6 +680,7 @@ function App() {
               onOpenDebug={() => setDebugPanelOpen(true)}
               // PERFORMANCE OPTIMIZATION: Pass ref for high-frequency updates
               playbackStateRef={playbackStateRef}
+              oscBufferRef={oscBufferRef}
              // Bloom settings from preset
              bloomIntensity={bloomPreset.intensity}
              bloomThreshold={bloomPreset.threshold}
