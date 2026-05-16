@@ -3,8 +3,16 @@ import { LibOpenMPT, ModuleInfo, PatternMatrix, ChannelShadowState, PlaybackStat
 import { OpenMPTWorkletEngine } from '../audio-worklet/OpenMPTWorkletEngine';
 import { getPatternMatrix, computeNoteAges } from '../utils/patternExtractor';
 import { startAudioPlayback, AudioGraphRefs, AudioGraphCallbacks, AudioGraphConfig } from './useAudioGraph';
-import { useWorkletLoader, getWorkletUrl, getAbsoluteWorkletUrl } from './useWorkletLoader';
+import { useWorkletLoader, getWorkletUrl, getNativeGlueUrl, getAbsoluteWorkletUrl } from './useWorkletLoader';
 import { logWorkletDiagnostics } from '../audio-worklet/diagnostics';
+
+interface SyncDebugInfo {
+  mode: string;
+  bufferMs: number;
+  driftMs: number;
+  row: number;
+  starvationCount: number;
+}
 
 // Use Vite BASE_URL for correct resolution under subdirectory deployment
 const DEFAULT_MODULE_URL = `${import.meta.env.BASE_URL}4-mat_madness.mod`;
@@ -767,7 +775,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
         // Note: enabling this requires building the wasm engine using
         // ./scripts/build-wasm.sh (Emscripten SDK must be installed).
         try {
-          const nativeGlueUrl = `${import.meta.env.BASE_URL}worklets/openmpt-native.js`;
+          const nativeGlueUrl = getNativeGlueUrl();
           console.log('[INIT] Probing for native engine at:', nativeGlueUrl);
           const probeResp = await fetch(nativeGlueUrl, { method: 'HEAD' });
           if (probeResp.ok) {
