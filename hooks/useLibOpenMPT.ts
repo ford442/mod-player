@@ -398,6 +398,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
     }
     setPlaybackRowFraction(smoothedPlayhead);
 
+    // Compute note ages for hardware choke / shaders
     // Compute note ages for hardware choke in shader (only update React state when integer ages change)
     const playheadRow = smoothedPlayhead;
     const currentMatrix = patternMatricesRef.current[order];
@@ -448,8 +449,8 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
     const beatPhaseValue = (time * 2) % 1;
     setBeatPhase(beatPhaseValue);
 
-    const now = workletTimestampRef.current || (audioCtx?.currentTime || performance.now() / 1000);
-
+    // TIMING FIX: Atomic update of playbackStateRef with worklet-provided timestamp
+    const now = workletTimestampRef.current ?? (audioCtx?.currentTime ?? performance.now() / 1000);
     playbackStateRef.current = {
       playheadRow: smoothedPlayhead,
       currentOrder: order,

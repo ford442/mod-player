@@ -161,6 +161,8 @@ function App() {
   // Media Overlay State
   const [mediaVisible, setMediaVisible] = useState<boolean>(false);
   const [mediaItem, setMediaItem] = useState<MediaItem | null>(null);
+  // Track object URLs created from local files so we can revoke them on replacement/unmount
+  const mediaObjectUrlRef = useRef<string | null>(null);
 
   // Panel visibility
   const [showChannelMeters, setShowChannelMeters] = useState<boolean>(true);
@@ -417,6 +419,15 @@ function App() {
     });
   }, []);
 
+  // Revoke any lingering media object URL on unmount
+  useEffect(() => {
+    return () => {
+      if (mediaObjectUrlRef.current) {
+        URL.revokeObjectURL(mediaObjectUrlRef.current);
+      }
+    };
+  }, []);
+
   // Handle File Selection
 
   const handleFileSelected = async (file: File) => {
@@ -427,7 +438,12 @@ function App() {
 
   const handleMediaAdd = (file: File) => {
     const kind = file.type.startsWith("video") ? "video" : "image";
+    // Revoke the previous object URL to avoid memory leaks
+    if (mediaObjectUrlRef.current) {
+      URL.revokeObjectURL(mediaObjectUrlRef.current);
+    }
     const url = URL.createObjectURL(file);
+    mediaObjectUrlRef.current = url;
     setMediaItem({
       id: crypto.randomUUID(),
       kind,
