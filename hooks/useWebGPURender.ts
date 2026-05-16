@@ -26,19 +26,7 @@ import {
 } from '../utils/gpuPacking';
 import type { BloomPostProcessor } from '../utils/bloomPostProcessor';
 import { GRID_RECT } from '../utils/geometryConstants';
-
-// Runtime base URL detection for subdirectory deployment
-const detectRuntimeBase = (): string => {
-  const viteBase = import.meta.env.BASE_URL;
-  if (viteBase && viteBase !== '/') {
-    return viteBase.endsWith('/') ? viteBase : `${viteBase}/`;
-  }
-  const pathSegments = window.location.pathname.split('/').filter(Boolean);
-  if (pathSegments.length > 0) {
-    return `/${pathSegments[0]}/`;
-  }
-  return '/';
-};
+import { detectRuntimeBase } from '../src/lib/paths';
 
 export type DebugInfo = {
   layoutMode: string;
@@ -393,6 +381,7 @@ export function useWebGPURender(
     const p = renderParamsRef.current;
     const rawChannels = matrix?.numChannels ?? DEFAULT_CHANNELS;
     const numChannels = p.padTopChannel ? rawChannels + 1 : rawChannels;
+    if (numChannels <= 0) return;
     const numRows = matrix?.numRows ?? DEFAULT_ROWS;
     // DEBUG: cells buffer update
     if (cellsBufferRef.current) cellsBufferRef.current.destroy();
@@ -472,6 +461,7 @@ export function useWebGPURender(
       const numRows = p.matrix?.numRows ?? DEFAULT_ROWS;
       const rawChannels = p.matrix?.numChannels ?? DEFAULT_CHANNELS;
       const numChannels = p.padTopChannel ? rawChannels + 1 : rawChannels;
+      if (numChannels <= 0) return;
       const rowLimit = Math.max(1, numRows);
 
       const refState = p.playbackStateRef?.current;

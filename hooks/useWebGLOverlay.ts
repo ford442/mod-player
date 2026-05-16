@@ -18,25 +18,13 @@ import {
   getLayoutModeFromShader,
   LAYOUT_MODES,
 } from '../utils/geometryConstants';
+import { detectRuntimeBase } from '../src/lib/paths';
 
 const DEFAULT_ROWS = 64;
 const DEFAULT_CHANNELS = 4;
 
 const CORE_UNIFORMS = new Set(['u_resolution', 'u_cellData', 'u_cols', 'u_playhead']);
 const VARIANT_UNIFORMS = new Set(['u_layoutMode', 'u_invertChannels', 'u_cellSize', 'u_offset', 'u_capTexture', 'u_rows', 'u_channelState', 'u_bloomIntensity', 'u_timeSec', 'u_innerRadius', 'u_outerRadius']);
-
-// Runtime base URL detection for subdirectory deployment (e.g., /xm-player/)
-const detectRuntimeBase = (): string => {
-  const viteBase = import.meta.env.BASE_URL;
-  if (viteBase && viteBase !== '/') {
-    return viteBase.endsWith('/') ? viteBase : `${viteBase}/`;
-  }
-  const pathSegments = window.location.pathname.split('/').filter(Boolean);
-  if (pathSegments.length > 0) {
-    return `/${pathSegments[0]}/`;
-  }
-  return '/';
-};
 
 export interface WebGLOverlayParams {
   shaderFile: string;

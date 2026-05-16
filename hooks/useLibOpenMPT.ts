@@ -6,14 +6,6 @@ import { startAudioPlayback, AudioGraphRefs, AudioGraphCallbacks, AudioGraphConf
 import { useWorkletLoader, getWorkletUrl, getNativeGlueUrl, getAbsoluteWorkletUrl } from './useWorkletLoader';
 import { logWorkletDiagnostics } from '../audio-worklet/diagnostics';
 
-interface SyncDebugInfo {
-  mode: string;
-  bufferMs: number;
-  driftMs: number;
-  row: number;
-  starvationCount: number;
-}
-
 // Use Vite BASE_URL for correct resolution under subdirectory deployment
 const DEFAULT_MODULE_URL = `${import.meta.env.BASE_URL}4-mat_madness.mod`;
 
@@ -405,23 +397,6 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
     }
     setPlaybackRowFraction(smoothedPlayhead);
 
-    // Compute note ages for hardware choke in shader (only update React state when integer ages change)
-    const playheadRow = row + smoothedRowFraction;
-    const currentMatrix = patternMatricesRef.current[order];
-    const numChannels = channelStatesRef.current.length;
-    if (currentMatrix && numChannels > 0) {
-    // TIMING FIX: Smooth row fraction for visual display
-    const targetPlayhead = row + rowFraction;
-    const prevPlayhead = playbackStateRef.current.playheadRow;
-    let smoothedPlayhead = prevPlayhead + (targetPlayhead - prevPlayhead) * ROW_INTERPOLATION_SMOOTHING;
-
-    // Snap if jump is too large (seek or pattern change)
-    if (Math.abs(targetPlayhead - prevPlayhead) > 2.0) {
-      smoothedPlayhead = targetPlayhead;
-    }
-
-    setPlaybackRowFraction(smoothedPlayhead);
-
     // Compute note ages for hardware choke / shaders
     const playheadRow = smoothedPlayhead;
     const currentMatrix = patternMatricesRef.current[order];
@@ -474,21 +449,17 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
     const beatPhaseValue = (time * 2) % 1;
     setBeatPhase(beatPhaseValue);
 
-// TIMING FIX COMPLETE: Atomic update of playbackStateRef with worklet-provided timestamp
-const now = workletTimestampRef.current || (audioCtx?.currentTime || performance.now() / 1000);
-
-// Use the already-computed smoothed value for consistency
-const smoothedPlayhead = row + smoothedRowFraction;
-
-playbackStateRef.current = {
-  playheadRow: smoothedPlayhead,
-  currentOrder: order,
-  timeSec: time,
-  beatPhase: beatPhaseValue,
-  kickTrigger: kickTrigger,
-  grooveAmount: grooveAmount,
-  lastUpdateTimestamp: now
-};
+    // TIMING FIX: Atomic update of playbackStateRef with worklet-provided timestamp
+    const now = workletTimestampRef.current || (audioCtx?.currentTime ?? performance.now() / 1000);
+    playbackStateRef.current = {
+      playheadRow: smoothedPlayhead,
+      currentOrder: order,
+      timeSec: time,
+      beatPhase: beatPhaseValue,
+      kickTrigger: kickTrigger,
+      grooveAmount: grooveAmount,
+      lastUpdateTimestamp: now
+    };
 
     // TIMING FIX: Update sync debug info
     setSyncDebug((prev: SyncDebugInfo) => ({

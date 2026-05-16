@@ -6,6 +6,22 @@
  */
 
 /**
+ * Detect the runtime base URL for asset loading, handling subdirectory deployments.
+ * Prefers the Vite-injected BASE_URL; falls back to inferring from `window.location`.
+ */
+export const detectRuntimeBase = (): string => {
+  const viteBase = import.meta.env.BASE_URL;
+  if (viteBase && viteBase !== '/') {
+    return viteBase.endsWith('/') ? viteBase : `${viteBase}/`;
+  }
+  const pathSegments = window.location.pathname.split('/').filter(Boolean);
+  if (pathSegments.length > 0) {
+    return `/${pathSegments[0]}/`;
+  }
+  return '/';
+};
+
+/**
  * Prepends the base URL to a path for proper subpath deployment support.
  * @param p - The path to resolve (e.g., 'worklets/openmpt-worklet.js')
  * @returns The full URL with base path
