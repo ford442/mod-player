@@ -6,13 +6,6 @@ import { startAudioPlayback, AudioGraphRefs, AudioGraphCallbacks, AudioGraphConf
 import { useWorkletLoader, getWorkletUrl, getNativeGlueUrl, getAbsoluteWorkletUrl } from './useWorkletLoader';
 import { logWorkletDiagnostics } from '../audio-worklet/diagnostics';
 
-interface SyncDebugInfo {
-  mode: string;
-  bufferMs: number;
-  driftMs: number;
-  row: number;
-  starvationCount: number;
-}
 
 // Use Vite BASE_URL for correct resolution under subdirectory deployment
 const DEFAULT_MODULE_URL = `${import.meta.env.BASE_URL}4-mat_madness.mod`;
