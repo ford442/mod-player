@@ -112,6 +112,7 @@ export const PatternDisplayVFX: React.FC<{
   const pipelineRef = useRef<GPURenderPipeline | null>(null);
   const particlesRef = useRef<Particle[]>([]);
   const animationRef = useRef<number>(0);
+  const activeParticleCountRef = useRef(0);
   
   const [gpuReady, setGpuReady] = useState(false);
   const [frameTime, setFrameTime] = useState(0);
@@ -142,6 +143,7 @@ export const PatternDisplayVFX: React.FC<{
   // Update particles
   const updateParticles = useCallback((deltaTime: number) => {
     const particles = particlesRef.current;
+    let activeCount = 0;
     
     // Spawn new particles on beat
     if (kickTrigger > 0.5) {
@@ -169,8 +171,13 @@ export const PatternDisplayVFX: React.FC<{
         if (p.x > 1) p.x = 0;
         if (p.y < 0) p.y = 1;
         if (p.y > 1) p.y = 0;
+
+        if (p.life > 0) {
+          activeCount++;
+        }
       }
     }
+    activeParticleCountRef.current = activeCount;
   }, [kickTrigger, settings.animationSpeed]);
   
   // Initialize WebGPU
@@ -287,7 +294,7 @@ export const PatternDisplayVFX: React.FC<{
         <div className="absolute top-2 right-2 bg-black/50 text-white text-xs font-mono p-2 rounded">
           <div>Frame: {frameTime.toFixed(2)}ms</div>
           <div>FPS: {(1000 / Math.max(frameTime, 1)).toFixed(0)}</div>
-          <div>Particles: {particlesRef.current.filter(p => p.life > 0).length}</div>
+          <div>Particles: {activeParticleCountRef.current}</div>
         </div>
       )}
       
