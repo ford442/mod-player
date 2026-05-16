@@ -6,6 +6,7 @@ import { startAudioPlayback, AudioGraphRefs, AudioGraphCallbacks, AudioGraphConf
 import { useWorkletLoader, getWorkletUrl, getNativeGlueUrl, getAbsoluteWorkletUrl } from './useWorkletLoader';
 import { logWorkletDiagnostics } from '../audio-worklet/diagnostics';
 
+
 // Use Vite BASE_URL for correct resolution under subdirectory deployment
 const DEFAULT_MODULE_URL = `${import.meta.env.BASE_URL}4-mat_madness.mod`;
 
@@ -398,10 +399,10 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
     setPlaybackRowFraction(smoothedPlayhead);
 
     // Compute note ages for hardware choke / shaders
+    // Compute note ages for hardware choke in shader (only update React state when integer ages change)
     const playheadRow = smoothedPlayhead;
     const currentMatrix = patternMatricesRef.current[order];
     const numChannels = channelStatesRef.current.length;
-
     if (currentMatrix && numChannels > 0) {
       // PERFORMANCE: Only recompute on row boundary crossings
       const prev = playbackStateRef.current;
@@ -421,7 +422,6 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
             changed = true;
           }
 
-          // Update ref (mutable for shaders)
           channelStatesRef.current[c] = {
             ...existing,
             noteAge: newAge,
