@@ -17,39 +17,32 @@ export interface ColorScheme {
 
 export const BLOOM_PRESETS: BloomPreset[] = [
   {
-    name: 'Subtle UI',
-    threshold: 0.85,
-    intensity: 0.8,
-    knee: 0.1,
-    description: 'Clean minimal - barely visible glow',
-  },
-  {
-    name: 'Standard',
-    threshold: 0.75,
-    intensity: 1.0,
-    knee: 0.15,
-    description: 'Balanced - general purpose (Recommended)',
-  },
-  {
-    name: 'Gaming',
+    name: 'Soft',
     threshold: 0.65,
-    intensity: 1.5,
-    knee: 0.2,
-    description: 'Dramatic glow effects',
+    intensity: 0.7,
+    knee: 0.35,
+    description: 'Wide, gentle glow — subtle and atmospheric',
   },
   {
-    name: 'HDR Cinematic',
-    threshold: 1.0,
-    intensity: 2.0,
-    knee: 0.3,
-    description: 'High contrast, film look',
+    name: 'Crisp',
+    threshold: 0.82,
+    intensity: 1.0,
+    knee: 0.06,
+    description: 'Tight, precise highlights — clean and sharp',
   },
   {
-    name: 'Neon',
-    threshold: 0.5,
-    intensity: 2.5,
-    knee: 0.05,
-    description: 'Cyberpunk - strong bloom',
+    name: 'Heavy',
+    threshold: 0.45,
+    intensity: 2.2,
+    knee: 0.18,
+    description: 'Intense, broad bloom — dramatic impact',
+  },
+  {
+    name: 'Dreamy',
+    threshold: 0.55,
+    intensity: 1.6,
+    knee: 0.45,
+    description: 'Soft wide halo with deep feathering — ethereal feel',
   },
 ];
 
@@ -77,7 +70,7 @@ export const COLOR_SCHEMES: ColorScheme[] = [
 ];
 
 // Default selections
-export const DEFAULT_BLOOM_PRESET: BloomPreset = BLOOM_PRESETS[1]!; // Standard
+export const DEFAULT_BLOOM_PRESET: BloomPreset = BLOOM_PRESETS[1]!; // Crisp
 export const DEFAULT_COLOR_SCHEME: ColorScheme = COLOR_SCHEMES[1]!; // Golden Ratio
 
 // Helper to get preset by name

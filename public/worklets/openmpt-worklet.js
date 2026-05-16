@@ -1,21 +1,44 @@
-// AudioWorkletProcessor for libopenmpt
-// Uses dynamic import() for broad Chrome 116+ compatibility.
-// DO NOT add a top-level static `import` here – that requires
-// addModule({ type:'module' }) which is not universally supported
-// across Chrome 113-116 (needed for WebGPU baseline).
+/**
+ * OpenMPT AudioWorklet Processor
+ * Renders libopenmpt audio directly inside the AudioWorklet process() callback.
+ *
+ * ⚠️  WARNING: This file MUST call _openmpt_module_read_float_stereo() in process().
+ *     Do NOT replace this with a stub/test tone. A previous stub (commit 499a862)
+ *     broke all MOD playback by generating a 440Hz sine wave instead of rendering
+ *     the loaded module. See docs/WORKLET_AUDIO_BUG.md for the full post-mortem.
+ *
+ * Critical setup for AudioWorklet compatibility:
+ * 1. globalThis.libopenmpt pre-configuration so Emscripten locateFile resolves WASM correctly
+ * 2. Dynamic import() of libopenmpt-audioworklet.js (avoids addModule({ type:'module' }) requirement)
+ *
+ * NOTE: Chrome 116+ provides setTimeout in AudioWorkletGlobalScope. The old microtask-based
+ * polyfill (Promise.resolve().then) was harmful because it ignored delay arguments,
+ * causing Emscripten timer callbacks to fire immediately and corrupt runtime state.
+ */
 
-const DEBUG = false;
+const DEBUG = true;
 function log(...args) { if (DEBUG) console.log('[Worklet]', ...args); }
 function error(...args) { console.error('[Worklet]', ...args); }
+
+// ── Emscripten Module pre-configuration ───────────────────────────
+// libopenmpt-audioworklet.js checks "typeof libopenmpt" and uses that
+// object as its Module. We pre-seed locateFile so it can find the
+// co-located .wasm file (or wasm2js stub) regardless of subdirectory deploys.
+try {
+  const workletBaseUrl = new URL('.', import.meta.url).href;
+  globalThis.libopenmpt = {
+    locateFile: (path) => workletBaseUrl + path,
+  };
+  log('WASM base URL resolved to:', workletBaseUrl);
+} catch (e) {
+  // Fallback: hope the wasm file is at the same path as the page
+  globalThis.libopenmpt = {};
+  error('Failed to resolve worklet base URL, WASM load may fail:', e);
+}
 
 class XMPlayerProcessor extends AudioWorkletProcessor {
   constructor(options) {
     super(options);
-    // Provide Emscripten with the shared WASM Memory BEFORE the script loads
-    if (options && options.processorOptions && options.processorOptions.memory) {
-      globalThis.Module = globalThis.Module || {};
-      globalThis.Module['wasmMemory'] = options.processorOptions.memory;
-    }
 
     this.modulePtr = 0;
     this.leftBufPtr = 0;
@@ -23,31 +46,61 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
     this.maxFrames = 4096;
     this.lib = null;
     this.isLibReady = false;
-    // 60 Hz position reports (matches display refresh, was 20 Hz)
+    this.isPlaying = true; // default to playing for backward compat
+    this.hasEnded = false; // prevent spamming 'ended' messages
+
+    // 60 Hz position reports
     this.positionReportInterval = 1 / 60;
     this.lastPositionReportTime = 0;
 
-    log('Constructor called');
+    log('Constructor called, sampleRate:', sampleRate);
 
     this.port.onmessage = async (e) => {
       const { type, moduleData } = e.data;
       log('Received message:', type || '(no-type)', 'bytes:', moduleData?.byteLength);
 
       if (type === 'load' && moduleData) {
+        this.hasEnded = false;
         await this.loadModule(moduleData);
+      } else if (type === 'play') {
+        this.isPlaying = true;
+        this.hasEnded = false;
+        log('Playback started');
+      } else if (type === 'pause') {
+        this.isPlaying = false;
+        log('Playback paused');
       } else if (type === 'seek') {
+        this.hasEnded = false;
         if (this.modulePtr && this.lib) {
           this.lib._openmpt_module_set_position_order_row(
             this.modulePtr, e.data.order, e.data.row
           );
+          log('Seek executed:', e.data.order, e.data.row);
         } else {
           error('Cannot seek: module not loaded');
+        }
+        this.port.postMessage({ type: 'seekAck' });
+      } else if (type === 'getOscBuffer') {
+        if (this.oscBuffer) {
+          this.port.postMessage({ type: 'oscBuffer', buffer: this.oscBuffer });
         }
       } else if (!type && moduleData) {
         // Legacy fallback
         await this.loadModule(moduleData);
       }
     };
+
+    // Oscilloscope ring buffer: 2048 floats (8192 bytes)
+    try {
+      this.oscBuffer = new SharedArrayBuffer(2048 * 4);
+    } catch (e) {
+      this.oscBuffer = null;
+    }
+    this.oscView = this.oscBuffer ? new Float32Array(this.oscBuffer) : null;
+    this.oscWritePtr = 0;
+    if (this.oscBuffer) {
+      this.port.postMessage({ type: 'oscBuffer', buffer: this.oscBuffer });
+    }
 
     // Fire-and-forget WASM bootstrap
     this._libInitPromise = this._initLib();
@@ -58,14 +111,12 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
     try {
       log('Dynamic-importing libopenmpt-audioworklet.js…');
 
-      // dynamic import() in AudioWorklet works since Chrome 116.
-      // It avoids the static-import / addModule({ type:'module' }) requirement.
       const mod = await import('./libopenmpt-audioworklet.js');
       let lib = mod.default;
 
       if (!lib) throw new Error('dynamic import returned falsy default export');
 
-      // Wait for the async WASM runtime to complete initialisation
+      // Wait for the async WASM (or wasm2js) runtime to complete initialisation
       if (!lib._openmpt_module_create_from_memory) {
         log('Waiting for WASM onRuntimeInitialized…');
         await new Promise((resolve, reject) => {
@@ -101,7 +152,6 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
   async loadModule(moduleData) {
     log('loadModule: awaiting WASM ready…');
 
-    // Always await the same init promise (idempotent)
     await this._libInitPromise;
 
     if (!this.isLibReady) {
@@ -119,7 +169,7 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
         lib._openmpt_module_destroy(this.modulePtr);
         this.modulePtr = 0;
       }
-      if (this.leftBufPtr)  { lib._free(this.leftBufPtr);  this.leftBufPtr  = 0; }
+      if (this.leftBufPtr) { lib._free(this.leftBufPtr); this.leftBufPtr = 0; }
       if (this.rightBufPtr) { lib._free(this.rightBufPtr); this.rightBufPtr = 0; }
 
       // Copy file data into WASM heap
@@ -137,16 +187,13 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
       }
 
       // Allocate persistent stereo output buffers in WASM heap
-      this.leftBufPtr  = lib._malloc(4 * this.maxFrames);
+      this.leftBufPtr = lib._malloc(4 * this.maxFrames);
       this.rightBufPtr = lib._malloc(4 * this.maxFrames);
 
       // Best-quality windowed-sinc interpolation
       lib._openmpt_module_set_render_param(this.modulePtr, 2, 8);
 
       log('Module loaded ✅ ptr=', this.modulePtr);
-      // Reset position reporting timer so the new module starts sending
-      // position messages immediately instead of waiting for the old interval.
-      this.lastPositionReportTime = 0;
       this.port.postMessage({ type: 'loaded' });
     } catch (err) {
       error('loadModule error:', err);
@@ -156,24 +203,25 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
 
   // ── Audio process loop ─────────────────────────────────────────────
   process(_inputs, outputs, _parameters) {
-    if (!this.modulePtr || !this.lib) {
-      // Silence while WASM / module is still initialising
-      const out = outputs[0];
-      if (out) { if (out[0]) out[0].fill(0); if (out[1]) out[1].fill(0); }
+    const out = outputs[0];
+    const outL = out[0];
+    const outR = out[1];
+
+    if (!outL || !outR) return true;
+
+    // Silence while WASM / module is still initialising or paused
+    if (!this.modulePtr || !this.lib || !this.isPlaying) {
+      outL.fill(0);
+      outR.fill(0);
       return true;
     }
 
-    const out  = outputs[0];
-    const outL = out[0];
-    const outR = out[1];
-    if (!outL || !outR) return true;
-
-    const numSamples   = outL.length;
+    const numSamples = outL.length;
     const framesToRead = Math.min(numSamples, this.maxFrames);
 
     const samplesWritten = this.lib._openmpt_module_read_float_stereo(
       this.modulePtr,
-      sampleRate,        // AudioWorklet global – correct context sample rate
+      sampleRate,
       framesToRead,
       this.leftBufPtr,
       this.rightBufPtr
@@ -182,13 +230,26 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
     if (samplesWritten === 0) {
       outL.fill(0);
       outR.fill(0);
-      this.port.postMessage({ type: 'ended' });
+      if (!this.hasEnded) {
+        this.hasEnded = true;
+        this.port.postMessage({ type: 'ended' });
+      }
       return true;
     }
+    this.hasEnded = false;
 
     // Zero-copy view into WASM heap
-    outL.set(new Float32Array(this.lib.HEAPF32.buffer, this.leftBufPtr,  samplesWritten));
+    outL.set(new Float32Array(this.lib.HEAPF32.buffer, this.leftBufPtr, samplesWritten));
     outR.set(new Float32Array(this.lib.HEAPF32.buffer, this.rightBufPtr, samplesWritten));
+
+    // Copy first 128 samples into oscilloscope ring buffer
+    if (this.oscView && outL) {
+      const framesToCopy = Math.min(128, outL.length);
+      for (let i = 0; i < framesToCopy; i++) {
+        this.oscView[this.oscWritePtr] = outL[i];
+        this.oscWritePtr = (this.oscWritePtr + 1) & 2047; // fast modulo 2048
+      }
+    }
 
     // Silence remainder if libopenmpt rendered fewer frames
     if (samplesWritten < numSamples) {
@@ -196,14 +257,21 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
       outR.fill(0, samplesWritten);
     }
 
-    // Position reporting at ~60 Hz (matches UI frame rate)
+    // Position reporting at ~60 Hz
     if (currentTime - this.lastPositionReportTime >= this.positionReportInterval) {
-      const order   = this.lib._openmpt_module_get_current_order(this.modulePtr);
-      const row     = this.lib._openmpt_module_get_current_row(this.modulePtr);
-      const posSec  = this.lib._openmpt_module_get_position_seconds(this.modulePtr);
-      const bpm     = this.lib._openmpt_module_get_current_estimated_bpm(this.modulePtr);
+      const order = this.lib._openmpt_module_get_current_order(this.modulePtr);
+      const row = this.lib._openmpt_module_get_current_row(this.modulePtr);
+      const posSec = this.lib._openmpt_module_get_position_seconds(this.modulePtr);
+      const bpm = this.lib._openmpt_module_get_current_estimated_bpm(this.modulePtr);
 
-      this.port.postMessage({ type: 'position', order, row, positionSeconds: posSec, bpm });
+      this.port.postMessage({
+        type: 'position',
+        order,
+        row,
+        positionSeconds: posSec,
+        bpm,
+        workletTime: currentTime,
+      });
       this.lastPositionReportTime = currentTime;
     }
 
@@ -212,3 +280,4 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
 }
 
 registerProcessor('openmpt-processor', XMPlayerProcessor);
+log('[OpenMPTWorklet] Script loaded, processor registered');

@@ -7,6 +7,7 @@ import { OpenMPTWorkletEngine } from '../audio-worklet/OpenMPTWorkletEngine';
 import type { WorkletPositionData } from '../audio-worklet/types';
 import { getWorkletUrl } from './useWorkletLoader';
 import { computeNoteAges } from '../utils/patternExtractor';
+import { logWorkletDiagnostics } from '../audio-worklet/diagnostics';
 
 export interface AudioGraphRefs {
   libopenmptRef:       React.MutableRefObject<LibOpenMPT | null>;
@@ -22,6 +23,7 @@ export interface AudioGraphRefs {
   workletOrderRef:     React.MutableRefObject<number>;
   workletRowRef:       React.MutableRefObject<number>;
   workletTimeRef:      React.MutableRefObject<number>;
+  workletTimestampRef: React.MutableRefObject<number>;
   lastWorkletUpdateRef: React.MutableRefObject<number>;
   workletBpmRef:       React.MutableRefObject<number>;
   pendingSeekRef:      React.MutableRefObject<{ order: number; row: number; timestamp: number } | null>;
@@ -62,19 +64,6 @@ export interface AudioGraphConfig {
   WORKLET_URL:            string;
 }
 
-// AUDIO-001 FIX COMPLETE: Enhanced logging helper
-const logWorkletDiagnostics = (ctx: AudioContext, workletUrl: string) => {
-  console.log('[WORKLET_DIAGNOSTICS]', {
-    audioContextState: ctx.state,
-    audioContextSampleRate: ctx.sampleRate,
-    workletUrl,
-    hasAudioWorklet: !!ctx.audioWorklet,
-    baseUrl: import.meta.env.BASE_URL,
-    location: window.location.href,
-    timestamp: new Date().toISOString(),
-  });
-};
-
 // AUDIO-001 FIX COMPLETE: Centralized worklet URL from useWorkletLoader
 const WORKLET_URL = getWorkletUrl();
 
@@ -105,15 +94,24 @@ export async function startAudioPlayback(
     if (!refs.audioContextRef.current) {
       console.log('[PLAY] Creating new AudioContext...');
       refs.audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ latencyHint: 'playback' });
-      // New context: worklet module needs to be (re)loaded
       refs.workletLoadedRef.current = false;
+
+      // AUDIO-001 FIX COMPLETE: Detailed log right after AudioContext creation
+      const ctx = refs.audioContextRef.current;
+      console.log('[AudioEngine] AudioContext created', {
+        state: ctx.state,
+        sampleRate: ctx.sampleRate,
+        baseLatency: ctx.baseLatency,
+        outputLatency: ctx.outputLatency ?? 0,
+        timestamp: performance.now(),
+      });
     }
 
     const ctx = refs.audioContextRef.current;
     console.log('[PLAY] AudioContext state:', ctx.state);
     
     // AUDIO-001 FIX COMPLETE: Log diagnostics
-    logWorkletDiagnostics(ctx, config.WORKLET_URL);
+    logWorkletDiagnostics(config.WORKLET_URL, ctx);
 
     if (ctx.state === 'suspended') {
       console.log('[PLAY] Resuming suspended AudioContext...');
@@ -174,6 +172,7 @@ export async function startAudioPlayback(
           refs.workletOrderRef.current = data.currentOrder;
           refs.workletRowRef.current = data.currentRow;
           refs.workletTimeRef.current = data.positionMs / 1000;
+          refs.workletTimestampRef.current = data.workletTime || now;
           refs.lastWorkletUpdateRef.current = now;
 
           // TIMING FIX: Update BPM ref from worklet
@@ -342,6 +341,8 @@ export async function startAudioPlayback(
           refs.wasmMemoryRef.current = wasmMemory;
         }
         if (wasmMemory) processorOptions.memory = wasmMemory;
+        // Pass base URL so the worklet can resolve WASM/co-located assets correctly
+        processorOptions.baseUrl = import.meta.env.BASE_URL || '/';
         
         // AUDIO-001 FIX COMPLETE: Wrap node creation in try-catch for better diagnostics
         let node: AudioWorkletNode;
@@ -368,6 +369,7 @@ export async function startAudioPlayback(
             refs.workletOrderRef.current = order;
             refs.workletRowRef.current = row;
             refs.workletTimeRef.current = positionSeconds;
+            refs.workletTimestampRef.current = e.data.workletTime || now;
             // TIMING FIX: Use audio context time for consistency
             refs.lastWorkletUpdateRef.current = now;
 
@@ -439,9 +441,16 @@ export async function startAudioPlayback(
                   const mLib = refs.libopenmptRef.current;
                   if (!mLib || !mPtr) { outL.fill(0); outR.fill(0); return; }
 
-                  const written = mLib._openmpt_module_read_float_stereo(
+                  let written = mLib._openmpt_module_read_float_stereo(
                     mPtr, ctx.sampleRate, SP_BUFFER, leftPtr, rightPtr
                   );
+                  if (written === 0 && config.isLooping) {
+                    // Loop back to start when module ends
+                    mLib._openmpt_module_set_position_order_row(mPtr, 0, 0);
+                    written = mLib._openmpt_module_read_float_stereo(
+                      mPtr, ctx.sampleRate, SP_BUFFER, leftPtr, rightPtr
+                    );
+                  }
                   if (written > 0) {
                     outL.set(new Float32Array(mLib.HEAPF32.buffer, leftPtr, written));
                     outR.set(new Float32Array(mLib.HEAPF32.buffer, rightPtr, written));
@@ -454,6 +463,7 @@ export async function startAudioPlayback(
                   refs.workletOrderRef.current = mLib._openmpt_module_get_current_order(mPtr);
                   refs.workletRowRef.current   = mLib._openmpt_module_get_current_row(mPtr);
                   refs.workletTimeRef.current  = mLib._openmpt_module_get_position_seconds(mPtr);
+                  refs.workletTimestampRef.current = ctx.currentTime;
                   refs.lastWorkletUpdateRef.current = ctx.currentTime;
                 };
 
@@ -481,10 +491,17 @@ export async function startAudioPlayback(
             callbacks.setStatus("Playing...");
             if (refs.animationFrameHandle.current) cancelAnimationFrame(refs.animationFrameHandle.current);
             refs.animationFrameHandle.current = requestAnimationFrame(refs.updateUIRef.current!);
+            // Explicitly tell the worklet to begin rendering (defensive, in case
+            // a future worklet version requires a play signal).
+            node.port.postMessage({ type: 'play' });
           } else if (type === 'seekAck') {
             // TIMING FIX: Worklet acknowledged seek
             refs.seekAcknowledgedRef.current = true;
             refs.pendingSeekRef.current = null;
+          } else if (type === 'needData' || type === 'starvation') {
+            // Defensive: ring-buffer worklets may request refills; we do not
+            // implement a main-thread pump, so log for diagnostics.
+            console.warn(`[PLAY] Worklet ${type}:`, e.data);
           }
         };
 

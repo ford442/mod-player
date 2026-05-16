@@ -122,14 +122,15 @@ export class OpenMPTWorkletEngine extends MiniEventEmitter<EngineEventMap> {
             // IMPORTANT: Use absolute paths rooted at BASE_URL so the browser
             // fetches from /worklets/, not from /assets/ (where the Vite bundle lives).
             // The /* @vite-ignore */ comment prevents Vite from rewriting these imports.
+            //
+            // ⚠️  NEVER import() an AudioWorklet processor script (e.g. openmpt-worklet.js)
+            //     on the main thread — it references AudioWorkletProcessor which only exists
+            //     inside AudioWorkletGlobalScope. See docs/WORKLET_AUDIO_BUG.md.
             let glueModule: Record<string, unknown>;
-            try {
-                const newUrl = `${import.meta.env.BASE_URL}worklets/openmpt-worklet.js`;
-                glueModule = await import(/* @vite-ignore */ newUrl) as Record<string, unknown>;
-            } catch {
-                const legacyUrl = `${import.meta.env.BASE_URL}worklets/openmpt-native.js`;
-                glueModule = await import(/* @vite-ignore */ legacyUrl) as Record<string, unknown>;
-            }
+            // The JS worklet processor (openmpt-worklet.js) references AudioWorkletProcessor
+            // and cannot be imported on the main thread. Only try the native Emscripten glue.
+            const nativeUrl = `${import.meta.env.BASE_URL}worklets/openmpt-native.js`;
+            glueModule = await import(/* @vite-ignore */ nativeUrl) as Record<string, unknown>;
             const createModule = (glueModule.default || glueModule['createOpenMPTModule']) as CreateOpenMPTModule;
 
             if (typeof createModule !== 'function') {

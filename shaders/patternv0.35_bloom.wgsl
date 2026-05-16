@@ -382,14 +382,14 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   }
 
   if (housingMask < 0.5) { return vec4(fs.borderColor, 0.0); }
-  
+
   // Kick reactive glow - add pulsing on bass hits
   let kickPulse = uniforms.kickTrigger * exp(-length(p) * 3.0) * 0.3;
   finalColor += vec3<f32>(0.9, 0.2, 0.4) * kickPulse * uniforms.bloomIntensity;
-  
+
   // Dithering for night mode banding fix
   let noise = fract(sin(dot(in.uv * uniforms.timeSec, vec2<f32>(12.9898, 78.233))) * 43758.5453);
   finalColor += (noise - 0.5) * 0.01;
-  
+
   return vec4(finalColor, 1.0);
 }
