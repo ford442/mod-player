@@ -361,6 +361,30 @@ export async function startAudioPlayback(
         
         console.log('[PLAY] AudioWorkletNode created:', node);
 
+        // Fetch libopenmpt JS + WASM on the main thread and forward to the worklet.
+        // AudioWorklet classic scripts cannot use import() or importScripts(), so we
+        // do the fetch here where fetch() is always available.
+        console.log('[PLAY] Fetching libopenmpt assets for worklet...');
+        const workletBaseUrl = (import.meta.env.BASE_URL || '/') + 'worklets/';
+        let libJsText: string;
+        let libWasmBuffer: ArrayBuffer;
+        try {
+          [libJsText, libWasmBuffer] = await Promise.all([
+            fetch(workletBaseUrl + 'libopenmpt-audioworklet.js').then(r => {
+              if (!r.ok) throw new Error(`HTTP ${r.status} for libopenmpt-audioworklet.js`);
+              return r.text();
+            }),
+            fetch(workletBaseUrl + 'libopenmpt.wasm').then(r => {
+              if (!r.ok) throw new Error(`HTTP ${r.status} for libopenmpt.wasm`);
+              return r.arrayBuffer();
+            }),
+          ]);
+          console.log('[PLAY] libopenmpt assets fetched — JS:', libJsText.length, 'bytes, WASM:', libWasmBuffer.byteLength, 'bytes');
+        } catch (fetchErr) {
+          console.error('[PLAY] Failed to fetch libopenmpt assets:', fetchErr);
+          throw fetchErr;
+        }
+
         node.port.onmessage = (e) => {
           const { type, order, row, positionSeconds, message, bpm } = e.data;
 
@@ -504,6 +528,12 @@ export async function startAudioPlayback(
             console.warn(`[PLAY] Worklet ${type}:`, e.data);
           }
         };
+
+        // Send WASM assets to worklet first (must arrive before 'load')
+        node.port.postMessage(
+          { type: 'initLib', scriptText: libJsText, wasmBytes: libWasmBuffer },
+          [libWasmBuffer],
+        );
 
         // Send module data (cloned, not transferred, so fileDataRef remains valid)
         const buf = refs.fileDataRef.current?.buffer;
