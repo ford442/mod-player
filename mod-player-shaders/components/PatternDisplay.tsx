@@ -1,4 +1,3 @@
-// @ts-nocheck
 
 // components/PatternDisplay.tsx
 // Refactored thin orchestrator - composes hooks and sub-components

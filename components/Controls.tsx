@@ -2,6 +2,7 @@ import React from 'react';
 import { UploadIcon } from './icons';
 import type { MediaItem } from '../types';
 import { BLOOM_PRESETS, COLOR_SCHEMES, type BloomPreset, type ColorScheme } from '../types/bloomPresets';
+import { cn } from '../utils/cn';
 
 interface ControlsProps {
   isReady: boolean;
@@ -24,6 +25,8 @@ interface ControlsProps {
   onBloomPresetChange?: (preset: BloomPreset) => void;
   colorScheme?: ColorScheme;
   onColorSchemeChange?: (scheme: ColorScheme) => void;
+  chassisDark?: boolean;
+  onToggleChassisDark?: () => void;
 }
 
 export const Controls: React.FC<ControlsProps> = ({
@@ -47,6 +50,8 @@ export const Controls: React.FC<ControlsProps> = ({
   onBloomPresetChange,
   colorScheme,
   onColorSchemeChange,
+  chassisDark,
+  onToggleChassisDark,
 }) => {
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -139,6 +144,19 @@ export const Controls: React.FC<ControlsProps> = ({
         >
           🔄 Loop
         </button>
+        {onToggleChassisDark !== undefined && (
+          <button
+            onClick={onToggleChassisDark}
+            className={cn(
+              'px-4 py-2 text-sm font-semibold rounded-lg shadow-lg transition-colors border',
+              chassisDark
+                ? 'bg-gray-900 text-gray-100 hover:bg-gray-800 border-gray-600'
+                : 'bg-gray-200 text-gray-800 hover:bg-gray-300 border-gray-400',
+            )}
+          >
+            {chassisDark ? '🌑 Dark Chassis' : '☀️ Light Chassis'}
+          </button>
+        )}
       </div>
 
       {/* Bloom Preset Dropdown */}

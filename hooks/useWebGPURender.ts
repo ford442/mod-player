@@ -24,6 +24,7 @@ import {
   DEFAULT_ROWS,
   DEFAULT_CHANNELS,
 } from '../utils/gpuPacking';
+import type { BloomPostProcessor } from '../utils/bloomPostProcessor';
 import { GRID_RECT } from '../utils/geometryConstants';
 
 // Runtime base URL detection for subdirectory deployment
@@ -78,6 +79,7 @@ export interface WebGPURenderParams {
   totalRows?: number;
   colorPalette?: number;
   stepsLength?: number;
+  chassisDark?: boolean;
 }
 
 export function useWebGPURender(
@@ -89,7 +91,9 @@ export function useWebGPURender(
   matrix: import('../types').PatternMatrix | null,
   padTopChannel: boolean,
   setDebugInfo: React.Dispatch<React.SetStateAction<DebugInfo>>,
-  setWebgpuAvailable: (v: boolean) => void
+  setWebgpuAvailable: (v: boolean) => void,
+  bloomProcessorRef?: React.MutableRefObject<BloomPostProcessor | null>,
+  oscTextureRef?: React.MutableRefObject<GPUTexture | null>
 ) {
   const [gpuReady, setGpuReady] = useState(false);
 
@@ -142,6 +146,9 @@ export function useWebGPURender(
         { binding: 4, resource: textureResourcesRef.current.sampler },
         { binding: 5, resource: textureResourcesRef.current.view },
       );
+      if (shaderFile.includes('v0.55') && oscTextureRef?.current) {
+        entries.push({ binding: 6, resource: oscTextureRef.current.createView() });
+      }
     } else if (layoutType === 'texture') {
       if (!textureResourcesRef.current) return;
       entries.push(
@@ -150,7 +157,7 @@ export function useWebGPURender(
       );
     }
     bindGroupRef.current = device.createBindGroup({ layout, entries });
-  }, []);
+  }, [oscTextureRef, shaderFile]);
 
   const loadBezelTexture = async (device: GPUDevice) => {
     if (bezelTextureResourcesRef.current) return;
@@ -267,7 +274,11 @@ export function useWebGPURender(
         if (layoutType === 'texture') {
           bindGroupLayout = device.createBindGroupLayout({ entries: [{ binding: 0, visibility: GPUShaderStage.FRAGMENT | GPUShaderStage.VERTEX, buffer: { type: 'read-only-storage' } }, { binding: 1, visibility: GPUShaderStage.FRAGMENT | GPUShaderStage.VERTEX, buffer: { type: 'uniform' } }, { binding: 2, visibility: GPUShaderStage.FRAGMENT, sampler: { type: 'filtering' } }, { binding: 3, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float' } }] });
         } else if (layoutType === 'extended') {
-          bindGroupLayout = device.createBindGroupLayout({ entries: [{ binding: 0, visibility: GPUShaderStage.FRAGMENT | GPUShaderStage.VERTEX, buffer: { type: 'read-only-storage' } }, { binding: 1, visibility: GPUShaderStage.FRAGMENT | GPUShaderStage.VERTEX, buffer: { type: 'uniform' } }, { binding: 2, visibility: GPUShaderStage.FRAGMENT, buffer: { type: 'read-only-storage' } }, { binding: 3, visibility: GPUShaderStage.FRAGMENT, buffer: { type: 'read-only-storage' } }, { binding: 4, visibility: GPUShaderStage.FRAGMENT, sampler: { type: 'filtering' } }, { binding: 5, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float' } }] });
+          const extendedEntries: GPUBindGroupLayoutEntry[] = [{ binding: 0, visibility: GPUShaderStage.FRAGMENT | GPUShaderStage.VERTEX, buffer: { type: 'read-only-storage' } }, { binding: 1, visibility: GPUShaderStage.FRAGMENT | GPUShaderStage.VERTEX, buffer: { type: 'uniform' } }, { binding: 2, visibility: GPUShaderStage.FRAGMENT, buffer: { type: 'read-only-storage' } }, { binding: 3, visibility: GPUShaderStage.FRAGMENT, buffer: { type: 'read-only-storage' } }, { binding: 4, visibility: GPUShaderStage.FRAGMENT, sampler: { type: 'filtering' } }, { binding: 5, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float' } }];
+          if (shaderFile.includes('v0.55')) {
+            extendedEntries.push({ binding: 6, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'unfilterable-float' } });
+          }
+          bindGroupLayout = device.createBindGroupLayout({ entries: extendedEntries });
         } else {
           bindGroupLayout = device.createBindGroupLayout({ entries: [{ binding: 0, visibility: GPUShaderStage.FRAGMENT | GPUShaderStage.VERTEX, buffer: { type: 'read-only-storage' } }, { binding: 1, visibility: GPUShaderStage.FRAGMENT | GPUShaderStage.VERTEX, buffer: { type: 'uniform' } }] });
         }
@@ -301,8 +312,15 @@ export function useWebGPURender(
 
         deviceRef.current = device; contextRef.current = context; uniformBufferRef.current = uniformBuffer;
 
+        device.lost.then((info) => {
+          if (!cancelled) {
+            console.error('WebGPU device lost:', info);
+            setGpuReady(false);
+          }
+        });
+
         const p = renderParamsRef.current;
-        const isHighPrec = shaderFile.includes('v0.36') || shaderFile.includes('v0.37') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.47') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49') || shaderFile.includes('v0.50') || shaderFile.includes('v0.51');
+        const isHighPrec = shaderFile.includes('v0.36') || shaderFile.includes('v0.37') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.47') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49') || shaderFile.includes('v0.50') || shaderFile.includes('v0.51') || shaderFile.includes('v0.55');
         const packFunc = isHighPrec ? packPatternMatrixHighPrecision : packPatternMatrix;
         const { packedData } = packFunc(p.matrix, p.padTopChannel);
         cellsBufferRef.current = createBufferWithData(device, packedData, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
@@ -378,7 +396,7 @@ export function useWebGPURender(
     const numRows = matrix?.numRows ?? DEFAULT_ROWS;
     // DEBUG: cells buffer update
     if (cellsBufferRef.current) cellsBufferRef.current.destroy();
-    const isHighPrec = shaderFile.includes('v0.36') || shaderFile.includes('v0.37') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.47') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49') || shaderFile.includes('v0.50');
+    const isHighPrec = shaderFile.includes('v0.36') || shaderFile.includes('v0.37') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.47') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49') || shaderFile.includes('v0.50') || shaderFile.includes('v0.51');
     const packFunc = isHighPrec ? packPatternMatrixHighPrecision : packPatternMatrix;
     const { packedData } = packFunc(p.matrix, p.padTopChannel);
     // DEBUG: packed data stats
@@ -486,7 +504,7 @@ export function useWebGPURender(
       let effectiveCellW = p.cellWidth;
       let effectiveCellH = p.cellHeight;
       const stepsCount = p.stepsLength ?? 32;
-      if (shaderFile.includes('v0.21') || shaderFile.includes('v0.40') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.47') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49') || shaderFile.includes('v0.50') || shaderFile.includes('v0.51')) {
+      if (shaderFile.includes('v0.21') || shaderFile.includes('v0.40') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.47') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49') || shaderFile.includes('v0.50') || shaderFile.includes('v0.51') || shaderFile.includes('v0.55')) {
         effectiveCellW = (GRID_RECT.w * actualCanvasW) / stepsCount;
         effectiveCellH = (GRID_RECT.h * actualCanvasH) / numChannels;
       } else if (shaderFile.includes('v0.39')) {
@@ -503,7 +521,7 @@ export function useWebGPURender(
       const uniformByteLength = fillUniformPayload(layoutTypeRef.current, {
         numRows, numChannels,
         playheadRow: tickRow,
-        playheadRowAsFloat: shaderFile.includes('v0.21') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.47') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49') || shaderFile.includes('v0.50') || shaderFile.includes('v0.51'),
+        playheadRowAsFloat: shaderFile.includes('v0.21') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.47') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49') || shaderFile.includes('v0.50') || shaderFile.includes('v0.51') || shaderFile.includes('v0.55'),
         isPlaying: p.isPlaying,
         cellW: effectiveCellW, cellH: effectiveCellH,
         canvasW: actualCanvasW, canvasH: actualCanvasH,
@@ -527,34 +545,6 @@ export function useWebGPURender(
       device.queue.writeBuffer(uniformBufferRef.current, 0, uniformBufferDataRef.current, 0, uniformByteLength);
     }
 
-    if (bezelUniformBufferRef.current) {
-      const buf = bezelFloatRef.current;
-      const actualCanvasW = canvas.width;
-      const actualCanvasH = canvas.height;
-      buf[0] = actualCanvasW; buf[1] = actualCanvasH;
-      const minDim = Math.min(actualCanvasW, actualCanvasH);
-      const circularLayout = isCircularLayoutShader(shaderFile);
-      buf[2] = minDim * (circularLayout ? 0.05 : 0.07);
-      buf[3] = 0.98; buf[4] = 0.98; buf[5] = 0.98;
-      buf[6] = 0.92; buf[7] = 0.92; buf[8] = 0.93;
-      buf[9] = 0.02;
-      if (shaderFile.includes('v0.35')) { buf[10] = 0.0; buf[11] = 0.95; buf[12] = 0.32; }
-      else { buf[10] = circularLayout ? 0.0 : 1.0; buf[11] = circularLayout ? 1.0 : 1.25; buf[12] = circularLayout ? 1.0 : 0.0; }
-      buf[13] = 0.10;
-      buf[14] = p.dimFactor;
-      buf[15] = p.isPlaying ? 1.0 : 0.0;
-      buf[16] = p.volume;
-      buf[17] = p.pan;
-      buf[18] = p.bpm;
-      const uint32View = bezelUintRef.current;
-      uint32View[19] = p.isLooping ? 1 : 0;
-      uint32View[20] = 0;
-      const livePlayheadRow = p.playbackStateRef?.current?.playheadRow ?? p.playheadRow;
-      buf[21] = livePlayheadRow;
-      uint32View[22] = p.clickedButton;
-      device.queue.writeBuffer(bezelUniformBufferRef.current, 0, bezelBufferDataRef.current, 0, 96);
-    }
-
     // Handle video texture source
     const isVideoShader = shaderFile.includes('v0.20') || shaderFile.includes('v0.23') || shaderFile.includes('v0.24') || shaderFile.includes('v0.25');
     const source = p.externalVideoSource;
@@ -574,74 +564,118 @@ export function useWebGPURender(
       }
     }
 
-    const encoder = device.createCommandEncoder();
-    const pass = encoder.beginRenderPass({
-      colorAttachments: [{
-        view: context.getCurrentTexture().createView(),
-        loadOp: 'clear',
-        clearValue: { r: 0, g: 0, b: 0, a: 1 },
-        storeOp: 'store',
-      }],
-    });
-
-    // Background pass (bezel/chassis shader)
-    const needsBackground = !isSinglePassCompositeShader(shaderFile);
-    if (bezelPipelineRef.current && bezelBindGroupRef.current && needsBackground && bezelUniformBufferRef.current) {
-      const bezelData = bezelFloatRef.current;
-      bezelData[0] = p.canvasMetrics.width; bezelData[1] = p.canvasMetrics.height;
-      bezelData[2] = 0;
-      bezelData[3] = 0.92; bezelData[4] = 0.93; bezelData[5] = 0.95;
-      bezelData[6] = 0.88; bezelData[7] = 0.89; bezelData[8] = 0.91;
-      bezelData[9] = 0.015;
-      const isCircShader = isCircularLayoutShader(shaderFile);
-      bezelData[10] = isCircShader ? 0.0 : 1.0;
-      bezelData[11] = isCircShader ? 0.95 : 1.0;
-      bezelData[12] = isCircShader ? 0.32 : 0.0;
-      bezelData[13] = isCircShader ? 0.0 : 0.02;
-      bezelData[14] = p.dimFactor ?? 1.0;
-      bezelData[15] = p.isPlaying ? 1.0 : 0.0;
-      bezelData[16] = 1.0; bezelData[17] = 0.5;
-      bezelData[18] = p.bpm ?? 120.0;
-      const bezelUint = bezelUintRef.current;
-      bezelUint[19] = p.isLooping ? 1 : 0;
-      bezelUint[20] = 0;
-      bezelUint[21] = Math.floor(p.playheadRow);
-      bezelUint[22] = 0;
-      bezelData[20] = GRID_RECT.x; bezelData[21] = GRID_RECT.y;
-      bezelData[22] = GRID_RECT.w; bezelData[23] = GRID_RECT.h;
-      device.queue.writeBuffer(bezelUniformBufferRef.current, 0, bezelBufferDataRef.current, 0, 96);
-      pass.setPipeline(bezelPipelineRef.current);
-      pass.setBindGroup(0, bezelBindGroupRef.current);
-      pass.draw(6, 1, 0, 0);
-    }
-
-    pass.setPipeline(pipeline);
-    pass.setBindGroup(0, bindGroup);
+    // Pre-calculate channel/instance counts for debug info
     const numRows = p.matrix?.numRows ?? DEFAULT_ROWS;
     const rawChannels = p.matrix?.numChannels ?? DEFAULT_CHANNELS;
     const numChannels = p.padTopChannel ? rawChannels + 1 : rawChannels;
     let totalInstances = numRows * numChannels;
-
     const isUIShader = shaderFile.includes('v0.45');
     if (isUIShader) totalInstances += 3; // UI_BUTTON_COUNT in shader
 
-    if (totalInstances > 0) {
-      if (isSinglePassCompositeShader(shaderFile)) {
-        if (shaderFile.includes('v0.45')) {
-          pass.draw(6, totalInstances, 0, 0);
+    // Scene render helper — reused by both direct and bloom-wrapped paths
+    const renderScene = (pass: GPURenderPassEncoder) => {
+      // Background pass (bezel/chassis shader)
+      const needsBackground = !isSinglePassCompositeShader(shaderFile);
+      if (bezelPipelineRef.current && bezelBindGroupRef.current && needsBackground && bezelUniformBufferRef.current) {
+        const actualCanvasW = canvas.width;
+        const actualCanvasH = canvas.height;
+        const minDim = Math.min(actualCanvasW, actualCanvasH);
+        const isCircShader = isCircularLayoutShader(shaderFile);
+        const backgroundShader = getBackgroundShaderFile(shaderFile);
+        const needsUIFields = backgroundShader === 'chassis_frosted.wgsl' || backgroundShader === 'chassisv0.37.wgsl';
+
+        const bezelData = bezelFloatRef.current;
+        bezelData[0] = actualCanvasW;
+        bezelData[1] = actualCanvasH;
+        bezelData[2] = minDim * (isCircShader ? 0.05 : 0.07);
+
+        if (p.chassisDark) {
+          bezelData[3] = 0.06; bezelData[4] = 0.06; bezelData[5] = 0.07;
+          bezelData[6] = 0.04; bezelData[7] = 0.04; bezelData[8] = 0.05;
+          bezelData[9] = 0.04;
         } else {
-          pass.draw(6, 1, 0, totalInstances);
+          bezelData[3] = 0.92; bezelData[4] = 0.93; bezelData[5] = 0.95;
+          bezelData[6] = 0.88; bezelData[7] = 0.89; bezelData[8] = 0.91;
+          bezelData[9] = 0.015;
+        }
+
+        if (shaderFile.includes('v0.35')) {
+          bezelData[10] = 0.0; bezelData[11] = 0.95; bezelData[12] = 0.32;
+        } else {
+          bezelData[10] = isCircShader ? 0.0 : 1.0;
+          bezelData[11] = isCircShader ? 0.95 : 1.25;
+          bezelData[12] = isCircShader ? 0.32 : 0.0;
+        }
+        bezelData[13] = shaderFile.includes('v0.35') ? 0.10 : (isCircShader ? 0.0 : 0.02);
+        bezelData[14] = p.dimFactor ?? 1.0;
+        bezelData[15] = p.isPlaying ? 1.0 : 0.0;
+
+        if (needsUIFields) {
+          const livePlayheadRow = p.playbackStateRef?.current?.playheadRow ?? p.playheadRow;
+          bezelData[16] = p.volume;
+          bezelData[17] = p.pan;
+          bezelData[18] = p.bpm ?? 120.0;
+
+          if (backgroundShader === 'chassis_frosted.wgsl') {
+            // chassis_frosted.wgsl uses f32 for all fields
+            bezelData[19] = p.isLooping ? 1.0 : 0.0;
+            bezelData[20] = 0.0; // currentOrder
+            bezelData[21] = livePlayheadRow;
+            bezelData[22] = p.clickedButton;
+            bezelData[23] = 0.0; // _pad2
+          } else {
+            // chassisv0.37.wgsl uses u32 for indices 19-22
+            const bezelUint = bezelUintRef.current;
+            bezelUint[19] = p.isLooping ? 1 : 0;
+            bezelUint[20] = 0; // currentOrder
+            bezelUint[21] = Math.floor(livePlayheadRow);
+            bezelUint[22] = p.clickedButton;
+            // _pad2 at index 23 can stay as 0.0
+          }
+        }
+
+        device.queue.writeBuffer(bezelUniformBufferRef.current, 0, bezelBufferDataRef.current, 0, 96);
+        pass.setPipeline(bezelPipelineRef.current);
+        pass.setBindGroup(0, bezelBindGroupRef.current);
+        pass.draw(6, 1, 0, 0);
+      }
+
+      pass.setPipeline(pipeline);
+      pass.setBindGroup(0, bindGroup);
+
+      if (totalInstances > 0) {
+        if (isSinglePassCompositeShader(shaderFile)) {
+          if (shaderFile.includes('v0.45')) {
+            pass.draw(6, totalInstances, 0, 0);
+          } else {
+            pass.draw(6, 1, 0, totalInstances);
+            pass.draw(6, totalInstances, 0, 0);
+          }
+        } else {
           pass.draw(6, totalInstances, 0, 0);
         }
-      } else {
-        pass.draw(6, totalInstances, 0, 0);
       }
+    };
+
+    const encoder = device.createCommandEncoder();
+    if (bloomProcessorRef?.current) {
+      bloomProcessorRef.current.render(encoder, renderScene);
+    } else {
+      const pass = encoder.beginRenderPass({
+        colorAttachments: [{
+          view: context.getCurrentTexture().createView(),
+          loadOp: 'clear',
+          clearValue: { r: 0, g: 0, b: 0, a: 1 },
+          storeOp: 'store',
+        }],
+      });
+      renderScene(pass);
+      pass.end();
     }
-    pass.end();
     device.queue.submit([encoder.finish()]);
 
     // Update debug info - always update regardless of overlay state
-    const isOverlayActive = shaderFile.includes('v0.21') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.47') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49') || shaderFile.includes('v0.50') || shaderFile.includes('v0.51');
+    const isOverlayActive = shaderFile.includes('v0.21') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.47') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49') || shaderFile.includes('v0.50') || shaderFile.includes('v0.51') || shaderFile.includes('v0.55');
     const layoutModeName = isCircularLayoutShader(shaderFile) ? 'CIRCULAR (WebGPU)' :
       p.isHorizontal ? 'HORIZONTAL (WebGPU)' : 'STANDARD (WebGPU)';
     setDebugInfo((prev: DebugInfo) => ({

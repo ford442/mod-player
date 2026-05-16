@@ -59,29 +59,29 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
   // Use floor on the float, then multiply to get the page start
   let pageStart = floor(uniforms.playheadRow / stepsPerPage) * stepsPerPage;
   let localRow = f32(row) - pageStart;
-  
+
   let px = localRow * uniforms.cellW;
   let py = f32(channel) * uniforms.cellH;
-  
+
   var isVisible = 1.0;
   if (localRow < 0.0 || localRow >= stepsPerPage) {
       isVisible = 0.0;
   }
-  
+
   let effectiveChannel = f32(channel);
   let hasHeader = uniforms.numChannels > 1u && uniforms.gridRect.y > 0.15;
   let dataChannels = f32(uniforms.numChannels) - select(0.0, 1.0, hasHeader);
   let channelIndex = select(effectiveChannel, effectiveChannel - 1.0, hasHeader && effectiveChannel > 0.0);
-  
+
   let gridX = uniforms.gridRect.x + (localRow / stepsPerPage) * uniforms.gridRect.z;
   let gridY = uniforms.gridRect.y + (channelIndex / max(1.0, dataChannels)) * uniforms.gridRect.w;
-  
+
   let cellWidth = uniforms.gridRect.z / stepsPerPage;
   let cellHeight = uniforms.gridRect.w / max(1.0, dataChannels);
-  
+
   let clipX = gridX * 2.0 - 1.0 + quad[vertexIndex].x * cellWidth * 2.0;
   let clipY = 1.0 - (gridY * 2.0) - quad[vertexIndex].y * cellHeight * 2.0;
-  
+
   let finalPos = select(vec4<f32>(0.0, 0.0, 0.0, 0.0), vec4<f32>(clipX, clipY, 0.0, 1.0), isVisible > 0.5);
 
   let idx = instanceIndex * 2u;
@@ -125,7 +125,7 @@ struct FragmentConstants {
 
 fn getFragmentConstants() -> FragmentConstants {
     var c: FragmentConstants;
-    c.bgColor = vec3<f32>(0.10, 0.11, 0.13); 
+    c.bgColor = vec3<f32>(0.10, 0.11, 0.13);
     c.ledOnColor = vec3<f32>(0.0, 0.85, 0.95);
     c.ledOffColor = vec3<f32>(0.08, 0.12, 0.15);
     c.borderColor = vec3<f32>(0.0, 0.0, 0.0);
@@ -138,7 +138,7 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   let uv = in.uv;
   let p = uv - vec2<f32>(0.5, 0.5);
   let aa = fwidth(p.y) * 0.75;
-  
+
   if (in.channel >= uniforms.numChannels) { return vec4<f32>(1.0, 0.0, 0.0, 1.0); }
   let fs = getFragmentConstants();
 
@@ -149,11 +149,11 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
 
   let dBox = sdRoundedBox(p, vec2<f32>(0.45, 0.40), 0.05);
   var col = fs.bgColor;
-  
+
   col += smoothstep(0.0, 0.1, dBox + 0.5) * 0.02;
 
   let onPlayhead = (in.row == u32(uniforms.playheadRow));
-  
+
   let note = (in.packedA >> 24) & 255u;
   let volCmd = (in.packedA >> 8) & 255u;
   let effCmd = (in.packedB >> 8) & 255u;

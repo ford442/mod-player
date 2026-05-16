@@ -59,24 +59,24 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
 
   // Horizontal Layout: X = Row (Time), Y = Channel
   // Static Paged Grid: We only render active page of 32 steps.
-  
+
   let stepsPerPage = select(32.0, f32(uniforms.stepsLength), uniforms.stepsLength >= 32u);
   let pageStart = floor(uniforms.playheadRow / stepsPerPage) * stepsPerPage;
-  
+
   // Calculate row local to current page (0..31)
   let localRow = f32(row) - pageStart;
-  
+
   // If this instance is NOT in the current page, we move it off-screen to clip it
   var isVisible = 1.0;
   if (localRow < 0.0 || localRow >= stepsPerPage) {
       isVisible = 0.0;
   }
-  
+
   // Use gridRect for precise positioning within bezel area
   // gridRect is in normalized coordinates (0-1)
   let gridX = uniforms.gridRect.x + (localRow / stepsPerPage) * uniforms.gridRect.z;
   let gridY = uniforms.gridRect.y + (f32(channel) / f32(numChannels)) * uniforms.gridRect.w;
-  
+
   // Convert to clip space (-1 to 1)
   let clipX = gridX * 2.0 - 1.0 + quad[vertexIndex].x * (uniforms.gridRect.z / stepsPerPage) * 2.0;
   let clipY = 1.0 - (gridY * 2.0) - quad[vertexIndex].y * (uniforms.gridRect.w / f32(numChannels)) * 2.0;
@@ -191,14 +191,14 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   // Housing (Cell Body)
   let dHousing = sdRoundedBox(p, fs.housingSize * 0.5, 0.04);
   let housingMask = 1.0 - smoothstep(0.0, aa * 2.0, dHousing);
-  
+
   var col = fs.bgColor;
-  
+
   // Inset shadow
   col *= smoothstep(0.0, 0.1, dHousing + 0.5);
 
   let onPlayhead = (f32(in.row) == uniforms.playheadRow);
-  
+
   // Get note and effect data
   let note = (in.packedA >> 24) & 255u;
   let inst = in.packedA & 255u;
@@ -206,13 +206,13 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   let effParam = in.packedB & 255u;
   let hasNote = (note >= 1u && note <= 96u);
   let hasEffect = (effParam > 0u);
-  
+
   // Get channel state for note activity with bounds check
   var ch = ChannelState(0.0, 0.0, 0.0, 0u, 1000.0, 0u, 0.0, 0u);
   if (in.channel < arrayLength(&channels)) {
       ch = channels[in.channel];
   }
-  
+
   // --- BUTTON TEXTURE OVERLAY ---
   let btnScale = 1.05;
   let btnUV = (uv - 0.5) * btnScale + 0.5;

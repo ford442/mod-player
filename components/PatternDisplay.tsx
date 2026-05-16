@@ -3,6 +3,8 @@ import { ChannelShadowState, PatternMatrix, PlaybackState } from '../types';
 
 import { useWebGLOverlay } from '../hooks/useWebGLOverlay';
 import { useWebGPURender, type WebGPURenderParams, type DebugInfo } from '../hooks/useWebGPURender';
+import { BloomPostProcessor, DEFAULT_LAYERS } from '../utils/bloomPostProcessor';
+import { WEBGL_HYBRID_SHADERS } from '../utils/shaderVersion';
 
 const DEFAULT_CHANNELS = 4;
 
@@ -39,10 +41,12 @@ interface PatternDisplayProps {
   dimFactor?: number;
   analyserNode?: AnalyserNode | null;
   playbackStateRef?: React.MutableRefObject<PlaybackState>;
+  oscBufferRef?: React.MutableRefObject<Float32Array | null>;
   debugPanelOpen?: boolean;
   onCloseDebug?: () => void;
   onOpenDebug?: () => void;
   colorPalette?: number;
+  chassisDark?: boolean;
 }
 
 export const PatternDisplay: React.FC<PatternDisplayProps> = ({
@@ -78,15 +82,18 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   dimFactor = 1.0,
   analyserNode,
   playbackStateRef,
+  oscBufferRef,
   debugPanelOpen = false,
   onCloseDebug,
   onOpenDebug,
   colorPalette = 0,
+  chassisDark = false,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const glCanvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const bloomRef = useRef<BloomPostProcessor | null>(null);
 
   const [webgpuAvailable, setWebgpuAvailable] = useState(true);
   const [localTime, setLocalTime] = useState(0);
@@ -107,15 +114,15 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
 
   const numChannels = matrix?.numChannels ?? DEFAULT_CHANNELS;
 
-  const isOverlayActive = shaderFile.includes('v0.21') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.47') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49') || shaderFile.includes('v0.50') || shaderFile.includes('v0.51');
+  const isOverlayActive = WEBGL_HYBRID_SHADERS.has(shaderFile);
 
-  const padTopChannel = shaderFile.includes('v0.16') || shaderFile.includes('v0.17') || shaderFile.includes('v0.21') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.47') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49') || shaderFile.includes('v0.50') || shaderFile.includes('v0.51');
+  const padTopChannel = shaderFile.includes('v0.16') || shaderFile.includes('v0.17') || shaderFile.includes('v0.21') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.47') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49') || shaderFile.includes('v0.50') || shaderFile.includes('v0.51') || shaderFile.includes('v0.55');
 
   const isHorizontal = shaderFile.includes('v0.13') || shaderFile.includes('v0.14') || shaderFile.includes('v0.16') || shaderFile.includes('v0.17') || shaderFile.includes('v0.21') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40');
 
   const canvasMetrics = useMemo(() => {
     if (shaderFile.includes('v0.27') || shaderFile.includes('v0.28')) return { width: 1024, height: 1008 };
-    if (shaderFile.includes('v0.21') || shaderFile.includes('v0.37') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.47') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49') || shaderFile.includes('v0.50') || shaderFile.includes('v0.51')) return { width: 1024, height: 1024 };
+    if (shaderFile.includes('v0.21') || shaderFile.includes('v0.37') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.47') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49') || shaderFile.includes('v0.50') || shaderFile.includes('v0.51') || shaderFile.includes('v0.55')) return { width: 1024, height: 1024 };
     if (isHorizontal) return { width: 1024, height: 1024 };
     if (shaderFile.includes('v0.25') || shaderFile.includes('v0.30') || shaderFile.includes('v0.35')) return { width: 1024, height: 1024 };
     return { width: Math.max(800, numChannels * cellWidth), height: 600 };
@@ -123,7 +130,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
 
   // Reset step length when switching to a shader that doesn't support it
   useEffect(() => {
-    if (!shaderFile.includes('v0.21') && !shaderFile.includes('v0.39') && !shaderFile.includes('v0.40') && !shaderFile.includes('v0.51')) {
+    if (!shaderFile.includes('v0.21') && !shaderFile.includes('v0.39') && !shaderFile.includes('v0.40') && !shaderFile.includes('v0.51') && !shaderFile.includes('v0.55')) {
       setStepsLength(32);
     }
   }, [shaderFile]);
@@ -186,6 +193,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
           console.error('❌ WebGPU context reconfiguration failed:', e);
         }
       }
+      bloomRef.current?.resize(canvas.width, canvas.height);
       resizeTimeoutRef.current = null;
     }, 100);
   }, [syncCanvasSize]);
@@ -222,6 +230,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     canvasMetrics,
     colorPalette,
     stepsLength,
+    chassisDark,
     ...(totalRows !== undefined ? { totalRows } : {}),
     ...(playbackStateRef ? { playbackStateRef } : {}),
   });
@@ -234,6 +243,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     canvasMetrics,
     colorPalette,
     stepsLength,
+    chassisDark,
     ...(totalRows !== undefined ? { totalRows } : {}),
     ...(playbackStateRef ? { playbackStateRef } : {}),
   };
@@ -248,15 +258,61 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
 
   // WebGPU render hook — matrix and padTopChannel passed directly so React tracks them as
   // explicit deps, guaranteeing the cells buffer is rebuilt when a new module is loaded.
+  const oscTextureRef = useRef<GPUTexture | null>(null);
+
   const { gpuReady, render, deviceRef: gpuDevRef } = useWebGPURender(
     canvasRef, glCanvasRef, shaderFile,
-    syncCanvasSize, renderParamsRef, matrix, padTopChannel, setDebugInfo, setWebgpuAvailable
+    syncCanvasSize, renderParamsRef, matrix, padTopChannel, setDebugInfo, setWebgpuAvailable,
+    bloomRef,
+    oscTextureRef
   );
 
   // Keep resize reconfiguration refs in sync
   useEffect(() => {
     gpuDeviceRef.current = gpuDevRef.current;
   });
+
+  // Create oscilloscope 1D texture when GPU is ready and v0.55 is active
+  useEffect(() => {
+    const device = gpuDevRef.current;
+    if (!device || !gpuReady || !shaderFile.includes('v0.55')) return;
+    if (!oscTextureRef.current) {
+      oscTextureRef.current = device.createTexture({
+        size: [2048, 1, 1],
+        format: 'r32float',
+        usage: GPUTextureUsage.COPY_DST | GPUTextureUsage.TEXTURE_BINDING,
+      });
+    }
+    return () => {
+      oscTextureRef.current?.destroy();
+      oscTextureRef.current = null;
+    };
+  }, [gpuReady, shaderFile]);
+
+  // Initialize multi-layer bloom post-processor when GPU becomes ready
+  useEffect(() => {
+    const device = gpuDevRef.current;
+    const canvas = canvasRef.current;
+    if (!device || !canvas || !gpuReady) return;
+    const context = canvas.getContext('webgpu') as GPUCanvasContext | null;
+    if (!context) return;
+
+    const bloom = new BloomPostProcessor(device, canvas, context, {
+      layers: DEFAULT_LAYERS,
+      finalFormat: navigator.gpu.getPreferredCanvasFormat(),
+    });
+    bloom.setBaseUrl(import.meta.env.BASE_URL);
+    bloom.init().then(() => {
+      bloomRef.current = bloom;
+    }).catch((err: unknown) => {
+      console.warn('BloomPostProcessor init failed:', err);
+    });
+
+    return () => {
+      bloomRef.current?.destroy();
+      bloomRef.current = null;
+    };
+  }, [gpuReady, shaderFile]);
 
   // Canvas click handler for shader-embedded UI interaction
   const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -336,9 +392,17 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
         }
         analyserNode.getByteFrequencyData(freqDataRef.current);
       }
+      if (oscTextureRef.current && oscBufferRef?.current && gpuDevRef.current) {
+        gpuDevRef.current.queue.writeTexture(
+          { texture: oscTextureRef.current },
+          oscBufferRef.current.buffer as ArrayBuffer,
+          { bytesPerRow: 2048 * 4 },
+          { width: 2048, height: 1, depthOrArrayLayers: 1 }
+        );
+      }
       if (gpuReady) {
         renderRef.current?.();
-        drawWebGL();
+        if (isOverlayActive) drawWebGL();
       }
     };
     animationFrameRef.current = requestAnimationFrame(loop);
@@ -392,6 +456,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
 
       <canvas
         ref={canvasRef}
+        data-shader-preview-source="true"
         width={canvasMetrics.width}
         height={canvasMetrics.height}
         onClick={handleCanvasClick}

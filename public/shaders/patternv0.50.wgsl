@@ -196,20 +196,20 @@ fn getFragmentConstants() -> FragmentConstants {
 // Draws an individual LED emitter that shows through the unified lens
 fn drawEmitterDiode(uv: vec2<f32>, intensity: f32, color: vec3<f32>, isOn: bool) -> vec4<f32> {
     let diodeSize = vec2<f32>(0.28, 0.14);
-    
+
     let p = uv;
     let dDiode = sdRoundedBox(p, diodeSize * 0.5, 0.06);
-    
+
     // Diode has a smaller "die" inside it — tighter for distinct dot appearance
     let dieSize = vec2<f32>(0.10, 0.05);
     let dDie = sdRoundedBox(p, dieSize * 0.5, 0.02);
-    
+
     // Base diode housing (darker)
     let diodeMask = 1.0 - smoothstep(0.0, 0.015, dDiode);
     let dieMask = 1.0 - smoothstep(0.0, 0.008, dDie);
-    
+
     var diodeColor = vec3<f32>(0.06, 0.06, 0.08);
-    
+
     if (isOn) {
         let dieGlow = color * (1.0 + intensity * 4.0);
         let housingGlow = color * 0.12 * intensity;
@@ -217,7 +217,7 @@ fn drawEmitterDiode(uv: vec2<f32>, intensity: f32, color: vec3<f32>, isOn: bool)
         let hotspot = exp(-length(p / vec2<f32>(0.06, 0.03)) * 2.5) * intensity;
         diodeColor += color * hotspot * 0.6;
     }
-    
+
     return vec4<f32>(diodeColor, diodeMask);
 }
 
@@ -225,7 +225,7 @@ fn drawEmitterDiode(uv: vec2<f32>, intensity: f32, color: vec3<f32>, isOn: bool)
 // Single glass surface covering three emitters (blue, note, amber)
 // Creates optical effects: refraction, reflection, subsurface scattering
 fn drawUnifiedLensCap(
-    uv: vec2<f32>, 
+    uv: vec2<f32>,
     lensSize: vec2<f32>,
     topEmitter: vec4<f32>,    // rgb=color, a=intensity (Blue note-on)
     midEmitter: vec4<f32>,    // rgb=color, a=intensity (Note color)
@@ -234,31 +234,31 @@ fn drawUnifiedLensCap(
 ) -> vec4<f32> {
     let p = uv;
     let dBox = sdRoundedBox(p, lensSize * 0.5, 0.12);
-    
+
     if (dBox > 0.0) {
         return vec4<f32>(0.0);
     }
-    
+
     // Emitter positions under the lens (vertical arrangement)
     let topPos = vec2<f32>(0.0, -0.28);   // Top: Blue note-on indicator
     let midPos = vec2<f32>(0.0, 0.0);      // Middle: Note color (steady)
     let botPos = vec2<f32>(0.0, 0.28);     // Bottom: Amber control indicator
-    
+
     // Glass surface properties
     let radial = length(p / (lensSize * 0.5));
     let edgeThickness = 0.18 + radial * 0.12;
     let centerThickness = 0.06;
     let thickness = mix(centerThickness, edgeThickness, radial * radial);
-    
+
     let n = normalize(vec3<f32>(p.x * 2.5 / lensSize.x, p.y * 2.5 / lensSize.y, 0.35));
     let viewDir = vec3<f32>(0.0, 0.0, 1.0);
     let fresnel = pow(1.0 - abs(dot(n, viewDir)), 2.5);
-    
+
     // Draw emitters under the lens
     let topDiode = drawEmitterDiode(uv - topPos, topEmitter.a, topEmitter.rgb, topEmitter.a > 0.05);
     let midDiode = drawEmitterDiode(uv - midPos, midEmitter.a, midEmitter.rgb, midEmitter.a > 0.05);
     let botDiode = drawEmitterDiode(uv - botPos, botEmitter.a, botEmitter.rgb, botEmitter.a > 0.05);
-    
+
     // Combine emitters
     var combinedDiode = vec3<f32>(0.06, 0.06, 0.08);
     if (botDiode.a > 0.0) {
@@ -271,14 +271,14 @@ fn drawUnifiedLensCap(
         combinedDiode = mix(combinedDiode, topDiode.rgb, topDiode.a);
     }
     let diodeMask = max(max(topDiode.a, midDiode.a), botDiode.a);
-    
+
     // Refraction effect
     let refractionStrength = (1.0 - radial * 0.6) * 0.04;
     let refractOffset = p * refractionStrength;
-    
+
     // Subsurface scattering
     var subsurfaceGlow = vec3<f32>(0.0);
-    
+
     // Top emitter scattering (Blue - note on) — tightened falloff
     let distTop = length(uv - topPos - refractOffset * 0.3);
     let scatterTop = exp(-distTop * 9.0) * topEmitter.a;
@@ -293,47 +293,47 @@ fn drawUnifiedLensCap(
     let distBot = length(uv - botPos - refractOffset * 0.3);
     let scatterBot = exp(-distBot * 9.0) * botEmitter.a;
     subsurfaceGlow += botEmitter.rgb * scatterBot * 2.2;
-    
+
     // Per-emitter fringe glow (replaces shared diffusion that smeared all three)
     subsurfaceGlow += topEmitter.rgb * exp(-distTop * 6.0) * topEmitter.a * 0.15;
     subsurfaceGlow += midEmitter.rgb * exp(-distMid * 6.0) * midEmitter.a * 0.15;
     subsurfaceGlow += botEmitter.rgb * exp(-distBot * 6.0) * botEmitter.a * 0.15;
-    
+
     // Glass base color
     let bgColor = vec3<f32>(0.04, 0.04, 0.05);
-    
+
     var activeColor = midEmitter.rgb * midEmitter.a;
     activeColor = mix(activeColor, topEmitter.rgb, topEmitter.a * 0.5);
     activeColor = mix(activeColor, botEmitter.rgb, botEmitter.a * 0.5);
-    
+
     let totalGlow = topEmitter.a + midEmitter.a + botEmitter.a;
     let litTint = mix(vec3<f32>(0.92, 0.93, 0.98), activeColor, min(totalGlow * 0.4, 0.4));
     let glassBaseColor = mix(bgColor * 0.12, litTint, 0.88);
-    
+
     // Edge alpha
     let edgeAlpha = smoothstep(0.0, aa * 2.0, -dBox);
-    
+
     // Glass transparency — reduce opacity when active emitters are lit
     let diodeVisibility = diodeMask * 0.55;
     let baseAlpha = 0.72 + 0.28 * fresnel;
     let emitterLift = clamp(topEmitter.a * 0.4 + botEmitter.a * 0.4, 0.0, 0.7);
     let alpha = mix(baseAlpha, 0.32, min(diodeVisibility + emitterLift, 0.9)) * edgeAlpha;
-    
+
     // Directional lighting
     let lightDir = vec3<f32>(0.4, -0.7, 0.6);
     let diff = max(0.0, dot(n, normalize(lightDir)));
     let spec = pow(max(0.0, dot(reflect(-normalize(lightDir), n), viewDir)), 40.0);
-    
+
     let litGlassColor = glassBaseColor * (0.45 + 0.55 * diff) + vec3<f32>(spec * 0.25);
-    
+
     // Final composition
     var finalColor = bgColor;
-    
+
     let diodeBlend = diodeMask * (1.0 - alpha * 0.65);
     finalColor = mix(finalColor, combinedDiode, diodeBlend);
     finalColor = mix(finalColor, litGlassColor, alpha);
     finalColor += subsurfaceGlow * 1.8;
-    
+
     // Concentrated glow around active emitters
     if (midEmitter.a > 0.05) {
         let midGlowDist = length(uv - midPos - refractOffset * 0.5);
@@ -350,17 +350,17 @@ fn drawUnifiedLensCap(
         let botGlow = (1.0 - smoothstep(0.0, 0.14, botGlowDist)) * botEmitter.a * 0.3;
         finalColor += botEmitter.rgb * botGlow;
     }
-    
+
     finalColor += fresnel * vec3<f32>(0.9, 0.95, 1.0) * 0.18 * (1.0 + radial * 0.5);
-    
+
     // Horizontal separator shadows between the three emitter zones
     let sepShadowTop = (1.0 - smoothstep(0.0, 0.015, abs(p.y - (-0.14)))) * 0.35;
     let sepShadowBot = (1.0 - smoothstep(0.0, 0.015, abs(p.y - 0.14))) * 0.35;
     finalColor -= finalColor * (sepShadowTop + sepShadowBot);
-    
+
     let vignette = 1.0 - radial * radial * 0.25;
     finalColor *= vignette;
-    
+
     return vec4<f32>(finalColor, edgeAlpha);
 }
 
@@ -369,7 +369,7 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   let uv = in.uv;
   let p = uv - 0.5;
   let aa = fwidth(p.y) * 0.33;
-  
+
   if (in.channel >= uniforms.numChannels) { return vec4<f32>(1.0, 0.0, 0.0, 1.0); }
   let fs = getFragmentConstants();
   let bloom = uniforms.bloomIntensity;
@@ -476,7 +476,7 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
       }
     }
     let topEmitColor = topColor * (1.5 + bloom * 2.0);
-    
+
     // EMITTER 2 (MIDDLE): Steady Note Color (off for expression-only)
     var noteColor = vec3<f32>(0.15);
     var midIntensity = 0.12; // Base dim glow
@@ -494,7 +494,7 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
       midIntensity = 0.0;
     }
     let midColor = noteColor;
-    
+
     // EMITTER 3 (BOTTOM): Amber Control Message Indicator
     // Suppressed for expression-only (amber moved to top emitter)
     var botIntensity = 0.0;
@@ -508,11 +508,11 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
         botColor = amberColor * (1.5 + bloom * 2.0);
       }
     }
-    
+
     // --- DRAW UNIFIED LENS CAP ---
     let lensUV = btnUV - vec2<f32>(0.5, 0.5);
     let lensSize = vec2<f32>(0.6, 0.82);
-    
+
     let unifiedLens = drawUnifiedLensCap(
         lensUV, lensSize,
         vec4<f32>(topEmitColor, topIntensity),    // Top: Blue note-on or Amber expr-only
@@ -520,7 +520,7 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
         vec4<f32>(botColor, botIntensity),         // Bottom: Amber control
         aa
     );
-    
+
     finalColor = mix(finalColor, unifiedLens.rgb, unifiedLens.a);
 
     // External glow when note is playing on playhead

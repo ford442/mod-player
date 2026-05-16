@@ -14,6 +14,7 @@ import type { PlaylistItem } from './components/Playlist';
 import { StoragePlaylist } from './components/StoragePlaylist';
 import { SeekBar } from './components/SeekBar';
 import { Panel } from './components/Panel';
+import { ShaderSelectorPanel } from './components/ShaderSelectorPanel';
 import { useLibOpenMPT } from './hooks/useLibOpenMPT';
 import { usePlaylist } from './hooks/usePlaylist';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
@@ -40,6 +41,7 @@ const SHADER_GROUPS = {
   ],
   CIRCULAR: [
     { id: 'patternv0.50.wgsl', label: 'v0.50 (Trap Frosted Lens)' },
+    { id: 'patternv0.51.wgsl', label: 'v0.51 (Playhead Arc)' },
     { id: 'patternv0.49.wgsl', label: 'v0.49 (Trap Frosted Glass)' },
     { id: 'patternv0.48.wgsl', label: 'v0.48 (Trap Frosted Disc)' },
     { id: 'patternv0.47.wgsl', label: 'v0.47 (Trap Frosted)' },
@@ -57,11 +59,15 @@ const SHADER_GROUPS = {
   ]
 };
 
+const ALL_SHADER_OPTIONS = [
+  ...SHADER_GROUPS.SQUARE.map(s => ({ ...s, group: 'Square' as const })),
+  ...SHADER_GROUPS.CIRCULAR.map(s => ({ ...s, group: 'Circular' as const })),
+  ...SHADER_GROUPS.VIDEO.map(s => ({ ...s, group: 'Video' as const })),
+];
+
 // Flat set of all valid shader IDs (used for localStorage validation)
 const ALL_SHADER_IDS = new Set<string>([
-  ...SHADER_GROUPS.SQUARE.map(s => s.id),
-  ...SHADER_GROUPS.CIRCULAR.map(s => s.id),
-  ...SHADER_GROUPS.VIDEO.map(s => s.id),
+  ...ALL_SHADER_OPTIONS.map(s => s.id),
 ]);
 
 // Available UI themes.
@@ -96,6 +102,9 @@ function App() {
 
   // Tier 2: per-module shader memory — keyed by first-16-byte hash of the loaded file
   const [moduleHash, setModuleHash] = useState<string | null>(null);
+  const [shaderFavorites, setShaderFavorites] = useLocalStorage<string[]>('xasm1-shader-favorites', []);
+  const [shaderRecents, setShaderRecents] = useLocalStorage<string[]>('xasm1-shader-recents', []);
+  const [shaderThumbnails, setShaderThumbnails] = useLocalStorage<Record<string, string>>('xasm1-shader-thumbnails', {});
 
   const [volume, setVolume] = useState<number>(0.5);
   const [pan, setPan] = useState<number>(0.0);
@@ -146,6 +155,7 @@ function App() {
     analyserNode,
     playbackStateRef,
     workletLoadError,
+    oscBufferRef,
   } = useLibOpenMPT(volume);
 
   // Media Overlay State
@@ -158,6 +168,7 @@ function App() {
   const [showPlaylist, setShowPlaylist] = useState<boolean>(true);
   const [showStorageLibrary, setShowStorageLibrary] = useState<boolean>(false);
   const [debugPanelOpen, setDebugPanelOpen] = useLocalStorage<boolean>('xasm1.debugPanel.open', false);
+  const [chassisDark, setChassisDark] = useLocalStorage<boolean>('xasm1_chassisDark', false);
   const [cheatsheetOpen, setCheatsheetOpen] = useState<boolean>(false);
 
   // Channel VU data (from worklet channelStates)
@@ -190,6 +201,7 @@ function App() {
   // Shader change handler — Tier 1 (global) + Tier 2 (per-module) write
   const setShaderFile = useCallback((shader: string) => {
     _setStoredShader(shader);
+    setShaderRecents(previousRecents => [shader, ...previousRecents.filter(s => s !== shader)].slice(0, 5));
     if (moduleHash) {
       try {
         localStorage.setItem(`xasm1_module_shader_${moduleHash}`, shader);
@@ -197,7 +209,43 @@ function App() {
         // Ignore quota/security errors
       }
     }
-  }, [_setStoredShader, moduleHash]);
+  }, [_setStoredShader, moduleHash, setShaderRecents]);
+
+  const toggleShaderFavorite = useCallback((shader: string) => {
+    setShaderFavorites(
+      previousFavorites => (
+        previousFavorites.includes(shader)
+          ? previousFavorites.filter(s => s !== shader)
+          : [shader, ...previousFavorites]
+      ),
+    );
+  }, [setShaderFavorites]);
+
+  useEffect(() => {
+    const canvas = document.querySelector<HTMLCanvasElement>('canvas[data-shader-preview-source="true"]');
+    if (!canvas) return;
+    if (shaderThumbnails[shaderFile]) return;
+    const timer = window.setTimeout(() => {
+      try {
+        const dataUrl = canvas.toDataURL('image/png');
+        if (dataUrl.startsWith('data:image/png')) {
+          setShaderThumbnails(previous => ({ ...previous, [shaderFile]: dataUrl }));
+        }
+      } catch {
+        // Ignore capture/security errors
+      }
+    }, 500);
+    return () => window.clearTimeout(timer);
+  }, [setShaderThumbnails, shaderFile, shaderThumbnails]);
+
+  const validShaderFavorites = useMemo(
+    () => shaderFavorites.filter(shader => ALL_SHADER_IDS.has(shader)),
+    [shaderFavorites],
+  );
+  const validShaderRecents = useMemo(
+    () => shaderRecents.filter(shader => ALL_SHADER_IDS.has(shader)).slice(0, 5),
+    [shaderRecents],
+  );
 
   // Tier 2: restore per-module shader whenever the loaded module changes
   useEffect(() => {
@@ -420,12 +468,21 @@ function App() {
           headerContent={
             <div className="scale-75 origin-top-left">
             <Header status={status} isModuleLoaded={isModuleLoaded} />
-            <div className={cn('mb-2 inline-flex flex-col rounded border px-2 py-1 text-[10px] font-mono', isDarkMode ? 'border-gray-700 bg-black/50 text-gray-300' : 'border-gray-300 bg-white/80 text-gray-700')}>
-              <span>sync mode: {syncDebug.mode}</span>
-              <span>buffer: {syncDebug.bufferMs.toFixed(1)}ms</span>
-              <span>drift: {syncDebug.driftMs.toFixed(1)}ms</span>
-              <span>row: {syncDebug.row.toFixed(2)}</span>
-              <span>starvations: {syncDebug.starvationCount}</span>
+            {/* === AUDIO ENGINE DIAGNOSTICS === */}
+            <div className={cn("debug-section audio-diagnostics mb-2 inline-flex flex-col rounded border px-2 py-1 text-[10px] font-mono", isDarkMode ? "border-gray-700 bg-black/50 text-gray-300" : "border-gray-300 bg-white/80 text-gray-700")}>
+              <h4 className="m-0 mb-1 border-b pb-1 font-bold">🎛️ Audio Engine</h4>
+              <div className="debug-grid grid grid-cols-2 gap-x-4 gap-y-1">
+                <div><strong>Context:</strong> {syncDebug.audioContextState}</div>
+                <div><strong>Sample Rate:</strong> {syncDebug.sampleRate} Hz</div>
+                <div><strong>Base Latency:</strong> {syncDebug.baseLatency.toFixed(2)} ms</div>
+                <div><strong>Output Latency:</strong> {syncDebug.outputLatency.toFixed(2)} ms</div>
+                <div><strong>Drift:</strong> {syncDebug.driftMs} ms <span style={{color: Math.abs(syncDebug.driftAccumulator) > 0.008 ? "#ff4444" : "#44ff88"}}>({syncDebug.driftAccumulator.toFixed(4)})</span></div>
+                <div><strong>Last Corrected:</strong> {syncDebug.lastCorrectedTime.toFixed(3)} s</div>
+                <div><strong>Last Worklet Update:</strong> {syncDebug.lastWorkletUpdate.toFixed(3)} s</div>
+                <div><strong>Seek Pending:</strong> <span style={{color: syncDebug.seekPending ? "#ffaa00" : "#44ff88"}}>{syncDebug.seekPending ? "YES" : "No"}</span></div>
+                <div><strong>Buffer:</strong> {(syncDebug.bufferMs / 1000).toFixed(2)} s</div>
+                <div><strong>Starvation Count:</strong> {syncDebug.starvationCount}</div>
+              </div>
             </div>
             </div>
           }
@@ -465,6 +522,7 @@ function App() {
                 onOpenDebug={() => setDebugPanelOpen(true)}
                 // PERFORMANCE OPTIMIZATION: Pass ref for high-frequency updates
                 playbackStateRef={playbackStateRef}
+                oscBufferRef={oscBufferRef}
                 // Bloom settings from preset
                 bloomIntensity={bloomPreset.intensity}
                 bloomThreshold={bloomPreset.threshold}
@@ -568,53 +626,18 @@ function App() {
                 </button>
             </div>
 
-            {/* Categorized Shader Selectors */}
             <div className={cn('flex flex-wrap gap-2 p-2 rounded-xl border', isDarkMode ? 'bg-black border-gray-800' : 'bg-gray-200 border-gray-300')}>
-                {/* Square Group */}
-                <div className="flex items-center gap-1">
-                    <span className="text-[10px] font-bold text-gray-500 uppercase px-1">Square</span>
-                    <select
-                        className={cn('text-xs font-mono p-1 rounded border outline-none', isDarkMode ? 'bg-gray-800 border-gray-600 text-white' : 'bg-white border-gray-300 text-black')}
-                        value={SHADER_GROUPS.SQUARE.some(s => s.id === shaderFile) ? shaderFile : ''}
-                        onChange={(e) => e.target.value && setShaderFile(e.target.value)}
-                    >
-                        <option value="" disabled>Select...</option>
-                        {SHADER_GROUPS.SQUARE.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
-                    </select>
-                </div>
-
+                <ShaderSelectorPanel
+                  shaderOptions={ALL_SHADER_OPTIONS}
+                  selectedShader={shaderFile}
+                  onSelectShader={setShaderFile}
+                  favorites={validShaderFavorites}
+                  recents={validShaderRecents}
+                  thumbnails={shaderThumbnails}
+                  onToggleFavorite={toggleShaderFavorite}
+                  isDarkMode={isDarkMode}
+                />
                 <div className={cn('w-px h-6', isDarkMode ? 'bg-gray-800' : 'bg-gray-300')}></div>
-
-                {/* Circular Group */}
-                <div className="flex items-center gap-1">
-                    <span className="text-[10px] font-bold text-gray-500 uppercase px-1">Circular</span>
-                    <select
-                        className={cn('text-xs font-mono p-1 rounded border outline-none', isDarkMode ? 'bg-gray-800 border-gray-600 text-white' : 'bg-white border-gray-300 text-black')}
-                        value={SHADER_GROUPS.CIRCULAR.some(s => s.id === shaderFile) ? shaderFile : ''}
-                        onChange={(e) => e.target.value && setShaderFile(e.target.value)}
-                    >
-                        <option value="" disabled>Select...</option>
-                        {SHADER_GROUPS.CIRCULAR.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
-                    </select>
-                </div>
-
-                <div className={cn('w-px h-6', isDarkMode ? 'bg-gray-800' : 'bg-gray-300')}></div>
-
-                {/* Video Group */}
-                <div className="flex items-center gap-1">
-                    <span className="text-[10px] font-bold text-gray-500 uppercase px-1">Video</span>
-                    <select
-                        className={cn('text-xs font-mono p-1 rounded border outline-none', isDarkMode ? 'bg-gray-800 border-gray-600 text-white' : 'bg-white border-gray-300 text-black')}
-                        value={SHADER_GROUPS.VIDEO.some(s => s.id === shaderFile) ? shaderFile : ''}
-                        onChange={(e) => e.target.value && setShaderFile(e.target.value)}
-                    >
-                        <option value="" disabled>Select...</option>
-                        {SHADER_GROUPS.VIDEO.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
-                    </select>
-                </div>
-                <div className={cn('w-px h-6', isDarkMode ? 'bg-gray-800' : 'bg-gray-300')}></div>
-
-                {/* Color Palette Selector */}
                 <div className="flex items-center gap-1">
                     <span className="text-[10px] font-bold text-gray-500 uppercase px-1">Palette</span>
                     <select
@@ -668,10 +691,12 @@ function App() {
               onOpenDebug={() => setDebugPanelOpen(true)}
               // PERFORMANCE OPTIMIZATION: Pass ref for high-frequency updates
               playbackStateRef={playbackStateRef}
+              oscBufferRef={oscBufferRef}
              // Bloom settings from preset
              bloomIntensity={bloomPreset.intensity}
              bloomThreshold={bloomPreset.threshold}
              colorPalette={colorPalette}
+             chassisDark={chassisDark}
            />
 
            <MediaOverlay
@@ -707,6 +732,8 @@ function App() {
           onBloomPresetChange={setBloomPreset}
           colorScheme={colorScheme}
           onColorSchemeChange={setColorScheme}
+          chassisDark={chassisDark}
+          onToggleChassisDark={() => setChassisDark(!chassisDark)}
         />
 
         {/* Seek Bar */}

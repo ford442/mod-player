@@ -181,7 +181,7 @@ export function handleWorkletError(message, node, refs, callbacks) {
     spFallbackTriggered, audioWorkletNodeRef, libopenmptRef, currentModulePtr,
     audioContextRef, spLeftBufPtr, spRightBufPtr, scriptProcessorRef,
     isPlayingRef, animationFrameHandle, analyserRef, workletOrderRef,
-    workletRowRef, workletTimeRef, lastWorkletUpdateRef,
+    workletRowRef, workletTimeRef, lastWorkletUpdateRef, workletTimestampRef,
   } = refs;
   const { setStatus, setIsPlaying, updateUI } = callbacks;
 
@@ -228,6 +228,7 @@ export function handleWorkletError(message, node, refs, callbacks) {
         workletOrderRef.current = mLib._openmpt_module_get_current_order(mPtr);
         workletRowRef.current   = mLib._openmpt_module_get_current_row(mPtr);
         workletTimeRef.current  = mLib._openmpt_module_get_position_seconds(mPtr);
+            workletTimestampRef.current = ctx.currentTime;
         lastWorkletUpdateRef.current = ctx.currentTime;
       };
 
@@ -251,7 +252,7 @@ export async function startAudioPlayback(refs, callbacks, config) {
     libopenmptRef, fileDataRef, audioContextRef, workletLoadedRef,
     stereoPannerRef, gainNodeRef, analyserRef, audioWorkletNodeRef,
     nativeEngineRef, wasmMemoryRef, workletOrderRef, workletRowRef,
-    workletTimeRef, lastWorkletUpdateRef, workletBpmRef, pendingSeekRef,
+    workletTimeRef, lastWorkletUpdateRef, workletTimestampRef, workletBpmRef, pendingSeekRef,
     seekAcknowledgedRef, spFallbackTriggered, isPlayingRef,
     animationFrameHandle, patternMatricesRef, channelStatesRef,
     audioClockStartRef, workletTimeAtStartRef, driftAccumulatorRef,
@@ -301,7 +302,7 @@ export async function startAudioPlayback(refs, callbacks, config) {
     }
 
     audioClockStartRef.current = ctx.currentTime;
-    workletTimeAtStartRef.current = 0;
+    workletTimeAtStartRef.current = workletTimeRef.current || 0;
     driftAccumulatorRef.current = 0;
 
     // Setup audio nodes
@@ -341,6 +342,7 @@ export async function startAudioPlayback(refs, callbacks, config) {
           workletOrderRef.current = data.currentOrder;
           workletRowRef.current = data.currentRow;
           workletTimeRef.current = data.positionMs / 1000;
+          workletTimestampRef.current = data.workletTime || now;
           lastWorkletUpdateRef.current = now;
 
           if (data.bpm && data.bpm > 0) {
@@ -464,6 +466,7 @@ export async function startAudioPlayback(refs, callbacks, config) {
             workletOrderRef.current = order;
             workletRowRef.current = row;
             workletTimeRef.current = positionSeconds;
+            workletTimestampRef.current = e.data.workletTime || now;
             lastWorkletUpdateRef.current = now;
 
             if (bpm && bpm > 0) {

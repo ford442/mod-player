@@ -1,7 +1,7 @@
 /**
  * useWorkletLoader.ts - AudioWorklet loading with proper Vite URL handling
  * 
- * AUDIO-001 FIX: This module provides robust worklet loading with:
+ * AUDIO-001 FIX COMPLETE: This module provides robust worklet loading with:
  * 1. Proper Vite asset URL construction using ?url imports
  * 2. Error handling and diagnostics for worklet initialization failures
  * 3. Retry logic with exponential backoff
@@ -37,21 +37,37 @@ export interface UseWorkletLoaderOptions {
 /**
  * Get the worklet URL with proper base path handling for Vite deployments.
  * Uses Vite's BASE_URL and handles subdirectory deployments correctly.
+ *
+ * Cache-busting: AudioWorklet modules are cached extremely aggressively by
+ * browsers. A version query parameter forces a fresh load after deploys.
  */
 export const getWorkletUrl = (): string => {
   // Try multiple strategies for URL construction, ordered by reliability
-  
+
   // Strategy 1: Use Vite's BASE_URL (most reliable for Vite builds)
   const viteBase = import.meta.env.BASE_URL || '/';
   const base = viteBase.endsWith('/') ? viteBase : `${viteBase}/`;
-  const url = `${base}worklets/openmpt-worklet.js`;
-  
+  // BUMP this version whenever openmpt-worklet.js changes to bust browser caches
+  const WORKLET_VERSION = '2';
+  const url = `${base}worklets/openmpt-worklet.js?v=${WORKLET_VERSION}`;
+
   return url;
 };
 
 /**
  * Get absolute URL for the worklet (useful for cross-origin scenarios)
  */
+
+/**
+ * Returns the full URL for the native C++ AudioWorklet glue (openmpt-native.js)
+ * Uses the same robust BASE_URL logic as getWorkletUrl().
+ */
+export const getNativeGlueUrl = (): string => {
+  const base = import.meta.env.BASE_URL || '/';
+  const normalized = base.endsWith('/') ? base : `${base}/`;
+  return `${normalized}worklets/openmpt-native.js`;
+};
+
 export const getAbsoluteWorkletUrl = (): string => {
   const relativeUrl = getWorkletUrl();
   return new URL(relativeUrl, window.location.href).toString();
@@ -254,6 +270,7 @@ export function useWorkletLoader(options: UseWorkletLoaderOptions = {}) {
     verifyWorkletFile,
     getDiagnostics,
     getWorkletUrl,
+    getNativeGlueUrl,
     getAbsoluteWorkletUrl,
     isAudioWorkletSupported,
     lastError,

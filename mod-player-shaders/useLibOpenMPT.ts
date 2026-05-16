@@ -1,4 +1,3 @@
-// @ts-nocheck
 
 /// <reference types="vite/client" />
 
@@ -7,6 +6,7 @@ import { ModuleMetadata, PatternMatrix } from '../types';
 import { OpenMPTWorkletEngine } from '../audio-worklet/OpenMPTWorkletEngine';
 import { getPatternMatrix } from './utils/patternExtractor';
 import { processModuleData as processModuleDataFn, startAudioPlayback } from './hooks/useAudioGraph';
+import { getWorkletUrl, getNativeGlueUrl } from '../hooks/useWorkletLoader';
 
 interface SyncDebugInfo {
   mode: string;
@@ -18,18 +18,8 @@ interface SyncDebugInfo {
 
 const DEFAULT_MODULE_URL = './4-mat_madness.mod';
 
-const detectRuntimeBase = (): string => {
-  const viteBase = import.meta.env.BASE_URL;
-  if (viteBase && viteBase !== '/') {
-    return viteBase.endsWith('/') ? viteBase : `${viteBase}/`;
-  }
-  const pathSegments = window.location.pathname.split('/').filter(Boolean);
-  if (pathSegments.length > 0) return `/${pathSegments[0]}/`;
-  return '/';
-};
-
-const RUNTIME_BASE_URL = detectRuntimeBase();
-const WORKLET_URL = `${RUNTIME_BASE_URL}worklets/openmpt-worklet.js`;
+// AUDIO-001 FIX COMPLETE: Use centralized worklet URL construction from useWorkletLoader
+const WORKLET_URL = getWorkletUrl();
 console.log('[AudioWorklet] Worklet URL resolved:', WORKLET_URL);
 
 const MAX_DRIFT_SECONDS = 0.1;
@@ -65,7 +55,23 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
   const [isWorkletSupported, setIsWorkletSupported] = useState(false);
   const [isNativeWorkletAvailable, setIsNativeWorkletAvailable] = useState(false);
   const [restartPlayback, setRestartPlayback] = useState(false);
-  const [syncDebug, setSyncDebug] = useState({ mode: "none", bufferMs: 0, driftMs: 0, row: 0, starvationCount: 0 });
+  const [syncDebug, setSyncDebug] = useState({
+    mode: "none",
+    bufferMs: 0,
+    driftMs: 0,
+    row: 0,
+    starvationCount: 0,
+    audioContextState: 'none',
+    sampleRate: 0,
+    baseLatency: 0,
+    outputLatency: 0,
+    workletSupported: false,
+    wasmSupported: false,
+    driftAccumulator: 0,
+    lastCorrectedTime: 0,
+    lastWorkletUpdate: 0,
+    seekPending: false,
+  });
 
   const libopenmptRef = useRef<any>(null);
   const currentModulePtr = useRef<any>(0);
@@ -86,6 +92,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
   const workletOrderRef = useRef(0);
   const workletRowRef = useRef(0);
   const workletTimeRef = useRef(0);
+  const workletTimestampRef = useRef<number>(0);
   const workletBpmRef = useRef(125);
   const lastWorkletUpdateRef = useRef(0);
 
@@ -235,15 +242,24 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
         const elapsed = now - lastWorkletUpdateRef.current;
         if (elapsed < 0.1) {
           rowFraction = Math.min(1, elapsed * (currentBpm / 60 / 4));
-          const expectedTime = workletTimeRef.current + elapsed;
-          const drift = time - expectedTime;
+          const elapsedHardwareTime = now - audioClockStartRef.current;
+          const expectedTime = workletTimeAtStartRef.current + elapsedHardwareTime;
+          const actualTrackerTime = workletTimeRef.current + elapsed;
+          const drift = actualTrackerTime - expectedTime;
           driftAccumulatorRef.current = driftAccumulatorRef.current * 0.9 + drift * 0.1;
           if (Math.abs(driftAccumulatorRef.current) > MAX_DRIFT_SECONDS) {
-            time = expectedTime + driftAccumulatorRef.current * 0.5;
+            time = expectedTime;
+            audioClockStartRef.current = now;
+            workletTimeAtStartRef.current = workletTimeRef.current;
+            driftAccumulatorRef.current = 0;
             lastCorrectedTimeRef.current = now;
           } else {
-            time = expectedTime;
+            time = actualTrackerTime - driftAccumulatorRef.current;
           }
+          lastCorrectedTimeRef.current = now;
+        } else {
+          // Normal path tracking
+          lastCorrectedTimeRef.current = now;
         }
       }
     } else {
@@ -254,8 +270,8 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
     }
 
     if (pendingSeekRef.current && !seekAcknowledgedRef.current) {
-      const seekAge = audioCtx ? audioCtx.currentTime - pendingSeekRef.current.timestamp : 0;
-      if (seekAge > 0.5) { seekAcknowledgedRef.current = true; pendingSeekRef.current = null; }
+      const seekAgeMs = performance.now() - pendingSeekRef.current.timestamp;
+      if (seekAgeMs > 500) { seekAcknowledgedRef.current = true; pendingSeekRef.current = null; }
     }
 
     if (sequencerMatrix?.order !== order) {
@@ -283,7 +299,8 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
     const beatPhaseValue = (time * 2) % 1;
     setBeatPhase(beatPhaseValue);
 
-    const now = audioCtx?.currentTime || performance.now() / 1000;
+    // TIMING FIX COMPLETE: Atomic update of playbackStateRef with worklet-provided timestamp
+    const now = workletTimestampRef.current || (audioCtx?.currentTime || performance.now() / 1000);
     playbackStateRef.current = {
       playheadRow: smoothedPlayhead, currentOrder: order, timeSec: time,
       beatPhase: beatPhaseValue, kickTrigger, grooveAmount, lastUpdateTimestamp: now,
@@ -292,9 +309,20 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
     setSyncDebug(prev => ({
       ...prev,
       driftMs: Math.round(driftAccumulatorRef.current * 1000),
-      row, mode: activeEngine,
-      bufferMs: Math.round(workletBufferHealthRef.current * 5000),
-      starvationCount: workletStarvationCountRef.current,
+      row,
+      mode: activeEngine,
+      audioContextState: audioContextRef.current?.state || 'none',
+      sampleRate: audioContextRef.current?.sampleRate || 0,
+      baseLatency: audioContextRef.current?.baseLatency ?? 0,
+      outputLatency: audioContextRef.current?.outputLatency ?? 0,
+      workletSupported: typeof AudioWorklet !== 'undefined',
+      wasmSupported: typeof WebAssembly !== 'undefined',
+      driftAccumulator: driftAccumulatorRef.current,
+      lastCorrectedTime: lastCorrectedTimeRef.current,
+      lastWorkletUpdate: lastWorkletUpdateRef.current,
+      seekPending: !!pendingSeekRef.current,
+      bufferMs: Math.round((workletBufferHealthRef.current ?? 0) * 5000),
+      starvationCount: workletStarvationCountRef.current ?? 0,
     }));
 
     lastUpdateTimeRef.current = performance.now() / 1000;
@@ -313,11 +341,22 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
     if (spLeftBufPtr.current && libopenmptRef.current) { libopenmptRef.current._free(spLeftBufPtr.current); spLeftBufPtr.current = 0; }
     if (spRightBufPtr.current && libopenmptRef.current) { libopenmptRef.current._free(spRightBufPtr.current); spRightBufPtr.current = 0; }
     spFallbackTriggered.current = false;
+    // TIMING FIX COMPLETE: Reset timing refs on stop (full sync with main implementation)
     audioClockStartRef.current = 0;
     workletTimeAtStartRef.current = 0;
     driftAccumulatorRef.current = 0;
+    lastCorrectedTimeRef.current = 0;
     pendingSeekRef.current = null;
     seekAcknowledgedRef.current = true;
+
+    const audioCtx = audioContextRef.current;
+    lastWorkletUpdateRef.current = audioCtx ? audioCtx.currentTime : (performance.now() / 1000);
+
+    workletTimeRef.current = 0;
+    workletOrderRef.current = 0;
+    workletRowRef.current = 0;
+
+    console.log("[stopMusic] Timing refs reset", { lastWorkletUpdate: lastWorkletUpdateRef.current, lastCorrected: lastCorrectedTimeRef.current });
     if (destroy && currentModulePtr.current !== 0 && libopenmptRef.current) {
       libopenmptRef.current._openmpt_module_destroy(currentModulePtr.current);
       currentModulePtr.current = 0;
@@ -396,7 +435,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
     }
 
     const audioCtx = audioContextRef.current;
-    pendingSeekRef.current = { order: targetOrder, row: targetRow, timestamp: audioCtx ? audioCtx.currentTime : performance.now() / 1000 };
+    pendingSeekRef.current = { order: targetOrder, row: targetRow, timestamp: performance.now() };
     seekAcknowledgedRef.current = false;
     lib._openmpt_module_set_position_order_row(modPtr, targetOrder, targetRow);
     workletOrderRef.current = targetOrder;
@@ -408,6 +447,8 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
     playbackStateRef.current.playheadRow = targetRow;
     driftAccumulatorRef.current = 0;
     lastWorkletUpdateRef.current = audioCtx ? audioCtx.currentTime : 0;
+    audioClockStartRef.current = audioCtx ? audioCtx.currentTime : 0;
+    workletTimeAtStartRef.current = workletTimeRef.current;
 
     if (activeEngine === 'native-worklet' && nativeEngineRef.current) {
       nativeEngineRef.current.seek(targetOrder, targetRow);
@@ -425,7 +466,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
         stereoPannerRef, gainNodeRef, analyserRef, audioWorkletNodeRef,
         nativeEngineRef, wasmMemoryRef, workletOrderRef, workletRowRef,
         workletTimeRef, lastWorkletUpdateRef, workletBpmRef, pendingSeekRef,
-        seekAcknowledgedRef, spFallbackTriggered, isPlayingRef,
+        seekAcknowledgedRef, workletTimestampRef, spFallbackTriggered, isPlayingRef,
         animationFrameHandle, patternMatricesRef, channelStatesRef,
         audioClockStartRef, workletTimeAtStartRef, driftAccumulatorRef,
         workletBufferHealthRef, workletStarvationCountRef, workletSampleRateRef,
@@ -509,7 +550,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
         }
 
         try {
-          const nativeGlueUrl = `${RUNTIME_BASE_URL}worklets/openmpt-native.js`;
+          const nativeGlueUrl = getNativeGlueUrl();
           const probeResp = await fetch(nativeGlueUrl, { method: 'HEAD' });
           if (probeResp.ok) {
             const engine = new OpenMPTWorkletEngine();
