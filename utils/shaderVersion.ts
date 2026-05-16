@@ -19,6 +19,8 @@ export type LayoutType = 'standard' | 'extended' | 'texture';
 
 // Set of all version substrings that use the extended layout (2×u32 per cell).
 // v0.13 and later all use extended layout; add new versions here when needed.
+// Note: v0.22 and v0.41 are intentionally absent — those version numbers were
+// never released/shipped, so no shader files with those strings exist in the repo.
 const EXTENDED_LAYOUT_VERSIONS = new Set([
   'v0.13', 'v0.14', 'v0.15', 'v0.16', 'v0.17', 'v0.18', 'v0.19',
   'v0.20', 'v0.21', 'v0.23', 'v0.24', 'v0.25', 'v0.26', 'v0.27', 'v0.28', 'v0.29',

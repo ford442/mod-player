@@ -450,7 +450,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
     setBeatPhase(beatPhaseValue);
 
     // TIMING FIX: Atomic update of playbackStateRef with worklet-provided timestamp
-    const now = workletTimestampRef.current || (audioCtx?.currentTime ?? performance.now() / 1000);
+    const now = workletTimestampRef.current ?? (audioCtx?.currentTime ?? performance.now() / 1000);
     playbackStateRef.current = {
       playheadRow: smoothedPlayhead,
       currentOrder: order,
