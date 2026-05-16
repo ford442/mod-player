@@ -395,18 +395,43 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
     setSequencerGlobalRow(globalRow + row);
 
     // TIMING FIX: Smooth row fraction for visual display
-    const smoothedRowFraction = rowFraction * ROW_INTERPOLATION_SMOOTHING + (playbackRowFraction * (1 - ROW_INTERPOLATION_SMOOTHING));
-    setPlaybackRowFraction(smoothedRowFraction);
+    const targetPlayhead = row + rowFraction;
+    const prevPlayhead = playbackStateRef.current.playheadRow;
+    let smoothedPlayhead = prevPlayhead + (targetPlayhead - prevPlayhead) * ROW_INTERPOLATION_SMOOTHING;
+
+    // Snap if jump is too large (seek or pattern change)
+    if (Math.abs(targetPlayhead - prevPlayhead) > 2.0) {
+      smoothedPlayhead = targetPlayhead;
+    }
+    setPlaybackRowFraction(smoothedPlayhead);
 
     // Compute note ages for hardware choke in shader (only update React state when integer ages change)
     const playheadRow = row + smoothedRowFraction;
     const currentMatrix = patternMatricesRef.current[order];
     const numChannels = channelStatesRef.current.length;
     if (currentMatrix && numChannels > 0) {
-      // PERFORMANCE: Only check for integer age changes if the row boundary has been crossed.
-      // This avoids redundant Math.floor calls and expensive matrix scans on every frame.
+    // TIMING FIX: Smooth row fraction for visual display
+    const targetPlayhead = row + rowFraction;
+    const prevPlayhead = playbackStateRef.current.playheadRow;
+    let smoothedPlayhead = prevPlayhead + (targetPlayhead - prevPlayhead) * ROW_INTERPOLATION_SMOOTHING;
+
+    // Snap if jump is too large (seek or pattern change)
+    if (Math.abs(targetPlayhead - prevPlayhead) > 2.0) {
+      smoothedPlayhead = targetPlayhead;
+    }
+
+    setPlaybackRowFraction(smoothedPlayhead);
+
+    // Compute note ages for hardware choke / shaders
+    const playheadRow = smoothedPlayhead;
+    const currentMatrix = patternMatricesRef.current[order];
+    const numChannels = channelStatesRef.current.length;
+
+    if (currentMatrix && numChannels > 0) {
+      // PERFORMANCE: Only recompute on row boundary crossings
       const prev = playbackStateRef.current;
-      const rowChanged = (order !== prev.currentOrder) || (Math.floor(playheadRow) !== Math.floor(prev.playheadRow));
+      const rowChanged = (order !== prev.currentOrder) ||
+                        (Math.floor(playheadRow) !== Math.floor(prev.playheadRow));
 
       if (rowChanged) {
         const noteAges = computeNoteAges(currentMatrix, playheadRow);
@@ -417,12 +442,11 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
           const existing = channelStatesRef.current[c];
           if (!existing) continue;
 
-          // Optimization: bitwise floor comparison is faster and less redundant
           if ((newAge | 0) !== (existing.noteAge | 0)) {
             changed = true;
           }
 
-          // Respect React immutability for the state update
+          // Update ref (mutable for shaders)
           channelStatesRef.current[c] = {
             ...existing,
             noteAge: newAge,
@@ -433,8 +457,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
           setChannelStates([...channelStatesRef.current]);
         }
       } else {
-        // PERFORMANCE: Smoothly update fractional ages in the ref for shaders between row boundaries.
-        // This avoids 64 object allocations and expensive computeNoteAges calls per frame.
+        // Smooth fractional ages between rows (no allocation)
         const delta = playheadRow - prev.playheadRow;
         if (delta > 0) {
           for (let c = 0; c < numChannels; c++) {
@@ -451,17 +474,21 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
     const beatPhaseValue = (time * 2) % 1;
     setBeatPhase(beatPhaseValue);
 
-    // TIMING FIX COMPLETE: Atomic update of playbackStateRef with worklet-provided timestamp
-    const now = workletTimestampRef.current || (audioCtx?.currentTime || performance.now() / 1000);
-    playbackStateRef.current = {
-      playheadRow: row + smoothedRowFraction,
-      currentOrder: order,
-      timeSec: time,
-      beatPhase: beatPhaseValue,
-      kickTrigger: kickTrigger,
-      grooveAmount: grooveAmount,
-      lastUpdateTimestamp: now
-    };
+// TIMING FIX COMPLETE: Atomic update of playbackStateRef with worklet-provided timestamp
+const now = workletTimestampRef.current || (audioCtx?.currentTime || performance.now() / 1000);
+
+// Use the already-computed smoothed value for consistency
+const smoothedPlayhead = row + smoothedRowFraction;
+
+playbackStateRef.current = {
+  playheadRow: smoothedPlayhead,
+  currentOrder: order,
+  timeSec: time,
+  beatPhase: beatPhaseValue,
+  kickTrigger: kickTrigger,
+  grooveAmount: grooveAmount,
+  lastUpdateTimestamp: now
+};
 
     // TIMING FIX: Update sync debug info
     setSyncDebug((prev: SyncDebugInfo) => ({
@@ -483,7 +510,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
 
     lastUpdateTimeRef.current = performance.now() / 1000;
     animationFrameHandle.current = requestAnimationFrame(updateUI);
-  }, [isPlaying, activeEngine, sequencerMatrix, kickTrigger, grooveAmount, playbackRowFraction]);
+  }, [isPlaying, activeEngine, sequencerMatrix, kickTrigger, grooveAmount]);
 
   // Keep updateUIRef always pointing to the latest updateUI so
   // startAudioPlayback can schedule the most current callback.
@@ -588,6 +615,8 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
     setModuleInfo((prev: ModuleInfo) => ({ ...prev, order: targetOrder, row: targetRow }));
     setSequencerCurrentRow(targetRow);
     setSequencerGlobalRow(step);
+    setPlaybackRowFraction(targetRow);
+    playbackStateRef.current.playheadRow = targetRow;
 
     // TIMING FIX: Reset drift accumulator on seek
     driftAccumulatorRef.current = 0;

@@ -742,7 +742,7 @@ function App() {
             <SeekBar
               currentSeconds={playbackSeconds}
               durationSeconds={0}
-              currentRow={Math.floor(playbackRowFraction)}
+              currentRow={playbackRowFraction}
               totalRows={totalPatternRows}
               isPlaying={isPlaying}
               onSeekRow={seekToStep}

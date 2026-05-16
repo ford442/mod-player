@@ -287,8 +287,14 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
     for (let i = 0; i < order; i++) globalRow += patternMatricesRef.current[i]?.numRows || 64;
     setSequencerGlobalRow(globalRow + row);
 
-    const smoothedRowFraction = rowFraction * ROW_INTERPOLATION_SMOOTHING + (playbackRowFraction * (1 - ROW_INTERPOLATION_SMOOTHING));
-    setPlaybackRowFraction(smoothedRowFraction);
+    const targetPlayhead = row + rowFraction;
+    const prevPlayhead = playbackStateRef.current.playheadRow;
+    let smoothedPlayhead = prevPlayhead + (targetPlayhead - prevPlayhead) * ROW_INTERPOLATION_SMOOTHING;
+
+    if (Math.abs(targetPlayhead - prevPlayhead) > 2.0) {
+      smoothedPlayhead = targetPlayhead;
+    }
+    setPlaybackRowFraction(smoothedPlayhead);
 
     const beatPhaseValue = (time * 2) % 1;
     setBeatPhase(beatPhaseValue);
@@ -296,7 +302,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
     // TIMING FIX COMPLETE: Atomic update of playbackStateRef with worklet-provided timestamp
     const now = workletTimestampRef.current || (audioCtx?.currentTime || performance.now() / 1000);
     playbackStateRef.current = {
-      playheadRow: row + smoothedRowFraction, currentOrder: order, timeSec: time,
+      playheadRow: smoothedPlayhead, currentOrder: order, timeSec: time,
       beatPhase: beatPhaseValue, kickTrigger, grooveAmount, lastUpdateTimestamp: now,
     };
 
@@ -321,7 +327,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
 
     lastUpdateTimeRef.current = performance.now() / 1000;
     animationFrameHandle.current = requestAnimationFrame(updateUI);
-  }, [isPlaying, activeEngine, sequencerMatrix, kickTrigger, grooveAmount, playbackRowFraction]);
+  }, [isPlaying, activeEngine, sequencerMatrix, kickTrigger, grooveAmount]);
 
   const stopMusic = useCallback((destroy: boolean = false) => {
     isPlayingRef.current = false;
@@ -402,6 +408,8 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
     currentOrderRef.current = clampedOrder;
     workletOrderRef.current = clampedOrder;
     workletRowRef.current = 0;
+    setPlaybackRowFraction(0);
+    playbackStateRef.current.playheadRow = 0;
     setSequencerCurrentRow(0);
     setModuleInfo(prev => ({ ...prev, order: clampedOrder, row: 0 }));
     const newMatrix = patternMatricesRef.current[clampedOrder];
@@ -435,6 +443,8 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
     setModuleInfo(prev => ({ ...prev, order: targetOrder, row: targetRow }));
     setSequencerCurrentRow(targetRow);
     setSequencerGlobalRow(step);
+    setPlaybackRowFraction(targetRow);
+    playbackStateRef.current.playheadRow = targetRow;
     driftAccumulatorRef.current = 0;
     lastWorkletUpdateRef.current = audioCtx ? audioCtx.currentTime : 0;
     audioClockStartRef.current = audioCtx ? audioCtx.currentTime : 0;
