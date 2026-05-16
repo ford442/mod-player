@@ -55,7 +55,7 @@ The root directory contains **30 actively-used shaders** that are production-rea
 
 ### `legacy/` Subfolder (Archived & Experimental)
 
-The `legacy/` subdirectory contains **34 older or experimental shaders** that are no longer in active use but preserved for reference and potential restoration:
+The `legacy/` subdirectory contains **33 older or experimental shaders** that are no longer in active use but preserved for reference and potential restoration:
 
 **Early Pattern Versions:**
 - `patternShader.wgsl`, `patternShaderv0.0.wgsl`, `patternShaderv0.1.wgsl`, `patternShaderv0.11.wgsl`
