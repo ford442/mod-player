@@ -391,13 +391,13 @@ export function useWebGPURender(
     const device = deviceRef.current;
     if (!device || !gpuReady) return;
     const p = renderParamsRef.current;
-    renderFrameCountRef.current = 0;
     const rawChannels = matrix?.numChannels ?? DEFAULT_CHANNELS;
     const numChannels = p.padTopChannel ? rawChannels + 1 : rawChannels;
     if (numChannels <= 0) return;
     const numRows = matrix?.numRows ?? DEFAULT_ROWS;
     // DEBUG: cells buffer update
     bindGroupRef.current = null;
+    renderFrameCountRef.current = 0;
     if (cellsBufferRef.current) cellsBufferRef.current.destroy();
     const isHighPrec = shaderFile.includes('v0.36') || shaderFile.includes('v0.37') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.47') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49') || shaderFile.includes('v0.50') || shaderFile.includes('v0.51');
     const packFunc = isHighPrec ? packPatternMatrixHighPrecision : packPatternMatrix;
@@ -426,8 +426,8 @@ export function useWebGPURender(
         device.queue.writeBuffer(rowFlagsBufferRef.current, 0, flags.buffer, flags.byteOffset, flags.byteLength);
       }
 
-      const channelsCount = Math.max(1, matrix?.numChannels ?? DEFAULT_CHANNELS);
-      const totalCount = p.padTopChannel ? channelsCount + 1 : channelsCount;
+      const channelsCount = Math.max(1, numChannels - (p.padTopChannel ? 1 : 0));
+      const totalCount = numChannels;
       const requiredSize = totalCount * 32;
       if (!channelBufferDataRef.current || channelBufferDataRef.current.byteLength < requiredSize) {
         channelBufferDataRef.current = new ArrayBuffer(requiredSize);
