@@ -175,13 +175,19 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
 
     console.log("[processModuleData] Processing module:", fileName, "size:", fileData.byteLength);
 
+    // Always cancel any queued UI frame before loading a new module.
+    // This avoids stale updateUI loops from a prior module instance.
+    if (animationFrameHandle.current) {
+      cancelAnimationFrame(animationFrameHandle.current);
+      animationFrameHandle.current = 0;
+    }
+
     // Use ref to check playing state to avoid dependency loop
     if (isPlayingRef.current) {
       console.log("[processModuleData] Stopping current playback");
       // Stop without calling stopMusic to avoid circular dependency
       isPlayingRef.current = false;
       setIsPlaying(false);
-      if (animationFrameHandle.current) cancelAnimationFrame(animationFrameHandle.current);
       if (audioContextRef.current) {
         try { audioContextRef.current.suspend(); } catch { /* ignore */ }
       }
@@ -262,6 +268,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
     workletTimeAtStartRef.current = 0;
     driftAccumulatorRef.current = 0;
     lastCorrectedTimeRef.current = 0;
+    lastWorkletUpdateRef.current = 0;
     pendingSeekRef.current = null;
     seekAcknowledgedRef.current = true;
 
