@@ -44,4 +44,3 @@ export function startProjectMBridge(analyser: AnalyserNode | null): () => void {
     channel.close();
   };
 }
-
