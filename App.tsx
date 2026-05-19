@@ -26,7 +26,10 @@ import {
   DEFAULT_BLOOM_PRESET, 
   DEFAULT_COLOR_SCHEME, 
   type BloomPreset, 
-  type ColorScheme 
+  type ColorScheme,
+  type NightPreset,
+  NIGHT_PRESETS,
+  DEFAULT_NIGHT_PRESET,
 } from './types/bloomPresets';
 
 // Shader Definitions
@@ -127,6 +130,10 @@ function App() {
   const [bloomPreset, setBloomPreset] = useState<BloomPreset>(DEFAULT_BLOOM_PRESET);
   const [colorScheme, setColorScheme] = useState<ColorScheme>(DEFAULT_COLOR_SCHEME);
   const [colorPalette, setColorPalette] = useState<number>(0);
+
+  // Night Mode 2.0 — persisted, active only on patternv0.35_bloom
+  const [nightModeEnabled, setNightModeEnabled] = useLocalStorage<boolean>('xasm1_nightMode_enabled', false);
+  const [nightModePreset, setNightModePreset] = useLocalStorage<NightPreset>('xasm1_nightMode_preset', DEFAULT_NIGHT_PRESET);
 
   const {
     isReady,
@@ -467,8 +474,13 @@ function App() {
     setMediaVisible(true);
   };
 
-  // Calculate Dim Factor
-  const dimFactor = isDarkMode ? 0.3 : 1.0;
+  // Calculate Dim Factor — Night Mode overrides when on v0.35_bloom
+  const isNightShader = shaderFile.includes('v0.35');
+  const nightConfig = NIGHT_PRESETS[nightModePreset];
+  const effectiveDimFactor = (isNightShader && nightModeEnabled)
+    ? nightConfig.dimFactor
+    : (isDarkMode ? 0.3 : 1.0);
+  const dimFactor = effectiveDimFactor;
 
   // Determine shader based on view mode when in 3D
   const get3DShader = () => {
@@ -717,10 +729,16 @@ function App() {
               playbackStateRef={playbackStateRef}
               oscBufferRef={oscBufferRef}
              // Bloom settings from preset
-             bloomIntensity={bloomPreset.intensity}
+             bloomIntensity={(isNightShader && nightModeEnabled) ? nightConfig.bloomIntensity : bloomPreset.intensity}
              bloomThreshold={bloomPreset.threshold}
              colorPalette={colorPalette}
              chassisDark={chassisDark}
+             // Night Mode 2.0
+             nightModeEnabled={isNightShader && nightModeEnabled}
+             nightPreset={nightModeEnabled ? nightConfig.presetIndex : 0}
+             vignetteStrength={nightConfig.vignetteStrength}
+             filmGrain={nightConfig.filmGrain}
+             invertMix={nightConfig.invertMix}
            />
 
            <MediaOverlay
@@ -758,6 +776,12 @@ function App() {
           onColorSchemeChange={setColorScheme}
           chassisDark={chassisDark}
           onToggleChassisDark={() => setChassisDark(!chassisDark)}
+          // Night Mode 2.0
+          nightModeEnabled={nightModeEnabled}
+          nightModePreset={nightModePreset}
+          onNightModeToggle={() => setNightModeEnabled(!nightModeEnabled)}
+          onNightPresetChange={setNightModePreset}
+          isNightShader={isNightShader}
         />
 
         {/* Seek Bar */}

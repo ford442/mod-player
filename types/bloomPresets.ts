@@ -9,6 +9,61 @@ export interface BloomPreset {
   description: string;
 }
 
+// Night Mode 2.0 — shader-driven night theme for patternv0.35_bloom and later
+export type NightPreset = 'dusk' | 'midnight' | 'deep';
+
+export interface NightModeConfig {
+  preset: NightPreset;
+  presetIndex: number;  // 1=dusk, 2=midnight, 3=deep (0 = night mode off)
+  dimFactor: number;
+  vignetteStrength: number;
+  filmGrain: number;
+  invertMix: number;     // luminance-inversion blend (0=normal, 1=inverted)
+  bloomIntensity: number;
+  description: string;
+}
+
+export const NIGHT_PRESETS: Record<NightPreset, NightModeConfig> = {
+  dusk: {
+    preset: 'dusk',
+    presetIndex: 1,
+    dimFactor: 0.7,
+    vignetteStrength: 0.3,
+    filmGrain: 0.02,
+    invertMix: 0.0,
+    bloomIntensity: 0.9,
+    description: 'Warm evening dim — subtle and atmospheric',
+  },
+  midnight: {
+    preset: 'midnight',
+    presetIndex: 2,
+    dimFactor: 0.4,
+    vignetteStrength: 0.6,
+    filmGrain: 0.04,
+    invertMix: 1.0,
+    bloomIntensity: 1.3,
+    description: 'Cool night — medium vignette, channel invert, soft UV',
+  },
+  deep: {
+    preset: 'deep',
+    presetIndex: 3,
+    dimFactor: 0.15,
+    vignetteStrength: 0.85,
+    filmGrain: 0.06,
+    invertMix: 1.0,
+    bloomIntensity: 2.0,
+    description: 'OLED void — heavy vignette, amber glow, only active notes pop',
+  },
+};
+
+export const DEFAULT_NIGHT_PRESET: NightPreset = 'midnight';
+
+export const NIGHT_PRESET_OPTIONS: { value: NightPreset; label: string }[] = [
+  { value: 'dusk',     label: '🌇 Dusk'       },
+  { value: 'midnight', label: '🌙 Midnight'    },
+  { value: 'deep',     label: '🌑 Deep Night'  },
+];
+
 export interface ColorScheme {
   name: string;
   type: 'chromatic' | 'golden' | 'warmcool' | 'rainbow';

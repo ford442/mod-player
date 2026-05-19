@@ -60,6 +60,12 @@ export const fillUniformPayload = (
     stepsLength?: number;
     analyserNode?: AnalyserNode | null;
     gridRect?: { x: number; y: number; w: number; h: number };
+    // Night Mode 2.0 uniforms (v0.35_bloom and later)
+    vignetteStrength?: number;  // [27] radial/ring vignette intensity (0–1)
+    themeBlend?: number;        // [28] animated blend from day→night (0–1)
+    filmGrain?: number;         // [29] film grain intensity (0–0.1)
+    nightPreset?: number;       // [30] 0=off, 1=dusk, 2=midnight, 3=deep
+    invertMix?: number;         // [31] luminance-inversion blend (0–1)
   },
   uint: Uint32Array,
   float: Float32Array
@@ -96,7 +102,13 @@ export const fillUniformPayload = (
     uint[24] = Math.max(0, params.stepsLength ?? params.colorPalette ?? 0) >>> 0;
     float[25] = params.innerRadius ?? 0.0;
     float[26] = params.outerRadius ?? 0.0;
-    return 108;
+    // Night Mode 2.0 fields — used by patternv0.35_bloom (slots 27–31)
+    float[27] = params.vignetteStrength ?? 0.0;
+    float[28] = params.themeBlend ?? 0.0;
+    float[29] = params.filmGrain ?? 0.0;
+    uint[30] = Math.max(0, params.nightPreset ?? 0) >>> 0;
+    float[31] = params.invertMix ?? 0.0;
+    return 128;
   }
 
   uint[0] = Math.max(0, params.numRows) >>> 0;

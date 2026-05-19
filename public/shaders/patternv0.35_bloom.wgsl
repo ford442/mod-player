@@ -1,30 +1,44 @@
 // patternv0.35_bloom.wgsl
-// - "Night Mode" (Dims housing/chrome when playing)
+// - "Night Mode 2.0" — Donut layout with smooth vignette, film grain, animated themeBlend
 // - UV Purple Ring (Outer) with Bezel Cast
-// - Channel Direction Toggle
+// - Channel Direction Toggle with per-ring luminance compensation
 // - Compatible with "Donut" chassis (White center island)
 
 struct Uniforms {
-  numRows: u32,
-  numChannels: u32,
-  playheadRow: u32,
-  isPlaying: u32,
-  cellW: f32,
-  cellH: f32,
-  canvasW: f32,
-  canvasH: f32,
-  tickOffset: f32,
-  bpm: f32,
-  timeSec: f32,
-  beatPhase: f32,
-  groove: f32,
-  kickTrigger: f32,
-  activeChannels: u32,
-  isModuleLoaded: u32,
-  bloomIntensity: f32,
-  bloomThreshold: f32,
-  invertChannels: u32,    // 0 = Outer Low, 1 = Inner Low
-  dimFactor: f32,
+  numRows: u32,           // [0]
+  numChannels: u32,       // [1]
+  playheadRow: u32,       // [2]
+  isPlaying: u32,         // [3]
+  cellW: f32,             // [4]
+  cellH: f32,             // [5]
+  canvasW: f32,           // [6]
+  canvasH: f32,           // [7]
+  tickOffset: f32,        // [8]
+  bpm: f32,               // [9]
+  timeSec: f32,           // [10]
+  beatPhase: f32,         // [11]
+  groove: f32,            // [12]
+  kickTrigger: f32,       // [13]
+  activeChannels: u32,    // [14]
+  isModuleLoaded: u32,    // [15]
+  bloomIntensity: f32,    // [16]
+  bloomThreshold: f32,    // [17]
+  invertChannels: u32,    // [18] 0 = Outer Low, 1 = Inner Low
+  dimFactor: f32,         // [19]
+  // Padding: values written by extended-layout host but unused by this shader [20-26]
+  _gridX: f32,            // [20]
+  _gridY: f32,            // [21]
+  _gridW: f32,            // [22]
+  _gridH: f32,            // [23]
+  _steps: u32,            // [24]
+  _innerR: f32,           // [25]
+  _outerR: f32,           // [26]
+  // Night Mode 2.0 fields [27-31]
+  vignetteStrength: f32,  // [27] radial ring vignette intensity (0–1)
+  themeBlend: f32,        // [28] animated day→night blend (0–1)
+  filmGrain: f32,         // [29] film grain intensity (0–0.1)
+  nightPreset: u32,       // [30] 0=off, 1=dusk, 2=midnight, 3=deep
+  invertMix: f32,         // [31] luminance-inversion blend (0–1)
 };
 
 @group(0) @binding(0) var<storage, read> cells: array<u32>;
@@ -73,9 +87,9 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
 
   let radius = minRadius + f32(ringIndex) * ringDepth;
 
-  let totalSteps = 64.0;
+  let totalSteps = f32(uniforms.numRows);
   let anglePerStep = 6.2831853 / totalSteps;
-  let theta = -1.570796 + f32(row % 64u) * anglePerStep;
+  let theta = -1.570796 + f32(row % uniforms.numRows) * anglePerStep;
 
   let circumference = 2.0 * 3.14159265 * radius;
   let arcLength = circumference / totalSteps;
@@ -255,6 +269,17 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   let isPlaying = (uniforms.isPlaying == 1u);
   let dimFactor = uniforms.dimFactor;
 
+  // Night Mode 2.0: per-ring luminance boost compensates for inner rings feeling dimmer.
+  // Outer rings (large radius) stay at 1.0×; inner rings get up to 1.4× boost.
+  // invertMix smoothly blends between "boost outer" and "boost inner" based on the
+  // current channel-inversion state and preset.
+  let numCh = uniforms.numChannels;
+  let ringIndex = select(numCh - 1u - in.channel, in.channel, uniforms.invertChannels == 1u);
+  let normalizedRing = select(0.0, f32(ringIndex) / f32(numCh - 1u), numCh > 1u);
+  // Without night mode the boost is 1.0; with night mode, inner rings are brightened.
+  let ringBoostRaw = 1.0 + (1.0 - normalizedRing) * 0.4 * uniforms.invertMix;
+  let ringBoost = mix(1.0, ringBoostRaw, uniforms.themeBlend);
+
   if (in.channel == 0u) {
     let onPlayhead = (in.row == uniforms.playheadRow);
     let indSize = vec2(0.3, 0.3);
@@ -275,9 +300,11 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     var col = indLed.rgb;
     var alpha = indLed.a;
 
-    // UV CAST: When playing, boost the purple glow so it blooms onto the bezel
+    // UV CAST: When playing, boost the purple glow so it blooms onto the bezel.
+    // In Deep Night (nightPreset==3) tint toward amber for OLED comfort.
     if (isPlaying) {
-        col += uvPurple * 0.4 * bloom;
+        let ringColor = select(uvPurple, mix(uvPurple, vec3(0.9, 0.5, 0.0), uniforms.themeBlend * select(0.0, 1.0, uniforms.nightPreset == 3u)), uniforms.nightPreset == 3u);
+        col += ringColor * 0.4 * bloom;
     }
 
     if (onPlayhead) {
@@ -339,10 +366,17 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
 
     if (hasNote) {
       let pitchHue = pitchClassFromPacked(in.packedA);
-      let baseColor = neonPalette(pitchHue);
+      var baseColor = neonPalette(pitchHue);
+
+      // Night Mode: Deep Night (preset 3) shifts palette toward warm amber
+      if (uniforms.nightPreset == 3u) {
+        let amberTint = mix(baseColor, vec3(0.9, 0.5, 0.0) * (0.5 + pitchHue * 0.5), uniforms.themeBlend * 0.7);
+        baseColor = amberTint;
+      }
+
       let instBand = inst & 15u;
       let instBright = 0.8 + (select(0.0, f32(instBand) / 15.0, instBand > 0u)) * 0.2;
-      noteColor = baseColor * instBright;
+      noteColor = baseColor * instBright * ringBoost;
 
       let linger = exp(-ch.noteAge * 1.5);
 
@@ -351,7 +385,7 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
       let strike = select(0.0, 3.0, onPlayhead);
 
       let flash = f32(ch.trigger) * 1.0;
-      let totalSteps = 64.0;
+      let totalSteps = f32(uniforms.numRows);
       // Optimized row wrapping using fract for cleaner wrap-around math
       let d = fract((f32(in.row) + uniforms.tickOffset - f32(uniforms.playheadRow)) / totalSteps) * totalSteps;
       let coreDist = min(d, totalSteps - d);
@@ -361,8 +395,12 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
 
       lightAmount = (activeVal * 0.8 + flash + strike + (linger * 2.0)) * clamp(ch.volume, 0.0, 1.2);
       if (isMuted) { lightAmount *= 0.2; }
+
+      // Night Mode: empty cells go pitch black (reduce minimum brightness)
+      let minBrightness = mix(0.1, 0.0, uniforms.themeBlend);
+      lightAmount = max(lightAmount, minBrightness);
     }
-    let displayColor = noteColor * max(lightAmount, 0.1) * (1.0 + bloom * 6.0);
+    let displayColor = noteColor * max(lightAmount, mix(0.1, 0.0, uniforms.themeBlend)) * (1.0 + bloom * 6.0);
     let isLit = (lightAmount > 0.05);
     let mainPad = drawChromeIndicator(mainUV, mainSize, displayColor, isLit, aa, dimFactor);
     finalColor = mix(finalColor, mainPad.rgb, mainPad.a);
@@ -387,7 +425,17 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   let kickPulse = uniforms.kickTrigger * exp(-length(p) * 3.0) * 0.3;
   finalColor += vec3<f32>(0.9, 0.2, 0.4) * kickPulse * uniforms.bloomIntensity;
 
-  // Dithering for night mode banding fix
+  // Night Mode 2.0: Per-ring radial vignette.
+  // In circular layout, outer rings = high normalizedRing → dimmer with vignette.
+  // This creates a "spotlight on the center" effect.
+  let vignette = normalizedRing * normalizedRing * uniforms.vignetteStrength * uniforms.themeBlend;
+  finalColor *= max(0.0, 1.0 - vignette);
+
+  // Night Mode 2.0: Animated film grain for atmosphere
+  let grain = fract(sin(dot(in.uv + vec2(uniforms.timeSec * 0.013, uniforms.timeSec * 0.007), vec2<f32>(127.1, 311.7))) * 43758.5453);
+  finalColor += (grain - 0.5) * uniforms.filmGrain * uniforms.themeBlend;
+
+  // Base dithering to reduce banding (always active, low intensity)
   let noise = fract(sin(dot(in.uv * uniforms.timeSec, vec2<f32>(12.9898, 78.233))) * 43758.5453);
   finalColor += (noise - 0.5) * 0.01;
 
