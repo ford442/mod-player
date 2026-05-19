@@ -89,7 +89,9 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
 
   let totalSteps = f32(uniforms.numRows);
   let anglePerStep = 6.2831853 / totalSteps;
-  let theta = -1.570796 + f32(row % uniforms.numRows) * anglePerStep;
+  // Guard against numRows==0 (e.g., no module loaded) to avoid division-by-zero
+  let safeNumRows = max(uniforms.numRows, 1u);
+  let theta = -1.570796 + f32(row % safeNumRows) * anglePerStep;
 
   let circumference = 2.0 * 3.14159265 * radius;
   let arcLength = circumference / totalSteps;
@@ -301,9 +303,11 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     var alpha = indLed.a;
 
     // UV CAST: When playing, boost the purple glow so it blooms onto the bezel.
-    // In Deep Night (nightPreset==3) tint toward amber for OLED comfort.
+    // In Deep Night (nightPreset==3), tint toward amber for OLED comfort.
     if (isPlaying) {
-        let ringColor = select(uvPurple, mix(uvPurple, vec3(0.9, 0.5, 0.0), uniforms.themeBlend * select(0.0, 1.0, uniforms.nightPreset == 3u)), uniforms.nightPreset == 3u);
+        let isDeepNight = uniforms.nightPreset == 3u;
+        let amberShift = uniforms.themeBlend * select(0.0, 1.0, isDeepNight);
+        let ringColor = mix(uvPurple, vec3(0.9, 0.5, 0.0), amberShift);
         col += ringColor * 0.4 * bloom;
     }
 
@@ -368,10 +372,11 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
       let pitchHue = pitchClassFromPacked(in.packedA);
       var baseColor = neonPalette(pitchHue);
 
-      // Night Mode: Deep Night (preset 3) shifts palette toward warm amber
+      // Night Mode: Deep Night (preset 3) shifts palette toward warm amber for OLED comfort
       if (uniforms.nightPreset == 3u) {
-        let amberTint = mix(baseColor, vec3(0.9, 0.5, 0.0) * (0.5 + pitchHue * 0.5), uniforms.themeBlend * 0.7);
-        baseColor = amberTint;
+        let amberBlend = uniforms.themeBlend * 0.7;
+        let amberColor = vec3(0.9, 0.5, 0.0) * (0.5 + pitchHue * 0.5);
+        baseColor = mix(baseColor, amberColor, amberBlend);
       }
 
       let instBand = inst & 15u;

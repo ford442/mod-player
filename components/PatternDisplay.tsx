@@ -107,6 +107,8 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   const bloomRef = useRef<BloomPostProcessor | null>(null);
 
   // Night Mode — animated themeBlend (0=day, 1=night)
+  // Transition speed: 400ms for a smooth, perceptible feel (not jarring).
+  const THEME_TRANSITION_DURATION_MS = 400;
   const themeBlendRef = useRef<number>(nightModeEnabled ? 1.0 : 0.0);
 
   const [webgpuAvailable, setWebgpuAvailable] = useState(true);
@@ -418,13 +420,14 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     const loop = (time: number) => {
       if (!isActive) return;
       animationFrameRef.current = requestAnimationFrame(loop);
-      const dt = Math.min((time - lastTime) / 1000, 0.1); // seconds, capped at 0.1s
+      // Cap dt at 100ms to prevent large jumps when the tab is backgrounded
+      const dt = Math.min((time - lastTime) / 1000, 0.1);
       lastTime = time;
-      // Animate themeBlend toward night mode target (~400ms transition)
+      // Animate themeBlend toward night mode target at the defined transition rate
       const target = nightModeTargetRef.current;
       const current = themeBlendRef.current;
       if (Math.abs(current - target) > 0.001) {
-        const speed = 1.0 / 0.4; // 400ms
+        const speed = 1000 / THEME_TRANSITION_DURATION_MS; // units/sec
         themeBlendRef.current = current + Math.sign(target - current) * Math.min(Math.abs(target - current), speed * dt);
         renderParamsRef.current.themeBlend = themeBlendRef.current;
       }

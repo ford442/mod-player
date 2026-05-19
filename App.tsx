@@ -134,7 +134,6 @@ function App() {
   // Night Mode 2.0 — persisted, active only on patternv0.35_bloom
   const [nightModeEnabled, setNightModeEnabled] = useLocalStorage<boolean>('xasm1_nightMode_enabled', false);
   const [nightModePreset, setNightModePreset] = useLocalStorage<NightPreset>('xasm1_nightMode_preset', DEFAULT_NIGHT_PRESET);
-
   const {
     isReady,
     isModuleLoaded,
@@ -475,7 +474,7 @@ function App() {
   };
 
   // Calculate Dim Factor — Night Mode overrides when on v0.35_bloom
-  const isNightShader = shaderFile.includes('v0.35');
+  const isNightShader = shaderFile.includes('v0.35_bloom');
   const nightConfig = NIGHT_PRESETS[nightModePreset];
   const effectiveDimFactor = (isNightShader && nightModeEnabled)
     ? nightConfig.dimFactor
