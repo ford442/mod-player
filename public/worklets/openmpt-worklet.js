@@ -12,8 +12,27 @@
  * and libopenmpt.wasm and sends them via postMessage({ type:'initLib', ... }).
  * The worklet evaluates the JS via new Function() with wasmBinary pre-seeded.
  *
- * NOTE: Chrome 116+ provides setTimeout in AudioWorkletGlobalScope.
+ * NOTE: Chrome 116+ provides setTimeout in AudioWorkletGlobalScope. Older
+ * browsers don't, so we polyfill it below using process()-driven ticks.
  */
+
+// ── setTimeout/clearTimeout polyfill for AudioWorkletGlobalScope ──────
+// Older Chrome/Edge/Firefox don't expose timers in the worklet scope.
+// Schedule callbacks via currentTime checks driven by process().
+if (typeof globalThis.setTimeout !== 'function') {
+  const _timers = new Map();
+  let _nextTimerId = 1;
+  globalThis.__workletTimers = _timers;
+  globalThis.setTimeout = function (fn, delayMs) {
+    const id = _nextTimerId++;
+    const deadline = (typeof currentTime === 'number' ? currentTime : 0) + (delayMs || 0) / 1000;
+    _timers.set(id, { fn, deadline });
+    return id;
+  };
+  globalThis.clearTimeout = function (id) {
+    _timers.delete(id);
+  };
+}
 
 const DEBUG = true;
 function log(...args) { if (DEBUG) console.log('[Worklet]', ...args); }
@@ -217,6 +236,18 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
 
   // ── Audio process loop ─────────────────────────────────────────────
   process(_inputs, outputs, _parameters) {
+    // Fire any setTimeout polyfill callbacks whose deadline has elapsed.
+    const timers = globalThis.__workletTimers;
+    if (timers && timers.size > 0) {
+      const now = currentTime;
+      for (const [id, t] of timers) {
+        if (t.deadline <= now) {
+          timers.delete(id);
+          try { t.fn(); } catch (e) { console.error('[Worklet] timer error', e); }
+        }
+      }
+    }
+
     const out = outputs[0];
     const outL = out[0];
     const outR = out[1];
