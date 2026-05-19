@@ -594,6 +594,7 @@ function App() {
             ) : undefined
           }
           playheadX={playbackSeconds * 10.0}
+          channels={channelStates}
         />
         {cheatsheetOpen && <KeyboardShortcutHelp onClose={() => setCheatsheetOpen(false)} />}
       </>

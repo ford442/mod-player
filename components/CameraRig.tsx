@@ -2,47 +2,68 @@ import React, { useRef } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 
+export type CameraPreset = 'front' | 'overhead' | 'dj';
+
+/** Distance (world units) at which a preset transition is considered complete. */
+const TRANSITION_COMPLETE_THRESHOLD = 0.15;
+
+/** World-space camera position (relative to playhead centre) for each preset. */
+const PRESET_POSITIONS: Record<CameraPreset, [number, number, number]> = {
+  front:    [0,  3, 12],
+  overhead: [0, 16,  2],
+  dj:       [8,  5,  8],
+};
+
 interface CameraRigProps {
   isPlaying: boolean;
   playheadX: number;
   controlsRef: React.MutableRefObject<any>;
+  cameraPreset?: CameraPreset;
 }
 
-const CameraRig: React.FC<CameraRigProps> = ({ playheadX, controlsRef }) => {
+const CameraRig: React.FC<CameraRigProps> = ({
+  playheadX,
+  controlsRef,
+  cameraPreset = 'front',
+}) => {
   const { camera } = useThree();
-
-  // Keep track of previous playhead to calculate delta if needed
-  const prevPlayhead = useRef(playheadX);
+  const prevPreset = useRef<CameraPreset>(cameraPreset);
+  const isTransitioning = useRef(false);
 
   useFrame(() => {
     if (!controlsRef.current) return;
-
     const controls = controlsRef.current;
 
-    // We want the camera to focus on the current playhead X
-    const targetX = playheadX;
+    // Smoothly follow the playhead horizontally
+    const smoothTargetX = THREE.MathUtils.lerp(controls.target.x, playheadX, 0.08);
 
-    // 1. Calculate the offset of the camera relative to the *old* target
-    //    This preserves the user's zoom level and rotation angle.
-    const currentTarget = controls.target;
-    const offset = new THREE.Vector3().subVectors(camera.position, currentTarget);
+    // Detect a preset change and kick off a smooth transition
+    if (cameraPreset !== prevPreset.current) {
+      prevPreset.current = cameraPreset;
+      isTransitioning.current = true;
+    }
 
-    // 2. Move the target to the new playhead position
-    //    Using a small lerp makes it smooth, 1.0 makes it locked.
-    //    If playhead moves fast, we want to keep up.
+    if (isTransitioning.current) {
+      // Lerp camera position towards the chosen preset
+      const [px, py, pz] = PRESET_POSITIONS[cameraPreset];
+      const targetPos = new THREE.Vector3(px + smoothTargetX, py, pz);
+      const targetLook = new THREE.Vector3(smoothTargetX, 0, 0);
 
-    // Smoothly interpolate the Target X
-    const smoothTargetX = THREE.MathUtils.lerp(currentTarget.x, targetX, 0.1);
+      camera.position.lerp(targetPos, 0.07);
+      controls.target.lerp(targetLook, 0.07);
 
-    controls.target.set(smoothTargetX, 0, 0); // Assuming center is Y=0, Z=0
-
-    // 3. Move the Camera to maintain the offset
-    //    This effectively "drags" the camera along with the target
-    camera.position.copy(controls.target).add(offset);
+      // Stop transitioning once we're close enough
+      if (camera.position.distanceTo(targetPos) < TRANSITION_COMPLETE_THRESHOLD) {
+        isTransitioning.current = false;
+      }
+    } else {
+      // Normal mode: maintain orbit offset while following the playhead
+      const offset = new THREE.Vector3().subVectors(camera.position, controls.target);
+      controls.target.set(smoothTargetX, 0, 0);
+      camera.position.copy(controls.target).add(offset);
+    }
 
     controls.update();
-
-    prevPlayhead.current = playheadX;
   });
 
   return null;
