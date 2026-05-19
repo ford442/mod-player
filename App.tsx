@@ -20,6 +20,7 @@ import { usePlaylist } from './hooks/usePlaylist';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { useLocalStorage } from './hooks/useLocalStorage';
 import { cn } from './utils/cn';
+import { startProjectMBridge } from './utils/projectMBridge';
 import type { MediaItem } from './types';
 import { 
   DEFAULT_BLOOM_PRESET, 
@@ -157,6 +158,12 @@ function App() {
     workletLoadError,
     oscBufferRef,
   } = useLibOpenMPT(volume);
+
+  // Project-M popup integration: broadcast PCM frames via BroadcastChannel
+  useEffect(() => {
+    const stopBridge = startProjectMBridge(analyserNode);
+    return stopBridge; // cleanup on unmount
+  }, [analyserNode]);
 
   // Media Overlay State
   const [mediaVisible, setMediaVisible] = useState<boolean>(false);
