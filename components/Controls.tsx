@@ -1,7 +1,7 @@
 import React from 'react';
 import { UploadIcon } from './icons';
 import type { MediaItem } from '../types';
-import { BLOOM_PRESETS, COLOR_SCHEMES, type BloomPreset, type ColorScheme } from '../types/bloomPresets';
+import { BLOOM_PRESETS, COLOR_SCHEMES, NIGHT_PRESET_OPTIONS, type BloomPreset, type ColorScheme, type NightPreset } from '../types/bloomPresets';
 import { cn } from '../utils/cn';
 
 interface ControlsProps {
@@ -27,6 +27,12 @@ interface ControlsProps {
   onColorSchemeChange?: (scheme: ColorScheme) => void;
   chassisDark?: boolean;
   onToggleChassisDark?: () => void;
+  // Night Mode 2.0
+  nightModeEnabled?: boolean;
+  nightModePreset?: NightPreset;
+  onNightModeToggle?: () => void;
+  onNightPresetChange?: (preset: NightPreset) => void;
+  isNightShader?: boolean;
 }
 
 export const Controls: React.FC<ControlsProps> = ({
@@ -52,6 +58,12 @@ export const Controls: React.FC<ControlsProps> = ({
   onColorSchemeChange,
   chassisDark,
   onToggleChassisDark,
+  // Night Mode 2.0
+  nightModeEnabled = false,
+  nightModePreset = 'midnight',
+  onNightModeToggle,
+  onNightPresetChange,
+  isNightShader = false,
 }) => {
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -158,6 +170,36 @@ export const Controls: React.FC<ControlsProps> = ({
           </button>
         )}
       </div>
+
+      {/* Night Mode 2.0 Toggle + Preset — shown only on v0.35_bloom */}
+      {isNightShader && onNightModeToggle && (
+        <div className="flex items-center gap-2 border-l border-gray-600 pl-4">
+          <button
+            onClick={onNightModeToggle}
+            title={nightModeEnabled ? 'Switch to Day Mode' : 'Switch to Night Mode'}
+            className={cn(
+              'px-3 py-2 text-sm font-semibold rounded-lg shadow-lg transition-all duration-300 border',
+              nightModeEnabled
+                ? 'bg-indigo-950 text-indigo-300 border-indigo-700 hover:bg-indigo-900'
+                : 'bg-gray-700 text-gray-200 border-gray-500 hover:bg-gray-600',
+            )}
+          >
+            {nightModeEnabled ? '🌙 Night' : '☀️ Day'}
+          </button>
+          {nightModeEnabled && onNightPresetChange && (
+            <select
+              value={nightModePreset}
+              onChange={(e) => onNightPresetChange(e.target.value as NightPreset)}
+              title="Night Mode Preset"
+              className="bg-indigo-950 text-indigo-200 text-sm px-2 py-2 rounded border border-indigo-700 focus:border-indigo-400 outline-none transition-colors"
+            >
+              {NIGHT_PRESET_OPTIONS.map(opt => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </select>
+          )}
+        </div>
+      )}
 
       {/* Bloom Preset Dropdown */}
       {onBloomPresetChange && (

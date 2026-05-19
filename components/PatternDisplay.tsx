@@ -47,6 +47,12 @@ interface PatternDisplayProps {
   onOpenDebug?: () => void;
   colorPalette?: number;
   chassisDark?: boolean;
+  // Night Mode 2.0
+  nightModeEnabled?: boolean;
+  nightPreset?: number;        // 0=off, 1=dusk, 2=midnight, 3=deep
+  vignetteStrength?: number;
+  filmGrain?: number;
+  invertMix?: number;
 }
 
 export const PatternDisplay: React.FC<PatternDisplayProps> = ({
@@ -88,12 +94,22 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   onOpenDebug,
   colorPalette = 0,
   chassisDark = false,
+  nightModeEnabled = false,
+  nightPreset = 0,
+  vignetteStrength = 0.0,
+  filmGrain = 0.0,
+  invertMix = 0.0,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const glCanvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const bloomRef = useRef<BloomPostProcessor | null>(null);
+
+  // Night Mode — animated themeBlend (0=day, 1=night)
+  // Transition speed: 400ms for a smooth, perceptible feel (not jarring).
+  const THEME_TRANSITION_DURATION_MS = 400;
+  const themeBlendRef = useRef<number>(nightModeEnabled ? 1.0 : 0.0);
 
   const [webgpuAvailable, setWebgpuAvailable] = useState(true);
   const [localTime, setLocalTime] = useState(0);
@@ -105,6 +121,9 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   const freqDataRef = useRef(new Uint8Array(256));
   const canvasSizeRef = useRef({ width: 0, height: 0, dpr: 1 });
   const resizeTimeoutRef = useRef<number | null>(null);
+  // Night mode target is read each frame from this ref to avoid stale closures
+  const nightModeTargetRef = useRef<number>(nightModeEnabled ? 1.0 : 0.0);
+  nightModeTargetRef.current = nightModeEnabled ? 1.0 : 0.0;
 
   const [debugInfo, setDebugInfo] = useState<DebugInfo>({
     layoutMode: 'NONE',
@@ -242,6 +261,8 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     colorPalette,
     stepsLength,
     chassisDark,
+    vignetteStrength, filmGrain, invertMix, nightPreset,
+    themeBlend: themeBlendRef.current,
     ...(totalRows !== undefined ? { totalRows } : {}),
     ...(playbackStateRef ? { playbackStateRef } : {}),
   });
@@ -255,6 +276,8 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     colorPalette,
     stepsLength,
     chassisDark,
+    vignetteStrength, filmGrain, invertMix, nightPreset,
+    themeBlend: themeBlendRef.current,
     ...(totalRows !== undefined ? { totalRows } : {}),
     ...(playbackStateRef ? { playbackStateRef } : {}),
   };
@@ -393,9 +416,21 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   // Animation RAF loop
   useEffect(() => {
     let isActive = true;
+    let lastTime = 0;
     const loop = (time: number) => {
       if (!isActive) return;
       animationFrameRef.current = requestAnimationFrame(loop);
+      // Cap dt at 100ms to prevent large jumps when the tab is backgrounded
+      const dt = Math.min((time - lastTime) / 1000, 0.1);
+      lastTime = time;
+      // Animate themeBlend toward night mode target at the defined transition rate
+      const target = nightModeTargetRef.current;
+      const current = themeBlendRef.current;
+      if (Math.abs(current - target) > 0.001) {
+        const speed = 1000 / THEME_TRANSITION_DURATION_MS; // units/sec
+        themeBlendRef.current = current + Math.sign(target - current) * Math.min(Math.abs(target - current), speed * dt);
+        renderParamsRef.current.themeBlend = themeBlendRef.current;
+      }
       if (!isModuleLoaded && !isPlaying) setLocalTime(time / 1000.0);
       if (analyserNode) {
         if (freqDataRef.current.length !== analyserNode.frequencyBinCount) {

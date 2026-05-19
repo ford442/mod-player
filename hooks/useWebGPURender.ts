@@ -68,6 +68,12 @@ export interface WebGPURenderParams {
   colorPalette?: number;
   stepsLength?: number;
   chassisDark?: boolean;
+  // Night Mode 2.0 (v0.35_bloom)
+  vignetteStrength?: number;
+  themeBlend?: number;
+  filmGrain?: number;
+  nightPreset?: number;
+  invertMix?: number;
 }
 
 export function useWebGPURender(
@@ -106,7 +112,7 @@ export function useWebGPURender(
   const bezelUniformBufferRef = useRef<GPUBuffer | null>(null);
 
   // Persistent typed arrays to avoid GC pressure
-  const uniformBufferDataRef = useRef(new ArrayBuffer(108));
+  const uniformBufferDataRef = useRef(new ArrayBuffer(128));
   const uniformUintRef = useRef(new Uint32Array(uniformBufferDataRef.current));
   const uniformFloatRef = useRef(new Float32Array(uniformBufferDataRef.current));
   const bezelBufferDataRef = useRef(new ArrayBuffer(128));
@@ -279,7 +285,7 @@ export function useWebGPURender(
           pipelineRef.current = device.createRenderPipeline({ layout: device.createPipelineLayout({ bindGroupLayouts: [bindGroupLayout] }), vertex: { module, entryPoint: 'vertex_main' }, fragment: { module, entryPoint: 'fragment_main', targets }, primitive: { topology: 'triangle-list' } });
         }
 
-        const uniformSize = layoutType === 'extended' ? 108 : (layoutType === 'texture' ? 64 : 32);
+        const uniformSize = layoutType === 'extended' ? 128 : (layoutType === 'texture' ? 64 : 32);
         const uniformBuffer = device.createBuffer({ size: alignTo(uniformSize, 256), usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
 
         if (shouldUseBackgroundPass(shaderFile)) {
@@ -531,6 +537,12 @@ export function useWebGPURender(
         colorPalette: p.colorPalette ?? 0,
         stepsLength: p.stepsLength ?? 32,
         gridRect: GRID_RECT,
+        // Night Mode 2.0
+        vignetteStrength: p.vignetteStrength ?? 0.0,
+        themeBlend: p.themeBlend ?? 0.0,
+        filmGrain: p.filmGrain ?? 0.0,
+        nightPreset: p.nightPreset ?? 0,
+        invertMix: p.invertMix ?? 0.0,
       }, uniformUintRef.current, uniformFloatRef.current);
       device.queue.writeBuffer(uniformBufferRef.current, 0, uniformBufferDataRef.current, 0, uniformByteLength);
     }
