@@ -133,7 +133,10 @@ export function useWebGPURender(
       { binding: 1, resource: { buffer: uniformBufferRef.current } },
     ];
     if (layoutType === 'extended') {
-      if (!rowFlagsBufferRef.current || !channelsBufferRef.current || !textureResourcesRef.current) return;
+      if (!rowFlagsBufferRef.current || !channelsBufferRef.current || !textureResourcesRef.current) {
+        bindGroupRef.current = null;
+        return;
+      }
       entries.push(
         { binding: 2, resource: { buffer: rowFlagsBufferRef.current } },
         { binding: 3, resource: { buffer: channelsBufferRef.current } },
@@ -144,7 +147,10 @@ export function useWebGPURender(
         entries.push({ binding: 6, resource: oscTextureRef.current.createView() });
       }
     } else if (layoutType === 'texture') {
-      if (!textureResourcesRef.current) return;
+      if (!textureResourcesRef.current) {
+        bindGroupRef.current = null;
+        return;
+      }
       entries.push(
         { binding: 2, resource: textureResourcesRef.current.sampler },
         { binding: 3, resource: textureResourcesRef.current.view },
@@ -385,11 +391,13 @@ export function useWebGPURender(
     const device = deviceRef.current;
     if (!device || !gpuReady) return;
     const p = renderParamsRef.current;
+    renderFrameCountRef.current = 0;
     const rawChannels = matrix?.numChannels ?? DEFAULT_CHANNELS;
     const numChannels = p.padTopChannel ? rawChannels + 1 : rawChannels;
     if (numChannels <= 0) return;
     const numRows = matrix?.numRows ?? DEFAULT_ROWS;
     // DEBUG: cells buffer update
+    bindGroupRef.current = null;
     if (cellsBufferRef.current) cellsBufferRef.current.destroy();
     const isHighPrec = shaderFile.includes('v0.36') || shaderFile.includes('v0.37') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.47') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49') || shaderFile.includes('v0.50') || shaderFile.includes('v0.51');
     const packFunc = isHighPrec ? packPatternMatrixHighPrecision : packPatternMatrix;
@@ -416,6 +424,23 @@ export function useWebGPURender(
         rowFlagsBufferRef.current = createBufferWithData(device, flags, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
       } else {
         device.queue.writeBuffer(rowFlagsBufferRef.current, 0, flags.buffer, flags.byteOffset, flags.byteLength);
+      }
+
+      const channelsCount = Math.max(1, matrix?.numChannels ?? DEFAULT_CHANNELS);
+      const totalCount = p.padTopChannel ? channelsCount + 1 : channelsCount;
+      const requiredSize = totalCount * 32;
+      if (!channelBufferDataRef.current || channelBufferDataRef.current.byteLength < requiredSize) {
+        channelBufferDataRef.current = new ArrayBuffer(requiredSize);
+        channelDataViewRef.current = new DataView(channelBufferDataRef.current);
+      } else {
+        new Uint8Array(channelBufferDataRef.current).fill(0, 0, requiredSize);
+      }
+      fillChannelStates(p.channels, channelsCount, channelDataViewRef.current!, p.padTopChannel);
+      if (!channelsBufferRef.current || channelsBufferRef.current.size < requiredSize) {
+        channelsBufferRef.current?.destroy();
+        channelsBufferRef.current = createBufferWithData(device, channelBufferDataRef.current!, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
+      } else {
+        device.queue.writeBuffer(channelsBufferRef.current, 0, channelBufferDataRef.current!, 0, requiredSize);
       }
     }
     refreshBindGroup(device);
