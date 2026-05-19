@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState, useMemo, useCallback } from 'react';
 import { ChannelShadowState, PatternMatrix, PlaybackState } from '../types';
 
 import { useWebGLOverlay } from '../hooks/useWebGLOverlay';
@@ -148,6 +148,8 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     const containerRect = container.getBoundingClientRect();
     const containerWidth = containerRect.width;
     const containerHeight = containerRect.height;
+    // Guard: container not yet laid out — don't resize to degenerate 1×1 dimensions
+    if (containerWidth <= 0 || containerHeight <= 0) return;
     const aspectRatio = canvasMetrics.width / canvasMetrics.height;
     let displayWidth = containerWidth;
     let displayHeight = containerHeight;
@@ -202,11 +204,20 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   const gpuDeviceRef = useRef<GPUDevice | null>(null);
   const gpuContextRef = useRef<GPUCanvasContext | null>(null);
 
+  // Sync canvas buffer to the DPR-correct physical size BEFORE the browser's first paint.
+  // useLayoutEffect fires synchronously after DOM commit but before paint, ensuring the
+  // canvas is never displayed at the wrong (non-DPR-scaled) resolution on the first frame.
+  useLayoutEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    syncCanvasSize(canvas, glCanvasRef.current);
+  }, [syncCanvasSize]);
+
+  // Set up ResizeObserver and window resize listener for all subsequent resizes.
   useEffect(() => {
     const container = containerRef.current;
     const canvas = canvasRef.current;
     if (!container || !canvas) return;
-    syncCanvasSize(canvas, glCanvasRef.current);
     const resizeObserver = new ResizeObserver(() => {
       requestAnimationFrame(() => handleResize());
     });
@@ -218,7 +229,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
       window.removeEventListener('resize', handleWindowResize);
       if (resizeTimeoutRef.current !== null) window.clearTimeout(resizeTimeoutRef.current);
     };
-  }, [handleResize, syncCanvasSize]);
+  }, [handleResize]);
 
   // Build render params ref — updated every render, read by hooks without stale closures
   const renderParamsRef = useRef<WebGPURenderParams>({
