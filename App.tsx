@@ -20,12 +20,16 @@ import { usePlaylist } from './hooks/usePlaylist';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { useLocalStorage } from './hooks/useLocalStorage';
 import { cn } from './utils/cn';
+import { startProjectMBridge } from './utils/projectMBridge';
 import type { MediaItem } from './types';
 import { 
   DEFAULT_BLOOM_PRESET, 
   DEFAULT_COLOR_SCHEME, 
   type BloomPreset, 
-  type ColorScheme 
+  type ColorScheme,
+  type NightPreset,
+  NIGHT_PRESETS,
+  DEFAULT_NIGHT_PRESET,
 } from './types/bloomPresets';
 
 // Shader Definitions
@@ -127,6 +131,9 @@ function App() {
   const [colorScheme, setColorScheme] = useState<ColorScheme>(DEFAULT_COLOR_SCHEME);
   const [colorPalette, setColorPalette] = useState<number>(0);
 
+  // Night Mode 2.0 — persisted, active only on patternv0.35_bloom
+  const [nightModeEnabled, setNightModeEnabled] = useLocalStorage<boolean>('xasm1_nightMode_enabled', false);
+  const [nightModePreset, setNightModePreset] = useLocalStorage<NightPreset>('xasm1_nightMode_preset', DEFAULT_NIGHT_PRESET);
   const {
     isReady,
     isModuleLoaded,
@@ -158,9 +165,17 @@ function App() {
     oscBufferRef,
   } = useLibOpenMPT(volume);
 
+  // Project-M popup integration: broadcast PCM frames via BroadcastChannel
+  useEffect(() => {
+    const stopBridge = startProjectMBridge(analyserNode);
+    return stopBridge; // cleanup on unmount
+  }, [analyserNode]);
+
   // Media Overlay State
   const [mediaVisible, setMediaVisible] = useState<boolean>(false);
   const [mediaItem, setMediaItem] = useState<MediaItem | null>(null);
+  // Track object URLs created from local files so we can revoke them on replacement/unmount
+  const mediaObjectUrlRef = useRef<string | null>(null);
 
   // Panel visibility
   const [showChannelMeters, setShowChannelMeters] = useState<boolean>(true);
@@ -417,6 +432,15 @@ function App() {
     });
   }, []);
 
+  // Revoke any lingering media object URL on unmount
+  useEffect(() => {
+    return () => {
+      if (mediaObjectUrlRef.current) {
+        URL.revokeObjectURL(mediaObjectUrlRef.current);
+      }
+    };
+  }, []);
+
   // Handle File Selection
 
   const handleFileSelected = async (file: File) => {
@@ -427,7 +451,12 @@ function App() {
 
   const handleMediaAdd = (file: File) => {
     const kind = file.type.startsWith("video") ? "video" : "image";
+    // Revoke the previous object URL to avoid memory leaks
+    if (mediaObjectUrlRef.current) {
+      URL.revokeObjectURL(mediaObjectUrlRef.current);
+    }
     const url = URL.createObjectURL(file);
+    mediaObjectUrlRef.current = url;
     setMediaItem({
       id: crypto.randomUUID(),
       kind,
@@ -444,8 +473,13 @@ function App() {
     setMediaVisible(true);
   };
 
-  // Calculate Dim Factor
-  const dimFactor = isDarkMode ? 0.3 : 1.0;
+  // Calculate Dim Factor — Night Mode overrides when on v0.35_bloom
+  const isNightShader = shaderFile.includes('v0.35_bloom');
+  const nightConfig = NIGHT_PRESETS[nightModePreset];
+  const effectiveDimFactor = (isNightShader && nightModeEnabled)
+    ? nightConfig.dimFactor
+    : (isDarkMode ? 0.3 : 1.0);
+  const dimFactor = effectiveDimFactor;
 
   // Determine shader based on view mode when in 3D
   const get3DShader = () => {
@@ -571,6 +605,7 @@ function App() {
             ) : undefined
           }
           playheadX={playbackSeconds * 10.0}
+          channels={channelStates}
         />
         {cheatsheetOpen && <KeyboardShortcutHelp onClose={() => setCheatsheetOpen(false)} />}
       </>
@@ -693,10 +728,16 @@ function App() {
               playbackStateRef={playbackStateRef}
               oscBufferRef={oscBufferRef}
              // Bloom settings from preset
-             bloomIntensity={bloomPreset.intensity}
+             bloomIntensity={(isNightShader && nightModeEnabled) ? nightConfig.bloomIntensity : bloomPreset.intensity}
              bloomThreshold={bloomPreset.threshold}
              colorPalette={colorPalette}
              chassisDark={chassisDark}
+             // Night Mode 2.0
+             nightModeEnabled={isNightShader && nightModeEnabled}
+             nightPreset={nightModeEnabled ? nightConfig.presetIndex : 0}
+             vignetteStrength={nightConfig.vignetteStrength}
+             filmGrain={nightConfig.filmGrain}
+             invertMix={nightConfig.invertMix}
            />
 
            <MediaOverlay
@@ -734,6 +775,12 @@ function App() {
           onColorSchemeChange={setColorScheme}
           chassisDark={chassisDark}
           onToggleChassisDark={() => setChassisDark(!chassisDark)}
+          // Night Mode 2.0
+          nightModeEnabled={nightModeEnabled}
+          nightModePreset={nightModePreset}
+          onNightModeToggle={() => setNightModeEnabled(!nightModeEnabled)}
+          onNightPresetChange={setNightModePreset}
+          isNightShader={isNightShader}
         />
 
         {/* Seek Bar */}

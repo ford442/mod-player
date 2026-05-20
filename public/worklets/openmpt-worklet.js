@@ -7,34 +7,36 @@
  *     broke all MOD playback by generating a 440Hz sine wave instead of rendering
  *     the loaded module. See docs/WORKLET_AUDIO_BUG.md for the full post-mortem.
  *
- * Critical setup for AudioWorklet compatibility:
- * 1. globalThis.libopenmpt pre-configuration so Emscripten locateFile resolves WASM correctly
- * 2. Dynamic import() of libopenmpt-audioworklet.js (avoids addModule({ type:'module' }) requirement)
+ * WASM loading strategy: AudioWorklet classic scripts cannot use import() or
+ * importScripts(). Instead, the main thread fetches libopenmpt-audioworklet.js
+ * and libopenmpt.wasm and sends them via postMessage({ type:'initLib', ... }).
+ * The worklet evaluates the JS via new Function() with wasmBinary pre-seeded.
  *
- * NOTE: Chrome 116+ provides setTimeout in AudioWorkletGlobalScope. The old microtask-based
- * polyfill (Promise.resolve().then) was harmful because it ignored delay arguments,
- * causing Emscripten timer callbacks to fire immediately and corrupt runtime state.
+ * NOTE: Chrome 116+ provides setTimeout in AudioWorkletGlobalScope. Older
+ * browsers don't, so we polyfill it below using process()-driven ticks.
  */
+
+// ── setTimeout/clearTimeout polyfill for AudioWorkletGlobalScope ──────
+// Older Chrome/Edge/Firefox don't expose timers in the worklet scope.
+// Schedule callbacks via currentTime checks driven by process().
+if (typeof globalThis.setTimeout !== 'function') {
+  const _timers = new Map();
+  let _nextTimerId = 1;
+  globalThis.__workletTimers = _timers;
+  globalThis.setTimeout = function (fn, delayMs) {
+    const id = _nextTimerId++;
+    const deadline = (typeof currentTime === 'number' ? currentTime : 0) + (delayMs || 0) / 1000;
+    _timers.set(id, { fn, deadline });
+    return id;
+  };
+  globalThis.clearTimeout = function (id) {
+    _timers.delete(id);
+  };
+}
 
 const DEBUG = true;
 function log(...args) { if (DEBUG) console.log('[Worklet]', ...args); }
 function error(...args) { console.error('[Worklet]', ...args); }
-
-// ── Emscripten Module pre-configuration ───────────────────────────
-// libopenmpt-audioworklet.js checks "typeof libopenmpt" and uses that
-// object as its Module. We pre-seed locateFile so it can find the
-// co-located .wasm file (or wasm2js stub) regardless of subdirectory deploys.
-try {
-  const workletBaseUrl = new URL('.', import.meta.url).href;
-  globalThis.libopenmpt = {
-    locateFile: (path) => workletBaseUrl + path,
-  };
-  log('WASM base URL resolved to:', workletBaseUrl);
-} catch (e) {
-  // Fallback: hope the wasm file is at the same path as the page
-  globalThis.libopenmpt = {};
-  error('Failed to resolve worklet base URL, WASM load may fail:', e);
-}
 
 class XMPlayerProcessor extends AudioWorkletProcessor {
   constructor(options) {
@@ -46,20 +48,32 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
     this.maxFrames = 4096;
     this.lib = null;
     this.isLibReady = false;
-    this.isPlaying = true; // default to playing for backward compat
-    this.hasEnded = false; // prevent spamming 'ended' messages
+    this.isPlaying = true;
+    this.hasEnded = false;
 
-    // 60 Hz position reports
     this.positionReportInterval = 1 / 60;
     this.lastPositionReportTime = 0;
 
     log('Constructor called, sampleRate:', sampleRate);
 
+    // _libInitPromise resolves once the main thread sends 'initLib'
+    // and WASM finishes initialising. loadModule() awaits this.
+    this._libInitPromise = new Promise((resolve, reject) => {
+      this._resolveLib = resolve;
+      this._rejectLib = reject;
+    });
+    this._libInitTimeout = setTimeout(() => {
+      this._rejectLib(new Error('WASM init timeout: initLib message never received'));
+      this.port.postMessage({ type: 'error', message: 'WASM library init timeout' });
+    }, 30000);
+
     this.port.onmessage = async (e) => {
       const { type, moduleData } = e.data;
       log('Received message:', type || '(no-type)', 'bytes:', moduleData?.byteLength);
 
-      if (type === 'load' && moduleData) {
+      if (type === 'initLib') {
+        await this._handleInitLib(e.data);
+      } else if (type === 'load' && moduleData) {
         this.hasEnded = false;
         await this.loadModule(moduleData);
       } else if (type === 'play') {
@@ -85,12 +99,10 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
           this.port.postMessage({ type: 'oscBuffer', buffer: this.oscBuffer });
         }
       } else if (!type && moduleData) {
-        // Legacy fallback
         await this.loadModule(moduleData);
       }
     };
 
-    // Oscilloscope ring buffer: 2048 floats (8192 bytes)
     try {
       this.oscBuffer = new SharedArrayBuffer(2048 * 4);
     } catch (e) {
@@ -101,27 +113,46 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
     if (this.oscBuffer) {
       this.port.postMessage({ type: 'oscBuffer', buffer: this.oscBuffer });
     }
-
-    // Fire-and-forget WASM bootstrap
-    this._libInitPromise = this._initLib();
   }
 
-  // ── WASM bootstrap ────────────────────────────────────────────────
-  async _initLib() {
+  // ── WASM bootstrap via main-thread-fetched assets ──────────────────
+  // AudioWorklet classic scripts cannot use import() or importScripts().
+  // The main thread fetches libopenmpt-audioworklet.js + libopenmpt.wasm
+  // and sends them here. We evaluate the JS via new Function() with
+  // wasmBinary pre-seeded so Emscripten skips its own network fetch.
+  async _handleInitLib({ scriptText, wasmBytes }) {
     try {
-      log('Dynamic-importing libopenmpt-audioworklet.js…');
+      clearTimeout(this._libInitTimeout);
 
-      const mod = await import('./libopenmpt-audioworklet.js');
-      let lib = mod.default;
+      if (!scriptText || !wasmBytes) {
+        throw new Error('initLib missing scriptText or wasmBytes');
+      }
 
-      if (!lib) throw new Error('dynamic import returned falsy default export');
+      log('Evaluating libopenmpt-audioworklet.js (', scriptText.length, ' chars)…');
 
-      // Wait for the async WASM (or wasm2js) runtime to complete initialisation
+      // Pre-configure the Emscripten Module object. Emscripten checks
+      // "typeof libopenmpt !== 'undefined'" and merges with this object.
+      globalThis.libopenmpt = {
+        wasmBinary: wasmBytes,  // avoids a second network fetch for the .wasm
+        noInitialRun: true,
+      };
+
+      // Evaluate the Emscripten-generated script in the global scope.
+      // new Function() runs with globalThis as its outer scope, so the script
+      // sees (and modifies) globalThis.libopenmpt via normal variable lookup.
+      const fn = new Function(scriptText); // eslint-disable-line no-new-func
+      fn.call(globalThis);
+
+      let lib = globalThis.libopenmpt;
+      if (!lib || typeof lib !== 'object') {
+        throw new Error('globalThis.libopenmpt not set after script evaluation');
+      }
+
       if (!lib._openmpt_module_create_from_memory) {
         log('Waiting for WASM onRuntimeInitialized…');
         await new Promise((resolve, reject) => {
           const timeout = setTimeout(
-            () => reject(new Error('WASM init timeout after 20 s')), 20000
+            () => reject(new Error('WASM onRuntimeInitialized timeout')), 25000
           );
           if (lib.calledRun) {
             clearTimeout(timeout);
@@ -141,9 +172,11 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
 
       this.lib = lib;
       this.isLibReady = true;
+      this._resolveLib();
       log('libopenmpt ready ✅');
     } catch (err) {
       error('Failed to initialise libopenmpt:', err);
+      this._rejectLib(err);
       this.port.postMessage({ type: 'error', message: 'Lib init failed: ' + String(err) });
     }
   }
@@ -203,6 +236,18 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
 
   // ── Audio process loop ─────────────────────────────────────────────
   process(_inputs, outputs, _parameters) {
+    // Fire any setTimeout polyfill callbacks whose deadline has elapsed.
+    const timers = globalThis.__workletTimers;
+    if (timers && timers.size > 0) {
+      const now = currentTime;
+      for (const [id, t] of timers) {
+        if (t.deadline <= now) {
+          timers.delete(id);
+          try { t.fn(); } catch (e) { console.error('[Worklet] timer error', e); }
+        }
+      }
+    }
+
     const out = outputs[0];
     const outL = out[0];
     const outR = out[1];
