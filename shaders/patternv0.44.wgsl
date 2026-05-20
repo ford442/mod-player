@@ -39,8 +39,6 @@ struct ChannelState {
     isMuted: u32 
 };
 @group(0) @binding(3) var<storage, read> channels: array<ChannelState>;
-@group(0) @binding(4) var buttonsSampler: sampler;
-@group(0) @binding(5) var buttonsTexture: texture_2d<f32>;
 
 struct VertexOut {
   @builtin(position) position: vec4<f32>,
