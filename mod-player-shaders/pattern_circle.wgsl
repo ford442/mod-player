@@ -324,7 +324,7 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   
   // Playhead calculation
   let maxRows = f32(uniforms.numRows);
-  let playheadStep = uniforms.playheadRow - floor(uniforms.playheadRow / maxRows) * maxRows;
+  let playheadStep = f32(uniforms.playheadRow) - floor(f32(uniforms.playheadRow) / maxRows) * maxRows;
   let rowDistRaw = abs(f32(in.row % uniforms.numRows) - playheadStep);
   let rowDist = min(rowDistRaw, maxRows - rowDistRaw);
   let playheadActivation = 1.0 - smoothstep(0.0, 1.5, rowDist);
