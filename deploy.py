@@ -60,7 +60,7 @@ def main():
     """
     password = 'GoogleBez12!' # getpass.getpass(f"Enter password for {USERNAME}@{HOSTNAME}: ")
 
-    build_project()
+    # build_project()
 
     transport = None
     sftp = None
