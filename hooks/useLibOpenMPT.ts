@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { LibOpenMPT, ModuleInfo, PatternMatrix, ChannelShadowState, PlaybackState, SyncDebugInfo } from '../types';
-import { OpenMPTWorkletEngine } from '../audio-worklet/OpenMPTWorkletEngine';
+import { OpenMPTWorkletEngine, NATIVE_RING_BUF_BYTES } from '../audio-worklet/OpenMPTWorkletEngine';
 import { getPatternMatrix, computeNoteAges } from '../utils/patternExtractor';
 import { startAudioPlayback, AudioGraphRefs, AudioGraphCallbacks, AudioGraphConfig } from './useAudioGraph';
 import { useWorkletLoader, getWorkletUrl, getNativeGlueUrl, getAbsoluteWorkletUrl } from './useWorkletLoader';
@@ -138,6 +138,12 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
 
   // Native C++/Wasm AudioWorklet engine (Phase 2)
   const nativeEngineRef = useRef<OpenMPTWorkletEngine | null>(null);
+  /**
+   * SharedArrayBuffer pre-allocated for the native engine's audio ring buffer.
+   * Set at engine construction time so it can be passed to OpenMPTWorkletEngine.
+   * Null in non-cross-origin-isolated contexts where SharedArrayBuffer is unavailable.
+   */
+  const nativeSharedBufferRef = useRef<SharedArrayBuffer | null>(null);
 
   // Oscilloscope SAB view — zero-GC, ref-based pipeline to GPU
   const oscBufferRef = useRef<Float32Array | null>(null);
@@ -630,7 +636,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
       spLeftBufPtr, spRightBufPtr, isPlayingRef, animationFrameHandle,
       currentModulePtr, channelStatesRef, patternMatricesRef,
       audioClockStartRef, workletTimeAtStartRef, driftAccumulatorRef,
-      updateUIRef,
+      updateUIRef, nativeSharedBuffer: nativeSharedBufferRef,
     };
     const audioCbs: AudioGraphCallbacks = {
       setStatus, setIsPlaying, setActiveEngine, setModuleInfo, setSequencerMatrix,
@@ -787,7 +793,26 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
           const probeResp = await fetch(nativeGlueUrl, { method: 'HEAD' });
           if (probeResp.ok) {
             console.log('[INIT] Native C++/Wasm AudioWorklet engine available');
-            const engine = new OpenMPTWorkletEngine();
+
+            // Allocate the ring-buffer SharedArrayBuffer before constructing the engine
+            // so it can be stored and forwarded to the engine constructor.
+            // SharedArrayBuffer requires cross-origin isolation (COOP/COEP headers).
+            const sharedOutputBuffer: SharedArrayBuffer | undefined =
+              window.crossOriginIsolated && typeof SharedArrayBuffer !== 'undefined'
+                ? new SharedArrayBuffer(NATIVE_RING_BUF_BYTES)
+                : undefined;
+
+            if (sharedOutputBuffer) {
+              console.log('[INIT] Allocated ring-buffer SharedArrayBuffer:', NATIVE_RING_BUF_BYTES, 'bytes');
+            } else {
+              console.log('[INIT] crossOriginIsolated=false — ring-buffer bridge unavailable; '
+                + 'falling back to MediaStream bridge');
+            }
+
+            nativeSharedBufferRef.current = sharedOutputBuffer ?? null;
+            const engineOptions: import('../audio-worklet/OpenMPTWorkletEngine').NativeEngineOptions = {};
+            if (sharedOutputBuffer) engineOptions.sharedOutputBuffer = sharedOutputBuffer;
+            const engine = new OpenMPTWorkletEngine(engineOptions);
             await engine.init();
             nativeEngineRef.current = engine;
             setIsNativeWorkletAvailable(true);

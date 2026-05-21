@@ -119,6 +119,41 @@ export interface EmscriptenOpenMPTModule {
     _get_order_pattern: (order: number) => number;
     _get_pattern_num_rows: (pattern: number) => number;
     _get_pattern_row_channel_command: (pattern: number, row: number, channel: number, command: number) => number;
+
+    // ── Bridge / routing extensions (optional – present after WASM rebuild) ──
+
+    /**
+     * Configure a shared-memory ring buffer in WASM heap for main-thread routing.
+     * Layout at bufPtr: [writeHead(Int32,4B), readHead(Int32,4B), stereoSamples(Float32)]
+     * @param bufPtr        WASM heap byte offset (from _malloc)
+     * @param capacityFrames  Stereo frame capacity of the sample region
+     */
+    _set_ring_buffer?: (bufPtr: number, capacityFrames: number) => void;
+
+    /** Returns the current ring buffer write-head position (in stereo frames). */
+    _get_ring_write_head?: () => number;
+
+    /**
+     * Initialise audio using an externally-provided AudioContext handle.
+     * In this mode the AudioWorkletNode is NOT auto-connected to destination;
+     * the caller wires it into their own audio graph.
+     * @param ctxHandle  Emscripten audio context handle (emscriptenRegisterAudioObject)
+     */
+    _init_audio_with_context?: (ctxHandle: number) => number;
+
+    // ── Emscripten audio object registry (injected by webaudio build) ──
+
+    /**
+     * Retrieve the JS AudioContext / AudioNode that was registered under this handle.
+     * Available when compiled with -sAUDIO_WORKLET=1.
+     */
+    emscriptenGetAudioObject?: (handle: number) => (AudioContext | AudioNode | null);
+
+    /**
+     * Register a JS AudioContext or AudioNode and get back an integer handle.
+     * The handle can then be passed to C++ exported functions.
+     */
+    emscriptenRegisterAudioObject?: (obj: AudioContext | AudioNode) => number;
 }
 
 /**

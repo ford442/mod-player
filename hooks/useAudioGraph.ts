@@ -3,7 +3,7 @@
 
 import type React from 'react';
 import { LibOpenMPT, PatternMatrix, ChannelShadowState, ModuleInfo, PatternCell } from '../types';
-import { OpenMPTWorkletEngine } from '../audio-worklet/OpenMPTWorkletEngine';
+import { OpenMPTWorkletEngine, NATIVE_RING_BUF_FRAMES } from '../audio-worklet/OpenMPTWorkletEngine';
 import type { WorkletPositionData } from '../audio-worklet/types';
 import { getWorkletUrl } from './useWorkletLoader';
 import { computeNoteAges } from '../utils/patternExtractor';
@@ -41,6 +41,8 @@ export interface AudioGraphRefs {
   workletTimeAtStartRef: React.MutableRefObject<number>;
   driftAccumulatorRef: React.MutableRefObject<number>;
   updateUIRef:         React.MutableRefObject<(() => void) | null>;
+  /** SharedArrayBuffer provided to the native engine constructor (may be null in non-isolated contexts). */
+  nativeSharedBuffer:  React.MutableRefObject<SharedArrayBuffer | null>;
 }
 
 export interface AudioGraphCallbacks {
@@ -167,6 +169,77 @@ export async function startAudioPlayback(
         // Set engine parameters
         engine.setVolume(config.volume);
         engine.setLoop(config.isLooping);
+
+        // ── Bridge native engine output to main-thread audio graph ─────────────
+        //
+        // Without bridging the C++ engine streams audio directly to its own
+        // AudioContext destination, bypassing the shared GainNode / AnalyserNode /
+        // StereoPannerNode chain.  Two strategies are attempted in priority order:
+        //
+        //   Strategy A — WASM ring buffer (crossOriginIsolated required):
+        //     C++ writes samples into a shared-memory ring buffer.
+        //     A bridge AudioWorkletNode on the main context reads the ring buffer
+        //     and outputs via the shared audio graph.  Zero extra latency.
+        //
+        //   Strategy B — MediaStream bridge (fallback, always available):
+        //     C++ AudioWorkletNode → MediaStreamDestinationNode (C++ ctx)
+        //     → MediaStream → MediaStreamAudioSourceNode (main ctx)
+        //     → AnalyserNode → GainNode → destination.
+        //     Adds ~few-ms latency but works without WASM rebuild.
+
+        let bridgeEstablished = false;
+
+        // Strategy A: WASM ring buffer
+        const wasmSAB = engine.getWasmMemory();
+        const ringByteOffset = engine.getRingBufByteOffset();
+        if (wasmSAB && ringByteOffset > 0) {
+          try {
+            const bridgeUrl = `${import.meta.env.BASE_URL}worklets/native-bridge-processor.js`;
+            await ctx.audioWorklet.addModule(bridgeUrl);
+            const bridgeNode = new AudioWorkletNode(ctx, 'native-bridge-processor', {
+              numberOfInputs: 0,
+              numberOfOutputs: 1,
+              outputChannelCount: [2],
+              processorOptions: {
+                wasmMemory: wasmSAB,
+                ringBufByteOffset: ringByteOffset,
+                frameCapacity: NATIVE_RING_BUF_FRAMES,
+              },
+            });
+            bridgeNode.connect(refs.analyserRef.current!);
+            refs.analyserRef.current!.connect(refs.stereoPannerRef.current!);
+            refs.stereoPannerRef.current!.connect(refs.gainNodeRef.current!);
+            refs.gainNodeRef.current!.connect(ctx.destination);
+            // Store bridge node so stopMusic() can disconnect it
+            refs.audioWorkletNodeRef.current = bridgeNode;
+            bridgeEstablished = true;
+            console.log('[PLAY] Native engine: ring-buffer bridge active (Strategy A)');
+          } catch (ringErr) {
+            console.warn('[PLAY] Ring-buffer bridge failed, trying MediaStream bridge:', ringErr);
+          }
+        }
+
+        // Strategy B: MediaStream bridge
+        if (!bridgeEstablished) {
+          try {
+            const mediaSrc = await engine.bridgeToAudioGraph(ctx, refs.analyserRef.current!);
+            if (mediaSrc) {
+              refs.analyserRef.current!.connect(refs.stereoPannerRef.current!);
+              refs.stereoPannerRef.current!.connect(refs.gainNodeRef.current!);
+              refs.gainNodeRef.current!.connect(ctx.destination);
+              bridgeEstablished = true;
+              console.log('[PLAY] Native engine: MediaStream bridge active (Strategy B)');
+            }
+          } catch (msErr) {
+            console.warn('[PLAY] MediaStream bridge failed:', msErr);
+          }
+        }
+
+        if (!bridgeEstablished) {
+          console.warn('[PLAY] Native engine audio not routed through main graph '
+            + '(volume/analyser will not work). Ensure WASM was built with ring-buffer support '
+            + 'or that emscriptenGetAudioObject is available.');
+        }
 
         // Listen for position updates from the native engine
         engine.on('position', (data: WorkletPositionData) => {
