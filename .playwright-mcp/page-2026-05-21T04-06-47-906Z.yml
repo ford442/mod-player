@@ -1,0 +1,37 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - generic:
+      - generic: "Score: 0"
+      - generic: "0"
+      - generic: "Balls: 1"
+      - generic: "Lives: 3"
+    - generic [ref=e5]:
+      - heading "NEXUS" [level=1] [ref=e6]
+      - generic [ref=e7]:
+        - paragraph [ref=e8]: "Best: 0"
+        - paragraph [ref=e9]: Left/Right Arrow to Flip
+        - paragraph [ref=e10]: Space to Launch
+        - button "Start Game" [ref=e11] [cursor=pointer]
+        - button "Settings" [ref=e12] [cursor=pointer]
+    - generic [ref=e13]:
+      - generic "Press M to cycle": M
+      - button "1" [ref=e29] [cursor=pointer]
+      - button "2" [ref=e30] [cursor=pointer]
+      - button "3" [ref=e31] [cursor=pointer]
+      - button "4" [ref=e32] [cursor=pointer]
+      - button "5" [ref=e33] [cursor=pointer]
+      - button "6" [ref=e34] [cursor=pointer]
+      - button "7" [ref=e35] [cursor=pointer]
+      - button "8" [ref=e36] [cursor=pointer]
+      - button "↻" [ref=e37] [cursor=pointer]
+      - link "+ Add New Map" [ref=e38] [cursor=pointer]:
+        - /url: https://storage.noahcohn.com/admin
+    - generic [ref=e22]:
+      - generic "Press C to cycle": C
+      - button "Classic" [ref=e23] [cursor=pointer]
+      - button "Neo" [ref=e24] [cursor=pointer]
+      - button "Vertical" [ref=e25] [cursor=pointer]
+    - generic [ref=e26]:
+      - generic "Press L for levels": L
+      - button "Levels" [ref=e27] [cursor=pointer]
+  - generic [ref=e28]: "Controls — Left/Right: Flippers | Space: Launch | P: Pause | R: Reset"
