@@ -130,6 +130,13 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
 
       log('Evaluating libopenmpt-audioworklet.js (', scriptText.length, ' chars)…');
 
+      // Emscripten calls performance.now() internally (_emscripten_get_now).
+      // AudioWorkletGlobalScope may not expose `performance` as a global, so
+      // polyfill it using currentTime (the high-resolution audio clock).
+      if (typeof globalThis.performance === 'undefined') {
+        globalThis.performance = { now: () => currentTime * 1000 };
+      }
+
       // Pre-configure the Emscripten Module object. Emscripten checks
       // "typeof libopenmpt !== 'undefined'" and merges with this object.
       globalThis.libopenmpt = {
