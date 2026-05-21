@@ -56,6 +56,26 @@ static EMSCRIPTEN_AUDIO_WORKLET_NODE_T g_workletNode = 0;
 static int g_lastReportedRow = -1;
 static double g_lastReportTimeS = 0.0;
 
+// ── Ring buffer for main-thread bridge routing ───────────────────────
+//
+// When a ring buffer is configured via set_ring_buffer(), the worklet thread
+// writes rendered audio samples here instead of (only) through the Web Audio
+// graph.  The main-thread bridge AudioWorkletProcessor reads from the same
+// WASM shared memory and re-outputs audio through the main AudioContext chain,
+// making GainNode / AnalyserNode routing work with the native C++ engine.
+//
+// Layout at g_ringBufBase (WASM heap pointer):
+//   [0..3]  writeHead  (Int32, updated atomically by worklet thread)
+//   [4..7]  readHead   (Int32, updated by bridge processor – reserved for JS)
+//   [8..]   stereo samples (Float32, interleaved L/R, capacity = g_ringCapacity frames)
+
+static volatile int32_t* g_ringBufHeader = nullptr; // &buf[0] – writeHead / readHead
+static float*            g_ringSamples   = nullptr; // &buf[8] – sample area
+static int               g_ringCapacity  = 0;       // in stereo frames
+
+// Flag: 1 = caller owns the AudioContext (skip auto-connect to destination)
+static int g_externalContext = 0;
+
 // ── AudioWorklet process callback (runs on worklet thread) ──────────
 
 EM_BOOL audio_process_cb(
@@ -152,9 +172,20 @@ EM_BOOL audio_process_cb(
         std::memset(outData + frames + rendered, 0, sizeof(float) * (frames - rendered));
     }
 
+    // ── Write to ring buffer (if configured for main-thread bridge routing) ──
+    if (g_ringBufHeader && g_ringSamples && g_ringCapacity > 0) {
+        int32_t head = __atomic_load_n(g_ringBufHeader, __ATOMIC_ACQUIRE);
+        for (int i = 0; i < rendered; ++i) {
+            int pos = (head + i) % g_ringCapacity;
+            g_ringSamples[pos * 2]     = interleaved[i * 2];     // Left
+            g_ringSamples[pos * 2 + 1] = interleaved[i * 2 + 1]; // Right
+        }
+        // Release fence ensures samples are visible before the updated head
+        __atomic_store_n(g_ringBufHeader, (head + rendered) % g_ringCapacity, __ATOMIC_RELEASE);
+    }
+
     // ── Report position (throttled: every ~16ms OR on row change) ──
-    int currentRow = g_module.getCurrentRow();
-    // Accumulate elapsed time based on sample count
+    int currentRow = g_module.getCurrentRow();    // Accumulate elapsed time based on sample count
     double elapsed = (double)frames / 48000.0;
     static double timeSinceLastReport = 0.0;
     timeSinceLastReport += elapsed;
@@ -199,15 +230,21 @@ static void worklet_thread_initialized(EMSCRIPTEN_WEBAUDIO_T audioCtx, EM_BOOL s
         nullptr  // userData
     );
 
-    // Connect worklet node to destination
-    EM_ASM({
-        var ctx = emscriptenGetAudioObject($0);
-        var node = emscriptenGetAudioObject($1);
-        if (ctx && node) {
-            node.connect(ctx.destination);
-            console.log('[C++] AudioWorkletNode connected to destination');
-        }
-    }, audioCtx, g_workletNode);
+    // Connect worklet node to destination (standalone mode only)
+    // In external-context mode the caller (TypeScript) wires the node manually.
+    if (!g_externalContext) {
+        EM_ASM({
+            var ctx = emscriptenGetAudioObject($0);
+            var node = emscriptenGetAudioObject($1);
+            if (ctx && node) {
+                node.connect(ctx.destination);
+                console.log('[C++] AudioWorkletNode connected to destination');
+            }
+        }, audioCtx, g_workletNode);
+    } else {
+        std::printf("[C++] External-context mode: AudioWorkletNode NOT auto-connected "
+                    "(caller responsible for graph wiring)\n");
+    }
 
     std::printf("[C++] Worklet thread initialized, node created\n");
 }
@@ -244,6 +281,79 @@ int init_audio(int sampleRate) {
     );
 
     std::printf("[C++] Audio context created (handle=%d)\n", g_audioCtx);
+    return 1;
+}
+
+/**
+ * Configure a ring buffer in WASM shared memory for main-thread bridge routing.
+ *
+ * The buffer must have been allocated on the WASM heap (via _malloc from JS).
+ * Layout at buf:
+ *   [0..3]  writeHead (Int32) – next frame index to write; updated atomically
+ *   [4..7]  readHead  (Int32) – reserved for the JS bridge worklet
+ *   [8..]   float32 stereo samples, interleaved L/R, capacity = capacityFrames
+ *
+ * Once configured, audio_process_cb writes every rendered frame here in addition
+ * to (or instead of) the Web Audio output, enabling the main-thread bridge
+ * AudioWorkletProcessor to re-output audio through the shared GainNode/AnalyserNode.
+ *
+ * @param buf            Pointer to the WASM heap ring buffer (8-byte header + samples)
+ * @param capacityFrames Stereo frame capacity of the sample area
+ */
+EMSCRIPTEN_KEEPALIVE
+void set_ring_buffer(uint8_t* buf, int capacityFrames) {
+    if (!buf || capacityFrames <= 0) return;
+    g_ringBufHeader = (volatile int32_t*)buf;
+    g_ringSamples   = (float*)(buf + 8); // skip 8-byte header
+    g_ringCapacity  = capacityFrames;
+    // Zero-initialise header counters and sample area
+    __atomic_store_n(g_ringBufHeader,     0, __ATOMIC_RELAXED); // writeHead = 0
+    __atomic_store_n(g_ringBufHeader + 1, 0, __ATOMIC_RELAXED); // readHead  = 0
+    std::memset(g_ringSamples, 0, (size_t)capacityFrames * 2 * sizeof(float));
+    std::printf("[C++] Ring buffer configured: ptr=%p, capacity=%d frames\n",
+                (void*)buf, capacityFrames);
+}
+
+/**
+ * Returns the current ring buffer write-head (in stereo frames).
+ * Useful for the JS side to verify data is flowing.
+ */
+EMSCRIPTEN_KEEPALIVE
+int get_ring_write_head() {
+    if (!g_ringBufHeader) return 0;
+    return __atomic_load_n(g_ringBufHeader, __ATOMIC_ACQUIRE);
+}
+
+/**
+ * Initialise audio using an externally-provided AudioContext handle.
+ *
+ * Unlike init_audio(), this function does NOT create a new AudioContext.
+ * Instead it accepts a handle obtained by the caller via
+ * emscriptenRegisterAudioObject(existingCtx) and starts the worklet thread
+ * on that context.  The AudioWorkletNode is NOT auto-connected to destination;
+ * the caller is responsible for connecting it into their audio graph (e.g. via
+ * the TypeScript bridgeToAudioGraph() helper or the ring-buffer bridge).
+ *
+ * @param ctxHandle  Emscripten audio context handle
+ * @return 1 on success, 0 on failure
+ */
+EMSCRIPTEN_KEEPALIVE
+int init_audio_with_context(int ctxHandle) {
+    if (!ctxHandle) {
+        std::fprintf(stderr, "[C++] init_audio_with_context: invalid context handle\n");
+        return 0;
+    }
+    g_audioCtx        = ctxHandle;
+    g_externalContext = 1; // skip auto-connect in worklet_thread_initialized
+
+    emscripten_start_wasm_audio_worklet_thread_async(
+        g_audioCtx,
+        nullptr, 0,
+        worklet_thread_initialized,
+        nullptr
+    );
+
+    std::printf("[C++] Audio initialised with external context (handle=%d)\n", ctxHandle);
     return 1;
 }
 

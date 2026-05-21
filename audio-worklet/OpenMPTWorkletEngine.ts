@@ -26,7 +26,46 @@ import type {
     CreateOpenMPTModule,
 } from './types';
 
-// ── Constants ────────────────────────────────────────────────────────
+// ── Public constants ─────────────────────────────────────────────────
+
+/**
+ * Default ring buffer capacity (stereo frames).
+ * 8 192 frames at 48 kHz ≈ 170 ms — large enough to absorb scheduling jitter
+ * while keeping latency well below a perceptible threshold.
+ */
+export const NATIVE_RING_BUF_FRAMES = 8192;
+
+/**
+ * Total byte size required for one ring buffer allocation:
+ *   8 B header  (writeHead Int32 + readHead Int32)
+ * + NATIVE_RING_BUF_FRAMES × 2 channels × 4 B  (interleaved Float32 stereo)
+ */
+export const NATIVE_RING_BUF_BYTES = 8 + NATIVE_RING_BUF_FRAMES * 2 * 4; // 65 544 B
+
+// ── Construction options ──────────────────────────────────────────────
+
+/**
+ * Options accepted by the OpenMPTWorkletEngine constructor.
+ */
+export interface NativeEngineOptions {
+    /** Base URL path for WASM assets (e.g. '/xm-player/worklets/'). */
+    basePath?: string;
+
+    /**
+     * Pre-allocated SharedArrayBuffer that the caller wants to use as the audio
+     * output ring buffer.  The engine will allocate an equivalently-sized buffer
+     * inside WASM linear memory (which IS a SharedArrayBuffer in cross-origin-
+     * isolated contexts) and expose it via getWasmMemory() / getRingBufByteOffset().
+     *
+     * Providing this value signals that the caller supports the ring-buffer bridge
+     * path and has already verified window.crossOriginIsolated === true.
+     *
+     * Recommended size: NATIVE_RING_BUF_BYTES.
+     */
+    sharedOutputBuffer?: SharedArrayBuffer;
+}
+
+// ── Internal constants ───────────────────────────────────────────────
 
 const MAX_VU_CHANNELS = 32;
 
@@ -87,14 +126,20 @@ export class OpenMPTWorkletEngine extends MiniEventEmitter<EngineEventMap> {
     private lastRow = -1;
     private lastPatternOrder = -1;
     private basePath: string;
+    /** SharedArrayBuffer provided at construction (signals ring-buffer bridge intent). */
+    private sharedOutputBuffer: SharedArrayBuffer | null;
+    /** WASM heap byte offset of the allocated ring buffer (0 = not allocated). */
+    private ringBufPtr = 0;
 
     /**
-     * @param basePath  Base URL path for WASM assets (e.g. '/xm-player/worklets/')
+     * @param options  Construction options, including an optional basePath and
+     *                 sharedOutputBuffer for the ring-buffer bridge path.
      */
-    constructor(basePath?: string) {
+    constructor(options?: NativeEngineOptions) {
         super();
         // Default to Vite's BASE_URL + worklets/
-        this.basePath = basePath ?? `${import.meta.env.BASE_URL}worklets/`;
+        this.basePath = options?.basePath ?? `${import.meta.env.BASE_URL}worklets/`;
+        this.sharedOutputBuffer = options?.sharedOutputBuffer ?? null;
     }
 
     /** Current engine state */
@@ -146,6 +191,26 @@ export class OpenMPTWorkletEngine extends MiniEventEmitter<EngineEventMap> {
             const result = this.module._init_audio(sampleRate);
             if (!result) {
                 throw new Error('Failed to initialize AudioContext');
+            }
+
+            // If a shared output buffer was requested AND the WASM module supports
+            // the ring-buffer API, allocate a ring buffer inside WASM linear memory.
+            // WASM memory is itself a SharedArrayBuffer (in cross-origin-isolated
+            // contexts), so the bridge worklet can read from it via Atomics.
+            if (this.sharedOutputBuffer && typeof this.module._set_ring_buffer === 'function') {
+                const frameCapacity = NATIVE_RING_BUF_FRAMES;
+                const byteSize = 8 + frameCapacity * 2 * 4; // header + samples
+                const ptr = this.module._malloc(byteSize);
+                if (ptr) {
+                    // Zero-initialise header (writeHead + readHead) and sample area
+                    this.module.HEAPU8.fill(0, ptr, ptr + byteSize);
+                    this.module._set_ring_buffer(ptr, frameCapacity);
+                    this.ringBufPtr = ptr;
+                    console.log('[OpenMPTWorkletEngine] Ring buffer allocated at WASM ptr', ptr,
+                        '– capacity:', frameCapacity, 'frames');
+                } else {
+                    console.warn('[OpenMPTWorkletEngine] _malloc failed for ring buffer');
+                }
             }
 
             // Start polling for position data
@@ -353,6 +418,126 @@ export class OpenMPTWorkletEngine extends MiniEventEmitter<EngineEventMap> {
      */
     getWorkletNodeHandle(): number {
         return this.module?._get_worklet_node() ?? 0;
+    }
+
+    // ── Bridge / routing helpers ─────────────────────────────────────
+
+    /**
+     * Returns the SharedArrayBuffer provided at construction, or null.
+     * This is the "intent" buffer; the actual ring buffer lives in WASM memory
+     * (see getWasmMemory() / getRingBufByteOffset()).
+     */
+    getSharedOutputBuffer(): SharedArrayBuffer | null {
+        return this.sharedOutputBuffer;
+    }
+
+    /**
+     * Returns the WASM linear memory as a SharedArrayBuffer.
+     * Available only when the page is cross-origin isolated and the WASM module
+     * was compiled with -sWASM_WORKERS=1 (shared memory required).
+     * Returns null if the buffer is not a SharedArrayBuffer (non-isolated context).
+     */
+    getWasmMemory(): SharedArrayBuffer | null {
+        if (!this.module) return null;
+        const buf = this.module.HEAPU8.buffer;
+        return buf instanceof SharedArrayBuffer ? buf : null;
+    }
+
+    /**
+     * Returns the byte offset within WASM linear memory where the ring buffer
+     * header begins.  Zero means the ring buffer was not allocated (either
+     * sharedOutputBuffer was not provided, or _set_ring_buffer is unavailable
+     * in the current WASM build).
+     */
+    getRingBufByteOffset(): number {
+        return this.ringBufPtr;
+    }
+
+    /**
+     * Waits for the C++ worklet thread to create its AudioWorkletNode and returns it.
+     *
+     * Background: `init_audio()` starts the worklet thread asynchronously.
+     * The node handle stored in `g_workletNode` (C++ side) is set by the
+     * `worklet_thread_initialized` callback some milliseconds after `init_audio()`
+     * returns.  This method polls until the handle is non-zero.
+     *
+     * @param timeoutMs  Maximum wait time in milliseconds (default 5 000).
+     * @returns          The AudioWorkletNode, or null on timeout.
+     */
+    async getOutputNode(timeoutMs = 5000): Promise<AudioWorkletNode | null> {
+        if (!this.module) return null;
+
+        const deadline = Date.now() + timeoutMs;
+        while (Date.now() < deadline) {
+            const handle = this.module._get_worklet_node();
+            if (handle) {
+                const fn = this.module.emscriptenGetAudioObject;
+                if (typeof fn === 'function') {
+                    return fn(handle) as AudioWorkletNode | null;
+                }
+                // emscriptenGetAudioObject not available in this build
+                console.warn('[OpenMPTWorkletEngine] emscriptenGetAudioObject not available');
+                return null;
+            }
+            await new Promise<void>(r => setTimeout(r, 50));
+        }
+        console.warn('[OpenMPTWorkletEngine] getOutputNode() timed out after', timeoutMs, 'ms');
+        return null;
+    }
+
+    /**
+     * Bridge the native engine's AudioWorkletNode to an external audio graph via
+     * a MediaStream.  This allows the C++ engine (which runs on its own AudioContext)
+     * to feed audio through the main-thread GainNode / AnalyserNode chain.
+     *
+     * Flow:
+     *   C++ AudioWorkletNode
+     *     → MediaStreamDestinationNode  (on C++ AudioContext)
+     *     → MediaStream (audio track)
+     *     → MediaStreamAudioSourceNode  (on mainCtx)
+     *     → destNode  (e.g. AnalyserNode on mainCtx)
+     *
+     * @param mainCtx   Main-thread AudioContext to create the source node on.
+     * @param destNode  First node in the main-thread chain (typically AnalyserNode).
+     * @returns         The MediaStreamAudioSourceNode, or null on failure.
+     */
+    async bridgeToAudioGraph(
+        mainCtx: AudioContext,
+        destNode: AudioNode,
+    ): Promise<MediaStreamAudioSourceNode | null> {
+        if (!this.module) return null;
+
+        // Wait for the worklet thread to produce a node handle
+        const cppNode = await this.getOutputNode(3000);
+        if (!cppNode) {
+            console.warn('[OpenMPTWorkletEngine] bridgeToAudioGraph: getOutputNode() timed out');
+            return null;
+        }
+
+        const ctxHandle = this.module._get_audio_context();
+        if (!ctxHandle || typeof this.module.emscriptenGetAudioObject !== 'function') {
+            console.warn('[OpenMPTWorkletEngine] bridgeToAudioGraph: cannot resolve C++ AudioContext');
+            return null;
+        }
+
+        const cppCtx = this.module.emscriptenGetAudioObject(ctxHandle) as AudioContext | null;
+        if (!cppCtx || typeof cppCtx.createMediaStreamDestination !== 'function') {
+            console.warn('[OpenMPTWorkletEngine] bridgeToAudioGraph: C++ AudioContext not resolvable');
+            return null;
+        }
+
+        // Disconnect from C++ context's destination (it was auto-connected in worklet_thread_initialized)
+        try { cppNode.disconnect(); } catch (_e) { /* already disconnected – ignore */ }
+
+        // Route via MediaStream so the audio crosses AudioContext boundaries
+        const mediaDest = cppCtx.createMediaStreamDestination();
+        cppNode.connect(mediaDest);
+
+        const mediaSrc = mainCtx.createMediaStreamSource(mediaDest.stream);
+        mediaSrc.connect(destNode);
+
+        console.log('[OpenMPTWorkletEngine] MediaStream bridge established: C++ → MediaStream → main graph');
+        return mediaSrc;
     }
 
     // ── Cleanup ──────────────────────────────────────────────────────
