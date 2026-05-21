@@ -122,7 +122,7 @@ export function ShaderSelectorPanel({
     const isSelected = selectedShader === option.id;
     const isActive = activeIndex === index;
     const liveThumbnail = thumbnails[option.id];
-    const staticThumbnail = `${import.meta.env.BASE_URL}shaders/thumbnails/${option.id}.png`;
+    const staticThumbnail = `${import.meta.env.BASE_URL}shaders/thumbnails/${option.id}.wgsl.png`;
     const thumbnailSrc = liveThumbnail ?? staticThumbnail;
 
     return (
