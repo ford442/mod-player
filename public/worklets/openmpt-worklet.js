@@ -1,3 +1,16 @@
+// Polyfill global crypto for AudioWorklet Global Scope if missing
+if (typeof self !== 'undefined' && !self.crypto) {
+    self.crypto = {
+        getRandomValues: function(array) {
+            for (let i = 0; i < array.length; i++) {
+                // Fallback to pseudo-random numbers if true crypto is restricted
+                array[i] = Math.floor(Math.random() * 256);
+            }
+            return array;
+        }
+    };
+}
+
 /**
  * OpenMPT AudioWorklet Processor
  * Renders libopenmpt audio directly inside the AudioWorklet process() callback.

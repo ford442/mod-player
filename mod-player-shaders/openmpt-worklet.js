@@ -1,3 +1,16 @@
+// Polyfill global crypto for AudioWorklet Global Scope if missing
+if (typeof self !== 'undefined' && !self.crypto) {
+    self.crypto = {
+        getRandomValues: function(array) {
+            for (let i = 0; i < array.length; i++) {
+                // Fallback to pseudo-random numbers if true crypto is restricted
+                array[i] = Math.floor(Math.random() * 256);
+            }
+            return array;
+        }
+    };
+}
+
 // openmpt-worklet.js
 // AudioWorkletProcessor for libopenmpt with ring buffer support
 // Uses dynamic import() for broad Chrome 116+ compatibility.
