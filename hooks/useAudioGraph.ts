@@ -149,7 +149,9 @@ export async function startAudioPlayback(
       refs.audioWorkletNodeRef.current = null;
     }
 
-    if (config.activeEngine === 'native-worklet' && config.isNativeWorkletAvailable) {
+    let currentEngineToTry = config.activeEngine;
+
+    if (currentEngineToTry === 'native-worklet' && config.isNativeWorkletAvailable) {
       // ── Native C++/Wasm AudioWorklet engine (Phase 2) ──
       console.log('[PLAY] Using native C++/Wasm AudioWorklet engine...');
       try {
@@ -259,13 +261,22 @@ export async function startAudioPlayback(
         // Start playback
         engine.play();
         console.log('[PLAY] Native C++/Wasm AudioWorklet engine started');
+
+        // Native engine started successfully — start UI and exit
+        refs.isPlayingRef.current = true;
+        callbacks.setIsPlaying(true);
+        callbacks.setStatus("Playing...");
+        refs.animationFrameHandle.current = requestAnimationFrame(refs.updateUIRef.current!);
+        return;
       } catch (e) {
         console.error("[PLAY] Failed to start native engine:", e);
         console.warn("[PLAY] Falling back to JS AudioWorklet engine");
         callbacks.setActiveEngine('worklet');
-        // Continue to existing worklet path below
+        currentEngineToTry = 'worklet';
       }
-    } else if (config.activeEngine === 'worklet' && config.isWorkletSupported) {
+    }
+
+    if (currentEngineToTry === 'worklet' && config.isWorkletSupported) {
       console.log('[PLAY] Using AudioWorklet engine...');
 
       try {
@@ -575,12 +586,7 @@ export async function startAudioPlayback(
       return;
     }
 
-    if (!refs.audioWorkletNodeRef.current && config.activeEngine === 'native-worklet') {
-      refs.isPlayingRef.current = true;
-      callbacks.setIsPlaying(true);
-      callbacks.setStatus("Playing...");
-      refs.animationFrameHandle.current = requestAnimationFrame(refs.updateUIRef.current!);
-    }
+
 
   } catch (e) {
     console.error("[PLAY] Play error:", e);
