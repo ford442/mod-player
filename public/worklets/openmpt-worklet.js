@@ -1,6 +1,8 @@
 // Polyfill global crypto for AudioWorklet Global Scope if missing
-if (typeof self !== 'undefined' && !self.crypto) {
-    self.crypto = {
+// This MUST be set on globalThis before libopenmpt-audioworklet.js is evaluated
+// so that Emscripten's randomFill can find it.
+if (typeof globalThis.crypto === 'undefined' || !globalThis.crypto) {
+    globalThis.crypto = {
         getRandomValues: function(array) {
             for (let i = 0; i < array.length; i++) {
                 // Fallback to pseudo-random numbers if true crypto is restricted
@@ -9,6 +11,10 @@ if (typeof self !== 'undefined' && !self.crypto) {
             return array;
         }
     };
+}
+// Also set on self for backwards compatibility
+if (typeof self !== 'undefined' && (!self.crypto || !self.crypto.getRandomValues)) {
+    self.crypto = globalThis.crypto;
 }
 
 /**
@@ -148,6 +154,19 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
       // polyfill it using currentTime (the high-resolution audio clock).
       if (typeof globalThis.performance === 'undefined') {
         globalThis.performance = { now: () => currentTime * 1000 };
+      }
+
+      // Ensure crypto.getRandomValues is available for Emscripten's random initialization
+      // This must be set BEFORE evaluating the Emscripten script.
+      if (!globalThis.crypto || !globalThis.crypto.getRandomValues) {
+        globalThis.crypto = {
+          getRandomValues: function(array) {
+            for (let i = 0; i < array.length; i++) {
+              array[i] = Math.floor(Math.random() * 256);
+            }
+            return array;
+          }
+        };
       }
 
       // Pre-configure the Emscripten Module object. Emscripten checks
