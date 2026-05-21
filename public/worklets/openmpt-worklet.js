@@ -137,10 +137,14 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
         noInitialRun: true,
       };
 
+      // Strip ES module export statements — new Function() is a classic-script
+      // context and will throw SyntaxError on any top-level `export` keyword.
+      const cleanedScript = scriptText.replace(/^\s*export\s+(default\s+)?/gm, '');
+
       // Evaluate the Emscripten-generated script in the global scope.
       // new Function() runs with globalThis as its outer scope, so the script
       // sees (and modifies) globalThis.libopenmpt via normal variable lookup.
-      const fn = new Function(scriptText); // eslint-disable-line no-new-func
+      const fn = new Function(cleanedScript); // eslint-disable-line no-new-func
       fn.call(globalThis);
 
       let lib = globalThis.libopenmpt;
