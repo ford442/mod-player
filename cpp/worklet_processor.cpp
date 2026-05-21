@@ -185,7 +185,8 @@ EM_BOOL audio_process_cb(
     }
 
     // ── Report position (throttled: every ~16ms OR on row change) ──
-    int currentRow = g_module.getCurrentRow();    // Accumulate elapsed time based on sample count
+    int currentRow = g_module.getCurrentRow();
+    // Accumulate elapsed time based on sample count
     double elapsed = (double)frames / 48000.0;
     static double timeSinceLastReport = 0.0;
     timeSinceLastReport += elapsed;

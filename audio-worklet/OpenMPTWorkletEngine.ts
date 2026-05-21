@@ -526,8 +526,9 @@ export class OpenMPTWorkletEngine extends MiniEventEmitter<EngineEventMap> {
             return null;
         }
 
-        // Disconnect from C++ context's destination (it was auto-connected in worklet_thread_initialized)
-        try { cppNode.disconnect(); } catch (_e) { /* already disconnected – ignore */ }
+        // disconnect() throws InvalidStateError if the node is already disconnected.
+        // That is expected and harmless here — the caller may have disconnected it already.
+        try { cppNode.disconnect(); } catch (_e) { /* node not connected — safe to ignore */ }
 
         // Route via MediaStream so the audio crosses AudioContext boundaries
         const mediaDest = cppCtx.createMediaStreamDestination();

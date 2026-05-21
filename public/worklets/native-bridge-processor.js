@@ -73,11 +73,19 @@ class NativeBridgeProcessor extends AudioWorkletProcessor {
         const available = (writeHead - readHead + capacity) % capacity;
         const toRead    = Math.min(blockSize, available);
 
-        // Copy samples from ring buffer
-        for (let i = 0; i < toRead; i++) {
-            const pos = (readHead + i) % capacity;
-            outL[i] = this._samplesView[pos * 2];
-            outR[i] = this._samplesView[pos * 2 + 1];
+        // Copy samples from ring buffer (both channels if available)
+        if (outR) {
+            for (let i = 0; i < toRead; i++) {
+                const pos = (readHead + i) % capacity;
+                outL[i] = this._samplesView[pos * 2];
+                outR[i] = this._samplesView[pos * 2 + 1];
+            }
+        } else {
+            // Mono output — mix down both channels
+            for (let i = 0; i < toRead; i++) {
+                const pos = (readHead + i) % capacity;
+                outL[i] = (this._samplesView[pos * 2] + this._samplesView[pos * 2 + 1]) * 0.5;
+            }
         }
 
         // Zero-fill any frames not supplied (ring buffer underrun / starvation)
@@ -85,12 +93,14 @@ class NativeBridgeProcessor extends AudioWorkletProcessor {
             outL.fill(0, toRead);
             if (outR) outR.fill(0, toRead);
             this._starvationCount++;
-            const now = currentTime * 1000;
-            if (now - this._lastStarvationLog > STARVATION_LOG_INTERVAL_MS) {
+            // Throttle log to avoid console spam; use this._frameCount as a clock
+            this._frameCount = (this._frameCount || 0) + blockSize;
+            const nowApprox = this._frameCount / sampleRate; // sampleRate is global in AudioWorkletGlobalScope
+            if (nowApprox - this._lastStarvationLog > STARVATION_LOG_INTERVAL_MS / 1000) {
                 console.warn('[NativeBridgeProcessor] Ring buffer starvation ×' +
                     this._starvationCount + ' (available=' + available + ')');
                 this._starvationCount = 0;
-                this._lastStarvationLog = now;
+                this._lastStarvationLog = nowApprox;
             }
         }
 
