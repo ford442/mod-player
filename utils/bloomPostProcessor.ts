@@ -197,7 +197,9 @@ export class BloomPostProcessor {
     // CRT uniform buffer — shared between legacy and layered modes
     // 16 bytes: [intensity, scanlineDark, vignetteStrength, _pad]
     this.crtUniformBuffer = this.device.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
-    // Default: CRT off (intensity = 0 means no effect — bit-identical to previous output)
+    // Default: intensity=0.0 means CRT is off (bit-identical output to pre-CRT).
+    // scanlineDark and vignetteStrength are pre-set to their recommended defaults
+    // so enabling CRT via updateCRT(1.0) just works without extra configuration.
     this.device.queue.writeBuffer(this.crtUniformBuffer, 0, new Float32Array([0.0, 0.15, 0.4, 0.0]));
 
     await this.createPipelines();
