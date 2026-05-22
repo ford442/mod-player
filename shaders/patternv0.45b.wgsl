@@ -292,17 +292,22 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
       capColor = mix(capColor, baseCol, 0.36);
 
       let dInfo = unpackDurationInfo(in.packedA, in.packedB);
-      let isNoteOffCmd = note == NOTE_OFF || note == NOTE_CUT || note == NOTE_FADE;
-      let isNoteOnCell = dInfo.rowOffset == 0u && !dInfo.isNoteOff && !isNoteOffCmd;
+      let isRealNoteOff = dInfo.isNoteOff || note >= 120u;
+      let isTrigger = dInfo.rowOffset == 0u && !isRealNoteOff;
+      let isSustain = dInfo.rowOffset > 0u && !isRealNoteOff;
 
       let ch = channels[in.channel];
       let durationF = f32(dInfo.duration);
       var sustainGlow = 0.0;
 
-      // Hardware choke: only the most recent active note on this channel may sustain
-      let isCurrentNote = abs(delta - ch.noteAge) < 1.0;
-      if (isNoteOnCell && durationF > 0.0 && delta >= 0.0 && delta < durationF && isCurrentNote) {
-          sustainGlow = 1.0;
+      // Unified note-relative age: works for both trigger and sustain rows.
+      // For trigger row (rowOffset=0): noteRelativeAge = playhead - triggerRow = noteAge.
+      // For sustain row at offset k: noteRelativeAge = (playhead - sustainRow) + k = playhead - triggerRow = noteAge.
+      let noteRelativeAge = delta + f32(dInfo.rowOffset);
+      let isCurrentNote = abs(noteRelativeAge - ch.noteAge) < 1.0;
+
+      if ((isTrigger || isSustain) && durationF > 0.0 && noteRelativeAge >= 0.0 && noteRelativeAge < durationF && isCurrentNote) {
+          sustainGlow = select(1.0, 0.45, isSustain);
       }
 
       // === SUSTAIN + FADE OUT (last 10%) ===
@@ -318,15 +323,15 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
           capColor *= shimmer;
 
           // Fade out in final 10% of duration
-          if (delta > durationF * 0.9) {
-              let fadeT = (delta - durationF * 0.9) / (durationF * 0.1);
+          if (noteRelativeAge > durationF * 0.9) {
+              let fadeT = (noteRelativeAge - durationF * 0.9) / (durationF * 0.1);
               let fade = smoothstep(1.0, 0.0, fadeT);
               capColor *= fade;
           }
       }
 
       // === TRIGGER FLASH (bright own color) ===
-      if (ch.trigger > 0u && isNoteOnCell) {
+      if (ch.trigger > 0u && isTrigger) {
           glow += 1.4;
           let brightFlash = clamp(baseCol * 2.15, vec3<f32>(0.0), vec3<f32>(1.0));
           capColor = mix(capColor, brightFlash, 0.96);
@@ -342,7 +347,7 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
       }
 
       // Rim light on active notes
-      if (sustainGlow > 0.0 || (ch.trigger > 0u && isNoteOnCell)) {
+      if (sustainGlow > 0.0 || (ch.trigger > 0u && isTrigger)) {
           let rim = pow(1.0 - abs(dBox) * 7.5, 2.2) * 0.22;
           capColor += baseCol * rim;
       }

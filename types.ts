@@ -9,6 +9,10 @@ export interface PatternCell {
   volVal?: number | undefined;
   effCmd?: number | undefined;
   effVal?: number | undefined;
+  // Note duration fields (computed by calculateNoteDurations in gpuPacking.ts)
+  noteDuration?: number | undefined;
+  isSustained?: boolean | undefined;
+  isTrigger?: boolean | undefined;
 }
 
 export interface PatternRow {
