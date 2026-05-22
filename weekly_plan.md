@@ -1,8 +1,8 @@
 # Weekly Plan - XASM-1 (patternv0.51 "Playhead Arc" + AUDIO-001 timing)
 
 ## Today's focus
-**User Idea — SharedArrayBuffer oscilloscope pipeline: zero-latency audio waveform feed from AudioWorklet → GPU texture → circular shader overlay (narrative §Advanced 4)**
-Implement the full SAB pipeline: allocate a SharedArrayBuffer in the worklet and fill it with recent PCM samples each render block; expose the typed-array view to the main thread via useLibOpenMPT; upload it to a 1D GPU texture every rAF frame via `device.queue.writeTexture`; sample the texture in a new v0.55 shader variant to draw an oscilloscope trace in the inner ring of the circular display. No React state involved — pure ref → GPU upload → WGSL read path.
+**User Idea — Fix note duration display in patternv0.45b (issue #213): step indicator should hold dimmed note color while note sustains, then return to base color when sound ends.**
+Audit the full pipeline: (1) JS duration pre-computation in `hooks/useLibOpenMPT.ts` (scanPattern loop, activeSustains tracking), (2) bit-packing of duration/sustain flag into PackedA/PackedB in `components/PatternDisplay.tsx`, (3) WGSL fragment-shader read + per-cell color logic in `shaders/patternv0.45b.wgsl`. Goal: trigger row glows at full note color → sustain rows hold 40–60% dimmed note color → row after note-off returns to dark base. No new shader version needed — fix in place within v0.45b.
 
 ## Ideas
 <!-- User-written ideas Noah accumulates during the week. Routine prioritizes these. -->
@@ -10,19 +10,21 @@ Implement the full SAB pipeline: allocate a SharedArrayBuffer in the worklet and
 - [done — 2026-05-08] Animated playhead scan-line arc at the current row in circular shaders — ARC-001 tag; v0.51.wgsl live in shaders/src + public/shaders, integrated in PatternDisplay.tsx version chain
 - [done — 2026-05-08] Fractional-row interpolation for smooth 144 Hz playhead — `playbackRowFraction` implemented in AUDIO-001 timing work, passed to PatternDisplay as `playheadRow`
 - [done — 2026-05-08] Keyboard shortcut set: space/arrows/1–9/L/M/F/D/? fully implemented in useKeyboardShortcuts.ts with cheatsheet + Media Session API
-- [in progress — 2026-05-15] SharedArrayBuffer oscilloscope pipeline from worklet → GPU texture (narrative §Advanced 4)
+- [needs-verification — 2026-05-22] SharedArrayBuffer oscilloscope pipeline from worklet → GPU texture (narrative §Advanced 4) — PR #215 brought SAB ring buffer for native engine bridge; unclear if v0.55 oscilloscope shader was ever created or if this is fulfilled/superseded
 - [ ] Move initial module parse off the main thread into a Web Worker to avoid 300 ms–1 s freezes on large `.it` files (narrative §Advanced 3)
 - [done — 2026-05-15] Darker-chassis toggle + drop shadow for white-chassis contrast — bezel dark-mode toggle landed in PR #186 (narrative §Graphical 6)
 - [done — 2026-05-15] Collapsible / default-hidden PatternDisplay debug panel — default-hidden + Mode=NONE fix in PR #186 (narrative §Graphical 8)
 - [done — 2026-04-24] Persist last-used shader in localStorage + per-module memory (PR #145)
-- [ ] Thumbnail previews + favorites in shader selector (narrative §Shader UI)
+- [thumbnails done 2026-05-22; favorites pending] Thumbnail previews + favorites in shader selector (narrative §Shader UI) — thumbnail rendering landed in commit f6676d1; favorites list + "random shader" button still outstanding
 - [done — 2026-05-15] Multi-layer bloom: separate passes for triggers / sustains / expression — BloomLayer API + layered WGSL shaders in PR #187, wired into PatternDisplay with DEFAULT_LAYERS (narrative §Shader 2)
 
 ## Backlog
 <!-- Unfinished items, known bugs, deferred work. -->
+- [ ] Verify SAB oscilloscope pipeline: does v0.55 shader exist? Did PR #215 native bridge fulfill this or is it still pending? (Ideas item marked needs-verification)
+- [ ] Note duration in v0.45b (issue #213) — TODAY'S FOCUS; move to Done when complete
 - [ ] Bug 4: ▶️ Play button scrolls canvas off-screen (focus/scroll side effect — likely `autoFocus` or `scrollIntoView` on play button element)
 - [ ] Verify Bug 5 (shader `.bak`/`.kate-swp` files) — confirm no swp/bak committed; add `.gitignore` patterns if missing
-- [ ] Verify Bug 2 (ScriptProcessor fallback) — PR #189 added enhanced diagnostics but did not fix; spot-check console on prod at `test.1ink.us/xm-player/`
+- [ ] Verify Bug 2 (ScriptProcessor fallback) — PR #189 added enhanced diagnostics; PR #215 native bridge may help; spot-check console on prod at `test.1ink.us/xm-player/`
 - [ ] v0.51 "Playhead Arc" shader exists in `shaders/` + `public/shaders/` but is NOT registered in `App.tsx` shader selector — add entry
 - [ ] v0.52 (Night), v0.53 (Midnight), v0.54 (Neon Night) shaders — NOT YET CREATED (last-week Done entry was incorrect); files do not exist in shaders/ or public/shaders/
 - [ ] 32/64 step-length toggle: ported to v0.51 and v0.39/v0.40/v0.21; NOT yet in v0.50 (default shader) — add stepsLength uniform to v0.50 struct
@@ -33,6 +35,14 @@ Implement the full SAB pipeline: allocate a SharedArrayBuffer in the worklet and
 - [ ] Storage-manager integration: `/api/shaders`, `/api/songs`, rating hookup (narrative §Integration)
 
 ## Done
+- [x] 2026-05-22 — Shader thumbnail previews in shader selector (commit f6676d1)
+- [x] 2026-05-22 — Night Mode 2.0: uniform-driven theme for patternv0.35_bloom with Dusk/Midnight/Deep presets (PR #207)
+- [x] 2026-05-22 — 3D Studio Mode: camera presets, three-point lighting, desk model, channel LEDs (PR #206)
+- [x] 2026-05-22 — Native C++ engine SAB ring-buffer bridge to main-thread AudioGraph via MediaStream fallback (PR #215)
+- [x] 2026-05-22 — AudioWorklet stability: strip ES module exports before new Function() eval, polyfill crypto + performance.now() in worklet scope (PRs #210–212)
+- [x] 2026-05-22 — Color palette selector fix, stepsLength lift to App.tsx, IS_PUBLIC_MODE refactor (PR #217)
+- [x] 2026-05-22 — Canvas sizing on mount: useLayoutEffect + zero-dimension guard (PR #205)
+- [x] 2026-05-22 — Pattern display freeze fix: WebGPU buffer refresh timing + bind group races on module reload (PR #209)
 - [x] 2026-05-15 — Multi-layer bloom: `BloomLayer` / `LayeredBloomOptions` / `DEFAULT_LAYERS` API in BloomPostProcessor; `bloom_threshold_layered.wgsl` + `bloom_composite_layered.wgsl`; PatternDisplay wired with DEFAULT_LAYERS (PR #187)
 - [x] 2026-05-15 — Bloom black screen fix: invalid WGSL vertex shader + scene texture format mismatch resolved; Soft/Crisp/Heavy/Dreamy presets added (PR #187)
 - [x] 2026-05-15 — PatternDisplay debug panel: default-hidden on load, Mode=NONE bug fixed, bezel dark-mode toggle added (PR #186)
@@ -65,10 +75,10 @@ Implement the full SAB pipeline: allocate a SharedArrayBuffer in the worklet and
 - [x] 2026-04-10 — Stale channel buffer + bind-group refresh fix; shader animation on second-song-load fix
 
 ## Last run
-Date: 2026-05-15
+Date: 2026-05-22
 Mode: User Idea
-Focus: SharedArrayBuffer oscilloscope pipeline — SAB from AudioWorklet → Float32Array view on main thread → 1D GPU texture → new v0.55 shader inner-ring trace
-Outcome: PRs #186–189 reconciled. Multi-layer bloom DONE (PR #187, layered WGSL + DEFAULT_LAYERS wired into PatternDisplay). Debug panel fixed (PR #186). v0.51 AWOL from App.tsx shader selector — moved to backlog. v0.52–v0.54 Done entry was incorrect — files don't exist — reopened as backlog. Oscilloscope pipeline picked as today's kimi-cli swarm. Copilot issue: ShaderSelectorPanel with thumbnail previews + favorites (fully decoupled from oscilloscope files).
+Focus: Note duration display in patternv0.45b (issue #213) — sustain tail + note-end return to base color
+Outcome: 8 PRs landed since 2026-05-15 (PRs #205–217): native engine SAB bridge, AudioWorklet stability, Night Mode 2.0, 3D Studio Mode, canvas sizing, pattern display freeze, color palette + stepsLength. Shader thumbnail previews shipped (f6676d1). SAB oscilloscope pipeline from last week unverified (v0.55 shader unclear, marked needs-verification). Issue #213 (note duration in v0.45b) filed yesterday and picked as today's kimi-cli swarm. Copilot issue: CRT scanline/phosphor post-process pass (fully decoupled from note-duration files).
 
 ---
 
