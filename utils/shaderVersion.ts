@@ -68,3 +68,11 @@ export const getBackgroundShaderFile = (shaderFile: string): string => {
 export const shouldEnableAlphaBlending = (shaderFile: string): boolean => {
   return shaderFile.includes('v0.35') || shaderFile.includes('v0.38') || shaderFile.includes('v0.40') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.47') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49') || shaderFile.includes('v0.50') || shaderFile.includes('v0.51') || shaderFile.includes('v0.55');
 };
+
+/**
+ * Returns true for shaders that use uniform slot [24] as `stepsLength: u32`.
+ * All other shaders use slot [24] as `colorPalette: u32` — do NOT pass stepsLength to them.
+ */
+export const supportsStepsLength = (shaderFile: string): boolean => {
+  return shaderFile.includes('v0.21') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40');
+};

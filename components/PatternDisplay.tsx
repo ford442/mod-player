@@ -4,7 +4,7 @@ import { ChannelShadowState, PatternMatrix, PlaybackState } from '../types';
 import { useWebGLOverlay } from '../hooks/useWebGLOverlay';
 import { useWebGPURender, type WebGPURenderParams, type DebugInfo } from '../hooks/useWebGPURender';
 import { BloomPostProcessor, DEFAULT_LAYERS } from '../utils/bloomPostProcessor';
-import { WEBGL_HYBRID_SHADERS } from '../utils/shaderVersion';
+import { WEBGL_HYBRID_SHADERS, supportsStepsLength } from '../utils/shaderVersion';
 
 const DEFAULT_CHANNELS = 4;
 
@@ -47,6 +47,11 @@ interface PatternDisplayProps {
   onOpenDebug?: () => void;
   colorPalette?: number;
   chassisDark?: boolean;
+  /** Controlled pattern steps count (32 or 64). When provided, overrides internal state.
+   *  Only meaningful for shaders that use slot [24] as stepsLength (v0.21, v0.39, v0.40). */
+  stepsLength?: 32 | 64;
+  /** Called when user clicks the steps toggle inside the canvas overlay. */
+  onStepsLengthToggle?: () => void;
   // Night Mode 2.0
   nightModeEnabled?: boolean;
   nightPreset?: number;        // 0=off, 1=dusk, 2=midnight, 3=deep
@@ -93,6 +98,8 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   onCloseDebug,
   onOpenDebug,
   colorPalette = 0,
+  stepsLength: stepsLengthProp,
+  onStepsLengthToggle,
   chassisDark = false,
   nightModeEnabled = false,
   nightPreset = 0,
@@ -114,7 +121,13 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   const [webgpuAvailable, setWebgpuAvailable] = useState(true);
   const [localTime, setLocalTime] = useState(0);
   const [invertChannels, setInvertChannels] = useState(false);
-  const [stepsLength, setStepsLength] = useState<32 | 64>(32);
+  // Internal stepsLength state — used when the prop is not controlled by the parent.
+  // NOTE: This component supports both controlled (stepsLengthProp provided) and
+  // uncontrolled (prop absent) modes. The mode should not change after initial mount —
+  // App.tsx always provides the prop, while Studio3D does not (uncontrolled fallback).
+  const [localStepsLength, setLocalStepsLength] = useState<32 | 64>(32);
+  // Effective value: prefer controlled prop, fall back to local state
+  const stepsLength = stepsLengthProp ?? localStepsLength;
   const [clickedButton, setClickedButton] = useState<number>(0);
   const clickTimeoutRef = useRef<number | null>(null);
   const animationFrameRef = useRef<number>();
@@ -147,11 +160,9 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     return { width: Math.max(800, numChannels * cellWidth), height: 600 };
   }, [shaderFile, isHorizontal, numChannels, cellWidth]);
 
-  // Reset step length when switching to a shader that doesn't support it
+  // Reset local step length when switching to a shader that doesn't support it
   useEffect(() => {
-    if (!shaderFile.includes('v0.21') && !shaderFile.includes('v0.39') && !shaderFile.includes('v0.40') && !shaderFile.includes('v0.51') && !shaderFile.includes('v0.55')) {
-      setStepsLength(32);
-    }
+    if (!supportsStepsLength(shaderFile)) setLocalStepsLength(32);
   }, [shaderFile]);
 
   // Track video source changes
@@ -491,9 +502,15 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
         </button>
       )}
 
-      {(shaderFile.includes('v0.21') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40')) && (
+      {supportsStepsLength(shaderFile) && (
         <button
-          onClick={() => setStepsLength(s => s === 32 ? 64 : 32)}
+          onClick={() => {
+            if (onStepsLengthToggle) {
+              onStepsLengthToggle();
+            } else {
+              setLocalStepsLength(s => s === 32 ? 64 : 32);
+            }
+          }}
           className="absolute top-2 left-36 px-2 py-1 bg-[#222] text-xs font-mono text-gray-400 border border-[#444] rounded hover:bg-[#333] hover:text-white transition-colors"
         >
           [{stepsLength} STEPS]

@@ -21,6 +21,7 @@ import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { useLocalStorage } from './hooks/useLocalStorage';
 import { cn } from './utils/cn';
 import { startProjectMBridge } from './utils/projectMBridge';
+import { supportsStepsLength } from './utils/shaderVersion';
 import type { MediaItem } from './types';
 import { 
   DEFAULT_BLOOM_PRESET, 
@@ -98,6 +99,11 @@ function computeModuleHash(data: Uint8Array): string {
     .join('');
 }
 
+// Public / demo mode — evaluated once at module load from URL params.
+// Activated by ?public=1 or ?demo=1; value doesn't change during the page lifecycle.
+const _urlParams = new URLSearchParams(window.location.search);
+const IS_PUBLIC_MODE = _urlParams.get('public') === '1' || _urlParams.get('demo') === '1';
+
 function App() {
   // Tier 1: global last-used shader — persisted across page reloads
   const [_storedShader, _setStoredShader] = useLocalStorage<string>('xasm1_last_shader', DEFAULT_SHADER);
@@ -129,7 +135,17 @@ function App() {
   // Bloom and Color Scheme State
   const [bloomPreset, setBloomPreset] = useState<BloomPreset>(DEFAULT_BLOOM_PRESET);
   const [colorScheme, setColorScheme] = useState<ColorScheme>(DEFAULT_COLOR_SCHEME);
-  const [colorPalette, setColorPalette] = useState<number>(0);
+  // Persist colorPalette selection across page reloads
+  const [colorPalette, setColorPalette] = useLocalStorage<number>('xasm1_colorPalette', 0);
+
+  // Pattern length toggle — lifted to App.tsx so it can be shown in the toolbar
+  // Uses supportsStepsLength() from shaderVersion.ts as the single source of truth
+  const isStepsShader = supportsStepsLength(shaderFile);
+  const [stepsLength, setStepsLength] = useLocalStorage<32 | 64>('xasm1_stepsLength', 32);
+  // Reset to 32 when switching to a shader that doesn't support stepsLength
+  useEffect(() => {
+    if (!isStepsShader) setStepsLength(32);
+  }, [isStepsShader, setStepsLength]);
 
   // Night Mode 2.0 — persisted, active only on patternv0.35_bloom
   const [nightModeEnabled, setNightModeEnabled] = useLocalStorage<boolean>('xasm1_nightMode_enabled', false);
@@ -662,17 +678,21 @@ function App() {
             </div>
 
             <div className={cn('flex flex-wrap gap-2 p-2 rounded-xl border', isDarkMode ? 'bg-black border-gray-800' : 'bg-gray-200 border-gray-300')}>
-                <ShaderSelectorPanel
-                  shaderOptions={ALL_SHADER_OPTIONS}
-                  selectedShader={shaderFile}
-                  onSelectShader={setShaderFile}
-                  favorites={validShaderFavorites}
-                  recents={validShaderRecents}
-                  thumbnails={shaderThumbnails}
-                  onToggleFavorite={toggleShaderFavorite}
-                  isDarkMode={isDarkMode}
-                />
-                <div className={cn('w-px h-6', isDarkMode ? 'bg-gray-800' : 'bg-gray-300')}></div>
+                {!IS_PUBLIC_MODE && (
+                  <>
+                    <ShaderSelectorPanel
+                      shaderOptions={ALL_SHADER_OPTIONS}
+                      selectedShader={shaderFile}
+                      onSelectShader={setShaderFile}
+                      favorites={validShaderFavorites}
+                      recents={validShaderRecents}
+                      thumbnails={shaderThumbnails}
+                      onToggleFavorite={toggleShaderFavorite}
+                      isDarkMode={isDarkMode}
+                    />
+                    <div className={cn('w-px h-6', isDarkMode ? 'bg-gray-800' : 'bg-gray-300')}></div>
+                  </>
+                )}
                 <div className="flex items-center gap-1">
                     <span className="text-[10px] font-bold text-gray-500 uppercase px-1">Palette</span>
                     <select
@@ -687,6 +707,23 @@ function App() {
                         <option value={4}>Acid</option>
                     </select>
                 </div>
+                {isStepsShader && (
+                  <>
+                    <div className={cn('w-px h-6', isDarkMode ? 'bg-gray-800' : 'bg-gray-300')}></div>
+                    <button
+                      onClick={() => setStepsLength(stepsLength === 32 ? 64 : 32)}
+                      className={cn(
+                        'text-xs font-mono px-2 py-1 rounded border transition-colors',
+                        isDarkMode
+                          ? 'bg-gray-800 text-gray-300 border-gray-600 hover:bg-gray-700 hover:text-white'
+                          : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50',
+                      )}
+                      title="Toggle pattern length (32 or 64 steps visible)"
+                    >
+                      {stepsLength} Steps
+                    </button>
+                  </>
+                )}
             </div>
         </div>
 
@@ -731,6 +768,8 @@ function App() {
              bloomIntensity={(isNightShader && nightModeEnabled) ? nightConfig.bloomIntensity : bloomPreset.intensity}
              bloomThreshold={bloomPreset.threshold}
              colorPalette={colorPalette}
+             stepsLength={stepsLength}
+             onStepsLengthToggle={() => setStepsLength(stepsLength === 32 ? 64 : 32)}
              chassisDark={chassisDark}
              // Night Mode 2.0
              nightModeEnabled={isNightShader && nightModeEnabled}

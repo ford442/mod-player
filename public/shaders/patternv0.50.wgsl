@@ -438,7 +438,7 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     var housingColor = fs.bgColor;
     if (hasNote) {
       let pitchHue = pitchClassFromIndex(note);
-      let baseColor = neonPalette(pitchHue);
+      let baseColor = selectPalette(uniforms.colorPalette, pitchHue);
       let instBand = inst & 15u;
       let instBright = 0.85 + (select(0.0, f32(instBand) / 15.0, instBand > 0u)) * 0.15;
       let tintColor = baseColor * instBright;
@@ -482,7 +482,7 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     var midIntensity = 0.12; // Base dim glow
     if (hasNote && !isExpressionOnly) {
       let pitchHue = pitchClassFromIndex(note);
-      let baseColor = neonPalette(pitchHue);
+      let baseColor = selectPalette(uniforms.colorPalette, pitchHue);
       let instBand = inst & 15u;
       let instBright = 0.85 + (select(0.0, f32(instBand) / 15.0, instBand > 0u)) * 0.15;
       noteColor = baseColor * instBright;

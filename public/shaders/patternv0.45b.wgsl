@@ -287,7 +287,7 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
 
   if (hasNote) {
       let pitchHue = pitchClassFromIndex(note);
-      let baseCol = neonPalette(pitchHue);
+      let baseCol = selectPalette(uniforms.colorPalette, pitchHue);
 
       capColor = mix(capColor, baseCol, 0.36);
 
