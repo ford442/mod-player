@@ -99,6 +99,12 @@ function computeModuleHash(data: Uint8Array): string {
 }
 
 function App() {
+  // Public / demo mode — activated by ?public=1 or ?demo=1 URL parameter
+  const isPublicMode = useMemo(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get('public') === '1' || params.get('demo') === '1';
+  }, []);
+
   // Tier 1: global last-used shader — persisted across page reloads
   const [_storedShader, _setStoredShader] = useLocalStorage<string>('xasm1_last_shader', DEFAULT_SHADER);
   // Validate: fall back to default if the stored shader was removed from the selector list
@@ -129,7 +135,18 @@ function App() {
   // Bloom and Color Scheme State
   const [bloomPreset, setBloomPreset] = useState<BloomPreset>(DEFAULT_BLOOM_PRESET);
   const [colorScheme, setColorScheme] = useState<ColorScheme>(DEFAULT_COLOR_SCHEME);
-  const [colorPalette, setColorPalette] = useState<number>(0);
+  // Persist colorPalette selection across page reloads
+  const [colorPalette, setColorPalette] = useLocalStorage<number>('xasm1_colorPalette', 0);
+
+  // Pattern length toggle — lifted to App.tsx so it can be shown in the toolbar
+  // Only v0.21, v0.39, v0.40 shaders use stepsLength at slot [24]
+  const STEPS_SHADERS = useMemo(() => ['v0.21', 'v0.39', 'v0.40'], []);
+  const supportsStepsLength = STEPS_SHADERS.some(v => shaderFile.includes(v));
+  const [stepsLength, setStepsLength] = useLocalStorage<32 | 64>('xasm1_stepsLength', 32);
+  // Reset to 32 when switching to a shader that doesn't support stepsLength
+  useEffect(() => {
+    if (!supportsStepsLength) setStepsLength(32);
+  }, [supportsStepsLength, setStepsLength]);
 
   // Night Mode 2.0 — persisted, active only on patternv0.35_bloom
   const [nightModeEnabled, setNightModeEnabled] = useLocalStorage<boolean>('xasm1_nightMode_enabled', false);
@@ -662,17 +679,21 @@ function App() {
             </div>
 
             <div className={cn('flex flex-wrap gap-2 p-2 rounded-xl border', isDarkMode ? 'bg-black border-gray-800' : 'bg-gray-200 border-gray-300')}>
-                <ShaderSelectorPanel
-                  shaderOptions={ALL_SHADER_OPTIONS}
-                  selectedShader={shaderFile}
-                  onSelectShader={setShaderFile}
-                  favorites={validShaderFavorites}
-                  recents={validShaderRecents}
-                  thumbnails={shaderThumbnails}
-                  onToggleFavorite={toggleShaderFavorite}
-                  isDarkMode={isDarkMode}
-                />
-                <div className={cn('w-px h-6', isDarkMode ? 'bg-gray-800' : 'bg-gray-300')}></div>
+                {!isPublicMode && (
+                  <>
+                    <ShaderSelectorPanel
+                      shaderOptions={ALL_SHADER_OPTIONS}
+                      selectedShader={shaderFile}
+                      onSelectShader={setShaderFile}
+                      favorites={validShaderFavorites}
+                      recents={validShaderRecents}
+                      thumbnails={shaderThumbnails}
+                      onToggleFavorite={toggleShaderFavorite}
+                      isDarkMode={isDarkMode}
+                    />
+                    <div className={cn('w-px h-6', isDarkMode ? 'bg-gray-800' : 'bg-gray-300')}></div>
+                  </>
+                )}
                 <div className="flex items-center gap-1">
                     <span className="text-[10px] font-bold text-gray-500 uppercase px-1">Palette</span>
                     <select
@@ -687,6 +708,23 @@ function App() {
                         <option value={4}>Acid</option>
                     </select>
                 </div>
+                {supportsStepsLength && (
+                  <>
+                    <div className={cn('w-px h-6', isDarkMode ? 'bg-gray-800' : 'bg-gray-300')}></div>
+                    <button
+                      onClick={() => setStepsLength(stepsLength === 32 ? 64 : 32)}
+                      className={cn(
+                        'text-xs font-mono px-2 py-1 rounded border transition-colors',
+                        isDarkMode
+                          ? 'bg-gray-800 text-gray-300 border-gray-600 hover:bg-gray-700 hover:text-white'
+                          : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50',
+                      )}
+                      title="Toggle pattern length (32 or 64 steps visible)"
+                    >
+                      {stepsLength} Steps
+                    </button>
+                  </>
+                )}
             </div>
         </div>
 
@@ -731,6 +769,8 @@ function App() {
              bloomIntensity={(isNightShader && nightModeEnabled) ? nightConfig.bloomIntensity : bloomPreset.intensity}
              bloomThreshold={bloomPreset.threshold}
              colorPalette={colorPalette}
+             stepsLength={stepsLength}
+             onStepsLengthToggle={() => setStepsLength(stepsLength === 32 ? 64 : 32)}
              chassisDark={chassisDark}
              // Night Mode 2.0
              nightModeEnabled={isNightShader && nightModeEnabled}

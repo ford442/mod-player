@@ -560,7 +560,6 @@ export function useWebGPURender(
         innerRadius,
         outerRadius,
         colorPalette: p.colorPalette ?? 0,
-        stepsLength: p.stepsLength ?? 32,
         gridRect: GRID_RECT,
         // Night Mode 2.0
         vignetteStrength: p.vignetteStrength ?? 0.0,
@@ -568,6 +567,11 @@ export function useWebGPURender(
         filmGrain: p.filmGrain ?? 0.0,
         nightPreset: p.nightPreset ?? 0,
         invertMix: p.invertMix ?? 0.0,
+        // Only pass stepsLength for shaders that use it at slot [24];
+        // for circular shaders slot [24] is colorPalette, so stepsLength must be absent.
+        ...((shaderFile.includes('v0.21') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40'))
+          ? { stepsLength: p.stepsLength ?? 32 }
+          : {}),
       }, uniformUintRef.current, uniformFloatRef.current);
       device.queue.writeBuffer(uniformBufferRef.current, 0, uniformBufferDataRef.current, 0, uniformByteLength);
     }
