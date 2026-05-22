@@ -6,11 +6,19 @@ struct Uniforms {
     sceneIntensity: f32,
 };
 
+struct CRTUniforms {
+    intensity: f32,
+    scanlineDark: f32,
+    vignetteStrength: f32,
+    _pad: f32,
+};
+
 @group(0) @binding(0) var sceneTexture: texture_2d<f32>;
 @group(0) @binding(1) var sceneSampler: sampler;
 @group(0) @binding(2) var bloomTexture: texture_2d<f32>;
 @group(0) @binding(3) var bloomSampler: sampler;
 @group(0) @binding(4) var<uniform> uniforms: Uniforms;
+@group(0) @binding(5) var<uniform> crt: CRTUniforms;
 
 @fragment
 fn fs(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
@@ -18,7 +26,14 @@ fn fs(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
     let bloomColor = textureSample(bloomTexture, bloomSampler, uv).rgb;
 
     // Linear combine (scene can be SDR; bloom is HDR)
-    let finalColor = sceneColor * uniforms.sceneIntensity + bloomColor * uniforms.bloomIntensity;
+    var finalColor = sceneColor * uniforms.sceneIntensity + bloomColor * uniforms.bloomIntensity;
+
+    // CRT scanline + vignette effect (gated by crt.intensity; 0.0 = no effect)
+    let row = floor(uv.y * f32(textureDimensions(sceneTexture).y));
+    let scanline = select(1.0, 1.0 - crt.scanlineDark, (u32(row) % 2u) == 0u);
+    let d = length(uv - vec2<f32>(0.5));
+    let vignette = 1.0 - crt.vignetteStrength * d * d;
+    finalColor = mix(finalColor, finalColor * scanline * vignette, crt.intensity);
 
     // Optional: simple Reinhard tone-mapping can be enabled by the host if desired
     // let tonemapped = finalColor / (finalColor + vec3<f32>(1.0));
