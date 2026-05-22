@@ -211,6 +211,8 @@ export interface NoteDurationInfo {
   duration: number;    // Total duration in rows (1-255)
   rowOffset: number;   // Offset from note start (0 = note-on row)
   isNoteOff: boolean;  // Whether this is a note-off/cut/fade row
+  isTrigger: boolean;  // This row is the note-on trigger row
+  isSustained: boolean;// This row is in the middle of a sustain tail
 }
 /**
  * Calculate note durations by scanning for note-off commands (DURA-001)
@@ -229,6 +231,8 @@ export const calculateNoteDurations = (
       duration: 1,
       rowOffset: 0,
       isNoteOff: false,
+      isTrigger: false,
+      isSustained: false,
     }))
   );
 
@@ -254,6 +258,8 @@ export const calculateNoteDurations = (
               res.duration = Math.min(duration, 255);
               res.rowOffset = r - noteStartRow;
               res.isNoteOff = false;
+              res.isTrigger = (r === noteStartRow);
+              res.isSustained = (r > noteStartRow);
             }
           }
         }
@@ -265,6 +271,8 @@ export const calculateNoteDurations = (
           res.duration = 1;           // temporary
           res.rowOffset = 0;
           res.isNoteOff = false;
+          res.isTrigger = true;
+          res.isSustained = false;
         }
       }
       else if (isNoteOff || isVolumeOff) {
@@ -277,6 +285,8 @@ export const calculateNoteDurations = (
               res.duration = Math.min(duration, 255);
               res.rowOffset = r - noteStartRow;
               res.isNoteOff = (r === row); // only the last row is the actual off
+              res.isTrigger = (r === noteStartRow);
+              res.isSustained = (r > noteStartRow && r < row);
             }
           }
           noteStartRow = -1;
@@ -287,6 +297,8 @@ export const calculateNoteDurations = (
             res.duration = 1;
             res.rowOffset = 0;
             res.isNoteOff = true;
+            res.isTrigger = false;
+            res.isSustained = false;
           }
         }
       }
@@ -302,6 +314,8 @@ export const calculateNoteDurations = (
           res.duration = Math.min(duration, 255);
           res.rowOffset = r - noteStartRow;
           res.isNoteOff = false;
+          res.isTrigger = (r === noteStartRow);
+          res.isSustained = (r > noteStartRow);
         }
       }
     }
