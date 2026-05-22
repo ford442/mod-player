@@ -58,6 +58,8 @@ interface PatternDisplayProps {
   vignetteStrength?: number;
   filmGrain?: number;
   invertMix?: number;
+  // CRT effect
+  crtEnabled?: boolean;
 }
 
 export const PatternDisplay: React.FC<PatternDisplayProps> = ({
@@ -106,6 +108,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   vignetteStrength = 0.0,
   filmGrain = 0.0,
   invertMix = 0.0,
+  crtEnabled = false,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const glCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -137,6 +140,10 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   // Night mode target is read each frame from this ref to avoid stale closures
   const nightModeTargetRef = useRef<number>(nightModeEnabled ? 1.0 : 0.0);
   nightModeTargetRef.current = nightModeEnabled ? 1.0 : 0.0;
+
+  // CRT enabled flag — updated each render so the RAF loop reads the latest value
+  const crtEnabledRef = useRef<boolean>(crtEnabled);
+  crtEnabledRef.current = crtEnabled;
 
   const [debugInfo, setDebugInfo] = useState<DebugInfo>({
     layoutMode: 'NONE',
@@ -458,6 +465,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
         );
       }
       if (gpuReady) {
+        bloomRef.current?.updateCRT(crtEnabledRef.current ? 1.0 : 0.0);
         renderRef.current?.();
         if (isOverlayActive) drawWebGL();
       }

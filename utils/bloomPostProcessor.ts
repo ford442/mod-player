@@ -68,6 +68,9 @@ export class BloomPostProcessor {
   private vBlurBindGroup!: GPUBindGroup;
   private compositeBindGroup!: GPUBindGroup;
 
+  // CRT uniform buffer (16 bytes: intensity, scanlineDark, vignetteStrength, _pad)
+  private crtUniformBuffer!: GPUBuffer;
+
   // Shader code
   private thresholdShaderCode?: string | undefined;
   private blurShaderCode?: string | undefined;
@@ -190,6 +193,14 @@ export class BloomPostProcessor {
       this.device.queue.writeBuffer(this.thresholdBuffer, 0, new Float32Array([0.8, 0.2, 0.0, 0.0]));
       this.device.queue.writeBuffer(this.compositeBuffer, 0, new Float32Array([1.2, 1.0, 0.0, 0.0]));
     }
+
+    // CRT uniform buffer — shared between legacy and layered modes
+    // 16 bytes: [intensity, scanlineDark, vignetteStrength, _pad]
+    this.crtUniformBuffer = this.device.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    // Default: intensity=0.0 means CRT is off (bit-identical output to pre-CRT).
+    // scanlineDark and vignetteStrength are pre-set to their recommended defaults
+    // so enabling CRT via updateCRT(1.0) just works without extra configuration.
+    this.device.queue.writeBuffer(this.crtUniformBuffer, 0, new Float32Array([0.0, 0.15, 0.4, 0.0]));
 
     await this.createPipelines();
     this.createBindGroups();
@@ -342,6 +353,7 @@ export class BloomPostProcessor {
           { binding: 2, resource: (this.blurTextures[1] ?? this.sceneTexture).createView() },
           { binding: 3, resource: this.linearSampler },
           { binding: 4, resource: { buffer: this.compositeBuffer } },
+          { binding: 5, resource: { buffer: this.crtUniformBuffer } },
         ],
       });
     }
@@ -575,6 +587,16 @@ export class BloomPostProcessor {
     this.updateUniforms(preset.intensity, preset.threshold, preset.knee, sceneIntensity);
   }
 
+  // Update CRT scanline + vignette uniforms.
+  // Call once per frame before bloomPostProcessor.render().
+  // intensity=0.0 → no effect (bit-identical to pre-CRT output).
+  public updateCRT(intensity: number, scanlineDark: number = 0.15, vignetteStrength: number = 0.4) {
+    this.device.queue.writeBuffer(
+      this.crtUniformBuffer, 0,
+      new Float32Array([intensity, scanlineDark, vignetteStrength, 0.0])
+    );
+  }
+
   public resize(width: number, height: number) {
     if (!this.sceneTexture) return;
 
@@ -649,6 +671,7 @@ export class BloomPostProcessor {
     this.thresholdBuffer?.destroy();
     this.blurBuffer?.destroy();
     this.compositeBuffer?.destroy();
+    this.crtUniformBuffer?.destroy();
 
     for (const layer of this.layerResources) {
       layer.thresholdTexture?.destroy();

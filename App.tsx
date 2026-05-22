@@ -150,6 +150,9 @@ function App() {
   // Night Mode 2.0 — persisted, active only on patternv0.35_bloom
   const [nightModeEnabled, setNightModeEnabled] = useLocalStorage<boolean>('xasm1_nightMode_enabled', false);
   const [nightModePreset, setNightModePreset] = useLocalStorage<NightPreset>('xasm1_nightMode_preset', DEFAULT_NIGHT_PRESET);
+
+  // CRT scanline/vignette effect — persisted across page reloads
+  const [crtEnabled, setCrtEnabled] = useLocalStorage<boolean>('xasm1-crt-enabled', false);
   const {
     isReady,
     isModuleLoaded,
@@ -777,6 +780,8 @@ function App() {
              vignetteStrength={nightConfig.vignetteStrength}
              filmGrain={nightConfig.filmGrain}
              invertMix={nightConfig.invertMix}
+             // CRT effect
+             crtEnabled={crtEnabled}
            />
 
            <MediaOverlay
@@ -820,6 +825,9 @@ function App() {
           onNightModeToggle={() => setNightModeEnabled(!nightModeEnabled)}
           onNightPresetChange={setNightModePreset}
           isNightShader={isNightShader}
+          // CRT effect
+          crtEnabled={crtEnabled}
+          onToggleCrt={() => setCrtEnabled(!crtEnabled)}
         />
 
         {/* Seek Bar */}

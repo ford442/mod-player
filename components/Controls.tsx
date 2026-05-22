@@ -33,6 +33,9 @@ interface ControlsProps {
   onNightModeToggle?: () => void;
   onNightPresetChange?: (preset: NightPreset) => void;
   isNightShader?: boolean;
+  // CRT scanline/vignette effect
+  crtEnabled?: boolean;
+  onToggleCrt?: () => void;
 }
 
 export const Controls: React.FC<ControlsProps> = ({
@@ -64,6 +67,9 @@ export const Controls: React.FC<ControlsProps> = ({
   onNightModeToggle,
   onNightPresetChange,
   isNightShader = false,
+  // CRT effect
+  crtEnabled = false,
+  onToggleCrt,
 }) => {
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -167,6 +173,20 @@ export const Controls: React.FC<ControlsProps> = ({
             )}
           >
             {chassisDark ? '🌑 Dark Chassis' : '☀️ Light Chassis'}
+          </button>
+        )}
+        {onToggleCrt !== undefined && (
+          <button
+            onClick={onToggleCrt}
+            title={crtEnabled ? 'Disable CRT scanline effect' : 'Enable CRT scanline effect'}
+            className={cn(
+              'px-4 py-2 text-sm font-semibold rounded-lg shadow-lg transition-colors border',
+              crtEnabled
+                ? 'bg-green-700 text-green-100 hover:bg-green-600 border-green-500'
+                : 'bg-gray-700 text-gray-300 hover:bg-gray-600 border-gray-500',
+            )}
+          >
+            📺 CRT
           </button>
         )}
       </div>
