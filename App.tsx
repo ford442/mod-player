@@ -21,6 +21,7 @@ import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { useLocalStorage } from './hooks/useLocalStorage';
 import { cn } from './utils/cn';
 import { startProjectMBridge } from './utils/projectMBridge';
+import { supportsStepsLength } from './utils/shaderVersion';
 import type { MediaItem } from './types';
 import { 
   DEFAULT_BLOOM_PRESET, 
@@ -98,13 +99,12 @@ function computeModuleHash(data: Uint8Array): string {
     .join('');
 }
 
-function App() {
-  // Public / demo mode — activated by ?public=1 or ?demo=1 URL parameter
-  const isPublicMode = useMemo(() => {
-    const params = new URLSearchParams(window.location.search);
-    return params.get('public') === '1' || params.get('demo') === '1';
-  }, []);
+// Public / demo mode — evaluated once at module load from URL params.
+// Activated by ?public=1 or ?demo=1; value doesn't change during the page lifecycle.
+const _urlParams = new URLSearchParams(window.location.search);
+const IS_PUBLIC_MODE = _urlParams.get('public') === '1' || _urlParams.get('demo') === '1';
 
+function App() {
   // Tier 1: global last-used shader — persisted across page reloads
   const [_storedShader, _setStoredShader] = useLocalStorage<string>('xasm1_last_shader', DEFAULT_SHADER);
   // Validate: fall back to default if the stored shader was removed from the selector list
@@ -139,14 +139,13 @@ function App() {
   const [colorPalette, setColorPalette] = useLocalStorage<number>('xasm1_colorPalette', 0);
 
   // Pattern length toggle — lifted to App.tsx so it can be shown in the toolbar
-  // Only v0.21, v0.39, v0.40 shaders use stepsLength at slot [24]
-  const STEPS_SHADERS = useMemo(() => ['v0.21', 'v0.39', 'v0.40'], []);
-  const supportsStepsLength = STEPS_SHADERS.some(v => shaderFile.includes(v));
+  // Uses supportsStepsLength() from shaderVersion.ts as the single source of truth
+  const isStepsShader = supportsStepsLength(shaderFile);
   const [stepsLength, setStepsLength] = useLocalStorage<32 | 64>('xasm1_stepsLength', 32);
   // Reset to 32 when switching to a shader that doesn't support stepsLength
   useEffect(() => {
-    if (!supportsStepsLength) setStepsLength(32);
-  }, [supportsStepsLength, setStepsLength]);
+    if (!isStepsShader) setStepsLength(32);
+  }, [isStepsShader, setStepsLength]);
 
   // Night Mode 2.0 — persisted, active only on patternv0.35_bloom
   const [nightModeEnabled, setNightModeEnabled] = useLocalStorage<boolean>('xasm1_nightMode_enabled', false);
@@ -679,7 +678,7 @@ function App() {
             </div>
 
             <div className={cn('flex flex-wrap gap-2 p-2 rounded-xl border', isDarkMode ? 'bg-black border-gray-800' : 'bg-gray-200 border-gray-300')}>
-                {!isPublicMode && (
+                {!IS_PUBLIC_MODE && (
                   <>
                     <ShaderSelectorPanel
                       shaderOptions={ALL_SHADER_OPTIONS}
@@ -708,7 +707,7 @@ function App() {
                         <option value={4}>Acid</option>
                     </select>
                 </div>
-                {supportsStepsLength && (
+                {isStepsShader && (
                   <>
                     <div className={cn('w-px h-6', isDarkMode ? 'bg-gray-800' : 'bg-gray-300')}></div>
                     <button

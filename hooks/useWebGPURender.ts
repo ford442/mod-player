@@ -11,6 +11,7 @@ import {
   shouldUseBackgroundPass,
   getBackgroundShaderFile,
   shouldEnableAlphaBlending,
+  supportsStepsLength,
 } from '../utils/shaderVersion';
 import {
   alignTo,
@@ -569,7 +570,7 @@ export function useWebGPURender(
         invertMix: p.invertMix ?? 0.0,
         // Only pass stepsLength for shaders that use it at slot [24];
         // for circular shaders slot [24] is colorPalette, so stepsLength must be absent.
-        ...((shaderFile.includes('v0.21') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40'))
+        ...(supportsStepsLength(shaderFile)
           ? { stepsLength: p.stepsLength ?? 32 }
           : {}),
       }, uniformUintRef.current, uniformFloatRef.current);
