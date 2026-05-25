@@ -154,6 +154,25 @@ fn sdEllipse(p: vec2<f32>, ab: vec2<f32>) -> f32 {
   return (k - 1.0) * min(ab.x, ab.y);
 }
 
+// ACES Filmic Tone Mapping (approximation by Narkowicz 2015).
+// Maps HDR values to [0,1] while preserving hue far better than a simple clamp.
+fn acesToneMap(color: vec3<f32>) -> vec3<f32> {
+  let a = 2.51;
+  let b = 0.03;
+  let c = 2.43;
+  let d = 0.59;
+  let e = 0.14;
+  return clamp(
+    (color * (a * color + b)) / (color * (c * color + d) + e),
+    vec3<f32>(0.0), vec3<f32>(1.0)
+  );
+}
+
+// Scale factor for hue-preservation in litTint mixing.
+// Higher value → more of the note's pitch color bleeds through the glass tint.
+const COLOR_PRESERVE_SCALE: f32 = 0.8;
+const COLOR_PRESERVE_MAX: f32   = 0.85;
+
 fn pitchClassFromIndex(note: u32) -> f32 {
   if (note == 0u || note > 96u) { return 0.0; }
   let semi = (note - 1u) % 12u;
@@ -376,7 +395,10 @@ fn drawUnifiedLensCap(
     activeColor = mix(activeColor, botEmitter.rgb, botEmitter.a * 0.5);
 
     let totalGlow = topEmitter.a + midEmitter.a + botEmitter.a;
-    let litTint = mix(vec3<f32>(0.92, 0.93, 0.98), activeColor, min(totalGlow * 0.4, 0.4));
+    // Preserve note hue: mix toward activeColor more aggressively (was 0.4 max).
+    // Near-white vec3(0.92,0.93,0.98) is only visible when there's no active color.
+    let colorPreserveFactor = min(totalGlow * COLOR_PRESERVE_SCALE, COLOR_PRESERVE_MAX);
+    let litTint = mix(vec3<f32>(0.92, 0.93, 0.98), activeColor, colorPreserveFactor);
     let glassBaseColor = mix(bgColor * 0.12, litTint, 0.88);
 
     // Edge alpha
@@ -429,7 +451,8 @@ fn drawUnifiedLensCap(
     let vignette = 1.0 - radial * radial * 0.25;
     finalColor *= vignette;
 
-    return vec4<f32>(finalColor, edgeAlpha);
+    // ACES tone mapping — maps HDR glow accumulation to [0,1] while preserving hue
+    return vec4<f32>(acesToneMap(finalColor), edgeAlpha);
 }
 
 @fragment

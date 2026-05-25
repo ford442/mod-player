@@ -194,6 +194,24 @@ fn sdCircle(p: vec2<f32>, r: f32) -> f32 {
   return length(p) - r;
 }
 
+// ACES Filmic Tone Mapping (approximation by Narkowicz 2015).
+// Maps HDR values to [0,1] while preserving hue far better than a simple clamp.
+fn acesToneMap(color: vec3<f32>) -> vec3<f32> {
+  let a = 2.51;
+  let b = 0.03;
+  let c = 2.43;
+  let d = 0.59;
+  let e = 0.14;
+  return clamp(
+    (color * (a * color + b)) / (color * (c * color + d) + e),
+    vec3<f32>(0.0), vec3<f32>(1.0)
+  );
+}
+
+// Scale a color to a target brightness while preserving its hue.
+// Returns an HDR color (> 1.0 allowed); call acesToneMap() downstream
+// instead of clamping here to avoid premature hue washout.
+
 fn sdTriangle(p: vec2<f32>, r: f32) -> f32 {
     let k = sqrt(3.0);
     var p2 = p;
@@ -335,8 +353,8 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
       if (sustainGlow > 0.0) {
           glow = max(glow, sustainGlow * 0.92);
 
-          // Brighter own-color mix
-          let brightSustain = clamp(baseCol * 1.68, vec3<f32>(0.0), vec3<f32>(1.0));
+          // Brighter own-color mix — HDR (no clamp), tone-mapped at output
+          let brightSustain = baseCol * 1.68;
           capColor = mix(capColor, brightSustain, 0.87);
 
           // Gentle shimmer
@@ -347,7 +365,8 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
       // === TRIGGER FLASH (bright own color) ===
       if (ch.trigger > 0u && isTrigger) {
           glow += TRIGGER_FLASH_BOOST;
-          let brightFlash = clamp(baseCol * 2.15, vec3<f32>(0.0), vec3<f32>(1.0));
+          // HDR boost — no clamp here; acesToneMap() at output preserves hue
+          let brightFlash = baseCol * 2.15;
           capColor = mix(capColor, brightFlash, 0.96);
       }
 
@@ -399,7 +418,9 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   let fresnel = pow(1.0 - max(0.0, dot(n, vec3<f32>(0.0, 0.0, 1.0))), 2.8) * 0.32;
 
   capColor = capColor * (0.52 + 0.48 * diff) + fresnel * 0.11;
-  capColor += vec3<f32>(glow * 0.58);
+  // Hue-preserving glow: add a fraction of the current capColor scaled by glow
+  // instead of adding neutral white (vec3(glow)), which causes hue washout.
+  capColor += capColor * glow * 0.58;
 
   if (glow > 0.0) {
       capColor *= (1.0 + bloom * 0.75);
@@ -409,5 +430,6 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   let noise = fract(sin(dot(in.uv * uniforms.timeSec * 0.7, vec2<f32>(12.9898, 78.233))) * 43758.5453);
   capColor += (noise - 0.5) * 0.007;
 
-  return vec4<f32>(capColor * dimFactor, edge);
+  // ACES tone mapping — maps HDR accumulation back to [0,1] while preserving hue
+  return vec4<f32>(acesToneMap(capColor) * dimFactor, edge);
 }

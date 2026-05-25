@@ -155,6 +155,25 @@ fn sdEllipse(p: vec2<f32>, ab: vec2<f32>) -> f32 {
   return (k - 1.0) * min(ab.x, ab.y);
 }
 
+// ACES Filmic Tone Mapping (approximation by Narkowicz 2015).
+// Maps HDR values to [0,1] while preserving hue far better than a simple clamp.
+fn acesToneMap(color: vec3<f32>) -> vec3<f32> {
+  let a = 2.51;
+  let b = 0.03;
+  let c = 2.43;
+  let d = 0.59;
+  let e = 0.14;
+  return clamp(
+    (color * (a * color + b)) / (color * (c * color + d) + e),
+    vec3<f32>(0.0), vec3<f32>(1.0)
+  );
+}
+
+// Scale factor for hue-preservation in litTint mixing.
+// Higher value → more of the note's pitch color bleeds through the glass tint.
+const COLOR_PRESERVE_SCALE: f32 = 0.8;
+const COLOR_PRESERVE_MAX: f32   = 0.85;
+
 fn pitchClassFromIndex(note: u32) -> f32 {
   if (note == 0u || note > 96u) { return 0.0; }
   let semi = (note - 1u) % 12u;
@@ -179,16 +198,16 @@ struct NoteDurationInfo {
 // DURA: Unpack duration info from packed cell data
 fn unpackDurationInfo(packedA: u32, packedB: u32) -> NoteDurationInfo {
   var info: NoteDurationInfo;
-
+  
   // Duration is in bits 8-15 of packedA (where volCmd used to be)
   info.duration = (packedA >> 8) & 0xFFu;
   if (info.duration == 0u) { info.duration = 1u; }
-
+  
   // rowOffset and isNoteOff are packed into bits 8-14 of packedB
   let durationFlags = (packedB >> 8) & 0x7Fu;
   info.rowOffset = durationFlags >> 1u;
   info.isNoteOff = (durationFlags & 1u) != 0u;
-
+  
   return info;
 }
 
@@ -198,14 +217,14 @@ fn calculateSustainBrightness(info: NoteDurationInfo, baseIntensity: f32) -> f32
     // Short note - full brightness
     return baseIntensity;
   }
-
+  
   let progress = f32(info.rowOffset) / f32(info.duration);
-
+  
   // Note-on row: full brightness
   if (info.rowOffset == 0u) {
     return baseIntensity;
   }
-
+  
   // Last 2-3 rows: fade out
   let remaining = info.duration - info.rowOffset;
   if (remaining <= 3u) {
@@ -213,7 +232,7 @@ fn calculateSustainBrightness(info: NoteDurationInfo, baseIntensity: f32) -> f32
     let fadeFactor = f32(remaining) / 3.0;
     return baseIntensity * (0.3 + 0.3 * fadeFactor);
   }
-
+  
   // Middle of sustain: 40-60% brightness
   return baseIntensity * (0.4 + 0.2 * (1.0 - progress));
 }
@@ -266,20 +285,20 @@ fn getFragmentConstants() -> FragmentConstants {
 // Draws an individual LED emitter that shows through the unified lens
 fn drawEmitterDiode(uv: vec2<f32>, intensity: f32, color: vec3<f32>, isOn: bool) -> vec4<f32> {
     let diodeSize = vec2<f32>(0.28, 0.14);
-
+    
     let p = uv;
     let dDiode = sdRoundedBox(p, diodeSize * 0.5, 0.06);
-
+    
     // Diode has a smaller "die" inside it — tighter for distinct dot appearance
     let dieSize = vec2<f32>(0.10, 0.05);
     let dDie = sdRoundedBox(p, dieSize * 0.5, 0.02);
-
+    
     // Base diode housing (darker)
     let diodeMask = 1.0 - smoothstep(0.0, 0.015, dDiode);
     let dieMask = 1.0 - smoothstep(0.0, 0.008, dDie);
-
+    
     var diodeColor = vec3<f32>(0.06, 0.06, 0.08);
-
+    
     if (isOn) {
         let dieGlow = color * (1.0 + intensity * 4.0);
         let housingGlow = color * 0.12 * intensity;
@@ -287,7 +306,7 @@ fn drawEmitterDiode(uv: vec2<f32>, intensity: f32, color: vec3<f32>, isOn: bool)
         let hotspot = exp(-length(p / vec2<f32>(0.06, 0.03)) * 2.5) * intensity;
         diodeColor += color * hotspot * 0.6;
     }
-
+    
     return vec4<f32>(diodeColor, diodeMask);
 }
 
@@ -295,7 +314,7 @@ fn drawEmitterDiode(uv: vec2<f32>, intensity: f32, color: vec3<f32>, isOn: bool)
 // Single glass surface covering three emitters (blue, note, amber)
 // Creates optical effects: refraction, reflection, subsurface scattering
 fn drawUnifiedLensCap(
-    uv: vec2<f32>,
+    uv: vec2<f32>, 
     lensSize: vec2<f32>,
     topEmitter: vec4<f32>,    // rgb=color, a=intensity (Blue note-on)
     midEmitter: vec4<f32>,    // rgb=color, a=intensity (Note color)
@@ -304,31 +323,31 @@ fn drawUnifiedLensCap(
 ) -> vec4<f32> {
     let p = uv;
     let dBox = sdRoundedBox(p, lensSize * 0.5, 0.12);
-
+    
     if (dBox > 0.0) {
         return vec4<f32>(0.0);
     }
-
+    
     // Emitter positions under the lens (vertical arrangement)
     let topPos = vec2<f32>(0.0, -0.28);   // Top: Blue note-on indicator
     let midPos = vec2<f32>(0.0, 0.0);      // Middle: Note color (steady)
     let botPos = vec2<f32>(0.0, 0.28);     // Bottom: Amber control indicator
-
+    
     // Glass surface properties
     let radial = length(p / (lensSize * 0.5));
     let edgeThickness = 0.18 + radial * 0.12;
     let centerThickness = 0.06;
     let thickness = mix(centerThickness, edgeThickness, radial * radial);
-
+    
     let n = normalize(vec3<f32>(p.x * 2.5 / lensSize.x, p.y * 2.5 / lensSize.y, 0.35));
     let viewDir = vec3<f32>(0.0, 0.0, 1.0);
     let fresnel = pow(1.0 - abs(dot(n, viewDir)), 2.5);
-
+    
     // Draw emitters under the lens
     let topDiode = drawEmitterDiode(uv - topPos, topEmitter.a, topEmitter.rgb, topEmitter.a > 0.05);
     let midDiode = drawEmitterDiode(uv - midPos, midEmitter.a, midEmitter.rgb, midEmitter.a > 0.05);
     let botDiode = drawEmitterDiode(uv - botPos, botEmitter.a, botEmitter.rgb, botEmitter.a > 0.05);
-
+    
     // Combine emitters
     var combinedDiode = vec3<f32>(0.06, 0.06, 0.08);
     if (botDiode.a > 0.0) {
@@ -341,68 +360,71 @@ fn drawUnifiedLensCap(
         combinedDiode = mix(combinedDiode, topDiode.rgb, topDiode.a);
     }
     let diodeMask = max(max(topDiode.a, midDiode.a), botDiode.a);
-
+    
     // Refraction effect
     let refractionStrength = (1.0 - radial * 0.6) * 0.04;
     let refractOffset = p * refractionStrength;
-
+    
     // Subsurface scattering
     var subsurfaceGlow = vec3<f32>(0.0);
-
+    
     // Top emitter scattering (Blue - note on) — tightened falloff
     let distTop = length(uv - topPos - refractOffset * 0.3);
     let scatterTop = exp(-distTop * 9.0) * topEmitter.a;
     subsurfaceGlow += topEmitter.rgb * scatterTop * 2.2;
-
+    
     // Middle emitter scattering (Note color - steady) — tightened falloff
     let distMid = length(uv - midPos - refractOffset * 0.5);
     let scatterMid = exp(-distMid * 7.5) * midEmitter.a;
     subsurfaceGlow += midEmitter.rgb * scatterMid * 3.0;
-
+    
     // Bottom emitter scattering (Amber - control) — tightened falloff
     let distBot = length(uv - botPos - refractOffset * 0.3);
     let scatterBot = exp(-distBot * 9.0) * botEmitter.a;
     subsurfaceGlow += botEmitter.rgb * scatterBot * 2.2;
-
+    
     // Per-emitter fringe glow (replaces shared diffusion that smeared all three)
     subsurfaceGlow += topEmitter.rgb * exp(-distTop * 6.0) * topEmitter.a * 0.15;
     subsurfaceGlow += midEmitter.rgb * exp(-distMid * 6.0) * midEmitter.a * 0.15;
     subsurfaceGlow += botEmitter.rgb * exp(-distBot * 6.0) * botEmitter.a * 0.15;
-
+    
     // Glass base color
     let bgColor = vec3<f32>(0.04, 0.04, 0.05);
-
+    
     var activeColor = midEmitter.rgb * midEmitter.a;
     activeColor = mix(activeColor, topEmitter.rgb, topEmitter.a * 0.5);
     activeColor = mix(activeColor, botEmitter.rgb, botEmitter.a * 0.5);
-
+    
     let totalGlow = topEmitter.a + midEmitter.a + botEmitter.a;
-    let litTint = mix(vec3<f32>(0.92, 0.93, 0.98), activeColor, min(totalGlow * 0.4, 0.4));
+    // Preserve note hue: mix toward activeColor more aggressively (was 0.4 max).
+    // Near-white vec3(0.92,0.93,0.98) is only visible when there's no active color.
+    let colorPreserveFactor = min(totalGlow * COLOR_PRESERVE_SCALE, COLOR_PRESERVE_MAX);
+    let litTint = mix(vec3<f32>(0.92, 0.93, 0.98), activeColor, colorPreserveFactor);
     let glassBaseColor = mix(bgColor * 0.12, litTint, 0.88);
-
+    
     // Edge alpha
     let edgeAlpha = smoothstep(0.0, aa * 2.0, -dBox);
-
+    
     // Glass transparency
     let diodeVisibility = diodeMask * 0.55;
     let baseAlpha = 0.72 + 0.28 * fresnel;
     let alpha = mix(baseAlpha, 0.32, diodeVisibility) * edgeAlpha;
-
+    
     // Directional lighting
     let lightDir = vec3<f32>(0.4, -0.7, 0.6);
     let diff = max(0.0, dot(n, normalize(lightDir)));
     let spec = pow(max(0.0, dot(reflect(-normalize(lightDir), n), viewDir)), 40.0);
-
+    
     let litGlassColor = glassBaseColor * (0.45 + 0.55 * diff) + vec3<f32>(spec * 0.25);
-
+    
     // Final composition
     var finalColor = bgColor;
-
+    
     let diodeBlend = diodeMask * (1.0 - alpha * 0.65);
     finalColor = mix(finalColor, combinedDiode, diodeBlend);
     finalColor = mix(finalColor, litGlassColor, alpha);
     finalColor += subsurfaceGlow * 1.8;
-
+    
     // Concentrated glow around active emitters
     if (midEmitter.a > 0.05) {
         let midGlowDist = length(uv - midPos - refractOffset * 0.5);
@@ -419,18 +441,19 @@ fn drawUnifiedLensCap(
         let botGlow = (1.0 - smoothstep(0.0, 0.14, botGlowDist)) * botEmitter.a * 0.3;
         finalColor += botEmitter.rgb * botGlow;
     }
-
+    
     finalColor += fresnel * vec3<f32>(0.9, 0.95, 1.0) * 0.18 * (1.0 + radial * 0.5);
-
+    
     // Horizontal separator shadows between the three emitter zones
     let sepShadowTop = (1.0 - smoothstep(0.0, 0.015, abs(p.y - (-0.14)))) * 0.35;
     let sepShadowBot = (1.0 - smoothstep(0.0, 0.015, abs(p.y - 0.14))) * 0.35;
     finalColor -= finalColor * (sepShadowTop + sepShadowBot);
-
+    
     let vignette = 1.0 - radial * radial * 0.25;
     finalColor *= vignette;
-
-    return vec4<f32>(finalColor, edgeAlpha);
+    
+    // ACES tone mapping — maps HDR glow accumulation to [0,1] while preserving hue
+    return vec4<f32>(acesToneMap(finalColor), edgeAlpha);
 }
 
 @fragment
@@ -438,7 +461,7 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   let uv = in.uv;
   let p = uv - 0.5;
   let aa = fwidth(p.y) * 0.33;
-
+  
   if (in.channel >= uniforms.numChannels) { return vec4<f32>(1.0, 0.0, 0.0, 1.0); }
   let fs = getFragmentConstants();
   let bloom = uniforms.bloomIntensity;
@@ -526,16 +549,16 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     let instRaw = (in.packedA >> 16) & 255u;
     let durationRaw = (in.packedA >> 8) & 255u;        // DURA: duration in rows
     let volPacked = in.packedA & 255u;                // DURA: packed volCmd/volVal
-
+    
     let effCmd = (in.packedB >> 24) & 255u;           // DURA: effect command
-    let effVal = (in.packedB >> 16) & 255u;           // DURA: effect value
+    let effVal = (in.packedB >> 16) & 255u;           // DURA: effect value  
     let durationFlags = (in.packedB >> 8) & 0x7Fu;    // DURA: rowOffset + isNoteOff
     let volCmdFull = in.packedB & 255u;               // DURA: full volume command
 
     // Unpack expression-only flag from bit 7 of inst field (EXPR-001)
     let isExpressionOnly = (instRaw & 128u) != 0u;
     let inst = instRaw & 127u;
-
+    
     // DURA: Reconstruct volume command from packed nibble
     let volCmd = (volPacked >> 4) << 4;
     let volVal = (volPacked & 0x0Fu) << 4;
@@ -616,11 +639,11 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
         botColor = amberColor;
       }
     }
-
+    
     // --- DRAW UNIFIED LENS CAP ---
     let lensUV = btnUV - vec2<f32>(0.5, 0.5);
     let lensSize = vec2<f32>(0.6, 0.82);
-
+    
     let unifiedLens = drawUnifiedLensCap(
         lensUV, lensSize,
         vec4<f32>(topColor, topIntensity),    // Top: Blue note-on/sustain
@@ -628,7 +651,7 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
         vec4<f32>(botColor, botIntensity),    // Bottom: Amber control
         aa
     );
-
+    
     finalColor = mix(finalColor, unifiedLens.rgb, unifiedLens.a);
 
     // AMBER-BLUE: Enhanced external glow for active notes

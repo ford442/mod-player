@@ -31,13 +31,15 @@ fn fs(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
     // CRT scanline + vignette effect (gated by crt.intensity; 0.0 = no effect)
     let row = floor(uv.y * f32(textureDimensions(sceneTexture).y));
     let scanline = select(1.0, 1.0 - crt.scanlineDark, (u32(row) % 2u) == 0u);
-    let d = length(uv - vec2<f32>(0.5));
-    let vignette = 1.0 - crt.vignetteStrength * d * d;
+    let vd = length(uv - vec2<f32>(0.5));
+    let vignette = 1.0 - crt.vignetteStrength * vd * vd;
     finalColor = mix(finalColor, finalColor * scanline * vignette, crt.intensity);
 
-    // Optional: simple Reinhard tone-mapping can be enabled by the host if desired
-    // let tonemapped = finalColor / (finalColor + vec3<f32>(1.0));
-    // return vec4(tonemapped, 1.0);
-
-    return vec4(finalColor, 1.0);
+    // ACES Filmic Tone Mapping — preserves note hue at high bloom intensity
+    let a = 2.51; let b = 0.03; let c = 2.43; let d = 0.59; let e = 0.14;
+    let tonemapped = clamp(
+        (finalColor * (a * finalColor + b)) / (finalColor * (c * finalColor + d) + e),
+        vec3<f32>(0.0), vec3<f32>(1.0)
+    );
+    return vec4(tonemapped, 1.0);
 }
