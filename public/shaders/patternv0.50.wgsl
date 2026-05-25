@@ -1,22 +1,9 @@
 // patternv0.50.wgsl
-// Frosted Glass Circular – Vibrant Note Colours + Blue LED Indicator + Full-Height Caps
-//
-// Hybrid composition combining v0.48 (vibrant note-data colours from neonPalette)
-// and v0.49 (blue LED indicator ring, solid housing, frosted glass caps).
-//
-// Per-step layering:
-//   1. HOUSING (BEHINDS) — Solid dark-metallic body lit with vibrant neonPalette
-//                          colours driven by real note pitch (purple, teal, green,
-//                          orange, red, cyan).  Activity from v0.48's distance-based
-//                          energy sweep + trail + noteAge + tickOffset sub-step.
-//   2. CAP — Full-height frosted acrylic glass (0.88 × 0.88) in the same vibrant
-//            hue as the housing.  LED-under-glass model with white bevel rim.
-//   3. DEPRESSION — On playhead hit: cap scales 4 % smaller + top inner-shadow.
-//
-// Channel 0: Blue LED indicator ring shows playhead proximity (from v0.49).
-//
-// Background: bezel.wgsl (hardware photo with dark centre + white frame).
-// Transparent gaps + centre circle allow bezel to show through.
+// Three-Emitter LED Indicator System with Unified Lens Cap
+// Top: Blue Note-On | Middle: Steady Note Color | Bottom: Amber Control
+// Based on v0.49 (circular layout with padTopChannel=true)
+// Note: Requires padTopChannel=true in PatternDisplay to shift music channels 1-32.
+// DURA UPDATE: Added note duration visualization with sustain tails
 
 struct Uniforms {
   numRows: u32,
@@ -46,6 +33,11 @@ struct Uniforms {
   colorPalette: u32,
 };
 
+// DURA: Note duration constants
+const NOTE_MIN: u32 = 1u;
+const NOTE_MAX: u32 = 119u;
+const NOTE_OFF_MIN: u32 = 120u;
+
 @group(0) @binding(0) var<storage, read> cells: array<u32>;
 @group(0) @binding(1) var<uniform> uniforms: Uniforms;
 @group(0) @binding(2) var<storage, read> rowFlags: array<u32>;
@@ -57,11 +49,11 @@ struct ChannelState { volume: f32, pan: f32, freq: f32, trigger: u32, noteAge: f
 
 struct VertexOut {
   @builtin(position) position: vec4<f32>,
-  @location(0) @interpolate(flat)   row:     u32,
-  @location(1) @interpolate(flat)   channel: u32,
-  @location(2) @interpolate(linear) uv:      vec2<f32>,
-  @location(3) @interpolate(flat)   packedA: u32,
-  @location(4) @interpolate(flat)   packedB: u32,
+  @location(0) @interpolate(flat) row: u32,
+  @location(1) @interpolate(flat) channel: u32,
+  @location(2) @interpolate(linear) uv: vec2<f32>,
+  @location(3) @interpolate(flat) packedA: u32,
+  @location(4) @interpolate(flat) packedB: u32,
 };
 
 @vertex
@@ -72,33 +64,38 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
   );
 
   let numChannels = uniforms.numChannels;
-  let row         = instanceIndex / numChannels;
-  let channel     = instanceIndex % numChannels;
+  let row = instanceIndex / numChannels;
+  let channel = instanceIndex % numChannels;
 
   let invertedChannel = numChannels - 1u - channel;
-  let ringIndex = select(invertedChannel, channel, uniforms.invertChannels == 1u);
+  let ringIndex = select(invertedChannel, channel, (uniforms.invertChannels == 1u));
 
-  let center    = vec2<f32>(uniforms.canvasW * 0.5, uniforms.canvasH * 0.5);
-  let minDim    = min(uniforms.canvasW, uniforms.canvasH);
+  let center = vec2<f32>(uniforms.canvasW * 0.5, uniforms.canvasH * 0.5);
+  let minDim = min(uniforms.canvasW, uniforms.canvasH);
+
   let maxRadius = minDim * 0.45;
   let minRadius = minDim * 0.15;
   let ringDepth = (maxRadius - minRadius) / f32(numChannels);
-  let radius    = minRadius + f32(ringIndex) * ringDepth;
 
-  let totalSteps   = 64.0;
+  let radius = minRadius + f32(ringIndex) * ringDepth;
+
+  let totalSteps = f32(uniforms.numRows);
   let anglePerStep = 6.2831853 / totalSteps;
-  let theta        = -1.570796 + f32(row % 64u) * anglePerStep;
+  let theta = -1.570796 + f32(row % uniforms.numRows) * anglePerStep;
 
   let circumference = 2.0 * 3.14159265 * radius;
-  let arcLength     = circumference / totalSteps;
-  let btnW          = arcLength * 0.95;
-  let btnH          = ringDepth * 0.95;
+  let arcLength = circumference / totalSteps;
 
-  let lp       = quad[vertexIndex];
+  let btnW = arcLength * 0.95;
+  let btnH = ringDepth * 0.95;
+
+  let lp = quad[vertexIndex];
   let localPos = (lp - 0.5) * vec2<f32>(btnW, btnH);
 
   let rotAng = theta + 1.570796;
-  let cA = cos(rotAng); let sA = sin(rotAng);
+  let cA = cos(rotAng);
+  let sA = sin(rotAng);
+
   let rotX = localPos.x * cA - localPos.y * sA;
   let rotY = localPos.x * sA + localPos.y * cA;
 
@@ -109,20 +106,18 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
   let clipY = 1.0 - (worldY / uniforms.canvasH) * 2.0;
 
   let idx = instanceIndex * 2u;
-  let a   = cells[idx];
-  let b   = cells[idx + 1u];
+  let a = cells[idx];
+  let b = cells[idx + 1u];
 
   var out: VertexOut;
   out.position = vec4<f32>(clipX, clipY, 0.0, 1.0);
-  out.row      = row;
-  out.channel  = channel;
-  out.uv       = lp;
-  out.packedA  = a;
-  out.packedB  = b;
+  out.row = row;
+  out.channel = channel;
+  out.uv = lp;
+  out.packedA = a;
+  out.packedB = b;
   return out;
 }
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
 
 fn selectPalette(id: u32, t: f32) -> vec3<f32> {
   let a = vec3<f32>(0.5, 0.5, 0.5);
@@ -159,6 +154,25 @@ fn sdEllipse(p: vec2<f32>, ab: vec2<f32>) -> f32 {
   return (k - 1.0) * min(ab.x, ab.y);
 }
 
+// ACES Filmic Tone Mapping (approximation by Narkowicz 2015).
+// Maps HDR values to [0,1] while preserving hue far better than a simple clamp.
+fn acesToneMap(color: vec3<f32>) -> vec3<f32> {
+  let a = 2.51;
+  let b = 0.03;
+  let c = 2.43;
+  let d = 0.59;
+  let e = 0.14;
+  return clamp(
+    (color * (a * color + b)) / (color * (c * color + d) + e),
+    vec3<f32>(0.0), vec3<f32>(1.0)
+  );
+}
+
+// Scale factor for hue-preservation in litTint mixing.
+// Higher value → more of the note's pitch color bleeds through the glass tint.
+const COLOR_PRESERVE_SCALE: f32 = 0.8;
+const COLOR_PRESERVE_MAX: f32   = 0.85;
+
 fn pitchClassFromIndex(note: u32) -> f32 {
   if (note == 0u || note > 96u) { return 0.0; }
   let semi = (note - 1u) % 12u;
@@ -171,6 +185,80 @@ fn neonPalette(t: f32) -> vec3<f32> {
   let c = vec3<f32>(1.0, 1.0, 1.0);
   let d = vec3<f32>(0.0, 0.33, 0.67);
   return a + b * cos(6.28318 * (c * t + d));
+}
+
+// DURA: Structure to hold unpacked note duration info
+struct NoteDurationInfo {
+  duration: u32,      // Total note duration in rows
+  rowOffset: u32,     // How many rows from note start (0 = note-on)
+  isNoteOff: bool,    // Whether this cell is the note-off row
+}
+
+// DURA: Unpack duration info from packed cell data
+fn unpackDurationInfo(packedA: u32, packedB: u32) -> NoteDurationInfo {
+  var info: NoteDurationInfo;
+
+  // Duration is in bits 8-15 of packedA (where volCmd used to be)
+  info.duration = (packedA >> 8) & 0xFFu;
+  if (info.duration == 0u) { info.duration = 1u; }
+
+  // rowOffset and isNoteOff are packed into bits 8-14 of packedB
+  let durationFlags = (packedB >> 8) & 0x7Fu;
+  info.rowOffset = durationFlags >> 1u;
+  info.isNoteOff = (durationFlags & 1u) != 0u;
+
+  return info;
+}
+
+// DURA: Calculate sustain brightness based on position in note
+fn calculateSustainBrightness(info: NoteDurationInfo, baseIntensity: f32) -> f32 {
+  if (info.duration <= 1u) {
+    // Short note - full brightness
+    return baseIntensity;
+  }
+
+  let progress = f32(info.rowOffset) / f32(info.duration);
+
+  // Note-on row: full brightness
+  if (info.rowOffset == 0u) {
+    return baseIntensity;
+  }
+
+  // Last 2-3 rows: fade out
+  let remaining = info.duration - info.rowOffset;
+  if (remaining <= 3u) {
+    // Fade from 60% to 30% over last 3 rows
+    let fadeFactor = f32(remaining) / 3.0;
+    return baseIntensity * (0.3 + 0.3 * fadeFactor);
+  }
+
+  // Middle of sustain: 40-60% brightness
+  return baseIntensity * (0.4 + 0.2 * (1.0 - progress));
+}
+
+// AMBER-BLUE: Calculate top-emitter intensity for note-on / expression-only / sustain
+fn calculateTopIntensity(
+  isNoteOn: bool,
+  isExprOnly: bool,
+  isSustain: bool,
+  isMuted: bool,
+  trigger: u32,
+  bloom: f32,
+  beat: f32
+) -> f32 {
+  var intensity = 0.0;
+  if (isNoteOn) {
+    intensity = 1.0 + bloom * 2.0;
+    if (trigger > 0u) {
+      intensity += beat * 0.3;
+    }
+  } else if (isExprOnly) {
+    intensity = 1.0 + bloom * 2.0;
+  } else if (isSustain) {
+    intensity = 0.1 + bloom * 0.2;
+  }
+  if (isMuted) { intensity *= 0.2; }
+  return intensity;
 }
 
 struct FragmentConstants {
@@ -307,17 +395,19 @@ fn drawUnifiedLensCap(
     activeColor = mix(activeColor, botEmitter.rgb, botEmitter.a * 0.5);
 
     let totalGlow = topEmitter.a + midEmitter.a + botEmitter.a;
-    let litTint = mix(vec3<f32>(0.92, 0.93, 0.98), activeColor, min(totalGlow * 0.4, 0.4));
+    // Preserve note hue: mix toward activeColor more aggressively (was 0.4 max).
+    // Near-white vec3(0.92,0.93,0.98) is only visible when there's no active color.
+    let colorPreserveFactor = min(totalGlow * COLOR_PRESERVE_SCALE, COLOR_PRESERVE_MAX);
+    let litTint = mix(vec3<f32>(0.92, 0.93, 0.98), activeColor, colorPreserveFactor);
     let glassBaseColor = mix(bgColor * 0.12, litTint, 0.88);
 
     // Edge alpha
     let edgeAlpha = smoothstep(0.0, aa * 2.0, -dBox);
 
-    // Glass transparency — reduce opacity when active emitters are lit
+    // Glass transparency
     let diodeVisibility = diodeMask * 0.55;
     let baseAlpha = 0.72 + 0.28 * fresnel;
-    let emitterLift = clamp(topEmitter.a * 0.4 + botEmitter.a * 0.4, 0.0, 0.7);
-    let alpha = mix(baseAlpha, 0.32, min(diodeVisibility + emitterLift, 0.9)) * edgeAlpha;
+    let alpha = mix(baseAlpha, 0.32, diodeVisibility) * edgeAlpha;
 
     // Directional lighting
     let lightDir = vec3<f32>(0.4, -0.7, 0.6);
@@ -361,7 +451,8 @@ fn drawUnifiedLensCap(
     let vignette = 1.0 - radial * radial * 0.25;
     finalColor *= vignette;
 
-    return vec4<f32>(finalColor, edgeAlpha);
+    // ACES tone mapping — maps HDR glow accumulation to [0,1] while preserving hue
+    return vec4<f32>(acesToneMap(finalColor), edgeAlpha);
 }
 
 @fragment
@@ -376,10 +467,16 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   let kick = uniforms.kickTrigger;
   let beat = uniforms.beatPhase;
 
+  // Hardware Layering: Discard pixels over UI
+  if (in.position.y > uniforms.canvasH * 0.88) {
+    discard;
+  }
+
   // Smooth playhead position
-  let playheadStep = uniforms.playheadRow - floor(uniforms.playheadRow / 64.0) * 64.0;
-  let rowDistRaw = abs(f32(in.row % 64u) - playheadStep);
-  let rowDist = min(rowDistRaw, 64.0 - rowDistRaw);
+  let maxRows = f32(uniforms.numRows);
+  let playheadStep = uniforms.playheadRow - floor(uniforms.playheadRow / maxRows) * maxRows;
+  let rowDistRaw = abs(f32(in.row % uniforms.numRows) - playheadStep);
+  let rowDist = min(rowDistRaw, maxRows - rowDistRaw);
   let playheadActivation = 1.0 - smoothstep(0.0, 1.5, rowDist);
 
   // CHANNEL 0 is the Indicator Ring
@@ -419,93 +516,99 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   }
 
   if (inButton > 0.5) {
+    // DURA: Unpack note and duration info from new packed format
     let note = (in.packedA >> 24) & 255u;
     let instRaw = (in.packedA >> 16) & 255u;
-    // High-precision packing: packedA bits 8-15 = duration (not volCmd)
-    // Effect data is in packedB: [effCmd:8][effVal:8][durationFlags:7][reserved:1][volCmdFull:8]
-    let effCmd = (in.packedB >> 24) & 255u;
-    let effVal = (in.packedB >> 16) & 255u;
-    let volCmdFull = in.packedB & 255u;
+    let durationRaw = (in.packedA >> 8) & 255u;        // DURA: duration in rows
+    let volPacked = in.packedA & 255u;                // DURA: packed volCmd/volVal
+
+    let effCmd = (in.packedB >> 24) & 255u;           // DURA: effect command
+    let effVal = (in.packedB >> 16) & 255u;           // DURA: effect value
+    let durationFlags = (in.packedB >> 8) & 0x7Fu;    // DURA: rowOffset + isNoteOff
+    let volCmdFull = in.packedB & 255u;               // DURA: full volume command
 
     // Unpack expression-only flag from bit 7 of inst field (EXPR-001)
     let isExpressionOnly = (instRaw & 128u) != 0u;
     let inst = instRaw & 127u;
 
-    let hasNote = (note > 0u && note < 120u);
-    let hasExpression = (volCmdFull > 0u) || (effCmd > 0u);
+    // DURA: Reconstruct volume command from packed nibble
+    let volCmd = (volPacked >> 4) << 4;
+    let volVal = (volPacked & 0x0Fu) << 4;
 
-    // Housing color: tint by note presence (restore color-per-note display)
-    var housingColor = fs.bgColor;
-    if (hasNote) {
-      let pitchHue = pitchClassFromIndex(note);
-      let baseColor = selectPalette(uniforms.colorPalette, pitchHue);
-      let instBand = inst & 15u;
-      let instBright = 0.85 + (select(0.0, f32(instBand) / 15.0, instBand > 0u)) * 0.15;
-      let tintColor = baseColor * instBright;
-      housingColor = mix(fs.bgColor, tintColor, 0.35);
-    }
+    // DURA: Build duration info struct
+    var dInfo: NoteDurationInfo;
+    dInfo.duration = durationRaw;
+    if (dInfo.duration == 0u) { dInfo.duration = 1u; }
+    dInfo.rowOffset = durationFlags >> 1u;
+    dInfo.isNoteOff = (durationFlags & 1u) != 0u;
 
-    // Start with tinted housing background
-    finalColor = housingColor;
+    // AMBER-BLUE: Cell-type classification
+    let isNoteOn   = (note > 0u && note < NOTE_OFF_MIN && dInfo.rowOffset == 0u);
+    let isNoteOff  = (note >= NOTE_OFF_MIN);
+    let isExprOnly = (!isNoteOn && !isNoteOff && isExpressionOnly);
+    let isSustain  = (note > 0u && note < NOTE_OFF_MIN && dInfo.duration > 1u && dInfo.rowOffset > 0u && !dInfo.isNoteOff);
+    let isDead     = (!isNoteOn && !isExprOnly && !isSustain && !isNoteOff);
 
-    // Bounds check for channel state array access
-    var ch = ChannelState(0.0, 0.0, 0.0, 0u, 1000.0, 0u, 0.0, 0u);
-    if (in.channel < arrayLength(&channels)) {
-      ch = channels[in.channel];
-    }
+    let ch = channels[in.channel];
     let isMuted = (ch.isMuted == 1u);
+    let hasExpression = (volCmd > 0u) || (effCmd > 0u) || (volCmdFull > 0u);
 
-    let blueColor  = vec3<f32>(0.15, 0.5, 1.0);
-    let amberColor = vec3<f32>(1.0, 0.55, 0.1);
+    // --- THREE-EMITTER SYSTEM with Amber-vs-Blue differentiation ---
 
-    // --- THREE-EMITTER SYSTEM ---
-    // EMITTER 1 (TOP): Blue Note-On or Amber Expression-Only indicator
-    var topColor = blueColor;
-    var topIntensity = 0.0;
-    if (!isMuted) {
-      if (isExpressionOnly) {
-        // Amber top emitter for expression-only cells
-        topColor = amberColor;
-        topIntensity = 1.0 + bloom * 2.0;
-      } else if (ch.trigger > 0u) {
-        topColor = blueColor;
-        topIntensity = 3.0 + kick * 0.5;
-      } else if (hasNote) {
-        topColor = blueColor;
-        topIntensity = playheadActivation * 0.8;
-      }
+    // EMITTER 1 (TOP): Semantic indicator — Blue for note-on, Amber for expression-only
+    let blueColor  = vec3<f32>(0.05, 0.45, 1.0);  // royal blue #0080FF
+    let amberColor = vec3<f32>(1.0, 0.55, 0.0);   // warm amber #FFA500
+    var topColor = vec3<f32>(0.0);
+    var topIntensity = calculateTopIntensity(isNoteOn, isExprOnly, isSustain, isMuted, ch.trigger, bloom, beat);
+    if (isNoteOn) {
+      topColor = blueColor;
+    } else if (isExprOnly) {
+      topColor = amberColor;
+    } else if (isSustain) {
+      topColor = blueColor;
     }
-    let topEmitColor = topColor * (1.5 + bloom * 2.0);
 
-    // EMITTER 2 (MIDDLE): Steady Note Color (off for expression-only)
-    var noteColor = vec3<f32>(0.15);
-    var midIntensity = 0.12; // Base dim glow
-    if (hasNote && !isExpressionOnly) {
+    // EMITTER 2 (MIDDLE): Note color (pitch-class) or dark
+    var noteColor = vec3<f32>(0.051, 0.051, 0.051); // #0D0D0D near-black default
+    var midIntensity = 0.02; // Base dim glow for dead/empty cells
+
+    if (isNoteOn || isSustain) {
       let pitchHue = pitchClassFromIndex(note);
       let baseColor = selectPalette(uniforms.colorPalette, pitchHue);
       let instBand = inst & 15u;
       let instBright = 0.85 + (select(0.0, f32(instBand) / 15.0, instBand > 0u)) * 0.15;
       noteColor = baseColor * instBright;
-      midIntensity = 0.6 + bloom * 2.0;
-      if (isMuted) { midIntensity *= 0.3; }
-    } else if (isExpressionOnly) {
-      // Dark middle for expression-only; amber top handles the visual
+
+      if (isNoteOn) {
+        midIntensity = calculateSustainBrightness(dInfo, 0.8 + bloom * 2.0);
+      } else {
+        // Sustain tail: fixed ~45% intensity
+        midIntensity = 0.45 + bloom * 0.5;
+      }
+      if (isMuted) { midIntensity *= 0.25; }
+    } else if (isNoteOff) {
+      noteColor = vec3<f32>(0.3, 0.3, 0.35);
+      midIntensity = 0.2 + 0.1 * sin(uniforms.timeSec * 4.0);
+    } else if (isExprOnly) {
+      // Dark center; amber top emitter illuminates via lens bloom
       noteColor = vec3<f32>(0.051, 0.051, 0.051);
       midIntensity = 0.0;
+    } else if (isDead) {
+      noteColor = vec3<f32>(0.051, 0.051, 0.051);
+      midIntensity = 0.02;
     }
     let midColor = noteColor;
 
-    // EMITTER 3 (BOTTOM): Amber Control Message Indicator
-    // Suppressed for expression-only (amber moved to top emitter)
+    // EMITTER 3 (BOTTOM): Control indicator — suppressed for expression-only (amber moved to top)
     var botIntensity = 0.0;
     var botColor = vec3<f32>(0.0);
-    if (!isMuted && !isExpressionOnly) {
-      if (hasExpression) {
+    if (!isMuted && !isExprOnly) {
+      if (isNoteOn && hasExpression) {
         botIntensity = 1.0 + bloom * 2.0;
-        botColor = amberColor * (1.5 + bloom * 2.0);
-      } else if (hasNote && playheadActivation > 0.5) {
-        botIntensity = 0.6;
-        botColor = amberColor * (1.5 + bloom * 2.0);
+        botColor = amberColor;
+      } else if (isSustain && hasExpression) {
+        botIntensity = 0.6 + bloom * 1.0;
+        botColor = amberColor;
       }
     }
 
@@ -515,27 +618,19 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
 
     let unifiedLens = drawUnifiedLensCap(
         lensUV, lensSize,
-        vec4<f32>(topEmitColor, topIntensity),    // Top: Blue note-on or Amber expr-only
-        vec4<f32>(midColor, midIntensity),         // Middle: Steady note color
-        vec4<f32>(botColor, botIntensity),         // Bottom: Amber control
+        vec4<f32>(topColor, topIntensity),    // Top: Blue note-on/sustain
+        vec4<f32>(midColor, midIntensity),    // Middle: Note color with sustain
+        vec4<f32>(botColor, botIntensity),    // Bottom: Amber control
         aa
     );
 
     finalColor = mix(finalColor, unifiedLens.rgb, unifiedLens.a);
 
-    // External glow when note is playing on playhead
-    if (playheadActivation > 0.5 && hasNote && !isExpressionOnly) {
-      let pulseColor = mix(blueColor, amberColor, 0.5 + 0.5 * sin(beat * 6.2832));
-      finalColor += pulseColor * playheadActivation * 0.4;
-    }
-
-    // Blue LED: bloom-independent external glow for active channels
-    if (!isMuted && ch.trigger > 0u && !isExpressionOnly) {
-      finalColor += blueColor * 0.4 * exp(-length(p) * 3.5);
-    }
-    // Amber LED: bloom-independent external glow for expression data
-    if (!isMuted && (hasExpression || isExpressionOnly)) {
-      finalColor += amberColor * 0.3 * exp(-length(p) * 3.5);
+    // AMBER-BLUE: Enhanced external glow for active notes
+    if (playheadActivation > 0.5 && (isNoteOn || isSustain)) {
+      let pulseColor = mix(blueColor, noteColor, 0.5 + 0.5 * sin(beat * 6.2832));
+      let sustainBoost = select(1.0, 1.5, isSustain && !isNoteOn);
+      finalColor += pulseColor * playheadActivation * 0.15 * sustainBoost;
     }
   }
 
