@@ -37,12 +37,20 @@ struct Uniforms {
   outerRadius: f32,
 };
 
-// Note constants for numeric note values
-const NOTE_MIN: u32 = 1u;
-const NOTE_MAX: u32 = 96u;
-const NOTE_OFF: u32 = 97u;
-const NOTE_CUT: u32 = 98u;
-const NOTE_FADE: u32 = 99u;
+// Note constants — must match TypeScript NOTE_MIN/NOTE_MAX/NOTE_OFF_MIN in gpuPacking.ts
+const NOTE_MIN: u32     = 1u;
+const NOTE_MAX: u32     = 119u;   // Full range: covers MOD/XM/IT notes (C-0 to B-9)
+const NOTE_OFF_MIN: u32 = 120u;   // Any note value >= this is note-off/cut/fade
+
+// === SUSTAIN TUNING CONSTANTS ===
+// Adjust these to change the visual feel of the Note-On Sustain effect.
+const SUSTAIN_GLOW: f32        = 0.45;  // Glow strength for sustain tail rows (0–1)
+const TRIGGER_FLASH_BOOST: f32 = 1.4;  // Extra glow added on the trigger row
+const LED_BLOOM_EXP: f32       = 3.6;  // LED bloom falloff exponent (higher = tighter spot)
+const NOTE_AGE_TOLERANCE: f32  = 0.5;  // Max row-age diff for hardware-choke isCurrentNote check
+const MIN_FADE_ROWS: f32       = 2.0;  // Minimum rows for the fade-out window
+const MAX_FADE_ROWS: f32       = 6.0;  // Maximum rows for the fade-out window
+const FADE_WINDOW_PCT: f32     = 0.30; // Fraction of duration used as the fade-out window
 
 @group(0) @binding(0) var<storage, read> cells: array<u32>;
 @group(0) @binding(1) var<uniform> uniforms: Uniforms;
@@ -292,7 +300,7 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
       capColor = mix(capColor, baseCol, 0.36);
 
       let dInfo = unpackDurationInfo(in.packedA, in.packedB);
-      let isRealNoteOff = dInfo.isNoteOff || note >= 120u;
+      let isRealNoteOff = dInfo.isNoteOff || note >= NOTE_OFF_MIN;
       let isTrigger = dInfo.rowOffset == 0u && !isRealNoteOff;
       let isSustain = dInfo.rowOffset > 0u && !isRealNoteOff;
 
@@ -300,17 +308,30 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
       let durationF = f32(dInfo.duration);
       var sustainGlow = 0.0;
 
-      // Unified note-relative age: works for both trigger and sustain rows.
-      // For trigger row (rowOffset=0): noteRelativeAge = playhead - triggerRow = noteAge.
-      // For sustain row at offset k: noteRelativeAge = (playhead - sustainRow) + k = playhead - triggerRow = noteAge.
+      // Unified note-relative age: equals the playhead's distance from the trigger row.
+      // For trigger row (rowOffset=0): noteRelativeAge = delta (playhead − thisRow).
+      // For sustain row at offset k: noteRelativeAge = (playhead − sustainRow) + k = noteAge.
       let noteRelativeAge = delta + f32(dInfo.rowOffset);
-      let isCurrentNote = abs(noteRelativeAge - ch.noteAge) < 1.0;
+
+      // Hardware choke: only the most-recent note per channel sustains.
+      // Tolerance tightened to 0.5 rows (was 1.0) to reduce ghost glows on rapid notes.
+      let isCurrentNote = abs(noteRelativeAge - ch.noteAge) < NOTE_AGE_TOLERANCE;
 
       if ((isTrigger || isSustain) && durationF > 0.0 && noteRelativeAge >= 0.0 && noteRelativeAge < durationF && isCurrentNote) {
-          sustainGlow = select(1.0, 0.45, isSustain);
+          sustainGlow = select(1.0, SUSTAIN_GLOW, isSustain);
+
+          // === ADAPTIVE FADE OUT ===
+          // Old: fixed last 10%. New: proportional window — 30% of duration,
+          // clamped to MIN_FADE_ROWS..MAX_FADE_ROWS. Both capColor and glow fade.
+          let fadeWindow = clamp(durationF * FADE_WINDOW_PCT, MIN_FADE_ROWS, MAX_FADE_ROWS);
+          let fadeStart = durationF - fadeWindow;
+          if (noteRelativeAge > fadeStart) {
+              let fadeT = (noteRelativeAge - fadeStart) / fadeWindow;
+              sustainGlow *= smoothstep(1.0, 0.0, fadeT);
+          }
       }
 
-      // === SUSTAIN + FADE OUT (last 10%) ===
+      // === SUSTAIN GLOW + COLOR ===
       if (sustainGlow > 0.0) {
           glow = max(glow, sustainGlow * 0.92);
 
@@ -321,27 +342,20 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
           // Gentle shimmer
           let shimmer = sin(uniforms.timeSec * 5.5 + f32(in.row) * 0.65) * 0.07 + 0.93;
           capColor *= shimmer;
-
-          // Fade out in final 10% of duration
-          if (noteRelativeAge > durationF * 0.9) {
-              let fadeT = (noteRelativeAge - durationF * 0.9) / (durationF * 0.1);
-              let fade = smoothstep(1.0, 0.0, fadeT);
-              capColor *= fade;
-          }
       }
 
       // === TRIGGER FLASH (bright own color) ===
       if (ch.trigger > 0u && isTrigger) {
-          glow += 1.4;
+          glow += TRIGGER_FLASH_BOOST;
           let brightFlash = clamp(baseCol * 2.15, vec3<f32>(0.0), vec3<f32>(1.0));
           capColor = mix(capColor, brightFlash, 0.96);
       }
 
-      // === ORGANIC LED BLOOM (tunable radius) ===
+      // === ORGANIC LED BLOOM (tunable radius) — fades with sustainGlow ===
       if (sustainGlow > 0.0) {
           let p = uv - 0.5;
           let dist = length(p);
-          let expGlow = exp2(-dist * 3.6) * sustainGlow;
+          let expGlow = exp2(-dist * LED_BLOOM_EXP) * sustainGlow;
           capColor += baseCol * expGlow * 0.58;
           glow += expGlow * 0.48;
       }
@@ -350,6 +364,15 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
       if (sustainGlow > 0.0 || (ch.trigger > 0u && isTrigger)) {
           let rim = pow(1.0 - abs(dBox) * 7.5, 2.2) * 0.22;
           capColor += baseCol * rim;
+      }
+  }
+  // === NOTE-OFF / CUT / FADE INDICATOR ===
+  // Brief neutral flash when the playhead crosses a note-off or note-cut row.
+  else if (note >= NOTE_OFF_MIN) {
+      if (abs(delta) < 0.5) {
+          let cutPulse = (0.5 - abs(delta)) * 2.0;
+          capColor = mix(capColor, vec3<f32>(0.35, 0.35, 0.45), cutPulse * 0.3);
+          glow = cutPulse * 0.15;
       }
   }
   // === EXPRESSION-ONLY ===

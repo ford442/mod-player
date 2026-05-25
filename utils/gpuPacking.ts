@@ -248,6 +248,19 @@ export const calculateNoteDurations = (
       const isNoteOff = note >= NOTE_OFF_MIN;
       const isVolumeOff = cell.volCmd === 0xC0 && cell.volVal === 0;
 
+      // Detect ECx (note cut after x ticks) — MOD/XM effect 'E' (cmd 14 or ASCII 69/'E')
+      // with parameter upper nibble 0xC (values 0xC0–0xCF).
+      // Effect 'e' (cmd 101, lowercase) is also accepted for safety.
+      // ECx immediately silences the note after x ticks, so the visual sustain
+      // should not extend past the ECx row.
+      const EFFECT_E_DECIMAL = 14;  // libopenmpt numeric code for MOD/XM 'E' effect
+      const EFFECT_E_ASCII   = 69;  // ASCII 'E' (used by some text-based formats)
+      const EFFECT_E_LOWER   = 101; // ASCII 'e' (lowercase variant)
+      const effCmd = cell.effCmd ?? 0;
+      const effVal = cell.effVal ?? 0;
+      const effCmdIsE = effCmd === EFFECT_E_DECIMAL || effCmd === EFFECT_E_ASCII || effCmd === EFFECT_E_LOWER;
+      const isEffectCut = effCmdIsE && (effVal & 0xF0) === 0xC0;
+
       if (hasNote) {
         // New note starts → end previous note if any
         if (noteStartRow !== -1) {
@@ -274,9 +287,15 @@ export const calculateNoteDurations = (
           res.isTrigger = true;
           res.isSustained = false;
         }
+
+        // ECx on the same row as a note-on: the note starts and is immediately cut.
+        // Duration stays at 1 (trigger row only), no sustain tail is generated.
+        if (isEffectCut) {
+          noteStartRow = -1;
+        }
       }
-      else if (isNoteOff || isVolumeOff) {
-        // Note-off / cut / fade → end current note
+      else if (isNoteOff || isVolumeOff || isEffectCut) {
+        // Note-off / cut / fade / ECx effect → end current note
         if (noteStartRow !== -1) {
           const duration = row - noteStartRow + 1; // include the off row
           for (let r = noteStartRow; r <= row; r++) {
@@ -291,7 +310,7 @@ export const calculateNoteDurations = (
           }
           noteStartRow = -1;
         } else {
-          // Standalone note-off without preceding note
+          // Standalone note-off/cut without preceding note
           const res = result[row]?.[ch];
           if (res) {
             res.duration = 1;
