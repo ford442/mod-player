@@ -26,6 +26,39 @@ struct Uniforms {
   stepsLength: u32,     // 32 or 64 steps visible per page
 };
 
+// === BACKPORTED FROM v0.45b: Note sustain + duration logic for organic square cells ===
+// Note constants — must match TypeScript NOTE_MIN/NOTE_MAX/NOTE_OFF_MIN in gpuPacking.ts
+const NOTE_MIN: u32     = 1u;
+const NOTE_MAX: u32     = 119u;   // Full range: covers MOD/XM/IT notes (C-0 to B-9)
+const NOTE_OFF_MIN: u32 = 120u;   // Any note value >= this is note-off/cut/fade
+
+// === SUSTAIN TUNING CONSTANTS (adapted for grid "blocks" feel, not circular LEDs) ===
+const SUSTAIN_GLOW: f32        = 0.55;  // Glow strength for sustain tail (0–1); slightly higher for grid visibility
+const TRIGGER_FLASH_BOOST: f32 = 1.3;   // Extra on trigger row
+const LED_BLOOM_EXP: f32       = 4.0;   // Exp decay for cell glow (higher=tighter spot on square cells)
+const NOTE_AGE_TOLERANCE: f32  = 0.5;   // Hardware choke tolerance (matches ch.noteAge from audio)
+const MIN_FADE_ROWS: f32       = 2.0;
+const MAX_FADE_ROWS: f32       = 6.0;
+const FADE_WINDOW_PCT: f32     = 0.30;  // Proportional fade window near end of note duration
+
+// Duration info unpacked from high-precision cell packing (DURA-001)
+// (Identical to v0.45b; duration now lives in the byte that v0.40 used to read as volCmd)
+struct NoteDurationInfo {
+  duration: u32,
+  rowOffset: u32,
+  isNoteOff: bool,
+}
+
+fn unpackDurationInfo(packedA: u32, packedB: u32) -> NoteDurationInfo {
+  var info: NoteDurationInfo;
+  info.duration = (packedA >> 8) & 0xFFu;
+  if (info.duration == 0u) { info.duration = 1u; }
+  let durationFlags = (packedB >> 8) & 0x7Fu;
+  info.rowOffset = durationFlags >> 1u;
+  info.isNoteOff = (durationFlags & 1u) != 0u;
+  return info;
+}
+
 @group(0) @binding(0) var<storage, read> cells: array<u32>;
 @group(0) @binding(1) var<uniform> uniforms: Uniforms;
 @group(0) @binding(2) var<storage, read> rowFlags: array<u32>;
@@ -152,33 +185,87 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
 
   col += smoothstep(0.0, 0.1, dBox + 0.5) * 0.02;
 
-  let onPlayhead = (in.row == u32(uniforms.playheadRow));
+  // === DURATION-AWARE SUSTAIN (backported + adapted from v0.45b) ===
+  // Compute modular delta for note age (supports long patterns + playhead wrap semantics).
+  let maxRows = f32(uniforms.numRows);
+  let playheadStep = uniforms.playheadRow - floor(uniforms.playheadRow / maxRows) * maxRows;
+  var delta = playheadStep - f32(in.row);
+  if (delta < -maxRows * 0.5) { delta += maxRows; }
+  else if (delta > maxRows * 0.5) { delta -= maxRows; }
+
+  // Crude onPlayhead kept for border highlight; duration logic drives the organic glow/fade.
+  let onPlayhead = (abs(delta) < 0.5);
 
   let note = (in.packedA >> 24) & 255u;
-  let volCmd = (in.packedA >> 8) & 255u;
-  let effCmd = (in.packedB >> 8) & 255u;
-  let hasNote = note > 0u;
-  let hasExpression = (volCmd > 0u) || (effCmd > 0u);
+  // Note: volCmd byte is now repurposed as duration in high-prec packing (DURA); we use unpack below.
+  let effCmd = (in.packedB >> 8) & 255u;  // eff still at old spot in this layout
+  let hasNote = (note >= NOTE_MIN && note <= NOTE_MAX);
+  let hasExpression = (effCmd > 0u);  // simplified; vol now duration
   let ch = channels[in.channel];
 
+  var sustainFactor = 0.0;
+  var noteCol = vec3<f32>(0.0);
+
   if (hasNote) {
-      let noteCol = neonPalette(f32(note % 12u) / 12.0);
+      noteCol = neonPalette(f32(note % 12u) / 12.0);
+
+      let dInfo = unpackDurationInfo(in.packedA, in.packedB);
+      let isRealNoteOff = dInfo.isNoteOff || (note >= NOTE_OFF_MIN);
+      let isTrigger = (dInfo.rowOffset == 0u) && !isRealNoteOff;
+      let isSustain = (dInfo.rowOffset > 0u) && !isRealNoteOff;
+
+      let durationF = f32(dInfo.duration);
+      let noteRelativeAge = delta + f32(dInfo.rowOffset);
+
+      // Hardware choke: only most recent note per channel gets the sustain tail (prevents ghosting).
+      let isCurrentNote = abs(noteRelativeAge - ch.noteAge) < NOTE_AGE_TOLERANCE;
+
+      if ((isTrigger || isSustain) && durationF > 0.0 && noteRelativeAge >= 0.0 && noteRelativeAge < durationF && isCurrentNote) {
+          sustainFactor = select(1.0, SUSTAIN_GLOW, isSustain);
+
+          // === ADAPTIVE / EXPONENTIAL DECAY FADE (proportional to note duration) ===
+          // Cells near end of long notes fade out organically instead of hard cut.
+          let fadeWindow = clamp(durationF * FADE_WINDOW_PCT, MIN_FADE_ROWS, MAX_FADE_ROWS);
+          let fadeStart = durationF - fadeWindow;
+          if (noteRelativeAge > fadeStart) {
+              let fadeT = (noteRelativeAge - fadeStart) / fadeWindow;
+              sustainFactor *= smoothstep(1.0, 0.0, fadeT);
+          }
+      }
+
+      // Base cell glow: exponential structure, now modulated by dynamic sustainFactor.
       let dist = length(p);
-      let glow = exp(-dist * 4.0);
-      col += noteCol * glow * 1.5;
-      // Trigger flash: pulse on the exact playhead row
-      if (ch.trigger > 0u && onPlayhead) {
-          col += noteCol * 1.5;
+      let baseExp = exp(-dist * 4.0);
+      // Use LED_BLOOM_EXP-style for tighter "organic" decay on active sustains (parity with circular).
+      let expDecay = exp(-dist * LED_BLOOM_EXP) * max(sustainFactor, 0.6);  // fallback keeps old notes visible
+      col += noteCol * (baseExp * 1.2 + expDecay * 0.9);
+
+      // Trigger flash: stronger on exact trigger row (uses ch.trigger + sustain context)
+      if (ch.trigger > 0u && isTrigger) {
+          col += noteCol * TRIGGER_FLASH_BOOST;
+      }
+
+      // Extra playhead "ripple" highlight while inside a sustaining note (makes grid feel alive)
+      if (onPlayhead && sustainFactor > 0.0) {
+          col += noteCol * 0.6 * sustainFactor;
       }
   }
 
-  // Expression indicator: subtle cyan tint for cells with vol/effect commands
-  if (hasExpression && ch.isMuted == 0u) {
+  // === NOTE-OFF / CUT / FADE (brief pulse, backported decay indicator) ===
+  else if (note >= NOTE_OFF_MIN) {
+      if (abs(delta) < 0.5) {
+          let cutPulse = (0.5 - abs(delta)) * 2.0;
+          col = mix(col, vec3<f32>(0.4, 0.4, 0.5), cutPulse * 0.35);
+      }
+  }
+
+  // Expression indicator (tinted when not a full note sustain)
+  if (hasExpression && ch.isMuted == 0u && sustainFactor < 0.1) {
       col += vec3<f32>(0.0, 0.04, 0.08) * uniforms.bloomIntensity;
   }
 
   if (onPlayhead) {
-      col += vec3<f32>(0.2, 0.2, 0.25) * 0.8;
+      col += vec3<f32>(0.2, 0.2, 0.25) * 0.7;
   }
 
   col = mix(col, fs.borderColor, smoothstep(0.0, aa, dBox));

@@ -250,6 +250,15 @@ export function useWebGPURender(
         const device = await adapter.requestDevice({ requiredFeatures });
         if (!device || cancelled) { setWebgpuAvailable(false); return; }
 
+        // CRITICAL FIX for initial mount blurriness:
+        // Synchronously measure the container via getBoundingClientRect() (delegated
+        // through syncCanvasSize) and set the canvas width/height attributes (× DPR)
+        // BEFORE obtaining the WebGPU context and calling configure(). This ensures
+        // the GPU surface is created at the correct physical resolution matching the
+        // final layout, so the first rendered frame is never drawn at fallback size.
+        const glCanvas = glCanvasRef.current;
+        if (canvas && glCanvas) syncCanvasSize(canvas, glCanvas);
+
         const context = canvas.getContext('webgpu') as GPUCanvasContext;
         const format = navigator.gpu.getPreferredCanvasFormat();
         context.configure({ device, format, alphaMode: 'premultiplied' });
@@ -344,9 +353,6 @@ export function useWebGPURender(
         }
 
         refreshBindGroup(device);
-
-        const glCanvas = glCanvasRef.current;
-        if (canvas && glCanvas) syncCanvasSize(canvas, glCanvas);
 
         setGpuReady(true);
       } catch (error) {
