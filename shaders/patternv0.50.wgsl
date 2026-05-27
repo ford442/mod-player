@@ -168,15 +168,13 @@ fn acesToneMap(color: vec3<f32>) -> vec3<f32> {
   );
 }
 
-// Brilliant LED Core: splits emission to fix white washout on active note playheads.
-// - Tight inner core (pow high) provides brilliant/hot intensity (near-white for punch).
-// - Wider halo (pow low * pitchColor) preserves rich note hue/saturation at distance.
-// dist: proximity factor [0..1] (higher = closer to emitter center, e.g. 1.0 - smoothstep(0, r, length(p)))
-// Call acesToneMap on the result (or sum) before writing final color.
+// Brilliant LED Core + Halo split.
+// dist: proximity factor (1.0 at centre → 0.0 at edge).
+// Returns an HDR colour that separates the near-white specular "die" core from the
+// colour-bearing halo, preventing full-channel saturation while retaining palette hue.
 fn brilliantLEDCore(dist: f32, pitchColor: vec3<f32>, intensity: f32) -> vec3<f32> {
-  let d = max(dist, 0.0);
-  let core = pow(d, 16.0) * intensity * 1.8;           // ultra-sharp brilliant core
-  let halo = pow(d, 2.0) * intensity * pitchColor;     // soft colored halo preserves saturation
+  let core = pow(dist, 16.0) * intensity * 1.8;         // tight, near-white specular die
+  let halo = pow(dist, 2.0)  * intensity * pitchColor;  // soft hue-bearing surround
   return vec3<f32>(core) + halo;
 }
 
@@ -436,12 +434,11 @@ fn drawUnifiedLensCap(
     finalColor = mix(finalColor, litGlassColor, alpha);
     finalColor += subsurfaceGlow * 1.8;
 
-    // Concentrated glow around active emitters — use Brilliant LED Core for mid (pitch) when bright
+    // Concentrated glow around active emitters — Brilliant LED Core for mid emitter
     if (midEmitter.a > 0.05) {
         let midGlowDist = length(uv - midPos - refractOffset * 0.5);
-        let midProx = 1.0 - smoothstep(0.0, 0.22, midGlowDist);
-        let midBrilliant = brilliantLEDCore(midProx, midEmitter.rgb, midEmitter.a * 0.7);
-        finalColor += midBrilliant;
+        let midDist = 1.0 - smoothstep(0.0, 0.18, midGlowDist);
+        finalColor += brilliantLEDCore(midDist, midEmitter.rgb, midEmitter.a * 0.5);
     }
     if (topEmitter.a > 0.05) {
         let topGlowDist = length(uv - topPos - refractOffset * 0.3);
@@ -508,13 +505,10 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     var alpha = indLed.a;
     if (playheadActivation > 0.0) {
       let beatPulse = 1.0 + kick * 0.6 + (0.5 + 0.5 * sin(beat * 6.2832)) * 0.2;
-      // Brilliant LED Core for playhead indicator ring (prevents wash to white)
-      let glowDist = 1.0 - smoothstep(0.0, 0.85, length(p));
-      let glow = brilliantLEDCore(glowDist, fs.ledOnColor, (bloom * 4.0) * playheadActivation * beatPulse);
-      col += glow;
-      alpha = max(alpha, smoothstep(0.0, 0.25, length(glow)));
+      let glowDist = 1.0 - smoothstep(0.0, 0.25, length(p));
+      col += brilliantLEDCore(glowDist, fs.ledOnColor, bloom * 5.0 * playheadActivation * beatPulse);
+      alpha = max(alpha, smoothstep(0.0, 0.25, length(col)));
     }
-    // ACES at bottom of this path: ensure core+halo HDR is mapped before 8unorm write
     return vec4<f32>(acesToneMap(col), clamp(alpha, 0.0, 1.0));
   }
 
@@ -642,14 +636,12 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
 
     finalColor = mix(finalColor, unifiedLens.rgb, unifiedLens.a);
 
-    // AMBER-BLUE: Enhanced external glow for active notes
-    // Use Brilliant LED Core split so high playhead energy stays colored (no white washout)
+    // AMBER-BLUE: Enhanced external glow for active notes — Brilliant LED Core
     if (playheadActivation > 0.5 && (isNoteOn || isSustain)) {
       let pulseColor = mix(blueColor, noteColor, 0.5 + 0.5 * sin(beat * 6.2832));
       let sustainBoost = select(1.0, 1.5, isSustain && !isNoteOn);
-      let phDist = 1.0 - smoothstep(0.0, 0.65, length(p));  // cell-local proximity
-      let brilliant = brilliantLEDCore(phDist, pulseColor, playheadActivation * 0.9 * sustainBoost);
-      finalColor += brilliant;
+      let pulseDist = 1.0 - smoothstep(0.0, 0.35, length(p));
+      finalColor += brilliantLEDCore(pulseDist, pulseColor, playheadActivation * 0.15 * sustainBoost);
     }
   }
 
@@ -668,11 +660,5 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     }
     return vec4<f32>(fs.borderColor, 0.0);
   }
-
-  // ACES tone mapping at bottom of fragment shader, applied to final accumulated color
-  // (including brilliant core+halo emissions from active note playheads). This guarantees
-  // the values written to the 8unorm sceneTexture preserve pitch hue instead of clamping
-  // overdriven channels to pure white.
-  finalColor = acesToneMap(finalColor);
-  return vec4<f32>(finalColor, 1.0);
+  return vec4<f32>(acesToneMap(finalColor), 1.0);
 }

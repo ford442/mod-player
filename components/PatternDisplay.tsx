@@ -241,11 +241,13 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   const gpuDeviceRef = useRef<GPUDevice | null>(null);
   const gpuContextRef = useRef<GPUCanvasContext | null>(null);
 
-  // Sync canvas buffer to the DPR-correct physical size on the very first render pass.
-  // useLayoutEffect fires synchronously after DOM commit but before paint and reads
-  // container.getBoundingClientRect() (via syncCanvasSize). If the container has not
-  // yet received its final layout, the guard skips; the authoritative pre-configure
-  // measurement + DPR scaling then occurs in useWebGPURender before WebGPU surface creation.
+  // Best-effort early sync: attempt to read the container rect before the first
+  // paint so the canvas attrs are already correct if layout has settled by the
+  // time this effect fires.  If the container reports 0×0 (flex parent not yet
+  // sized), syncCanvasSize's guard skips the write — the initialization path in
+  // useWebGPURender will call syncCanvasSize again after the device is acquired,
+  // at which point layout is guaranteed stable, ensuring the WebGPU surface is
+  // configured at the correct DPR-scaled resolution for the very first frame.
   useLayoutEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
