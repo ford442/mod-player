@@ -168,6 +168,16 @@ fn acesToneMap(color: vec3<f32>) -> vec3<f32> {
   );
 }
 
+// Brilliant LED Core + Halo split.
+// dist: proximity factor (1.0 at centre → 0.0 at edge).
+// Returns an HDR colour that separates the near-white specular "die" core from the
+// colour-bearing halo, preventing full-channel saturation while retaining palette hue.
+fn brilliantLEDCore(dist: f32, pitchColor: vec3<f32>, intensity: f32) -> vec3<f32> {
+  let core = pow(dist, 16.0) * intensity * 1.8;         // tight, near-white specular die
+  let halo = pow(dist, 2.0)  * intensity * pitchColor;  // soft hue-bearing surround
+  return vec3<f32>(core) + halo;
+}
+
 // Scale factor for hue-preservation in litTint mixing.
 // Higher value → more of the note's pitch color bleeds through the glass tint.
 const COLOR_PRESERVE_SCALE: f32 = 0.8;
@@ -424,11 +434,11 @@ fn drawUnifiedLensCap(
     finalColor = mix(finalColor, litGlassColor, alpha);
     finalColor += subsurfaceGlow * 1.8;
 
-    // Concentrated glow around active emitters
+    // Concentrated glow around active emitters — Brilliant LED Core for mid emitter
     if (midEmitter.a > 0.05) {
         let midGlowDist = length(uv - midPos - refractOffset * 0.5);
-        let midGlow = (1.0 - smoothstep(0.0, 0.18, midGlowDist)) * midEmitter.a * 0.5;
-        finalColor += midEmitter.rgb * midGlow;
+        let midDist = 1.0 - smoothstep(0.0, 0.18, midGlowDist);
+        finalColor += brilliantLEDCore(midDist, midEmitter.rgb, midEmitter.a * 0.5);
     }
     if (topEmitter.a > 0.05) {
         let topGlowDist = length(uv - topPos - refractOffset * 0.3);
@@ -495,11 +505,11 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     var alpha = indLed.a;
     if (playheadActivation > 0.0) {
       let beatPulse = 1.0 + kick * 0.6 + (0.5 + 0.5 * sin(beat * 6.2832)) * 0.2;
-      let glow = fs.ledOnColor * (bloom * 5.0) * exp(-length(p) * 3.5) * playheadActivation * beatPulse;
-      col += glow;
-      alpha = max(alpha, smoothstep(0.0, 0.25, length(glow)));
+      let glowDist = 1.0 - smoothstep(0.0, 0.25, length(p));
+      col += brilliantLEDCore(glowDist, fs.ledOnColor, bloom * 5.0 * playheadActivation * beatPulse);
+      alpha = max(alpha, smoothstep(0.0, 0.25, length(col)));
     }
-    return vec4<f32>(col, clamp(alpha, 0.0, 1.0));
+    return vec4<f32>(acesToneMap(col), clamp(alpha, 0.0, 1.0));
   }
 
   // --- MUSIC CHANNELS (1-32) with THREE-EMITTER LED SYSTEM ---
@@ -626,11 +636,12 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
 
     finalColor = mix(finalColor, unifiedLens.rgb, unifiedLens.a);
 
-    // AMBER-BLUE: Enhanced external glow for active notes
+    // AMBER-BLUE: Enhanced external glow for active notes — Brilliant LED Core
     if (playheadActivation > 0.5 && (isNoteOn || isSustain)) {
       let pulseColor = mix(blueColor, noteColor, 0.5 + 0.5 * sin(beat * 6.2832));
       let sustainBoost = select(1.0, 1.5, isSustain && !isNoteOn);
-      finalColor += pulseColor * playheadActivation * 0.15 * sustainBoost;
+      let pulseDist = 1.0 - smoothstep(0.0, 0.35, length(p));
+      finalColor += brilliantLEDCore(pulseDist, pulseColor, playheadActivation * 0.15 * sustainBoost);
     }
   }
 
@@ -649,5 +660,5 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     }
     return vec4<f32>(fs.borderColor, 0.0);
   }
-  return vec4<f32>(finalColor, 1.0);
+  return vec4<f32>(acesToneMap(finalColor), 1.0);
 }
