@@ -11,6 +11,7 @@ interface ShaderSelectorPanelProps {
   shaderOptions: ShaderOption[];
   selectedShader: string;
   onSelectShader: (shaderId: string) => void;
+  onRandomShader?: () => void;
   favorites: string[];
   recents: string[];
   thumbnails: Record<string, string>;
@@ -32,6 +33,7 @@ export function ShaderSelectorPanel({
   shaderOptions,
   selectedShader,
   onSelectShader,
+  onRandomShader,
   favorites,
   recents,
   thumbnails,
@@ -260,7 +262,25 @@ export function ShaderSelectorPanel({
             </div>
           )}
 
-          <div className="mb-1 text-[10px] font-bold uppercase text-gray-500">All shaders</div>
+          <div className="mb-1 flex items-center justify-between">
+            <div className="text-[10px] font-bold uppercase text-gray-500">All shaders</div>
+            {onRandomShader && (
+              <button
+                type="button"
+                onClick={() => {
+                  onRandomShader();
+                  setOpen(false);
+                }}
+                className={cn(
+                  'rounded border px-2 py-1 text-[10px] font-mono',
+                  isDarkMode ? 'border-gray-700 bg-gray-800 text-gray-200 hover:bg-gray-700' : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-100',
+                )}
+                aria-label="Pick a random shader"
+              >
+                🔀 Random
+              </button>
+            )}
+          </div>
           <div className="grid max-h-[60vh] grid-cols-2 gap-2 overflow-y-auto pr-1 sm:grid-cols-3 lg:grid-cols-4">
             {shaderOptions.map((option, index) => renderShaderCard(option, index))}
           </div>
