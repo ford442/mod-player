@@ -499,7 +499,11 @@ export function useWebGPURender(
       const rawChannels = p.matrix?.numChannels ?? DEFAULT_CHANNELS;
       const numChannels = p.padTopChannel ? rawChannels + 1 : rawChannels;
       if (numChannels <= 0) return;
-      const rowLimit = Math.max(1, numRows);
+      const stepsCount = p.stepsLength ?? 32;
+      const visibleRows = (stepsCount > 0 && shaderFile.includes('v0.50'))
+        ? Math.min(stepsCount, numRows)
+        : numRows;
+      const rowLimit = Math.max(1, visibleRows);
 
       const refState = p.playbackStateRef?.current;
       const livePlayheadRow = refState?.playheadRow ?? p.playheadRow;
@@ -530,7 +534,6 @@ export function useWebGPURender(
 
       let effectiveCellW = p.cellWidth;
       let effectiveCellH = p.cellHeight;
-      const stepsCount = p.stepsLength ?? 32;
       if (shaderFile.includes('v0.21') || shaderFile.includes('v0.40') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.47') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49') || shaderFile.includes('v0.50') || shaderFile.includes('v0.51') || shaderFile.includes('v0.55')) {
         effectiveCellW = (GRID_RECT.w * actualCanvasW) / stepsCount;
         effectiveCellH = (GRID_RECT.h * actualCanvasH) / numChannels;
@@ -546,7 +549,7 @@ export function useWebGPURender(
       const outerRadius = (shaderFile.includes('v0.45') && !shaderFile.includes('v0.45b')) ? minDim * 0.40 : minDim * 0.45;
 
       const uniformByteLength = fillUniformPayload(layoutTypeRef.current, {
-        numRows, numChannels,
+        numRows: visibleRows, numChannels,
         playheadRow: tickRow,
         playheadRowAsFloat: shaderFile.includes('v0.21') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.47') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49') || shaderFile.includes('v0.50') || shaderFile.includes('v0.51') || shaderFile.includes('v0.55'),
         isPlaying: p.isPlaying,
@@ -603,9 +606,13 @@ export function useWebGPURender(
 
     // Pre-calculate channel/instance counts for debug info
     const numRows = p.matrix?.numRows ?? DEFAULT_ROWS;
+    const stepsCount = p.stepsLength ?? 32;
+    const visibleRows = (stepsCount > 0 && shaderFile.includes('v0.50'))
+      ? Math.min(stepsCount, numRows)
+      : numRows;
     const rawChannels = p.matrix?.numChannels ?? DEFAULT_CHANNELS;
     const numChannels = p.padTopChannel ? rawChannels + 1 : rawChannels;
-    let totalInstances = numRows * numChannels;
+    let totalInstances = visibleRows * numChannels;
     const isUIShader = shaderFile.includes('v0.45');
     if (isUIShader) totalInstances += 3; // UI_BUTTON_COUNT in shader
 

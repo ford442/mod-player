@@ -255,6 +255,15 @@ function App() {
     );
   }, [setShaderFavorites]);
 
+  const handleRandomShader = useCallback(() => {
+    const others = ALL_SHADER_OPTIONS.filter(shader => shader.id !== shaderFile);
+    const pool = others.length > 0 ? others : ALL_SHADER_OPTIONS;
+    const pick = pool[Math.floor(Math.random() * pool.length)];
+    if (pick) {
+      setShaderFile(pick.id);
+    }
+  }, [shaderFile, setShaderFile]);
+
   useEffect(() => {
     const canvas = document.querySelector<HTMLCanvasElement>('canvas[data-shader-preview-source="true"]');
     if (!canvas) return;
@@ -687,6 +696,7 @@ function App() {
                       shaderOptions={ALL_SHADER_OPTIONS}
                       selectedShader={shaderFile}
                       onSelectShader={setShaderFile}
+                      onRandomShader={handleRandomShader}
                       favorites={validShaderFavorites}
                       recents={validShaderRecents}
                       thumbnails={shaderThumbnails}
