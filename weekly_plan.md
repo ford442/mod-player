@@ -1,8 +1,8 @@
 # Weekly Plan - XASM-1 (patternv0.51 "Playhead Arc" + AUDIO-001 timing)
 
 ## Today's focus
-**User Idea — Fix note duration display in patternv0.45b (issue #213): step indicator should hold dimmed note color while note sustains, then return to base color when sound ends.**
-Audit the full pipeline: (1) JS duration pre-computation in `hooks/useLibOpenMPT.ts` (scanPattern loop, activeSustains tracking), (2) bit-packing of duration/sustain flag into PackedA/PackedB in `components/PatternDisplay.tsx`, (3) WGSL fragment-shader read + per-cell color logic in `shaders/patternv0.45b.wgsl`. Goal: trigger row glows at full note color → sustain rows hold 40–60% dimmed note color → row after note-off returns to dark base. No new shader version needed — fix in place within v0.45b.
+**User Idea — Move initial module parse off main thread into a Web Worker to eliminate 300 ms–1 s freezes on large `.it` files (narrative §Advanced 3).**
+Extract `_openmpt_module_create_from_memory2()` and the full pattern-matrix pre-computation out of `hooks/useLibOpenMPT.ts` into a dedicated `workers/openmpt-parser.worker.ts`. Worker receives the raw `ArrayBuffer`, runs libopenmpt WASM in isolation, builds the `PatternMatrix` JSON + metadata, and sends it back via `postMessage`. Main thread then forwards the same `ArrayBuffer` to the AudioWorklet for playback — parse and playback are fully decoupled. Save-state written to `.swarm-state.md` at each iteration boundary.
 
 ## Ideas
 <!-- User-written ideas Noah accumulates during the week. Routine prioritizes these. -->
@@ -10,31 +10,35 @@ Audit the full pipeline: (1) JS duration pre-computation in `hooks/useLibOpenMPT
 - [done — 2026-05-08] Animated playhead scan-line arc at the current row in circular shaders — ARC-001 tag; v0.51.wgsl live in shaders/src + public/shaders, integrated in PatternDisplay.tsx version chain
 - [done — 2026-05-08] Fractional-row interpolation for smooth 144 Hz playhead — `playbackRowFraction` implemented in AUDIO-001 timing work, passed to PatternDisplay as `playheadRow`
 - [done — 2026-05-08] Keyboard shortcut set: space/arrows/1–9/L/M/F/D/? fully implemented in useKeyboardShortcuts.ts with cheatsheet + Media Session API
-- [needs-verification — 2026-05-22] SharedArrayBuffer oscilloscope pipeline from worklet → GPU texture (narrative §Advanced 4) — PR #215 brought SAB ring buffer for native engine bridge; unclear if v0.55 oscilloscope shader was ever created or if this is fulfilled/superseded
-- [ ] Move initial module parse off the main thread into a Web Worker to avoid 300 ms–1 s freezes on large `.it` files (narrative §Advanced 3)
+- [done — 2026-05-29] SharedArrayBuffer oscilloscope pipeline from worklet → GPU texture (narrative §Advanced 4) — v0.55 shader confirmed present with `oscTexture: texture_1d<f32>` binding; PatternDisplay.tsx creates texture + uploads SAB buffer when v0.55 active; useLibOpenMPT.ts receives SAB from worklet; only missing piece was App.tsx registration — add `{ id: 'patternv0.55.wgsl', label: 'v0.55 (Oscilloscope)' }` to AVAILABLE_SHADERS
+- [in progress — 2026-05-29] Move initial module parse off the main thread into a Web Worker to avoid 300 ms–1 s freezes on large `.it` files (narrative §Advanced 3)
 - [done — 2026-05-15] Darker-chassis toggle + drop shadow for white-chassis contrast — bezel dark-mode toggle landed in PR #186 (narrative §Graphical 6)
 - [done — 2026-05-15] Collapsible / default-hidden PatternDisplay debug panel — default-hidden + Mode=NONE fix in PR #186 (narrative §Graphical 8)
 - [done — 2026-04-24] Persist last-used shader in localStorage + per-module memory (PR #145)
-- [thumbnails done 2026-05-22; favorites pending] Thumbnail previews + favorites in shader selector (narrative §Shader UI) — thumbnail rendering landed in commit f6676d1; favorites list + "random shader" button still outstanding
+- [favorites done 2026-05-29; random button pending] Thumbnail previews + favorites in shader selector (narrative §Shader UI) — thumbnails done (f6676d1), favorites implemented in `ShaderSelectorPanel.tsx`; "random shader" shuffle button still outstanding
 - [done — 2026-05-15] Multi-layer bloom: separate passes for triggers / sustains / expression — BloomLayer API + layered WGSL shaders in PR #187, wired into PatternDisplay with DEFAULT_LAYERS (narrative §Shader 2)
 
 ## Backlog
 <!-- Unfinished items, known bugs, deferred work. -->
-- [ ] Verify SAB oscilloscope pipeline: does v0.55 shader exist? Did PR #215 native bridge fulfill this or is it still pending? (Ideas item marked needs-verification)
-- [ ] Note duration in v0.45b (issue #213) — TODAY'S FOCUS; move to Done when complete
+- [ ] Register `patternv0.55.wgsl` in App.tsx AVAILABLE_SHADERS (pipeline is fully wired — this is a 1-line change closing out the SAB oscilloscope backlog)
 - [ ] Bug 4: ▶️ Play button scrolls canvas off-screen (focus/scroll side effect — likely `autoFocus` or `scrollIntoView` on play button element)
-- [ ] Verify Bug 5 (shader `.bak`/`.kate-swp` files) — confirm no swp/bak committed; add `.gitignore` patterns if missing
-- [ ] Verify Bug 2 (ScriptProcessor fallback) — PR #189 added enhanced diagnostics; PR #215 native bridge may help; spot-check console on prod at `test.1ink.us/xm-player/`
-- [ ] v0.51 "Playhead Arc" shader exists in `shaders/` + `public/shaders/` but is NOT registered in `App.tsx` shader selector — add entry
-- [ ] v0.52 (Night), v0.53 (Midnight), v0.54 (Neon Night) shaders — NOT YET CREATED (last-week Done entry was incorrect); files do not exist in shaders/ or public/shaders/
-- [ ] 32/64 step-length toggle: ported to v0.51 and v0.39/v0.40/v0.21; NOT yet in v0.50 (default shader) — add stepsLength uniform to v0.50 struct
-- [ ] CRT scanline / phosphor post-process shader (narrative §Shader)
+- [ ] Verify Bug 2 (ScriptProcessor fallback) — PR #189 diagnostics + PR #215 native bridge landed; spot-check console on prod at `test.1ink.us/xm-player/`
+- [ ] v0.52 (Night), v0.53 (Midnight), v0.54 (Neon Night) shaders — NOT YET CREATED; files do not exist in shaders/ or public/shaders/
+- [ ] 32/64 step-length toggle: NOT yet in v0.50 (default shader) — add `stepsLength: u32` to patternv0.50.wgsl Uniforms struct and use in row-count logic
+- [ ] Add "Random Shader" shuffle button to ShaderSelectorPanel (favorites done; random button missing)
 - [ ] Dynamic per-instrument color palettes (narrative §Shader / §UI)
 - [ ] Compute-shader port of note-duration calculation (narrative §Performance)
 - [ ] Mobile "lite" render mode (narrative §Performance)
 - [ ] Storage-manager integration: `/api/shaders`, `/api/songs`, rating hookup (narrative §Integration)
 
 ## Done
+- [x] 2026-05-29 — Note duration v0.45b: sustain row illumination + hardware choke fix (PR #221); sustain logic improvements: ECx detection, adaptive fade, ghost-glow fix, note-off indicator (PR #224)
+- [x] 2026-05-29 — Note sustain/duration logic backported to patternv0.40 square shader (PR #233)
+- [x] 2026-05-29 — ACES tone mapping + hue preservation for LED color washout (PR #225); Brilliant LED Core ACES for v0.50 playheads (PR #232)
+- [x] 2026-05-29 — CRT scanline + vignette post-process via bloom_composite.wgsl (PR #222)
+- [x] 2026-05-29 — ProjectM audio bridge: popup + iframe support enhanced (PR #227)
+- [x] 2026-05-29 — Canvas first-frame blurriness: sync canvas size before WebGPU context.configure() (PR #231)
+- [x] 2026-05-29 — Shader favorites list implemented in ShaderSelectorPanel.tsx (toggled by star icon per shader)
 - [x] 2026-05-22 — Shader thumbnail previews in shader selector (commit f6676d1)
 - [x] 2026-05-22 — Night Mode 2.0: uniform-driven theme for patternv0.35_bloom with Dusk/Midnight/Deep presets (PR #207)
 - [x] 2026-05-22 — 3D Studio Mode: camera presets, three-point lighting, desk model, channel LEDs (PR #206)
@@ -75,10 +79,10 @@ Audit the full pipeline: (1) JS duration pre-computation in `hooks/useLibOpenMPT
 - [x] 2026-04-10 — Stale channel buffer + bind-group refresh fix; shader animation on second-song-load fix
 
 ## Last run
-Date: 2026-05-22
+Date: 2026-05-29
 Mode: User Idea
-Focus: Note duration display in patternv0.45b (issue #213) — sustain tail + note-end return to base color
-Outcome: 8 PRs landed since 2026-05-15 (PRs #205–217): native engine SAB bridge, AudioWorklet stability, Night Mode 2.0, 3D Studio Mode, canvas sizing, pattern display freeze, color palette + stepsLength. Shader thumbnail previews shipped (f6676d1). SAB oscilloscope pipeline from last week unverified (v0.55 shader unclear, marked needs-verification). Issue #213 (note duration in v0.45b) filed yesterday and picked as today's kimi-cli swarm. Copilot issue: CRT scanline/phosphor post-process pass (fully decoupled from note-duration files).
+Focus: Web Worker module parse — move `_openmpt_module_create_from_memory2()` + pattern-matrix pre-computation off main thread to eliminate 300 ms–1 s freezes on large `.it` files
+Outcome: TBD — kimi-cli swarm in progress. Prior week (2026-05-22): note duration v0.45b fixed (PRs #221, #224), sustain backported to v0.40 (#233), ACES LED color (#225, #232), CRT scanline (#222), projectM bridge (#227), canvas blurriness (#231). SAB oscilloscope pipeline confirmed complete in host code; only App.tsx registration outstanding (v0.55 not in selector). Favorites done in ShaderSelectorPanel. Copilot issue: random shader button + stepsLength in v0.50.
 
 ---
 
