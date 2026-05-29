@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { LibOpenMPT, ModuleInfo, PatternMatrix, ChannelShadowState, PlaybackState, SyncDebugInfo } from '../types';
+import { LibOpenMPT, ModuleInfo, PatternMatrix, ChannelShadowState, PlaybackState, SyncDebugInfo, WorkerParseMessage, WorkerParseResult } from '../types';
 import { OpenMPTWorkletEngine, NATIVE_RING_BUF_BYTES } from '../audio-worklet/OpenMPTWorkletEngine';
-import { getPatternMatrix, computeNoteAges } from '../utils/patternExtractor';
+import { computeNoteAges } from '../utils/patternExtractor';
 import { startAudioPlayback, AudioGraphRefs, AudioGraphCallbacks, AudioGraphConfig } from './useAudioGraph';
 import { useWorkletLoader, getWorkletUrl, getNativeGlueUrl, getAbsoluteWorkletUrl } from './useWorkletLoader';
 import { logWorkletDiagnostics } from '../audio-worklet/diagnostics';
@@ -98,6 +98,8 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
   const analyserRef = useRef<AnalyserNode | null>(null);
 
   const fileDataRef = useRef<Uint8Array | null>(null);
+  const workerRef = useRef<Worker | null>(null);
+  const ensureMainThreadModuleRef = useRef<((data: Uint8Array) => Promise<void>) | null>(null);
 
   const animationFrameHandle = useRef<number>(0);
   const lastUpdateTimeRef = useRef<number>(0);
@@ -172,17 +174,43 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
     if (playRef.current) playRef.current();
   }, []);
 
+  const ensureMainThreadModule = useCallback(async (data: Uint8Array) => {
+    const lib = libopenmptRef.current;
+    if (!lib) {
+      console.error('[ensureMainThreadModule] libopenmpt not initialized');
+      return;
+    }
+    if (currentModulePtr.current !== 0) return;
+
+    const bufferSize = data.byteLength;
+    const bufferPtr = lib._malloc(bufferSize);
+    lib.HEAPU8.set(data, bufferPtr);
+    const modPtr = lib._openmpt_module_create_from_memory2(
+      bufferPtr, bufferSize, 0, 0, 0, 0, 0, 0, 0
+    );
+    lib._free(bufferPtr);
+
+    if (modPtr !== 0) {
+      currentModulePtr.current = modPtr;
+      console.log('[ensureMainThreadModule] Main-thread module created for fallback');
+    } else {
+      console.error('[ensureMainThreadModule] Failed to create main-thread module');
+    }
+  }, []);
+
+  // Expose to audio graph so ScriptProcessor fallback can lazily create a module.
+  ensureMainThreadModuleRef.current = ensureMainThreadModule;
+
   const processModuleData = useCallback(async (fileData: Uint8Array, fileName: string) => {
     const lib = libopenmptRef.current;
     if (!lib) {
-      console.error("[processModuleData] libopenmpt not initialized");
+      console.error('[processModuleData] libopenmpt not initialized');
       return;
     }
 
-    console.log("[processModuleData] Processing module:", fileName, "size:", fileData.byteLength);
+    console.log('[processModuleData] Processing module:', fileName, 'size:', fileData.byteLength);
 
     // Always cancel any queued UI frame before loading a new module.
-    // This avoids stale updateUI loops from a prior module instance.
     if (animationFrameHandle.current) {
       cancelAnimationFrame(animationFrameHandle.current);
       animationFrameHandle.current = 0;
@@ -190,8 +218,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
 
     // Use ref to check playing state to avoid dependency loop
     if (isPlayingRef.current) {
-      console.log("[processModuleData] Stopping current playback");
-      // Stop without calling stopMusic to avoid circular dependency
+      console.log('[processModuleData] Stopping current playback');
       isPlayingRef.current = false;
       setIsPlaying(false);
       if (audioContextRef.current) {
@@ -203,71 +230,77 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
       }
     }
 
-    // Cleanup previous module
+    // Cleanup previous main-thread module (e.g. from prior ScriptProcessor fallback)
     if (currentModulePtr.current !== 0) {
-      console.log("[processModuleData] Destroying previous module");
+      console.log('[processModuleData] Destroying previous main-thread module');
       lib._openmpt_module_destroy(currentModulePtr.current);
       currentModulePtr.current = 0;
     }
 
-    // Store file data for Worklet
-    console.log("[processModuleData] Storing fileDataRef for worklet");
-    fileDataRef.current = fileData;
+    // Clone file data before transferring original buffer to the worker.
+    const fileDataCopy = fileData.slice();
+    fileDataRef.current = fileDataCopy;
 
-    // Load module into MAIN thread instance (for metadata and pattern viewing)
-    const bufferSize = fileData.byteLength;
-    const bufferPtr = lib._malloc(bufferSize);
-    lib.HEAPU8.set(fileData, bufferPtr);
+    // Create / reuse the parser worker
+    if (!workerRef.current) {
+      workerRef.current = new Worker(
+        new URL('../workers/openmpt-parser.worker.ts', import.meta.url),
+        { type: 'module' }
+      );
+    }
 
-    // Provide logging/error callbacks (null for now)
-    const modPtr = lib._openmpt_module_create_from_memory2(bufferPtr, bufferSize, 0, 0, 0, 0, 0, 0, 0);
-    lib._free(bufferPtr);
+    setStatus(`Parsing "${fileName}"…`);
 
-    if (modPtr === 0) {
-      setStatus("Error: Failed to load module (invalid format?)");
+    const result = await new Promise<WorkerParseResult>((resolve) => {
+      const worker = workerRef.current!;
+      const handler = (e: MessageEvent<WorkerParseResult>) => {
+        worker.removeEventListener('message', handler);
+        resolve(e.data);
+      };
+      worker.addEventListener('message', handler);
+      worker.postMessage(
+        { type: 'parse', fileData, fileName } as WorkerParseMessage,
+        [fileData.buffer]
+      );
+    });
+
+    if (result.type === 'error') {
+      setStatus(`Error: ${result.message}`);
       return;
     }
 
-    currentModulePtr.current = modPtr;
-
-    // Read metadata
-    const titlePtr = lib._openmpt_module_get_metadata(modPtr, lib.stringToUTF8("title"));
-    const title = lib.UTF8ToString(titlePtr);
-    lib._openmpt_free_string(titlePtr);
-
-    const numOrders = lib._openmpt_module_get_num_orders(modPtr);
-    const numChannels = lib._openmpt_module_get_num_channels(modPtr);
-    const initialBpm = lib._openmpt_module_get_current_estimated_bpm(modPtr);
+    const { patternMatrices, metadata } = result;
 
     // TIMING FIX: Initialize BPM ref
-    workletBpmRef.current = initialBpm || 125;
+    workletBpmRef.current = metadata.initialBpm || 125;
 
     setModuleInfo({
-      title: title || fileName,
+      title: metadata.title || fileName,
       order: 0,
       row: 0,
-      bpm: initialBpm,
-      numChannels
+      bpm: metadata.initialBpm,
+      numChannels: metadata.numChannels,
     });
 
-    // Cache patterns
-    const matrices: PatternMatrix[] = [];
-    let totalRows = 0;
-    for (let i = 0; i < numOrders; i++) {
-      const patIdx = lib._openmpt_module_get_order_pattern(modPtr, i);
-      const matrix = getPatternMatrix(lib, modPtr, patIdx, i);
-      matrices.push(matrix);
-      totalRows += matrix.numRows;
-    }
-    patternMatricesRef.current = matrices;
-    setTotalPatternRows(totalRows);
+    patternMatricesRef.current = patternMatrices;
+    setTotalPatternRows(metadata.totalPatternRows);
 
     // Initial state
-    setSequencerMatrix(matrices[0] ?? null);
+    setSequencerMatrix(patternMatrices[0] ?? null);
     setSequencerCurrentRow(0);
     setSequencerGlobalRow(0);
-    setChannelStates(new Array(numChannels).fill({ volume: 0, pan: 128, freq: 0, trigger: 0, noteAge: 0, activeEffect: 0, effectValue: 0, isMuted: 0 }));
-    channelStatesRef.current = new Array(numChannels).fill(null).map(() => ({ volume: 0, pan: 128, freq: 0, trigger: 0, noteAge: 0, activeEffect: 0, effectValue: 0, isMuted: 0 }));
+    setChannelStates(
+      new Array(metadata.numChannels).fill({
+        volume: 0, pan: 128, freq: 0, trigger: 0, noteAge: 0,
+        activeEffect: 0, effectValue: 0, isMuted: 0,
+      })
+    );
+    channelStatesRef.current = new Array(metadata.numChannels)
+      .fill(null)
+      .map(() => ({
+        volume: 0, pan: 128, freq: 0, trigger: 0, noteAge: 0,
+        activeEffect: 0, effectValue: 0, isMuted: 0,
+      }));
 
     // TIMING FIX: Reset timing refs on new module
     audioClockStartRef.current = 0;
@@ -286,11 +319,11 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
       beatPhase: 0,
       kickTrigger: 0,
       grooveAmount: 0.5,
-      lastUpdateTimestamp: 0
+      lastUpdateTimestamp: 0,
     };
 
     setIsModuleLoaded(true);
-    setStatus(`Loaded "${title || fileName}"`);
+    setStatus(`Loaded "${metadata.title || fileName}"`);
 
     // REMOVED AUTO-PLAY FROM HERE.
     // It prevented the AudioContext from securely starting because it lacked a user gesture on page load.
@@ -560,18 +593,15 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
 
   // TIMING FIX: Improved seekToStep with proper synchronization
   const seekToStepWrapper = useCallback((step: number) => {
-    // Main thread update (for UI immediate response)
-    const lib = libopenmptRef.current;
-    const modPtr = currentModulePtr.current;
-    if (!lib || modPtr === 0) return;
+    const matrices = patternMatricesRef.current;
+    if (matrices.length === 0) return;
 
     let acc = 0;
     let targetOrder = 0;
     let targetRow = 0;
-    const numOrders = lib._openmpt_module_get_num_orders(modPtr);
-    for (let o = 0; o < numOrders; o++) {
-      const m = patternMatricesRef.current[o];
-      const rows = m ? m.numRows : lib._openmpt_module_get_pattern_num_rows(modPtr, lib._openmpt_module_get_order_pattern(modPtr, o));
+    for (let o = 0; o < matrices.length; o++) {
+      const m = matrices[o];
+      const rows = m ? m.numRows : 64;
       if (step < acc + rows) {
         targetOrder = o;
         targetRow = step - acc;
@@ -589,8 +619,12 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
     };
     seekAcknowledgedRef.current = false;
 
-    // Update main thread libopenmpt position
-    lib._openmpt_module_set_position_order_row(modPtr, targetOrder, targetRow);
+    // Update main thread libopenmpt position only if a main-thread module exists
+    const lib = libopenmptRef.current;
+    const modPtr = currentModulePtr.current;
+    if (lib && modPtr !== 0) {
+      lib._openmpt_module_set_position_order_row(modPtr, targetOrder, targetRow);
+    }
 
     // TIMING FIX: Update worklet refs immediately for UI consistency
     workletOrderRef.current = targetOrder;
@@ -637,6 +671,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
       currentModulePtr, channelStatesRef, patternMatricesRef,
       audioClockStartRef, workletTimeAtStartRef, driftAccumulatorRef,
       updateUIRef, nativeSharedBuffer: nativeSharedBufferRef,
+      ensureMainThreadModuleRef,
     };
     const audioCbs: AudioGraphCallbacks = {
       setStatus, setIsPlaying, setActiveEngine, setModuleInfo, setSequencerMatrix,
@@ -848,6 +883,10 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
       if (audioContextRef.current && audioContextRef.current.state !== 'closed') audioContextRef.current.close();
       if (currentModulePtr.current !== 0 && libopenmptRef.current) {
         libopenmptRef.current._openmpt_module_destroy(currentModulePtr.current);
+      }
+      if (workerRef.current) {
+        workerRef.current.terminate();
+        workerRef.current = null;
       }
       cancelAnimationFrame(animationFrameHandle.current);
     };

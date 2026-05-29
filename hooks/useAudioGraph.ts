@@ -43,6 +43,8 @@ export interface AudioGraphRefs {
   updateUIRef:         React.MutableRefObject<(() => void) | null>;
   /** SharedArrayBuffer provided to the native engine constructor (may be null in non-isolated contexts). */
   nativeSharedBuffer:  React.MutableRefObject<SharedArrayBuffer | null>;
+  /** Callback to lazily create a main-thread libopenmpt module for ScriptProcessor fallback. */
+  ensureMainThreadModuleRef: React.MutableRefObject<((data: Uint8Array) => Promise<void>) | null>;
 }
 
 export interface AudioGraphCallbacks {
@@ -469,7 +471,7 @@ export async function startAudioPlayback(
           throw fetchErr;
         }
 
-        node.port.onmessage = (e) => {
+        node.port.onmessage = async (e) => {
           const { type, order, row, positionSeconds, message, bpm } = e.data;
 
           if (type === 'position') {
@@ -529,6 +531,11 @@ export async function startAudioPlayback(
               console.warn('[PLAY] Worklet WASM init failed — falling back to ScriptProcessorNode');
               try { node.disconnect(); } catch (_e) { /* ignore */ }
               refs.audioWorkletNodeRef.current = null;
+
+              // Lazily create main-thread module if it doesn't exist (normal path now uses worker parse).
+              if (refs.currentModulePtr.current === 0 && refs.ensureMainThreadModuleRef.current && refs.fileDataRef.current) {
+                await refs.ensureMainThreadModuleRef.current(refs.fileDataRef.current);
+              }
 
               const lib = refs.libopenmptRef.current;
               const modPtr = refs.currentModulePtr.current;

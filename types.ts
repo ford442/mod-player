@@ -88,6 +88,7 @@ export interface LibOpenMPT {
   _openmpt_module_get_current_order: (modPtr: number) => number;
   _openmpt_module_get_current_row: (modPtr: number) => number;
   _openmpt_module_get_position_seconds: (modPtr: number) => number;
+  _openmpt_module_get_duration_seconds: (modPtr: number) => number;
   _openmpt_module_get_num_orders: (modPtr: number) => number;
   _openmpt_module_get_order_pattern: (modPtr: number, order: number) => number;
   _openmpt_module_get_current_estimated_bpm: (modPtr: number) => number;
@@ -115,6 +116,36 @@ export interface LibOpenMPT {
 }
 
 export type AudioEngine = 'worklet' | 'native-worklet' | 'scriptprocessor';
+
+// Web Worker parse protocol
+export interface WorkerParseRequest {
+  type: 'parse';
+  fileData: Uint8Array;
+  fileName: string;
+}
+
+export interface WorkerParseMetadata {
+  title: string;
+  numOrders: number;
+  numChannels: number;
+  initialBpm: number;
+  durationSeconds: number;
+  totalPatternRows: number;
+}
+
+export interface WorkerParseResponse {
+  type: 'parsed';
+  patternMatrices: PatternMatrix[];
+  metadata: WorkerParseMetadata;
+}
+
+export interface WorkerParseError {
+  type: 'error';
+  message: string;
+}
+
+export type WorkerParseMessage = WorkerParseRequest;
+export type WorkerParseResult = WorkerParseResponse | WorkerParseError;
 
 export interface PlaybackState {
   playheadRow: number;
