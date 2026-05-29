@@ -47,6 +47,7 @@ const SHADER_GROUPS = {
   CIRCULAR: [
     { id: 'patternv0.50.wgsl', label: 'v0.50 (Trap Frosted Lens)' },
     { id: 'patternv0.51.wgsl', label: 'v0.51 (Playhead Arc)' },
+    { id: 'patternv0.55.wgsl', label: 'v0.55 (Oscilloscope)' },
     { id: 'patternv0.49.wgsl', label: 'v0.49 (Trap Frosted Glass)' },
     { id: 'patternv0.48.wgsl', label: 'v0.48 (Trap Frosted Disc)' },
     { id: 'patternv0.47.wgsl', label: 'v0.47 (Trap Frosted)' },

@@ -598,7 +598,7 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
 
     if (isNoteOn || isSustain) {
       let pitchHue = pitchClassFromIndex(note);
-      let baseColor = neonPalette(pitchHue);
+      let baseColor = selectPalette(uniforms.colorPalette, pitchHue);
       let instBand = inst & 15u;
       let instBright = 0.85 + (select(0.0, f32(instBand) / 15.0, instBand > 0u)) * 0.15;
       noteColor = baseColor * instBright;
