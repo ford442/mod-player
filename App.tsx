@@ -10,8 +10,7 @@ import { ChannelMeters } from './components/ChannelMeters';
 import { MetadataPanel } from './components/MetadataPanel';
 import type { ModuleMetadata } from './components/MetadataPanel';
 import { Playlist } from './components/Playlist';
-import type { PlaylistItem } from './components/Playlist';
-import { StoragePlaylist } from './components/StoragePlaylist';
+import { LibraryBrowser } from './components/LibraryBrowser';
 import { SeekBar } from './components/SeekBar';
 import { Panel } from './components/Panel';
 import { ShaderSelectorPanel } from './components/ShaderSelectorPanel';
@@ -19,8 +18,12 @@ import { useLibOpenMPT } from './hooks/useLibOpenMPT';
 import { usePlaylist } from './hooks/usePlaylist';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { useLocalStorage } from './hooks/useLocalStorage';
+import { useLibrary } from './hooks/useLibrary';
+import { useRateShader } from './hooks/useRateShader';
 import { cn } from './utils/cn';
 import { startProjectMBridge } from './utils/projectMBridge';
+import { fetchRemoteModule, inferFileNameFromUrl } from './utils/remoteMedia';
+import { SchemaMismatchError, type RemoteSong } from './utils/storageApi';
 import { supportsStepsLength } from './utils/shaderVersion';
 import type { MediaItem } from './types';
 import { 
@@ -70,10 +73,11 @@ const ALL_SHADER_OPTIONS = [
   ...SHADER_GROUPS.CIRCULAR.map(s => ({ ...s, group: 'Circular' as const })),
   ...SHADER_GROUPS.VIDEO.map(s => ({ ...s, group: 'Video' as const })),
 ];
+const AVAILABLE_SHADERS = ALL_SHADER_OPTIONS;
 
 // Flat set of all valid shader IDs (used for localStorage validation)
 const ALL_SHADER_IDS = new Set<string>([
-  ...ALL_SHADER_OPTIONS.map(s => s.id),
+  ...AVAILABLE_SHADERS.map(s => s.id),
 ]);
 
 // Available UI themes.
@@ -201,10 +205,12 @@ function App() {
   const [showChannelMeters, setShowChannelMeters] = useState<boolean>(true);
   const [showMetadata, setShowMetadata] = useState<boolean>(true);
   const [showPlaylist, setShowPlaylist] = useState<boolean>(true);
-  const [showStorageLibrary, setShowStorageLibrary] = useState<boolean>(false);
+  const [showLibraryBrowser, setShowLibraryBrowser] = useState<boolean>(false);
   const [debugPanelOpen, setDebugPanelOpen] = useLocalStorage<boolean>('xasm1.debugPanel.open', false);
   const [chassisDark, setChassisDark] = useLocalStorage<boolean>('xasm1_chassisDark', false);
   const [cheatsheetOpen, setCheatsheetOpen] = useState<boolean>(false);
+  const { songsQuery, shadersQuery } = useLibrary();
+  const rateShaderMutation = useRateShader();
 
   // Channel VU data (from worklet channelStates)
   const channelVU = useMemo(() => {
@@ -257,8 +263,8 @@ function App() {
   }, [setShaderFavorites]);
 
   const handleRandomShader = useCallback(() => {
-    const others = ALL_SHADER_OPTIONS.filter(shader => shader.id !== shaderFile);
-    const pool = others.length > 0 ? others : ALL_SHADER_OPTIONS;
+    const others = AVAILABLE_SHADERS.filter(shader => shader.id !== shaderFile);
+    const pool = others.length > 0 ? others : AVAILABLE_SHADERS;
     const pick = pool[Math.floor(Math.random() * pool.length)];
     if (pick) {
       setShaderFile(pick.id);
@@ -290,6 +296,22 @@ function App() {
     () => shaderRecents.filter(shader => ALL_SHADER_IDS.has(shader)).slice(0, 5),
     [shaderRecents],
   );
+  const libraryErrorMessage = useMemo(() => {
+    const error = songsQuery.error;
+    if (!error) return null;
+    if (error instanceof SchemaMismatchError) {
+      return error.message;
+    }
+    return 'Cloud library unavailable. Check storage_manager connectivity.';
+  }, [songsQuery.error]);
+  const shaderCatalogErrorMessage = useMemo(() => {
+    const error = shadersQuery.error;
+    if (!error) return null;
+    if (error instanceof SchemaMismatchError) {
+      return error.message;
+    }
+    return 'Shader catalog unavailable. Ratings are temporarily offline.';
+  }, [shadersQuery.error]);
 
   // Tier 2: restore per-module shader whenever the loaded module changes
   useEffect(() => {
@@ -332,13 +354,19 @@ function App() {
     playlist.addFiles(files);
   }, [playlist]);
 
-  const handleAddToPlaylist = useCallback((item: PlaylistItem) => {
-    playlist.addItem(item);
-  }, [playlist]);
-
-  const handleStorageLoadAndPlay = useCallback((fileData: Uint8Array, fileName: string) => {
+  const handleLibrarySongLoad = useCallback(async (song: RemoteSong) => {
+    const fileData = await fetchRemoteModule(song.downloadUrl);
+    const fileName = song.fileName || inferFileNameFromUrl(song.downloadUrl);
+    const remotePlaylistId = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? `remote-${crypto.randomUUID()}`
+      : `remote-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    playlist.addItem({
+      id: remotePlaylistId,
+      fileName,
+      fileData,
+    });
     loadFileWithHash(fileData, fileName);
-  }, [loadFileWithHash]);
+  }, [loadFileWithHash, playlist]);
 
   // Sync pan with library
   useEffect(() => { setLibPan(pan); }, [pan, setLibPan]);
@@ -694,7 +722,7 @@ function App() {
                 {!IS_PUBLIC_MODE && (
                   <>
                     <ShaderSelectorPanel
-                      shaderOptions={ALL_SHADER_OPTIONS}
+                      shaderOptions={AVAILABLE_SHADERS}
                       selectedShader={shaderFile}
                       onSelectShader={setShaderFile}
                       onRandomShader={handleRandomShader}
@@ -703,6 +731,12 @@ function App() {
                       thumbnails={shaderThumbnails}
                       onToggleFavorite={toggleShaderFavorite}
                       isDarkMode={isDarkMode}
+                      shaderCatalog={shadersQuery.data ?? []}
+                      shaderCatalogError={shaderCatalogErrorMessage}
+                      onRateShader={async (shaderId, score) => {
+                        await rateShaderMutation.mutateAsync({ id: shaderId, score });
+                      }}
+                      ratingInFlightShaderId={rateShaderMutation.isPending ? rateShaderMutation.variables?.id ?? null : null}
                     />
                     <div className={cn('w-px h-6', isDarkMode ? 'bg-gray-800' : 'bg-gray-300')}></div>
                   </>
@@ -861,7 +895,7 @@ function App() {
             { key: 'meters', label: '📊 VU Meters', state: showChannelMeters, toggle: setShowChannelMeters },
             { key: 'meta', label: 'ℹ️ Metadata', state: showMetadata, toggle: setShowMetadata },
             { key: 'playlist', label: '📋 Playlist', state: showPlaylist, toggle: setShowPlaylist },
-            { key: 'storage', label: '📦 Storage', state: showStorageLibrary, toggle: setShowStorageLibrary },
+            { key: 'library', label: '☁️ Browse Library', state: showLibraryBrowser, toggle: setShowLibraryBrowser },
           ].map(({ key, label, state, toggle }) => (
             <button
               key={key}
@@ -936,13 +970,16 @@ function App() {
           </div>
         )}
 
-        {/* Storage Library */}
-        {showStorageLibrary && (
-          <Panel variant="raised" title="Storage Library" className="mt-4">
-            <StoragePlaylist
-              onAddToPlaylist={handleAddToPlaylist}
-              onLoadAndPlay={handleStorageLoadAndPlay}
+        {/* Cloud Library */}
+        {showLibraryBrowser && (
+          <Panel variant="raised" title="Cloud Library" className="mt-4">
+            <LibraryBrowser
+              songs={songsQuery.data ?? []}
+              loading={songsQuery.isLoading}
+              error={libraryErrorMessage}
               isDarkMode={isDarkMode}
+              onRefresh={() => void songsQuery.refetch()}
+              onLoadSong={handleLibrarySongLoad}
             />
           </Panel>
         )}

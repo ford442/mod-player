@@ -1,5 +1,6 @@
 import { type KeyboardEvent as ReactKeyboardEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { cn } from '../utils/cn';
+import type { ShaderMeta } from '../utils/storageApi';
 
 interface ShaderOption {
   id: string;
@@ -17,6 +18,10 @@ interface ShaderSelectorPanelProps {
   thumbnails: Record<string, string>;
   onToggleFavorite: (shaderId: string) => void;
   isDarkMode: boolean;
+  shaderCatalog: ShaderMeta[];
+  shaderCatalogError?: string | null;
+  onRateShader?: (shaderId: string, score: number) => Promise<void>;
+  ratingInFlightShaderId?: string | null;
 }
 
 const THUMBNAIL_SIZE = 96;
@@ -39,6 +44,10 @@ export function ShaderSelectorPanel({
   thumbnails,
   onToggleFavorite,
   isDarkMode,
+  shaderCatalog,
+  shaderCatalogError,
+  onRateShader,
+  ratingInFlightShaderId = null,
 }: ShaderSelectorPanelProps) {
   const [open, setOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
@@ -47,6 +56,11 @@ export function ShaderSelectorPanel({
 
   const optionById = useMemo(() => new Map(shaderOptions.map(option => [option.id, option])), [shaderOptions]);
   const allShaderIds = useMemo(() => shaderOptions.map(option => option.id), [shaderOptions]);
+  const catalogById = useMemo(() => new Map(shaderCatalog.map(shader => [shader.id, shader])), [shaderCatalog]);
+  const remoteOnlyShaders = useMemo(
+    () => shaderCatalog.filter(shader => !optionById.has(shader.id)),
+    [optionById, shaderCatalog],
+  );
 
   const favoriteShaders = useMemo(
     () => favorites.map(id => optionById.get(id)).filter((option): option is ShaderOption => Boolean(option)),
@@ -126,6 +140,7 @@ export function ShaderSelectorPanel({
     const liveThumbnail = thumbnails[option.id];
     const staticThumbnail = `${import.meta.env.BASE_URL}shaders/thumbnails/${option.id}.wgsl.png`;
     const thumbnailSrc = liveThumbnail ?? staticThumbnail;
+    const cloudMeta = catalogById.get(option.id);
 
     return (
       <div
@@ -160,7 +175,39 @@ export function ShaderSelectorPanel({
         />
           <div className="mt-1 text-[10px] text-gray-500">{option.group}</div>
           <div className="text-xs font-mono leading-tight">{option.label}</div>
+          <div className="mt-1 text-[10px] text-gray-500">
+            {cloudMeta?.averageRating !== null && cloudMeta?.averageRating !== undefined
+              ? `★ ${cloudMeta.averageRating.toFixed(1)}${cloudMeta.voteCount ? ` (${cloudMeta.voteCount})` : ''}`
+              : 'No cloud rating'}
+          </div>
         </button>
+        <div className="mt-1 flex items-center gap-0.5">
+          {[1, 2, 3, 4, 5].map(score => (
+            <button
+              key={`${option.id}-${score}`}
+              type="button"
+              disabled={!cloudMeta || !onRateShader || ratingInFlightShaderId === option.id}
+              onClick={async event => {
+                event.preventDefault();
+                event.stopPropagation();
+                if (!onRateShader) return;
+                try {
+                  await onRateShader(option.id, score);
+                } catch (error) {
+                  console.error('Failed to rate shader', error);
+                }
+              }}
+              className={cn(
+                'text-[10px] leading-none transition-colors disabled:opacity-30',
+                (cloudMeta?.userRating ?? 0) >= score ? 'text-yellow-400' : 'text-gray-500 hover:text-yellow-300',
+              )}
+              title={cloudMeta ? `Rate ${score} stars` : 'Rating unavailable'}
+              aria-label={`Rate shader ${option.label} ${score} stars`}
+            >
+              ★
+            </button>
+          ))}
+        </div>
         <button
           type="button"
           aria-label={isFavorite ? `Remove ${option.label} from favorites` : `Add ${option.label} to favorites`}
@@ -284,6 +331,27 @@ export function ShaderSelectorPanel({
           <div className="grid max-h-[60vh] grid-cols-2 gap-2 overflow-y-auto pr-1 sm:grid-cols-3 lg:grid-cols-4">
             {shaderOptions.map((option, index) => renderShaderCard(option, index))}
           </div>
+          {shaderCatalogError && (
+            <div className="mt-2 text-[10px] text-red-400">{shaderCatalogError}</div>
+          )}
+          {remoteOnlyShaders.length > 0 && (
+            <div className="mt-3 border-t border-gray-700/60 pt-2">
+              <div className="mb-1 text-[10px] font-bold uppercase text-gray-500">Cloud catalog (local engine unavailable)</div>
+              <div className="max-h-32 space-y-1 overflow-y-auto text-xs font-mono">
+                {remoteOnlyShaders.map(shader => (
+                  <button
+                    key={`remote-only-${shader.id}`}
+                    type="button"
+                    disabled
+                    className="flex w-full items-center justify-between rounded border border-gray-700 bg-gray-900/60 px-2 py-1 text-left text-gray-500 disabled:cursor-not-allowed"
+                  >
+                    <span className="truncate">{shader.name}</span>
+                    <span className="ml-2 shrink-0">Unavailable</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>

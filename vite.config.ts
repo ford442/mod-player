@@ -7,6 +7,14 @@ export default defineConfig(({ mode }) => {
   // dev default: /
   // deploy build: VITE_APP_BASE_PATH=/xm-player/ npm run build
   const base = process.env.VITE_APP_BASE_PATH || '/'
+  const storageApiUrl = process.env.VITE_STORAGE_API_URL || 'http://localhost:8000'
+  const storageProxyTarget = (() => {
+    try {
+      return new URL(storageApiUrl).origin
+    } catch {
+      return storageApiUrl
+    }
+  })()
   
   return {
     base,
@@ -27,6 +35,18 @@ export default defineConfig(({ mode }) => {
         // resources (e.g. the CDN-hosted libopenmpt) load without a
         // Cross-Origin-Resource-Policy header.  'require-corp' would block them.
         'Cross-Origin-Embedder-Policy': 'credentialless',
+      },
+      proxy: {
+        '/api': {
+          target: storageProxyTarget,
+          changeOrigin: true,
+          secure: false,
+        },
+        '/songs': {
+          target: storageProxyTarget,
+          changeOrigin: true,
+          secure: false,
+        },
       },
     },
     optimizeDeps: {

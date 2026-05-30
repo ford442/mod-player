@@ -2,6 +2,8 @@ import type { MediaItem } from '../types';
 
 // Adjust this path to match where you drop your files on the FTP
 const REMOTE_MEDIA_BASE_URL = `${import.meta.env.BASE_URL}media/`;
+const moduleFetchCache = new Map<string, Promise<Uint8Array>>();
+const MAX_MODULE_CACHE_ENTRIES = 64;
 
 export const fetchRemoteMedia = async (): Promise<MediaItem[]> => {
   try {
@@ -47,3 +49,40 @@ export const fetchRemoteMedia = async (): Promise<MediaItem[]> => {
     return [];
   }
 };
+
+export function inferFileNameFromUrl(downloadUrl: string): string {
+  try {
+    const parsed = new URL(downloadUrl, window.location.href);
+    return decodeURIComponent(parsed.pathname.split('/').pop() || 'remote.mod');
+  } catch {
+    return decodeURIComponent(downloadUrl.split('?')[0]?.split('/').pop() || 'remote.mod');
+  }
+}
+
+export async function fetchRemoteModule(downloadUrl: string): Promise<Uint8Array> {
+  const cached = moduleFetchCache.get(downloadUrl);
+  if (cached) {
+    return cached;
+  }
+
+  if (moduleFetchCache.size >= MAX_MODULE_CACHE_ENTRIES) {
+    const oldestKey = moduleFetchCache.keys().next().value;
+    if (oldestKey) {
+      moduleFetchCache.delete(oldestKey);
+    }
+  }
+
+  const pending = fetch(downloadUrl).then(async response => {
+    if (!response.ok) {
+      throw new Error(`failed to download remote module (${response.status})`);
+    }
+    const data = await response.arrayBuffer();
+    return new Uint8Array(data);
+  }).catch(error => {
+    moduleFetchCache.delete(downloadUrl);
+    throw error;
+  });
+
+  moduleFetchCache.set(downloadUrl, pending);
+  return pending;
+}
