@@ -1,8 +1,8 @@
-# Weekly Plan - XASM-1 (patternv0.51 "Playhead Arc" + AUDIO-001 timing)
+# Weekly Plan - XASM-1 (Web Worker parse landed → GPU compute duration port)
 
 ## Today's focus
-**User Idea — Move initial module parse off main thread into a Web Worker to eliminate 300 ms–1 s freezes on large `.it` files (narrative §Advanced 3).**
-Extract `_openmpt_module_create_from_memory2()` and the full pattern-matrix pre-computation out of `hooks/useLibOpenMPT.ts` into a dedicated `workers/openmpt-parser.worker.ts`. Worker receives the raw `ArrayBuffer`, runs libopenmpt WASM in isolation, builds the `PatternMatrix` JSON + metadata, and sends it back via `postMessage`. Main thread then forwards the same `ArrayBuffer` to the AudioWorklet for playback — parse and playback are fully decoupled. Save-state written to `.swarm-state.md` at each iteration boundary.
+**New Idea — GPU compute-shader port of the note-duration / sustain-span calculation (narrative §Performance; backlog "Compute-shader port of note-duration calculation").**
+Port `calculateNoteDurations` (DURA-001) in `utils/gpuPacking.ts` — currently an O(rows×channels) JS scan with ECx/note-off detection that runs on every pattern load (and now inside `workers/openmpt-parser.worker.ts`) — into a WebGPU compute pass. The compute shader runs over the packed pattern buffer, computes per-cell `{duration, isSustained, isExpressionOnly}`, and writes results into the per-cell GPU buffer the render shader already reads, so the CPU never walks the pattern. Keep the existing JS `calculateNoteDurations` as a CPU fallback for the HTML/ScriptProcessor/no-WebGPU paths and for the worker. Rationale: last week's Web Worker parse decoupled libopenmpt parsing from the main thread; the remaining per-load cost on large/dense `.it` patterns is this duration scan — moving it to the GPU makes it near-free and scales to dense patterns. Save-state written to `.swarm-state.md` at each iteration boundary.
 
 ## Ideas
 <!-- User-written ideas Noah accumulates during the week. Routine prioritizes these. -->
@@ -11,27 +11,30 @@ Extract `_openmpt_module_create_from_memory2()` and the full pattern-matrix pre-
 - [done — 2026-05-08] Fractional-row interpolation for smooth 144 Hz playhead — `playbackRowFraction` implemented in AUDIO-001 timing work, passed to PatternDisplay as `playheadRow`
 - [done — 2026-05-08] Keyboard shortcut set: space/arrows/1–9/L/M/F/D/? fully implemented in useKeyboardShortcuts.ts with cheatsheet + Media Session API
 - [done — 2026-05-29] SharedArrayBuffer oscilloscope pipeline from worklet → GPU texture (narrative §Advanced 4) — v0.55 shader confirmed present with `oscTexture: texture_1d<f32>` binding; PatternDisplay.tsx creates texture + uploads SAB buffer when v0.55 active; useLibOpenMPT.ts receives SAB from worklet; only missing piece was App.tsx registration — add `{ id: 'patternv0.55.wgsl', label: 'v0.55 (Oscilloscope)' }` to AVAILABLE_SHADERS
-- [in progress — 2026-05-29] Move initial module parse off the main thread into a Web Worker to avoid 300 ms–1 s freezes on large `.it` files (narrative §Advanced 3)
+- [done — 2026-05-30] Move initial module parse off the main thread into a Web Worker to avoid 300 ms–1 s freezes on large `.it` files (narrative §Advanced 3) — `workers/openmpt-parser.worker.ts` created, `useLibOpenMPT.ts`/`useAudioGraph.ts` refactored, lazy `ensureMainThreadModule()` for ScriptProcessor fallback; typecheck + build pass. NOT YET in a PR / not merged to main (lives on working branch).
+- [ ] (new — 2026-05-30) Mobile / low-end "lite" render mode: detect mobile + low-power GPU (or absence of WebGPU), reduce visible row count, disable multi-layer bloom, auto-select a cheap shader variant — widens the public audience without touching the premium desktop path
+- [ ] (new — 2026-05-30) Dynamic per-instrument color palettes driven by the module: derive/assign a color per instrument and pass as a palette uniform/texture so melodic lines are distinguishable by timbre, not only pitch hue — extends the existing colorPalette uniform + multi-palette selector (PR #148)
 - [done — 2026-05-15] Darker-chassis toggle + drop shadow for white-chassis contrast — bezel dark-mode toggle landed in PR #186 (narrative §Graphical 6)
 - [done — 2026-05-15] Collapsible / default-hidden PatternDisplay debug panel — default-hidden + Mode=NONE fix in PR #186 (narrative §Graphical 8)
 - [done — 2026-04-24] Persist last-used shader in localStorage + per-module memory (PR #145)
-- [favorites done 2026-05-29; random button pending] Thumbnail previews + favorites in shader selector (narrative §Shader UI) — thumbnails done (f6676d1), favorites implemented in `ShaderSelectorPanel.tsx`; "random shader" shuffle button still outstanding
+- [done — 2026-05-30] Thumbnail previews + favorites + random-shader button in shader selector (narrative §Shader UI) — thumbnails (f6676d1), favorites in `ShaderSelectorPanel.tsx`, and 🔀 Random shuffle button (`onRandomShader`/`handleRandomShader`, PR #237) all landed
 - [done — 2026-05-15] Multi-layer bloom: separate passes for triggers / sustains / expression — BloomLayer API + layered WGSL shaders in PR #187, wired into PatternDisplay with DEFAULT_LAYERS (narrative §Shader 2)
 
 ## Backlog
 <!-- Unfinished items, known bugs, deferred work. -->
-- [ ] Register `patternv0.55.wgsl` in App.tsx AVAILABLE_SHADERS (pipeline is fully wired — this is a 1-line change closing out the SAB oscilloscope backlog)
+- [ ] **MERGE STATE:** working branch `claude/charming-johnson-I2pjU` is ~98 commits ahead of `main` with NO open PR — the Web Worker parse, v0.55 registration, and shuffle/stepsLength all live here un-merged. Open a PR and reconcile `main` so it stops drifting.
+- [ ] Compute-shader port of note-duration calculation (narrative §Performance) — **[in progress — 2026-05-30, today's focus]**
 - [ ] Bug 4: ▶️ Play button scrolls canvas off-screen (focus/scroll side effect — likely `autoFocus` or `scrollIntoView` on play button element)
 - [ ] Verify Bug 2 (ScriptProcessor fallback) — PR #189 diagnostics + PR #215 native bridge landed; spot-check console on prod at `test.1ink.us/xm-player/`
 - [ ] v0.52 (Night), v0.53 (Midnight), v0.54 (Neon Night) shaders — NOT YET CREATED; files do not exist in shaders/ or public/shaders/
-- [ ] 32/64 step-length toggle: NOT yet in v0.50 (default shader) — add `stepsLength: u32` to patternv0.50.wgsl Uniforms struct and use in row-count logic
-- [ ] Add "Random Shader" shuffle button to ShaderSelectorPanel (favorites done; random button missing)
 - [ ] Dynamic per-instrument color palettes (narrative §Shader / §UI)
-- [ ] Compute-shader port of note-duration calculation (narrative §Performance)
 - [ ] Mobile "lite" render mode (narrative §Performance)
-- [ ] Storage-manager integration: `/api/shaders`, `/api/songs`, rating hookup (narrative §Integration)
+- [ ] Storage-manager integration: `/api/shaders`, `/api/songs`, rating hookup (narrative §Integration) — candidate decoupled Copilot issue (see today's dispatch)
 
 ## Done
+- [x] 2026-05-30 — Web Worker module parse: `_openmpt_module_create_from_memory2()` + pattern-matrix pre-compute moved into `workers/openmpt-parser.worker.ts`; `useLibOpenMPT.ts`/`useAudioGraph.ts` refactored with lazy `ensureMainThreadModule()` ScriptProcessor fallback; typecheck + build pass (un-merged on working branch — see Backlog MERGE STATE)
+- [x] 2026-05-30 — Register `patternv0.55.wgsl` (Oscilloscope) in App.tsx AVAILABLE_SHADERS — closes SAB oscilloscope pipeline (commit 8b9fb14, PR #238)
+- [x] 2026-05-30 — Random-shader 🔀 shuffle button in ShaderSelectorPanel + v0.50 stepsLength clamping (PR #237)
 - [x] 2026-05-29 — Note duration v0.45b: sustain row illumination + hardware choke fix (PR #221); sustain logic improvements: ECx detection, adaptive fade, ghost-glow fix, note-off indicator (PR #224)
 - [x] 2026-05-29 — Note sustain/duration logic backported to patternv0.40 square shader (PR #233)
 - [x] 2026-05-29 — ACES tone mapping + hue preservation for LED color washout (PR #225); Brilliant LED Core ACES for v0.50 playheads (PR #232)
@@ -79,10 +82,10 @@ Extract `_openmpt_module_create_from_memory2()` and the full pattern-matrix pre-
 - [x] 2026-04-10 — Stale channel buffer + bind-group refresh fix; shader animation on second-song-load fix
 
 ## Last run
-Date: 2026-05-29
-Mode: User Idea
-Focus: Web Worker module parse — move `_openmpt_module_create_from_memory2()` + pattern-matrix pre-computation off main thread to eliminate 300 ms–1 s freezes on large `.it` files
-Outcome: TBD — kimi-cli swarm in progress. Prior week (2026-05-22): note duration v0.45b fixed (PRs #221, #224), sustain backported to v0.40 (#233), ACES LED color (#225, #232), CRT scanline (#222), projectM bridge (#227), canvas blurriness (#231). SAB oscilloscope pipeline confirmed complete in host code; only App.tsx registration outstanding (v0.55 not in selector). Favorites done in ShaderSelectorPanel. Copilot issue: random shader button + stepsLength in v0.50.
+Date: 2026-05-30
+Mode: New Idea
+Focus: GPU compute-shader port of the note-duration / sustain-span calculation (`calculateNoteDurations`, DURA-001) — move the per-load JS pattern scan onto a WebGPU compute pass, keep JS as CPU fallback
+Outcome: Last week's Web Worker module parse landed COMPLETE (typecheck + build green, `workers/openmpt-parser.worker.ts`) — NOT Fix First. Also confirmed landed: v0.55 oscilloscope registration (#238) and random-shader shuffle + v0.50 stepsLength (#237). Ideas section exhausted → New Idea mode; picked compute-shader duration port, appended mobile lite-mode + per-instrument palettes to Ideas. Flagged: working branch ~98 commits ahead of main with no open PR. Decoupled Copilot issue this run = storage-manager cloud library browser (no overlap with GPU compute files).
 
 ---
 
