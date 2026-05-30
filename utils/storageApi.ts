@@ -88,7 +88,7 @@ function normalizeSong(raw: z.infer<typeof SongSchema>): RemoteSong {
     }
   }
 
-  const fileName = raw.fileName ?? raw.filename ?? decodeURIComponent(downloadUrl.split('/').pop() ?? 'remote.mod');
+  const fileName = raw.fileName ?? raw.filename ?? decodeURIComponent(downloadUrl.split('/').pop() || 'remote.mod');
   const durationSeconds = raw.durationSeconds ?? raw.duration;
 
   const song: RemoteSong = {

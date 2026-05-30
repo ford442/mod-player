@@ -3,6 +3,7 @@ import type { MediaItem } from '../types';
 // Adjust this path to match where you drop your files on the FTP
 const REMOTE_MEDIA_BASE_URL = `${import.meta.env.BASE_URL}media/`;
 const moduleFetchCache = new Map<string, Promise<Uint8Array>>();
+const MAX_MODULE_CACHE_ENTRIES = 64;
 
 export const fetchRemoteMedia = async (): Promise<MediaItem[]> => {
   try {
@@ -62,6 +63,13 @@ export async function fetchRemoteModule(downloadUrl: string): Promise<Uint8Array
   const cached = moduleFetchCache.get(downloadUrl);
   if (cached) {
     return cached;
+  }
+
+  if (moduleFetchCache.size >= MAX_MODULE_CACHE_ENTRIES) {
+    const oldestKey = moduleFetchCache.keys().next().value;
+    if (oldestKey) {
+      moduleFetchCache.delete(oldestKey);
+    }
   }
 
   const pending = fetch(downloadUrl).then(async response => {

@@ -28,7 +28,7 @@ export function useRateShader() {
           const total = existingAverage * existingVotes;
           const nextAverage = shader.userRating === null
             ? (existingVotes > 0 ? (total + score) / nextVotes : score)
-            : score;
+            : (existingVotes > 0 ? ((total - shader.userRating) + score) / nextVotes : score);
 
           return {
             ...shader,

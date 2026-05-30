@@ -23,7 +23,7 @@ import { useRateShader } from './hooks/useRateShader';
 import { cn } from './utils/cn';
 import { startProjectMBridge } from './utils/projectMBridge';
 import { fetchRemoteModule, inferFileNameFromUrl } from './utils/remoteMedia';
-import { SchemaMismatchError } from './utils/storageApi';
+import { SchemaMismatchError, type RemoteSong } from './utils/storageApi';
 import { supportsStepsLength } from './utils/shaderVersion';
 import type { MediaItem } from './types';
 import { 
@@ -354,11 +354,14 @@ function App() {
     playlist.addFiles(files);
   }, [playlist]);
 
-  const handleLibrarySongLoad = useCallback(async (downloadUrl: string, fallbackName: string) => {
-    const fileData = await fetchRemoteModule(downloadUrl);
-    const fileName = fallbackName || inferFileNameFromUrl(downloadUrl);
+  const handleLibrarySongLoad = useCallback(async (song: RemoteSong) => {
+    const fileData = await fetchRemoteModule(song.downloadUrl);
+    const fileName = song.fileName || inferFileNameFromUrl(song.downloadUrl);
+    const remotePlaylistId = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? `remote-${crypto.randomUUID()}`
+      : `remote-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     playlist.addItem({
-      id: `remote-${crypto.randomUUID()}`,
+      id: remotePlaylistId,
       fileName,
       fileData,
     });
@@ -976,7 +979,7 @@ function App() {
               error={libraryErrorMessage}
               isDarkMode={isDarkMode}
               onRefresh={() => void songsQuery.refetch()}
-              onLoadSong={song => handleLibrarySongLoad(song.downloadUrl, song.fileName)}
+              onLoadSong={handleLibrarySongLoad}
             />
           </Panel>
         )}

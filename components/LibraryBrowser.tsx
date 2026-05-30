@@ -11,7 +11,7 @@ interface LibraryBrowserProps {
 }
 
 function formatDuration(seconds?: number): string {
-  if (!seconds || !Number.isFinite(seconds)) return '--:--';
+  if (seconds === undefined || seconds === null || !Number.isFinite(seconds)) return '--:--';
   const m = Math.floor(seconds / 60);
   const s = Math.floor(seconds % 60);
   return `${m}:${s.toString().padStart(2, '0')}`;
@@ -104,8 +104,8 @@ export function LibraryBrowser({
                   setLoadingId(song.id);
                   try {
                     await onLoadSong(song);
-                  } catch (loadSongError) {
-                    setLoadError(loadSongError instanceof Error ? loadSongError.message : 'Failed to load remote song');
+                  } catch (songLoadErr) {
+                    setLoadError(songLoadErr instanceof Error ? songLoadErr.message : 'Failed to load remote song');
                   } finally {
                     setLoadingId(null);
                   }

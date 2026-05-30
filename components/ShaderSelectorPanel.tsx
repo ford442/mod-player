@@ -191,7 +191,11 @@ export function ShaderSelectorPanel({
                 event.preventDefault();
                 event.stopPropagation();
                 if (!onRateShader) return;
-                await onRateShader(option.id, score);
+                try {
+                  await onRateShader(option.id, score);
+                } catch (error) {
+                  console.error('Failed to rate shader', error);
+                }
               }}
               className={cn(
                 'text-[10px] leading-none transition-colors disabled:opacity-30',
