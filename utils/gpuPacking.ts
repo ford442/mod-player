@@ -587,6 +587,91 @@ export const createBufferWithData = (device: GPUDevice, data: ArrayBufferView | 
   return buffer;
 };
 
+/**
+ * Pack raw pattern data for the GPU compute duration path (DURA-001).
+ * Extracts cell fields identically to `packPatternMatrixHighPrecision` but
+ * outputs the standard 2×u32 layout without duration info.
+ *
+ * Output format (per cell):
+ *   packedA: [note:8][inst:8][volCmd:8][volVal:8]
+ *   packedB: [unused:16][effCmd:8][effVal:8]
+ */
+export const packPatternMatrixComputeInput = (matrix: PatternMatrix | null, padTopChannel = false): PackedPatternData => {
+  const rawChannels = matrix?.numChannels ?? DEFAULT_CHANNELS;
+  const numRows = matrix?.numRows ?? DEFAULT_ROWS;
+  const numChannels = padTopChannel ? rawChannels + 1 : rawChannels;
+  const totalCells = numRows * numChannels;
+  const packedData = new Uint32Array(totalCells * 2);
+
+  if (!matrix) return { packedData, noteCount: 0 };
+
+  const { rows } = matrix;
+  const startCol = padTopChannel ? 1 : 0;
+
+  for (let r = 0; r < numRows; r++) {
+    const rowCells = rows[r] || [];
+    for (let c = 0; c < rawChannels; c++) {
+      const offset = (r * numChannels + (c + startCol)) * 2;
+      const cell = rowCells[c];
+
+      let note = 0, inst = 0, volCmd = 0, volVal = 0, effCmd = 0, effVal = 0;
+
+      if (cell) {
+        if (cell.note && cell.note > 0) {
+          note = cell.note;
+        } else if (cell.text && cell.text.trim()) {
+          const text = cell.text.trim().toUpperCase();
+          note = encodeNoteText(text.slice(0, 3));
+        }
+        inst = cell.inst || 0;
+        volCmd = cell.volCmd || 0;
+        volVal = cell.volVal || 0;
+        effCmd = cell.effCmd || 0;
+        effVal = cell.effVal || 0;
+      }
+
+      packedData[offset] = ((note & 0xFF) << 24) | ((inst & 0xFF) << 16) | ((volCmd & 0xFF) << 8) | (volVal & 0xFF);
+      packedData[offset + 1] = ((effCmd & 0xFF) << 8) | (effVal & 0xFF);
+    }
+  }
+
+  return { packedData, noteCount: 0 };
+};
+
+/**
+ * Byte-for-byte parity check between GPU compute output and CPU fallback.
+ * Returns true if buffers match. Logs the first mismatch in dev mode.
+ */
+export function verifyDurationParity(
+  gpuData: Uint32Array,
+  matrix: PatternMatrix | null,
+  padTopChannel = false
+): boolean {
+  const { packedData: cpuData } = packPatternMatrixHighPrecision(matrix, padTopChannel);
+  if (gpuData.length !== cpuData.length) {
+    console.error(
+      `[DURA-PARITY] Length mismatch: GPU=${gpuData.length} CPU=${cpuData.length}`
+    );
+    return false;
+  }
+  for (let i = 0; i < gpuData.length; i++) {
+    const gpuVal = gpuData[i]!;
+    const cpuVal = cpuData[i]!;
+    if (gpuVal !== cpuVal) {
+      const cellIdx = Math.floor(i / 2);
+      const isPackedA = i % 2 === 0;
+      console.error(
+        `[DURA-PARITY] Mismatch at index ${i} (cell=${cellIdx}, ${isPackedA ? 'packedA' : 'packedB'}): ` +
+        `GPU=0x${gpuVal.toString(16).padStart(8, '0')} ` +
+        `CPU=0x${cpuVal.toString(16).padStart(8, '0')}`
+      );
+      return false;
+    }
+  }
+  console.log('[DURA-PARITY] ✓ GPU and CPU outputs match byte-for-byte');
+  return true;
+}
+
 export const buildRowFlags = (numRows: number): Uint32Array => {
   const flags = new Uint32Array(numRows);
   for (let r = 0; r < numRows; r++) {

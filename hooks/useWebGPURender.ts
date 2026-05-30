@@ -20,11 +20,20 @@ import {
   fillChannelStates,
   packPatternMatrix,
   packPatternMatrixHighPrecision,
+  packPatternMatrixComputeInput,
   createBufferWithData,
   buildRowFlags,
+  verifyDurationParity,
   DEFAULT_ROWS,
   DEFAULT_CHANNELS,
 } from '../utils/gpuPacking';
+import {
+  initNoteDurationCompute,
+  runNoteDurationCompute,
+  canUseComputePath,
+  readbackBuffer,
+  type NoteDurationComputeState,
+} from '../utils/computeNoteDuration';
 import type { BloomPostProcessor } from '../utils/bloomPostProcessor';
 import { GRID_RECT } from '../utils/geometryConstants';
 import { detectRuntimeBase } from '../src/lib/paths';
@@ -109,6 +118,7 @@ export function useWebGPURender(
   const videoTextureRef = useRef<GPUTexture | null>(null);
   const renderFrameCountRef = useRef<number>(0);
   const bezelPipelineRef = useRef<GPURenderPipeline | null>(null);
+  const computeStateRef = useRef<NoteDurationComputeState | null>(null);
   const bezelBindGroupRef = useRef<GPUBindGroup | null>(null);
   const bezelUniformBufferRef = useRef<GPUBuffer | null>(null);
 
@@ -330,9 +340,45 @@ export function useWebGPURender(
 
         const p = renderParamsRef.current;
         const isHighPrec = shaderFile.includes('v0.36') || shaderFile.includes('v0.37') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.47') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49') || shaderFile.includes('v0.50') || shaderFile.includes('v0.51') || shaderFile.includes('v0.55');
-        const packFunc = isHighPrec ? packPatternMatrixHighPrecision : packPatternMatrix;
-        const { packedData } = packFunc(p.matrix, p.padTopChannel);
-        cellsBufferRef.current = createBufferWithData(device, packedData, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
+
+        // DURA-001: initialize compute pipeline for high-precision shaders
+        if (isHighPrec && !computeStateRef.current) {
+          try {
+            computeStateRef.current = await initNoteDurationCompute(device);
+          } catch (e) {
+            console.warn('[DURA-001] Compute pipeline init failed, falling back to CPU:', e);
+          }
+        }
+
+        const useCompute = isHighPrec && computeStateRef.current && canUseComputePath(p.matrix);
+        if (useCompute) {
+          const rawPacked = packPatternMatrixComputeInput(p.matrix, p.padTopChannel);
+          const rawBuffer = createBufferWithData(device, rawPacked.packedData, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
+          const numRows = p.matrix?.numRows ?? DEFAULT_ROWS;
+          const rawChannels = p.matrix?.numChannels ?? DEFAULT_CHANNELS;
+          const numChannels = p.padTopChannel ? rawChannels + 1 : rawChannels;
+          cellsBufferRef.current = runNoteDurationCompute(
+            device, computeStateRef.current!, rawBuffer,
+            numRows, numChannels, p.padTopChannel
+          );
+          rawBuffer.destroy();
+
+          // DEV parity check: compare GPU output against CPU fallback
+          if (import.meta.env.DEV) {
+            (async () => {
+              const buffer = cellsBufferRef.current;
+              if (!buffer) return;
+              const gpuData = await readbackBuffer(device, buffer, buffer.size);
+              if (gpuData) {
+                verifyDurationParity(gpuData, p.matrix, p.padTopChannel);
+              }
+            })();
+          }
+        } else {
+          const packFunc = isHighPrec ? packPatternMatrixHighPrecision : packPatternMatrix;
+          const { packedData } = packFunc(p.matrix, p.padTopChannel);
+          cellsBufferRef.current = createBufferWithData(device, packedData, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
+        }
 
         if (layoutType === 'extended') {
           const numRows = p.matrix?.numRows ?? DEFAULT_ROWS;
@@ -378,6 +424,7 @@ export function useWebGPURender(
       rowFlagsBufferRef.current = null;
       channelsBufferRef.current = null;
       textureResourcesRef.current = null;
+      computeStateRef.current = null;
       if (videoTextureRef.current) {
         try { videoTextureRef.current.destroy(); } catch { /* ignore */ }
         videoTextureRef.current = null;
@@ -406,18 +453,46 @@ export function useWebGPURender(
     renderFrameCountRef.current = 0;
     if (cellsBufferRef.current) cellsBufferRef.current.destroy();
     const isHighPrec = shaderFile.includes('v0.36') || shaderFile.includes('v0.37') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.47') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49') || shaderFile.includes('v0.50') || shaderFile.includes('v0.51');
-    const packFunc = isHighPrec ? packPatternMatrixHighPrecision : packPatternMatrix;
-    const { packedData } = packFunc(p.matrix, p.padTopChannel);
-    // DEBUG: packed data stats
-    cellsBufferRef.current = createBufferWithData(device, packedData, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
 
-    // DEV INVARIANT: GPU buffer size must match packed data size
+    const useCompute = isHighPrec && computeStateRef.current && canUseComputePath(p.matrix);
+    if (useCompute) {
+      const rawPacked = packPatternMatrixComputeInput(p.matrix, p.padTopChannel);
+      const rawBuffer = createBufferWithData(device, rawPacked.packedData, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
+      const outNumRows = p.matrix?.numRows ?? DEFAULT_ROWS;
+      const outRawChannels = p.matrix?.numChannels ?? DEFAULT_CHANNELS;
+      const outNumChannels = p.padTopChannel ? outRawChannels + 1 : outRawChannels;
+      cellsBufferRef.current = runNoteDurationCompute(
+        device, computeStateRef.current!, rawBuffer,
+        outNumRows, outNumChannels, p.padTopChannel
+      );
+      rawBuffer.destroy();
+
+      // DEV parity check
+      if (import.meta.env.DEV) {
+        (async () => {
+          const buffer = cellsBufferRef.current;
+          if (!buffer) return;
+          const gpuData = await readbackBuffer(device, buffer, buffer.size);
+          if (gpuData) {
+            verifyDurationParity(gpuData, p.matrix, p.padTopChannel);
+          }
+        })();
+      }
+    } else {
+      const packFunc = isHighPrec ? packPatternMatrixHighPrecision : packPatternMatrix;
+      const { packedData } = packFunc(p.matrix, p.padTopChannel);
+      // DEBUG: packed data stats
+      cellsBufferRef.current = createBufferWithData(device, packedData, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
+    }
+
+    // DEV INVARIANT: GPU buffer size must match expected cell data size
     if (import.meta.env?.DEV && cellsBufferRef.current) {
-      if (cellsBufferRef.current.size !== packedData.byteLength) {
+      const expectedBytes = numRows * numChannels * 2 * 4;
+      if (cellsBufferRef.current.size !== expectedBytes) {
         console.error(
           `[useWebGPURender INVARIANT] cells buffer size mismatch. ` +
-          `bufferSize=${cellsBufferRef.current.size}, packedDataByteLength=${packedData.byteLength}, ` +
-          `actualCells=${packedData.length / 2}, expectedCells=${numRows * numChannels}`
+          `bufferSize=${cellsBufferRef.current.size}, expectedBytes=${expectedBytes}, ` +
+          `expectedCells=${numRows * numChannels}`
         );
       }
     }
