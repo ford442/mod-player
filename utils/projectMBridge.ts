@@ -6,7 +6,23 @@
  * forwards time-domain PCM audio data so the visualizer can receive the
  * audio stream.
  *
- * Three delivery channels are used in parallel:
+ * Two delivery paths are supported:
+ *
+ *   ── New (preferred): worklet-driven PCM ──────────────────────────────────
+ *   broadcastPcmBlock() is called from the AudioWorklet message handler
+ *   whenever the worklet emits a 'projectm-pcm' block.  The PCM is rendered
+ *   inside process() at audio-clock rate, so it carries no RAF jitter and
+ *   contains authentic stereo samples straight from the WASM renderer.
+ *   Block size is fixed (~512 samples) as required by Project-M.
+ *
+ *   ── Legacy (fallback): requestAnimationFrame + AnalyserNode ─────────────
+ *   startProjectMBridge() starts a ~60 fps RAF loop that calls
+ *   AnalyserNode.getFloatTimeDomainData().  This path is retained for
+ *   non-worklet engines (ScriptProcessor fallback) and for backward
+ *   compatibility, but suffers from variable block sizes, background-tab
+ *   throttling, and mono-only output.
+ *
+ * Three delivery channels are used in parallel by both paths:
  *   1. BroadcastChannel('projectm-audio') – same-origin tabs / service workers
  *   2. window.opener.postMessage()         – popup launched via window.open()
  *   3. window.parent.postMessage()         – embedded iframe context
@@ -17,19 +33,77 @@ const DEFAULT_FFT_SIZE = 2048;
 
 /** Shape of every PCM message sent to project-M.
  *
- * `channels` is always 1 (mono) because getFloatTimeDomainData() returns a
- * single mono-mixed buffer.  The projectM receiver protocol expects this
- * field to be present so it can allocate the right number of sample arrays.
+ * `channels` is 1 (mono) for the legacy RAF path or 2 (interleaved stereo)
+ * for the worklet-driven path.  Stereo buffers are laid out as
+ * L0,R0, L1,R1, … so receivers can handle either width by checking this field.
  */
 interface ProjectMPcmMessage {
   type: 'pcm';
   buffer: Float32Array;
-  /** Number of audio channels in the buffer (always mono / 1). */
-  channels: 1;
+  /** Number of audio channels: 1 = mono (legacy RAF path), 2 = interleaved stereo (worklet path). */
+  channels: 1 | 2;
+}
+
+// ── Shared channel for worklet-driven PCM blocks ──────────────────────────────
+// Lazily created on the first broadcastPcmBlock() call and kept open for the
+// page lifetime (no cleanup needed since BroadcastChannel is low-weight and
+// the worklet path is active as long as the page is alive).
+let _workletPcmChannel: BroadcastChannel | null = null;
+
+/**
+ * Broadcast a pre-rendered PCM block to Project-M receivers.
+ *
+ * This is the new audio-clock-accurate path.  Call it from the AudioWorklet
+ * message handler whenever a 'projectm-pcm' event arrives; the worklet has
+ * already accumulated a fixed-size block (default 512 samples per channel)
+ * so the block size is stable and the timing matches the audio render clock.
+ *
+ * The function is a no-op when the page is neither a popup nor an iframe,
+ * so it is safe to call unconditionally.
+ *
+ * @param buffer   Float32Array of PCM samples (interleaved stereo or mono)
+ * @param channels 2 for interleaved stereo (L0,R0,L1,R1,…), 1 for mono
+ */
+export function broadcastPcmBlock(buffer: Float32Array, channels: 1 | 2): void {
+  const isPopup = !!window.opener;
+  const isIframe = window.parent !== window;
+
+  if (!isPopup && !isIframe) return;
+
+  if (!_workletPcmChannel) {
+    _workletPcmChannel = new BroadcastChannel('projectm-audio');
+  }
+
+  const msg: ProjectMPcmMessage = { type: 'pcm', buffer, channels };
+
+  // 1. BroadcastChannel – reaches same-origin contexts
+  _workletPcmChannel.postMessage(msg);
+
+  // 2. Direct postMessage to opener (popup mode)
+  if (isPopup) {
+    try {
+      window.opener.postMessage(msg, '*');
+    } catch {
+      // opener may be cross-origin or closed; ignore
+    }
+  }
+
+  // 3. Direct postMessage to parent frame (iframe mode)
+  if (isIframe) {
+    try {
+      window.parent.postMessage(msg, '*');
+    } catch {
+      // parent may be cross-origin; ignore
+    }
+  }
 }
 
 /**
- * Start broadcasting PCM audio data to project-M.
+ * Start broadcasting PCM audio data to project-M via the legacy RAF path.
+ *
+ * @deprecated Prefer the worklet-driven path (broadcastPcmBlock) which delivers
+ * audio-clock-accurate fixed-size blocks without RAF jitter.  This function is
+ * retained as a fallback for non-worklet engines (e.g. ScriptProcessorNode).
  *
  * Activates when:
  *   - opened as a popup (window.opener is set), OR
@@ -54,9 +128,11 @@ export function startProjectMBridge(analyser: AnalyserNode | null): () => void {
   }
 
   console.log(
-    `[ProjectM] Detected ${isPopup ? 'popup' : 'iframe'} context. Starting PCM broadcast...`
+    `[ProjectM] Detected ${isPopup ? 'popup' : 'iframe'} context. Starting legacy RAF PCM broadcast...`
   );
 
+  // Use a dedicated channel for the RAF path so it doesn't interfere with
+  // the worklet-driven broadcastPcmBlock() channel.
   const channel = new BroadcastChannel('projectm-audio');
   const analyserNode = analyser;
   const buf = new Float32Array(analyserNode.fftSize || DEFAULT_FFT_SIZE);
@@ -66,6 +142,7 @@ export function startProjectMBridge(analyser: AnalyserNode | null): () => void {
     analyserNode.getFloatTimeDomainData(buf);
     // Use slice() so the transfer doesn't detach the reusable buffer
     const copy = buf.slice();
+    // Legacy path always sends mono (channels: 1)
     const msg: ProjectMPcmMessage = { type: 'pcm', buffer: copy, channels: 1 };
 
     // 1. BroadcastChannel – reaches same-origin contexts
@@ -93,10 +170,10 @@ export function startProjectMBridge(analyser: AnalyserNode | null): () => void {
   }
 
   rafId = requestAnimationFrame(send);
-  console.log('[ProjectM] PCM broadcast started');
+  console.log('[ProjectM] Legacy RAF PCM broadcast started');
 
   return () => {
-    console.log('[ProjectM] Stopping PCM broadcast...');
+    console.log('[ProjectM] Stopping legacy RAF PCM broadcast...');
     cancelAnimationFrame(rafId);
     channel.close();
   };

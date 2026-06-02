@@ -73,6 +73,17 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
     this.positionReportInterval = 1 / 60;
     this.lastPositionReportTime = 0;
 
+    // ── Project-M PCM accumulation ─────────────────────────────────
+    // Accumulate audio-clock-accurate stereo PCM blocks and emit them
+    // to the main thread for Project-M visualization.  Doing this here
+    // (inside process()) avoids the jitter and background-tab throttling
+    // of the requestAnimationFrame path and provides authentic PCM
+    // directly from the WASM render callback.
+    this.pcmChunkSize = 512;   // target block size (~11.6 ms @ 44100 Hz)
+    this.pcmAccumL = new Float32Array(this.pcmChunkSize);
+    this.pcmAccumR = new Float32Array(this.pcmChunkSize);
+    this.pcmAccumCount = 0;
+
     log('Constructor called, sampleRate:', sampleRate);
 
     // _libInitPromise resolves once the main thread sends 'initLib'
@@ -343,6 +354,45 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
     if (samplesWritten < numSamples) {
       outL.fill(0, samplesWritten);
       outR.fill(0, samplesWritten);
+    }
+
+    // ── Project-M PCM accumulation ─────────────────────────────────
+    // Accumulate rendered stereo samples into a fixed-size block and emit
+    // a 'projectm-pcm' message when the block is full.  This runs at audio
+    // callback rate (no RAF jitter) and delivers authentic PCM straight from
+    // the WASM renderer, solving the timing issues of the legacy
+    // requestAnimationFrame + AnalyserNode.getFloatTimeDomainData() path.
+    {
+      let src = 0;
+      while (src < samplesWritten) {
+        const space = this.pcmChunkSize - this.pcmAccumCount;
+        const toCopy = Math.min(samplesWritten - src, space);
+        this.pcmAccumL.set(outL.subarray(src, src + toCopy), this.pcmAccumCount);
+        this.pcmAccumR.set(outR.subarray(src, src + toCopy), this.pcmAccumCount);
+        this.pcmAccumCount += toCopy;
+        src += toCopy;
+
+        if (this.pcmAccumCount >= this.pcmChunkSize) {
+          // Build interleaved stereo Float32Array: L0,R0, L1,R1, …
+          // The element-by-element loop is the only way to interleave two
+          // typed arrays with different strides; for 512 samples this is
+          // ~1024 writes per block (~88 blocks/s @ 44100 Hz) — negligible
+          // overhead relative to the WASM render call above.
+          const interleaved = new Float32Array(this.pcmChunkSize * 2);
+          for (let i = 0; i < this.pcmChunkSize; i++) {
+            interleaved[i * 2]     = this.pcmAccumL[i];
+            interleaved[i * 2 + 1] = this.pcmAccumR[i];
+          }
+          // `sampleRate` is a read-only global in AudioWorkletGlobalScope
+          // (spec §4.3), like `currentTime`.  No `this.` prefix needed.
+          this.port.postMessage(
+            { type: 'projectm-pcm', buffer: interleaved, channels: 2,
+              sampleRate, samplesPerChannel: this.pcmChunkSize },
+            [interleaved.buffer]
+          );
+          this.pcmAccumCount = 0;
+        }
+      }
     }
 
     // Position reporting at ~60 Hz
