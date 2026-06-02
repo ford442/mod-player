@@ -92,6 +92,7 @@ export interface LibOpenMPT {
   _openmpt_module_get_num_orders: (modPtr: number) => number;
   _openmpt_module_get_order_pattern: (modPtr: number, order: number) => number;
   _openmpt_module_get_current_estimated_bpm: (modPtr: number) => number;
+  _openmpt_module_get_current_channel_vu_mono: (modPtr: number, channel: number) => number;
   _openmpt_module_set_position_order_row: (
     modPtr: number,
     order: number,

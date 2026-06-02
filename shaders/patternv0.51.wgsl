@@ -136,6 +136,18 @@ fn selectPalette(id: u32, t: f32) -> vec3<f32> {
   } else if (id == 4u) {
     // Acid: green, yellow, chartreuse
     return a + b * cos(6.28318 * (c * t + vec3<f32>(0.3, 0.0, 0.7)));
+  } else if (id == 5u) {
+    // Circle of Fifths: fully-saturated HSV wheel — t is used directly as hue.
+    let h6  = t * 6.0;
+    let hi  = u32(h6) % 6u;
+    let f   = h6 - floor(h6);
+    let q   = 1.0 - f;
+    if      (hi == 0u) { return vec3<f32>(1.0, f,   0.0); }
+    else if (hi == 1u) { return vec3<f32>(q,   1.0, 0.0); }
+    else if (hi == 2u) { return vec3<f32>(0.0, 1.0, f  ); }
+    else if (hi == 3u) { return vec3<f32>(0.0, q,   1.0); }
+    else if (hi == 4u) { return vec3<f32>(f,   0.0, 1.0); }
+    else               { return vec3<f32>(1.0, 0.0, q  ); }
   }
   // Default palette 0: Rainbow
   return a + b * cos(6.28318 * (c * t + vec3<f32>(0.0, 0.33, 0.67)));
@@ -175,9 +187,27 @@ const COLOR_PRESERVE_SCALE: f32 = 0.8;
 const COLOR_PRESERVE_MAX: f32   = 0.85;
 
 fn pitchClassFromIndex(note: u32) -> f32 {
-  if (note == 0u || note > 96u) { return 0.0; }
+  if (note == 0u || note > NOTE_MAX) { return 0.0; }
   let semi = (note - 1u) % 12u;
   return f32(semi) / 12.0;
+}
+
+fn fifthsHue(note: u32) -> f32 {
+  if (note == 0u || note > NOTE_MAX) { return 0.0; }
+  let semi = (note - 1u) % 12u;
+  let cof  = (semi * 7u) % 12u;
+  return f32(cof) / 12.0;
+}
+
+fn octaveBrightness(note: u32) -> f32 {
+  if (note == 0u || note > NOTE_MAX) { return 1.0; }
+  let oct = (note - 1u) / 12u;
+  return 0.65 + 0.35 * f32(oct) / 9.0;
+}
+
+fn pitchHueForPalette(note: u32, paletteId: u32) -> f32 {
+  if (paletteId == 5u) { return fifthsHue(note); }
+  return pitchClassFromIndex(note);
 }
 
 fn neonPalette(t: f32) -> vec3<f32> {
@@ -601,11 +631,12 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     var midIntensity = 0.02; // Base dim glow for dead/empty cells
 
     if (isNoteOn || isSustain) {
-      let pitchHue = pitchClassFromIndex(note);
+      let pitchHue = pitchHueForPalette(note, uniforms.colorPalette);
       let baseColor = selectPalette(uniforms.colorPalette, pitchHue);
       let instBand = inst & 15u;
       let instBright = 0.85 + (select(0.0, f32(instBand) / 15.0, instBand > 0u)) * 0.15;
-      noteColor = baseColor * instBright;
+      let octBright = octaveBrightness(note);
+      noteColor = baseColor * instBright * octBright;
 
       if (isNoteOn) {
         midIntensity = calculateSustainBrightness(dInfo, 0.8 + bloom * 2.0);

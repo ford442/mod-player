@@ -459,6 +459,12 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
         const noteAges = computeNoteAges(currentMatrix, playheadRow);
         let changed = false;
 
+        // On the SP fallback path, lib/modPtr are available and the worklet
+        // message handler never runs, so volume/trigger are never refreshed
+        // there. Query VU directly here instead.
+        const spLib = (activeEngine !== 'worklet' && activeEngine !== 'native-worklet') ? lib : null;
+        const spPtr = spLib && modPtr !== 0 ? modPtr : 0;
+
         for (let c = 0; c < numChannels; c++) {
           const newAge = noteAges[c] ?? 1000;
           const existing = channelStatesRef.current[c];
@@ -468,9 +474,19 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
             changed = true;
           }
 
+          let volume = existing.volume;
+          let trigger = existing.trigger;
+          if (spLib && spPtr) {
+            const vu: number = spLib._openmpt_module_get_current_channel_vu_mono(spPtr, c) as number;
+            volume = vu;
+            trigger = vu > 0.05 ? 1 : 0;
+          }
+
           channelStatesRef.current[c] = {
             ...existing,
             noteAge: newAge,
+            volume,
+            trigger,
           };
         }
 

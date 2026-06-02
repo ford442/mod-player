@@ -82,7 +82,7 @@ export function computeNoteAges(matrix: PatternMatrix, playheadRow: number): num
     // Scan backwards from current row for most recent note-on
     for (let r = row; r >= 0; r--) {
       const cell = matrix.rows[r]?.[c];
-      if (cell && cell.note && cell.note >= 1 && cell.note <= 96) {
+      if (cell && cell.note && cell.note >= NOTE_VALID_MIN && cell.note <= NOTE_VALID_MAX) {
         ages[c] = playheadRow - r;
         break;
       }
@@ -91,7 +91,7 @@ export function computeNoteAges(matrix: PatternMatrix, playheadRow: number): num
     if (ages[c] === 1000) {
       for (let r = numRows - 1; r > row; r--) {
         const cell = matrix.rows[r]?.[c];
-        if (cell && cell.note && cell.note >= 1 && cell.note <= 96) {
+        if (cell && cell.note && cell.note >= NOTE_VALID_MIN && cell.note <= NOTE_VALID_MAX) {
           ages[c] = playheadRow + (numRows - r);
           break;
         }

@@ -638,38 +638,49 @@ export const packPatternMatrixComputeInput = (matrix: PatternMatrix | null, padT
   return { packedData, noteCount: 0 };
 };
 
+export interface DurationParityResult {
+  ok: boolean;
+  /** Human-readable summary of the first up-to-3 mismatches, or null on success. */
+  errorSummary: string | null;
+}
+
 /**
  * Byte-for-byte parity check between GPU compute output and CPU fallback.
- * Returns true if buffers match. Logs the first mismatch in dev mode.
+ * Returns a result object so callers can surface failures in the UI.
  */
 export function verifyDurationParity(
   gpuData: Uint32Array,
   matrix: PatternMatrix | null,
   padTopChannel = false
-): boolean {
+): DurationParityResult {
   const { packedData: cpuData } = packPatternMatrixHighPrecision(matrix, padTopChannel);
   if (gpuData.length !== cpuData.length) {
-    console.error(
-      `[DURA-PARITY] Length mismatch: GPU=${gpuData.length} CPU=${cpuData.length}`
-    );
-    return false;
+    const msg = `DURA-PARITY: length mismatch GPU=${gpuData.length} CPU=${cpuData.length}`;
+    console.error(`[${msg}]`);
+    return { ok: false, errorSummary: msg };
   }
-  for (let i = 0; i < gpuData.length; i++) {
+
+  const mismatches: string[] = [];
+  for (let i = 0; i < gpuData.length && mismatches.length < 3; i++) {
     const gpuVal = gpuData[i]!;
     const cpuVal = cpuData[i]!;
     if (gpuVal !== cpuVal) {
+      const numChannels = (matrix?.numChannels ?? DEFAULT_CHANNELS) + (padTopChannel ? 1 : 0);
+      const numRows = matrix?.numRows ?? DEFAULT_ROWS;
       const cellIdx = Math.floor(i / 2);
-      const isPackedA = i % 2 === 0;
-      console.error(
-        `[DURA-PARITY] Mismatch at index ${i} (cell=${cellIdx}, ${isPackedA ? 'packedA' : 'packedB'}): ` +
-        `GPU=0x${gpuVal.toString(16).padStart(8, '0')} ` +
-        `CPU=0x${cpuVal.toString(16).padStart(8, '0')}`
-      );
-      return false;
+      const row = Math.floor(cellIdx / numChannels);
+      const ch  = cellIdx % numChannels;
+      const word = i % 2 === 0 ? 'A' : 'B';
+      const m = `r${row}c${ch}[${word}]: GPU=0x${gpuVal.toString(16).padStart(8,'0')} CPU=0x${cpuVal.toString(16).padStart(8,'0')}`;
+      mismatches.push(m);
+      console.error(`[DURA-PARITY] ${m} (numRows=${numRows})`);
     }
   }
-  console.log('[DURA-PARITY] ✓ GPU and CPU outputs match byte-for-byte');
-  return true;
+
+  if (mismatches.length > 0) {
+    return { ok: false, errorSummary: `DURA-PARITY: ${mismatches.join(' | ')}` };
+  }
+  return { ok: true, errorSummary: null };
 }
 
 export const buildRowFlags = (numRows: number): Uint32Array => {

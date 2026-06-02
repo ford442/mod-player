@@ -472,7 +472,7 @@ export async function startAudioPlayback(
         }
 
         node.port.onmessage = async (e) => {
-          const { type, order, row, positionSeconds, message, bpm } = e.data;
+          const { type, order, row, positionSeconds, message, bpm, channelVU } = e.data;
 
           if (type === 'position') {
             const now = ctx.currentTime;
@@ -503,11 +503,12 @@ export async function startAudioPlayback(
               const noteAges = computeNoteAges(matrix, row);
               for (let c = 0; c < noteAges.length && c < refs.channelStatesRef.current.length; c++) {
                 const existing = refs.channelStatesRef.current[c];
+                const vu = (channelVU && channelVU[c] != null) ? (channelVU[c] as number) : (existing?.volume ?? 0);
                 refs.channelStatesRef.current[c] = {
-                  volume: existing?.volume ?? 0,
+                  volume: vu,
                   pan: existing?.pan ?? 128,
                   freq: existing?.freq ?? 0,
-                  trigger: existing?.trigger ?? 0,
+                  trigger: vu > 0.05 ? 1 : 0,
                   noteAge: noteAges[c] ?? existing?.noteAge ?? 1000,
                   activeEffect: existing?.activeEffect ?? 0,
                   effectValue: existing?.effectValue ?? 0,

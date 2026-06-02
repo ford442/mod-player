@@ -204,7 +204,7 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   let inst = in.packedA & 255u;
   let effCode = (in.packedB >> 8) & 255u;
   let effParam = in.packedB & 255u;
-  let hasNote = (note >= 1u && note <= 96u);
+  let hasNote = (note >= 1u && note <= 119u);
   let hasEffect = (effParam > 0u);
 
   // Get channel state for note activity with bounds check

@@ -3,8 +3,10 @@ import { ChannelShadowState, PatternMatrix, PlaybackState } from '../types';
 
 import { useWebGLOverlay } from '../hooks/useWebGLOverlay';
 import { useWebGPURender, type WebGPURenderParams, type DebugInfo } from '../hooks/useWebGPURender';
-import { BloomPostProcessor, DEFAULT_LAYERS } from '../utils/bloomPostProcessor';
+import { BloomPostProcessor } from '../utils/bloomPostProcessor';
 import { WEBGL_HYBRID_SHADERS, supportsStepsLength } from '../utils/shaderVersion';
+import { getShaderMeta } from '../utils/shaderRegistry';
+import { getBloomProfile } from '../utils/bloomProfiles';
 
 const DEFAULT_CHANNELS = 4;
 
@@ -115,6 +117,8 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   const containerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const bloomRef = useRef<BloomPostProcessor | null>(null);
+  // DEV: debug bloom layer isolation state (-1 = all layers, 0/1/2 = isolated)
+  const [debugBloomLayer, setDebugBloomLayer] = useState<number>(-1);
 
   // Night Mode — animated themeBlend (0=day, 1=night)
   // Transition speed: 400ms for a smooth, perceptible feel (not jarring).
@@ -353,10 +357,14 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     const context = canvas.getContext('webgpu') as GPUCanvasContext | null;
     if (!context) return;
 
-    const bloom = new BloomPostProcessor(device, canvas, context, {
-      layers: DEFAULT_LAYERS,
-      finalFormat: navigator.gpu.getPreferredCanvasFormat(),
-    });
+    const meta = getShaderMeta(shaderFile);
+    const bloomLayers = meta?.bloomProfile
+      ? getBloomProfile(meta.bloomProfile)
+      : undefined;
+    const bloomOptions = bloomLayers
+      ? { layers: [...bloomLayers], finalFormat: navigator.gpu.getPreferredCanvasFormat() }
+      : { finalFormat: navigator.gpu.getPreferredCanvasFormat() };
+    const bloom = new BloomPostProcessor(device, canvas, context, bloomOptions);
     bloom.setBaseUrl(import.meta.env.BASE_URL);
     bloom.init().then(() => {
       bloomRef.current = bloom;
@@ -369,6 +377,27 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
       bloomRef.current = null;
     };
   }, [gpuReady, shaderFile]);
+
+  // DEV: Alt+B cycles bloom layer isolation (trigger → sustain → expression/trace → all)
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    const handler = (e: KeyboardEvent) => {
+      if (!e.altKey || e.key !== 'b') return;
+      e.preventDefault();
+      const bloom = bloomRef.current;
+      if (!bloom) return;
+      // Cycle: -1 → 0 → 1 → 2 → -1
+      setDebugBloomLayer(prev => {
+        const next = prev >= 2 ? -1 : prev + 1;
+        bloom.setDebugLayer(next);
+        const label = bloom.getDebugLayerLabel();
+        console.log(`[Bloom debug] layer: ${label ?? 'all'}`);
+        return next;
+      });
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
 
   // Canvas click handler for shader-embedded UI interaction
   const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -586,6 +615,14 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
                 <span className="text-cyan-300 ml-2">{String(val)}</span>
               </div>
             ))}
+          </div>
+        </div>
+      )}
+      {import.meta.env.DEV && debugBloomLayer >= 0 && (
+        <div className="absolute top-2 right-2 z-50 pointer-events-none">
+          <div className="bg-black/80 text-yellow-300 font-mono text-[10px] px-2 py-1 rounded border border-yellow-500/60">
+            BLOOM: {bloomRef.current?.getDebugLayerLabel() ?? `layer ${debugBloomLayer}`} only
+            <span className="text-gray-500 ml-1">(Alt+B)</span>
           </div>
         </div>
       )}

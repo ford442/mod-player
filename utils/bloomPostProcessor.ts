@@ -55,6 +55,8 @@ export class BloomPostProcessor {
   // Layered resources
   private layers: BloomLayer[] | null = null;
   private layerResources: LayerResources[] = [];
+  // Debug: when >= 0, only this layer index contributes (others get weight 0)
+  private debugLayerIndex: number = -1;
   private layeredCompositeBindGroup!: GPUBindGroup;
 
   // Pipelines (shared between legacy and layered)
@@ -538,14 +540,13 @@ export class BloomPostProcessor {
     }
 
     // Composite pass: scene + all blurred layers -> swapchain
+    const dbg = this.debugLayerIndex;
+    const w0 = (dbg < 0 || dbg === 0) ? this.layers![0]!.weight : 0;
+    const w1 = (dbg < 0 || dbg === 1) ? this.layers![1]!.weight : 0;
+    const w2 = (dbg < 0 || dbg === 2) ? this.layers![2]!.weight : 0;
     this.device.queue.writeBuffer(
       this.compositeBuffer, 0,
-      new Float32Array([
-        1.0, // sceneIntensity
-        this.layers![0]!.weight,
-        this.layers![1]!.weight,
-        this.layers![2]!.weight,
-      ])
+      new Float32Array([1.0, w0, w1, w2])
     );
 
     const compositePass = commandEncoder.beginRenderPass({
@@ -585,6 +586,26 @@ export class BloomPostProcessor {
   // Apply a bloom preset with all parameters
   public applyPreset(preset: { intensity: number; threshold: number; knee: number }, sceneIntensity: number = 1.0) {
     this.updateUniforms(preset.intensity, preset.threshold, preset.knee, sceneIntensity);
+  }
+
+  /**
+   * Debug visualization: isolate a single bloom layer.
+   * Pass layerIndex 0/1/2 to show only that layer's contribution.
+   * Pass -1 to restore all layers.
+   *
+   * Layer indices for three-emitter shaders:
+   *   0 = trigger  (note-on flash, blue)
+   *   1 = sustain  (sustain tail, cool blue)
+   *   2 = expression / trace  (amber for LED, green for oscilloscope)
+   */
+  public setDebugLayer(layerIndex: number): void {
+    this.debugLayerIndex = layerIndex;
+  }
+
+  /** Returns the label of the currently isolated layer, or null if all layers are active. */
+  public getDebugLayerLabel(): string | null {
+    if (this.debugLayerIndex < 0 || !this.layers) return null;
+    return this.layers[this.debugLayerIndex]?.label ?? null;
   }
 
   // Update CRT scanline + vignette uniforms.

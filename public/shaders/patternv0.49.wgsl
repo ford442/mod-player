@@ -73,9 +73,9 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
 
   let radius = minRadius + f32(ringIndex) * ringDepth;
 
-  let totalSteps = 64.0;
+  let totalSteps = f32(uniforms.numRows);
   let anglePerStep = 6.2831853 / totalSteps;
-  let theta = -1.570796 + f32(row % 64u) * anglePerStep;
+  let theta = -1.570796 + f32(row % uniforms.numRows) * anglePerStep;
 
   let circumference = 2.0 * 3.14159265 * radius;
   let arcLength = circumference / totalSteps;
@@ -129,6 +129,18 @@ fn selectPalette(id: u32, t: f32) -> vec3<f32> {
   } else if (id == 4u) {
     // Acid: green, yellow, chartreuse
     return a + b * cos(6.28318 * (c * t + vec3<f32>(0.3, 0.0, 0.7)));
+  } else if (id == 5u) {
+    // Circle of Fifths: fully-saturated HSV wheel — t is used directly as hue.
+    let h6  = t * 6.0;
+    let hi  = u32(h6) % 6u;
+    let f   = h6 - floor(h6);
+    let q   = 1.0 - f;
+    if      (hi == 0u) { return vec3<f32>(1.0, f,   0.0); }
+    else if (hi == 1u) { return vec3<f32>(q,   1.0, 0.0); }
+    else if (hi == 2u) { return vec3<f32>(0.0, 1.0, f  ); }
+    else if (hi == 3u) { return vec3<f32>(0.0, q,   1.0); }
+    else if (hi == 4u) { return vec3<f32>(f,   0.0, 1.0); }
+    else               { return vec3<f32>(1.0, 0.0, q  ); }
   }
   // Default palette 0: Rainbow
   return a + b * cos(6.28318 * (c * t + vec3<f32>(0.0, 0.33, 0.67)));
@@ -149,9 +161,27 @@ fn sdEllipse(p: vec2<f32>, ab: vec2<f32>) -> f32 {
 }
 
 fn pitchClassFromIndex(note: u32) -> f32 {
-  if (note == 0u) { return 0.0; }
+  if (note == 0u || note > 119u) { return 0.0; }
   let semi = (note - 1u) % 12u;
   return f32(semi) / 12.0;
+}
+
+fn fifthsHue(note: u32) -> f32 {
+  if (note == 0u || note > 119u) { return 0.0; }
+  let semi = (note - 1u) % 12u;
+  let cof  = (semi * 7u) % 12u;
+  return f32(cof) / 12.0;
+}
+
+fn octaveBrightness(note: u32) -> f32 {
+  if (note == 0u || note > 119u) { return 1.0; }
+  let oct = (note - 1u) / 12u;
+  return 0.65 + 0.35 * f32(oct) / 9.0;
+}
+
+fn pitchHueForPalette(note: u32, paletteId: u32) -> f32 {
+  if (paletteId == 5u) { return fifthsHue(note); }
+  return pitchClassFromIndex(note);
 }
 
 struct FragmentConstants {
@@ -301,10 +331,16 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   let kick = uniforms.kickTrigger;
   let beat = uniforms.beatPhase;
 
-  // Smooth playhead position — compute BEFORE any early discard
-  let playheadStep = uniforms.playheadRow - floor(uniforms.playheadRow / 64.0) * 64.0;
-  let rowDistRaw = abs(f32(in.row % 64u) - playheadStep);
-  let rowDist = min(rowDistRaw, 64.0 - rowDistRaw);
+  // Hardware Layering: Discard pixels over UI
+  if (in.position.y > uniforms.canvasH * 0.88) {
+    discard;
+  }
+
+  // Smooth playhead position
+  let maxRows = f32(uniforms.numRows);
+  let playheadStep = uniforms.playheadRow - floor(uniforms.playheadRow / maxRows) * maxRows;
+  let rowDistRaw = abs(f32(in.row % uniforms.numRows) - playheadStep);
+  let rowDist = min(rowDistRaw, maxRows - rowDistRaw);
   let playheadActivation = 1.0 - smoothstep(0.0, 1.5, rowDist);
 
   // CHANNEL 0 is the Indicator Ring (padTopChannel shifts music to 1-32)
@@ -352,25 +388,7 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     let hasNote = (note > 0u);
     let hasExpression = (volCmd > 0u) || (effCmd > 0u);
 
-    // Housing color: tint by note presence (restore color-per-note display)
-    var housingColor = fs.bgColor;
-    if (hasNote) {
-      let pitchHue = pitchClassFromIndex(note);
-      let baseColor = selectPalette(uniforms.colorPalette, pitchHue);
-      let instBand = inst & 15u;
-      let instBright = 0.85 + (select(0.0, f32(instBand) / 15.0, instBand > 0u)) * 0.15;
-      let tintColor = baseColor * instBright;
-      housingColor = mix(fs.bgColor, tintColor, 0.35);
-    }
-
-    // Start with tinted housing background
-    finalColor = housingColor;
-
-    // Bounds check for channel state array access
-    var ch = ChannelState(0.0, 0.0, 0.0, 0u, 1000.0, 0u, 0.0, 0u);
-    if (in.channel < arrayLength(&channels)) {
-      ch = channels[in.channel];
-    }
+    let ch = channels[in.channel];
     let isMuted = (ch.isMuted == 1u);
 
     // --- THREE-EMITTER SYSTEM ---
@@ -381,9 +399,9 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     var topIntensity = 0.0;
     if (!isMuted) {
       if (ch.trigger > 0u) {
-        topIntensity = 2.5;
-      } else if (hasNote) {
-        topIntensity = playheadActivation * 1.5;
+        topIntensity = 1.0 + bloom;
+      } else if (playheadActivation > 0.5) {
+        topIntensity = playheadActivation * 0.6;
       }
     }
 
@@ -392,11 +410,12 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     var midColor = vec3<f32>(0.15);
     var midIntensity = 0.12; // Base dim glow
     if (hasNote) {
-      let pitchHue = pitchClassFromIndex(note);
+      let pitchHue = pitchHueForPalette(note, uniforms.colorPalette);
       let baseColor = selectPalette(uniforms.colorPalette, pitchHue);
       let instBand = inst & 15u;
       let instBright = 0.85 + (select(0.0, f32(instBand) / 15.0, instBand > 0u)) * 0.15;
-      midColor = baseColor * instBright;
+      let octBright = octaveBrightness(note);
+      midColor = baseColor * instBright * octBright;
 
       // Steady indication - doesn't blink, just shows note presence
       midIntensity = 0.6 + bloom * 2.0;
@@ -407,12 +426,8 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     // Lights up when there's an effect or volume command
     let amberColor = vec3<f32>(1.0, 0.55, 0.1);
     var botIntensity = 0.0;
-    if (!isMuted) {
-      if (hasExpression) {
-        botIntensity = 2.0;
-      } else if (hasNote && playheadActivation > 0.5) {
-        botIntensity = 0.6;
-      }
+    if (!isMuted && hasExpression) {
+      botIntensity = 0.8 + bloom;
     }
 
     // --- RENDER UNIFIED GLASS LENS ---
@@ -429,20 +444,13 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
 
     finalColor = mix(finalColor, lens.rgb, lens.a);
 
-    // External glow — bloom-independent so LEDs are always visible
+    // Add external glow when active
     if (topIntensity > 0.0 || botIntensity > 0.0 || midIntensity > 0.5) {
       let totalActivity = topIntensity + botIntensity + (midIntensity - 0.12);
       let glowColor = mix(midColor, blueColor, topIntensity * 0.5);
       let glowColor2 = mix(glowColor, amberColor, botIntensity * 0.5);
-      let externalGlow = glowColor2 * totalActivity * (0.3 + bloom * 1.5) * exp(-length(p) * 4.0);
+      let externalGlow = glowColor2 * totalActivity * bloom * 2.0 * exp(-length(p) * 4.0);
       finalColor += externalGlow;
-    }
-    // Direct LED glow independent of bloom
-    if (!isMuted && ch.trigger > 0u) {
-      finalColor += blueColor * 0.4 * exp(-length(p) * 3.5);
-    }
-    if (!isMuted && hasExpression) {
-      finalColor += amberColor * 0.3 * exp(-length(p) * 3.5);
     }
   }
 

@@ -351,6 +351,11 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
       const row = this.lib._openmpt_module_get_current_row(this.modulePtr);
       const posSec = this.lib._openmpt_module_get_position_seconds(this.modulePtr);
       const bpm = this.lib._openmpt_module_get_current_estimated_bpm(this.modulePtr);
+      const numCh = this.lib._openmpt_module_get_num_channels(this.modulePtr);
+      const channelVU = [];
+      for (let i = 0; i < Math.min(numCh, 32); i++) {
+        channelVU.push(this.lib._openmpt_module_get_current_channel_vu_mono(this.modulePtr, i));
+      }
 
       this.port.postMessage({
         type: 'position',
@@ -359,6 +364,7 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
         positionSeconds: posSec,
         bpm,
         workletTime: currentTime,
+        channelVU,
       });
       this.lastPositionReportTime = currentTime;
     }

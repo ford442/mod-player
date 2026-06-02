@@ -68,15 +68,15 @@ fn drawDigit(p: vec2<f32>, digit: u32, size: f32) -> f32 {
     let segW = size * 0.15;
     let segL = size * 0.45;
     let gap = size * 0.05;
-    
+
     var segments = array<u32, 10>(
-        0x77u, 0x24u, 0x5du, 0x6du, 0x2eu, 
+        0x77u, 0x24u, 0x5du, 0x6du, 0x2eu,
         0x6bu, 0x7bu, 0x25u, 0x7fu, 0x6fu
     );
-    
+
     let code = select(0u, segments[digit], digit < 10u);
     var minDist = 100.0;
-    
+
     if ((code & 0x01u) != 0u) { minDist = min(minDist, sdBox(p - vec2<f32>(0.0, -segL), vec2<f32>(segL, segW))); }
     if ((code & 0x02u) != 0u) { minDist = min(minDist, sdBox(p - vec2<f32>(segL, -segL * 0.5 - gap * 0.5), vec2<f32>(segW, segL * 0.5))); }
     if ((code & 0x04u) != 0u) { minDist = min(minDist, sdBox(p - vec2<f32>(segL, segL * 0.5 + gap * 0.5), vec2<f32>(segW, segL * 0.5))); }
@@ -84,7 +84,7 @@ fn drawDigit(p: vec2<f32>, digit: u32, size: f32) -> f32 {
     if ((code & 0x10u) != 0u) { minDist = min(minDist, sdBox(p - vec2<f32>(-segL, segL * 0.5 + gap * 0.5), vec2<f32>(segW, segL * 0.5))); }
     if ((code & 0x20u) != 0u) { minDist = min(minDist, sdBox(p - vec2<f32>(-segL, -segL * 0.5 - gap * 0.5), vec2<f32>(segW, segL * 0.5))); }
     if ((code & 0x40u) != 0u) { minDist = min(minDist, sdBox(p, vec2<f32>(segL, segW))); }
-    
+
     return minDist;
 }
 
@@ -108,16 +108,16 @@ fn drawText(p: vec2<f32>, size: vec2<f32>) -> f32 {
 // White Square Button Style
 fn drawWhiteButton(uv: vec2<f32>, size: vec2<f32>, glowColor: vec3<f32>, isOn: bool, aa: f32) -> vec4<f32> {
   let halfSize = size * 0.5;
-  let d = sdRoundedBox(uv, halfSize, 0.015); 
+  let d = sdRoundedBox(uv, halfSize, 0.015);
 
-  var col = vec3<f32>(0.90, 0.90, 0.92); 
+  var col = vec3<f32>(0.90, 0.90, 0.92);
   col *= (0.95 + 0.05 * cos(uv.y * 8.0));
 
   var alpha = 0.0;
   let bodyMask = 1.0 - smoothstep(0.0, aa, d);
-  
+
   if (isOn) {
-      col = vec3<f32>(1.0, 1.0, 1.0); 
+      col = vec3<f32>(1.0, 1.0, 1.0);
       col = mix(col, glowColor, 0.2);
   } else {
       col = vec3<f32>(0.65, 0.65, 0.68);
@@ -160,8 +160,8 @@ fn vs(@builtin(vertex_index) vertexIndex: u32) -> VertOut {
 
 @fragment
 fn fs(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
-  let p = uv - 0.5; 
-  let aa = 1.0 / bez.canvasH; 
+  let p = uv - 0.5;
+  let aa = 1.0 / bez.canvasH;
 
   let colPlastic = vec3<f32>(0.08, 0.08, 0.10);
   let colRecess = vec3<f32>(0.05, 0.05, 0.06);
@@ -181,9 +181,9 @@ fn fs(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
   }
 
   let displayY = 0.45;
-  
+
   // --- 1. SLIDER DEFINITIONS ---
-  
+
   // Panning (Right Vertical) - kept as is
   let sliderRightX = 0.42;
   let sliderY = -0.2;
@@ -196,11 +196,11 @@ fn fs(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
   let volDim = vec2<f32>(0.09, 0.006); // Half-extents (0.18 width)
 
   // --- 2. LABELS ---
-  
+
   // Tempo/BPM
   let dTempoLabel = drawText(p - vec2<f32>(-0.07, displayY), vec2<f32>(0.03, 0.008));
   if (dTempoLabel < 0.0) { color = mix(color, vec3<f32>(0.6, 0.6, 0.7), smoothstep(aa, 0.0, dTempoLabel)); }
-  
+
   let dBPMLabel = drawText(p - vec2<f32>(0.07, displayY), vec2<f32>(0.015, 0.008));
   if (dBPMLabel < 0.0) { color = mix(color, vec3<f32>(0.6, 0.6, 0.7), smoothstep(aa, 0.0, dBPMLabel)); }
 
@@ -220,14 +220,14 @@ fn fs(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
   if (dVolTrack < 0.0) {
       color = mix(color, vec3<f32>(0.15, 0.15, 0.18), 0.8);
   }
-  
+
   // Volume Handle (Horizontal Movement)
   let volNorm = clamp(bez.volume, 0.0, 1.0);
   // Full width is 0.18. Handle travel approx 0.16.
   // Left edge: 0.28 - 0.08 = 0.20. Right edge: 0.28 + 0.08 = 0.36.
   let volHandleX = volPos.x + (volNorm - 0.5) * (volDim.x * 2.0 * 0.9);
   let dVolHandle = sdCircle(p - vec2<f32>(volHandleX, volPos.y), 0.02);
-  
+
   if (dVolHandle < 0.0) {
       color = mix(color, vec3<f32>(0.3, 0.8, 0.4), smoothstep(aa, -aa, dVolHandle));
   }
@@ -253,30 +253,30 @@ fn fs(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
   if (dBarRail < 0.0) {
       color = mix(color, vec3<f32>(0.2, 0.2, 0.25), 0.9);
   }
-  
+
   // --- NIGHT MODE DIMMING ---
   let dim = max(0.2, bez.dimFactor);
   color *= dim;
-  let uvFactor = (1.0 - dim) * 1.5; 
+  let uvFactor = (1.0 - dim) * 1.5;
 
   // --- PASS 2: EMISSIVE UI ---
 
   // 5. LCD Displays
-  let lcdColorBase = vec3<f32>(0.3, 0.8, 1.0); 
-  let lcdColor = lcdColorBase + (lcdColorBase * uvFactor); 
+  let lcdColorBase = vec3<f32>(0.3, 0.8, 1.0);
+  let lcdColor = lcdColorBase + (lcdColorBase * uvFactor);
 
   let bpmValue = u32(bez.bpm);
   let dBPM = drawNumber(p - vec2<f32>(0.0, displayY), bpmValue, 3u, 0.012, 0.015);
   if (dBPM < 0.0) {
       let mask = smoothstep(aa, 0.0, dBPM);
-      color = mix(color, lcdColor, mask); 
+      color = mix(color, lcdColor, mask);
       color += lcdColor * 0.5 * mask;
   }
 
   let posY = displayY - 0.04;
-  let lcdColorPos = vec3<f32>(1.0, 0.7, 0.2); 
+  let lcdColorPos = vec3<f32>(1.0, 0.7, 0.2);
   let lcdColorPosBright = lcdColorPos + (lcdColorPos * uvFactor);
-  
+
   let dOrder = drawNumber(p - vec2<f32>(-0.10, posY), bez.currentOrder, 2u, 0.01, 0.012);
   if (dOrder < 0.0) {
       let mask = smoothstep(aa, 0.0, dOrder);
@@ -300,7 +300,7 @@ fn fs(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
   let isLooping = bez.isLooping == 1u;
   let isLoopClicked = bez.clickedButton == 1u;
   let loopActive = isLooping || isLoopClicked;
-  
+
   let loopBtn = drawWhiteButton(p - posLoop, btnSize, purpleGlow, loopActive, aa);
   color = mix(color, loopBtn.rgb, loopBtn.a);
 
@@ -328,10 +328,10 @@ fn fs(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
   let isPlaying = bez.isPlaying > 0.5;
   let isPlayClicked = bez.clickedButton == 3u;
   let playActive = isPlaying || isPlayClicked;
-  
+
   let playBtn = drawWhiteButton(p - posPlay, btnSize, purpleGlow, playActive, aa);
   color = mix(color, playBtn.rgb, playBtn.a);
-  
+
   let dPlayIcon = sdTriangle((p - posPlay) * vec2<f32>(1.0, -1.0) * 1.5, iconRadius * 0.4);
   let playIconMask = smoothstep(aa, 0.0, -dPlayIcon);
   color = mix(color, vec3<f32>(0.1), playIconMask * 0.6);
@@ -340,10 +340,10 @@ fn fs(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
   let posStop = vec2<f32>(-0.35, -0.40);
   let isStopClicked = bez.clickedButton == 4u;
   let stopActive = !isPlaying || isStopClicked;
-  
+
   let stopBtn = drawWhiteButton(p - posStop, btnSize, purpleGlow, stopActive, aa);
   color = mix(color, stopBtn.rgb, stopBtn.a);
-  
+
   let dStopIcon = sdBox(p - posStop, vec2<f32>(iconRadius * 0.35));
   let stopIconMask = smoothstep(aa, 0.0, -dStopIcon);
   color = mix(color, vec3<f32>(0.1), stopIconMask * 0.6);

@@ -4,13 +4,18 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
+    "sync:shaders": "rsync -av --delete --exclude='legacy/' --exclude='thumbnails/' --exclude='README.md' shaders/ public/shaders/",
+    "predev": "npm run sync:shaders",
     "dev": "vite",
+    "prebuild": "npm run sync:shaders",
     "build:worklet": "bash ./build-wasm.sh",
     "build:emcc": "bash scripts/build-wasm.sh",
     "build": "tsc && node --max-old-space-size=4096 node_modules/.bin/vite build",
     "preview": "vite preview",
     "lint": "exit 0",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:duration-parity": "node utils/__debug__/durationParity.test.cjs",
+    "test:shader-registry": "node utils/__debug__/shaderRegistry.test.cjs"
   },
   "dependencies": {
     "@react-three/drei": "^9.122.0",

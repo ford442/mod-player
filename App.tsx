@@ -753,6 +753,7 @@ function App() {
                         <option value={2}>Cool</option>
                         <option value={3}>Neon</option>
                         <option value={4}>Acid</option>
+                        <option value={5}>Fifths</option>
                     </select>
                 </div>
                 {isStepsShader && (

@@ -370,7 +370,13 @@ export function useWebGPURender(
               if (!buffer) return;
               const gpuData = await readbackBuffer(device, buffer, buffer.size);
               if (gpuData) {
-                verifyDurationParity(gpuData, p.matrix, p.padTopChannel);
+                const parity = verifyDurationParity(gpuData, p.matrix, p.padTopChannel);
+                if (!parity.ok && parity.errorSummary) {
+                  setDebugInfo((prev: DebugInfo) => ({
+                    ...prev,
+                    errors: [...prev.errors.filter(e => !e.startsWith('DURA-PARITY')), parity.errorSummary!],
+                  }));
+                }
               }
             })();
           }
@@ -474,7 +480,13 @@ export function useWebGPURender(
           if (!buffer) return;
           const gpuData = await readbackBuffer(device, buffer, buffer.size);
           if (gpuData) {
-            verifyDurationParity(gpuData, p.matrix, p.padTopChannel);
+            const parity = verifyDurationParity(gpuData, p.matrix, p.padTopChannel);
+            if (!parity.ok && parity.errorSummary) {
+              setDebugInfo((prev: DebugInfo) => ({
+                ...prev,
+                errors: [...prev.errors.filter(e => !e.startsWith('DURA-PARITY')), parity.errorSummary!],
+              }));
+            }
           }
         })();
       }
