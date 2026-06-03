@@ -7,6 +7,7 @@ import { OpenMPTWorkletEngine, NATIVE_RING_BUF_FRAMES } from '../audio-worklet/O
 import type { WorkletPositionData } from '../audio-worklet/types';
 import { getWorkletUrl } from './useWorkletLoader';
 import { computeNoteAges } from '../utils/patternExtractor';
+import { broadcastPcmBlock } from '../utils/projectMBridge';
 import { logWorkletDiagnostics } from '../audio-worklet/diagnostics';
 
 export interface AudioGraphRefs {
@@ -618,6 +619,17 @@ export async function startAudioPlayback(
             // Defensive: ring-buffer worklets may request refills; we do not
             // implement a main-thread pump, so log for diagnostics.
             console.warn(`[PLAY] Worklet ${type}:`, e.data);
+          } else if (type === 'projectm-pcm') {
+            // Audio-clock-accurate PCM block from the worklet render callback.
+            // Forward to Project-M receivers via BroadcastChannel + opener/parent
+            // postMessage.  This path replaces the legacy RAF+AnalyserNode tap:
+            // blocks are fixed-size (default 512 samples/channel), stereo, and
+            // arrive at audio-clock rate with no background-tab throttling.
+            const buf = e.data.buffer;
+            const ch  = e.data.channels;
+            if (buf instanceof Float32Array && (ch === 1 || ch === 2)) {
+              broadcastPcmBlock(buf, ch);
+            }
           }
         };
 
