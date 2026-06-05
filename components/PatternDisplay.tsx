@@ -62,6 +62,8 @@ interface PatternDisplayProps {
   invertMix?: number;
   // CRT effect
   crtEnabled?: boolean;
+  // Lite mode
+  liteMode?: boolean;
 }
 
 export const PatternDisplay: React.FC<PatternDisplayProps> = ({
@@ -111,6 +113,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   filmGrain = 0.0,
   invertMix = 0.0,
   crtEnabled = false,
+  liteMode = false,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const glCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -157,19 +160,20 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
 
   const numChannels = matrix?.numChannels ?? DEFAULT_CHANNELS;
 
-  const isOverlayActive = WEBGL_HYBRID_SHADERS.has(shaderFile);
+  const isOverlayActive = !liteMode && WEBGL_HYBRID_SHADERS.has(shaderFile);
 
   const padTopChannel = shaderFile.includes('v0.16') || shaderFile.includes('v0.17') || shaderFile.includes('v0.21') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.47') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49') || shaderFile.includes('v0.50') || shaderFile.includes('v0.51') || shaderFile.includes('v0.55');
 
   const isHorizontal = shaderFile.includes('v0.13') || shaderFile.includes('v0.14') || shaderFile.includes('v0.16') || shaderFile.includes('v0.17') || shaderFile.includes('v0.21') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40');
 
   const canvasMetrics = useMemo(() => {
+    if (liteMode) return { width: 512, height: 512 };
     if (shaderFile.includes('v0.27') || shaderFile.includes('v0.28')) return { width: 1024, height: 1008 };
     if (shaderFile.includes('v0.21') || shaderFile.includes('v0.37') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.47') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49') || shaderFile.includes('v0.50') || shaderFile.includes('v0.51') || shaderFile.includes('v0.55')) return { width: 1024, height: 1024 };
     if (isHorizontal) return { width: 1024, height: 1024 };
     if (shaderFile.includes('v0.25') || shaderFile.includes('v0.30') || shaderFile.includes('v0.35')) return { width: 1024, height: 1024 };
     return { width: Math.max(800, numChannels * cellWidth), height: 600 };
-  }, [shaderFile, isHorizontal, numChannels, cellWidth]);
+  }, [shaderFile, isHorizontal, numChannels, cellWidth, liteMode]);
 
   // Reset local step length when switching to a shader that doesn't support it
   useEffect(() => {
@@ -183,7 +187,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
 
   // Canvas resize handling
   const syncCanvasSize = useCallback((canvas: HTMLCanvasElement, glCanvas: HTMLCanvasElement | null) => {
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const dpr = liteMode ? 1 : Math.min(window.devicePixelRatio || 1, 2);
     const container = containerRef.current;
     if (!container) return;
     const containerRect = container.getBoundingClientRect();
@@ -216,7 +220,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
         glCanvas.height = bufferHeight;
       }
     }
-  }, [canvasMetrics]);
+  }, [canvasMetrics, liteMode]);
 
   const handleResize = useCallback(() => {
     const canvas = canvasRef.current;
@@ -324,7 +328,8 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     canvasRef, glCanvasRef, shaderFile,
     syncCanvasSize, renderParamsRef, matrix, padTopChannel, setDebugInfo, setWebgpuAvailable,
     bloomRef,
-    oscTextureRef
+    oscTextureRef,
+    liteMode,
   );
 
   // Keep resize reconfiguration refs in sync
@@ -354,6 +359,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     const device = gpuDevRef.current;
     const canvas = canvasRef.current;
     if (!device || !canvas || !gpuReady) return;
+    if (liteMode) return; // Skip bloom entirely in lite mode
     const context = canvas.getContext('webgpu') as GPUCanvasContext | null;
     if (!context) return;
 
@@ -376,7 +382,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
       bloomRef.current?.destroy();
       bloomRef.current = null;
     };
-  }, [gpuReady, shaderFile]);
+  }, [gpuReady, shaderFile, liteMode]);
 
   // DEV: Alt+B cycles bloom layer isolation (trigger → sustain → expression/trace → all)
   useEffect(() => {

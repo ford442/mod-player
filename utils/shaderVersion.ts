@@ -56,3 +56,9 @@ export const supportsStepsLength = (shaderFile: string): boolean => {
   const meta = getShaderMeta(shaderFile);
   return meta ? meta.supportsStepsLength : false;
 };
+
+/** Returns true if the shader is tagged as recommended for lite/mobile mode. */
+export const isLiteRecommendedShader = (shaderFile: string): boolean => {
+  const meta = getShaderMeta(shaderFile);
+  return meta?.liteRecommended ?? false;
+};

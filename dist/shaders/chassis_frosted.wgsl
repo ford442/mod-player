@@ -78,12 +78,12 @@ fn drawDigit(p: vec2<f32>, digit: u32, size: f32) -> f32 {
     let segL = size * 0.45;
     let gap = size * 0.05;
     var segments = array<u32, 10>(0x77u, 0x24u, 0x5du, 0x6du, 0x2eu, 0x6bu, 0x7bu, 0x25u, 0x7fu, 0x6fu);
-
+    
     // WebGPU safe bounds
     let safeDigit = min(digit, 9u);
     let code = select(0u, segments[safeDigit], digit < 10u);
     var minDist = 100.0;
-
+    
     if ((code & 0x01u) != 0u) { minDist = min(minDist, sdBox(p - vec2<f32>(0.0, -segL), vec2<f32>(segL, segW))); }
     if ((code & 0x02u) != 0u) { minDist = min(minDist, sdBox(p - vec2<f32>(segL, -segL * 0.5 - gap * 0.5), vec2<f32>(segW, segL * 0.5))); }
     if ((code & 0x04u) != 0u) { minDist = min(minDist, sdBox(p - vec2<f32>(segL, segL * 0.5 + gap * 0.5), vec2<f32>(segW, segL * 0.5))); }
@@ -110,11 +110,11 @@ fn drawNumber(p: vec2<f32>, value: u32, numDigits: u32, digitSize: f32, spacing:
 // --- MATERIALS ---
 
 fn getChassisMaterial(uv: vec2<f32>) -> vec3<f32> {
-    let baseCol = vec3<f32>(0.94, 0.95, 0.96);
+    let baseCol = vec3<f32>(0.94, 0.95, 0.96); 
     let grain = noise(uv * 1500.0) * 0.03;
     let sheen = noise(uv * 4.0) * 0.02;
     return baseCol - vec3<f32>(grain + sheen);
-}
+} 
 
 fn drawFrostedButton(p: vec2<f32>, size: vec2<f32>, ledColor: vec3<f32>, isOn: bool, aa: f32) -> vec4<f32> {
     let halfSize = size * 0.5;
@@ -124,7 +124,7 @@ fn drawFrostedButton(p: vec2<f32>, size: vec2<f32>, ledColor: vec3<f32>, isOn: b
     let alpha = 1.0 - smoothstep(0.0, aa, d);
     if (alpha <= 0.0) { return vec4<f32>(0.0, 0.0, 0.0, 0.0); }
 
-    var col = vec3<f32>(0.88, 0.90, 0.95);
+    var col = vec3<f32>(0.88, 0.90, 0.95); 
     let frostGrain = hash2(p * 600.0) * 0.05;
     col -= vec3<f32>(frostGrain);
 
@@ -144,7 +144,7 @@ fn drawFrostedButton(p: vec2<f32>, size: vec2<f32>, ledColor: vec3<f32>, isOn: b
     }
 
     return vec4<f32>(col, alpha);
-}
+} 
 
 // --- MAIN STAGE ---
 
@@ -169,17 +169,17 @@ fn vs(@builtin(vertex_index) vertexIndex: u32) -> VertOut {
 @fragment
 fn fs(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
     let p = uv - 0.5;
-    let aa = 1.5 / bez.canvasH;
+    let aa = 1.5 / bez.canvasH; 
 
     var color = getChassisMaterial(uv);
 
     let recessBox = sdRoundedBox(p - vec2<f32>(0.0, 0.40), vec2<f32>(0.36, 0.12), 0.02);
     let recessMask = smoothstep(aa, -aa, recessBox);
     let shadow = smoothstep(0.06, 0.0, recessBox);
-
+    
     let colRecess = vec3<f32>(0.12, 0.13, 0.15);
     color = mix(color, colRecess, recessMask);
-    color *= 1.0 - (shadow * 0.35 * (1.0 - recessMask));
+    color *= 1.0 - (shadow * 0.35 * (1.0 - recessMask)); 
 
     let displayY = 0.45;
     let sliderRightX = 0.42;
@@ -189,7 +189,7 @@ fn fs(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
 
     let dVolTrack = sdRoundedBox(p - volPos, volDim, 0.003);
     if (dVolTrack < 0.0) { color = vec3<f32>(0.2, 0.2, 0.2); }
-
+    
     let volNorm = clamp(bez.volume, 0.0, 1.0);
     let volHandleX = volPos.x + (volNorm - 0.5) * (volDim.x * 2.0 * 0.9);
     let dVolHandle = sdCircle(p - vec2<f32>(volHandleX, volPos.y), 0.02);
@@ -197,29 +197,29 @@ fn fs(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
 
     let dPanTrack = sdRoundedBox(p - vec2<f32>(sliderRightX, sliderY), vec2<f32>(0.008, 0.1), 0.003);
     if (dPanTrack < 0.0) { color = vec3<f32>(0.2, 0.2, 0.2); }
-
+    
     let panNorm = clamp(bez.pan, -1.0, 1.0);
     let panHandleY = sliderY + panNorm * 0.09;
     let dPanHandle = sdCircle(p - vec2<f32>(sliderRightX, panHandleY), 0.02);
     if (dPanHandle < 0.0) { color = mix(color, vec3<f32>(0.4, 0.6, 1.0), smoothstep(aa, -aa, dPanHandle)); }
 
-    let lcdColor = vec3<f32>(0.4, 0.9, 1.0);
+    let lcdColor = vec3<f32>(0.4, 0.9, 1.0); 
     let bpmValue = u32(bez.bpm);
     let dBPM = drawNumber(p - vec2<f32>(0.0, displayY), bpmValue, 3u, 0.012, 0.015);
     if (dBPM < 0.0) { color = mix(color, lcdColor, smoothstep(aa, 0.0, dBPM)); }
 
     let posY = displayY - 0.04;
     let lcdAmber = vec3<f32>(1.0, 0.7, 0.2);
-
+    
     let dRow = drawNumber(p - vec2<f32>(0.10, posY), u32(bez.currentRow), 2u, 0.01, 0.012);
     if (dRow < 0.0) { color = mix(color, lcdAmber, smoothstep(aa, 0.0, dRow)); }
-
+    
     let dOrd = drawNumber(p - vec2<f32>(-0.10, posY), u32(bez.currentOrder), 2u, 0.01, 0.012);
     if (dOrd < 0.0) { color = mix(color, lcdAmber, smoothstep(aa, 0.0, dOrd)); }
 
     let btnSize = vec2<f32>(0.09, 0.09);
     let smBtnSize = vec2<f32>(0.07, 0.06);
-    let iconCol = vec3<f32>(0.15, 0.15, 0.15);
+    let iconCol = vec3<f32>(0.15, 0.15, 0.15); 
 
     let ledPurple = vec3<f32>(0.8, 0.4, 1.0);
     let ledAmber = vec3<f32>(1.0, 0.6, 0.1);

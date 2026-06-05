@@ -24,7 +24,9 @@ import { cn } from './utils/cn';
 import { startProjectMBridge } from './utils/projectMBridge';
 import { fetchRemoteModule, inferFileNameFromUrl } from './utils/remoteMedia';
 import { SchemaMismatchError, type RemoteSong } from './utils/storageApi';
-import { supportsStepsLength } from './utils/shaderVersion';
+import { supportsStepsLength, isLiteRecommendedShader } from './utils/shaderVersion';
+import { getLiteRecommendedShader } from './utils/shaderRegistry';
+import { DEVICE_CAPABILITIES, setLiteOverride } from './utils/deviceCapabilities';
 import type { MediaItem } from './types';
 import { 
   DEFAULT_BLOOM_PRESET, 
@@ -131,6 +133,9 @@ function App() {
   const [theme, setTheme] = useLocalStorage<AppTheme>('xasm1_theme', 'dark');
   const isDarkMode = !LIGHT_THEMES.has(theme);
   const [viewMode, setViewMode] = useState<'device' | 'wall'>('device');
+
+  // Lite mode — auto-detected from device capabilities, overridable via toggle
+  const [liteMode, setLiteMode] = useState<boolean>(DEVICE_CAPABILITIES.isLite);
 
   // Apply data-theme attribute to <html> so CSS variables cascade globally
   useEffect(() => {
@@ -544,6 +549,15 @@ function App() {
     return 'patternv0.38.wgsl';
   };
 
+  // In lite mode, substitute a cheap shader for rendering unless the user
+  // has already manually selected a lite-recommended one.
+  const displayShaderFile = useMemo(() => {
+    if (liteMode && !isLiteRecommendedShader(shaderFile)) {
+      return getLiteRecommendedShader();
+    }
+    return shaderFile;
+  }, [liteMode, shaderFile]);
+
   // Render in 3D mode
   if (is3DMode) {
     const shader3D = get3DShader();
@@ -716,6 +730,22 @@ function App() {
                 >
                   {activeEngine === 'native-worklet' ? '🚀 Native' : activeEngine === 'worklet' ? '⚡ Worklet' : '🐌 Script'}
                 </button>
+                <button
+                  onClick={() => {
+                    const next = !liteMode;
+                    setLiteMode(next);
+                    setLiteOverride(next);
+                  }}
+                  className={cn(
+                    'px-4 py-2 text-sm font-mono rounded-lg shadow-lg transition-colors border',
+                    liteMode
+                      ? 'bg-orange-600 text-white border-orange-500 hover:bg-orange-700'
+                      : 'bg-gray-700 text-gray-200 border-gray-600 hover:bg-gray-600',
+                  )}
+                  title={liteMode ? 'Lite mode active (mobile/low-power)' : 'Desktop mode'}
+                >
+                  {liteMode ? '⚡ Lite' : '🖥️ Full'}
+                </button>
             </div>
 
             <div className={cn('flex flex-wrap gap-2 p-2 rounded-xl border', isDarkMode ? 'bg-black border-gray-800' : 'bg-gray-200 border-gray-300')}>
@@ -779,7 +809,7 @@ function App() {
         {/* Main Display Area */}
         <div className={cn('relative rounded-xl overflow-hidden shadow-2xl mb-6 border', isDarkMode ? 'bg-black border-gray-800' : 'bg-white border-gray-300')}>
            <PatternDisplay
-             key={shaderFile}
+             key={displayShaderFile}
              matrix={sequencerMatrix}
              playheadRow={playbackRowFraction}
              isPlaying={isPlaying}
@@ -792,7 +822,7 @@ function App() {
              kickTrigger={kickTrigger}
              activeChannels={activeChannels}
              isModuleLoaded={isModuleLoaded}
-             shaderFile={shaderFile}
+             shaderFile={displayShaderFile}
              volume={volume}
              pan={pan}
              isLooping={isLooping}
@@ -828,6 +858,8 @@ function App() {
              invertMix={nightConfig.invertMix}
              // CRT effect
              crtEnabled={crtEnabled}
+             // Lite mode
+             liteMode={liteMode}
            />
 
            <MediaOverlay

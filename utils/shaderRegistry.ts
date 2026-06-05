@@ -33,6 +33,8 @@ export interface ShaderMeta {
   supportsStepsLength: boolean;
   /** Bloom post-process profile id, or null to use BloomPostProcessor default. */
   bloomProfile: string | null;
+  /** Recommended for lite/mobile mode — simple layout, low GPU cost. */
+  liteRecommended?: boolean;
 }
 
 const C: ShaderMeta = {
@@ -59,6 +61,7 @@ export const SHADER_REGISTRY: Readonly<Record<string, ShaderMeta>> = {
     singlePassComposite: 'chassis_frosted.wgsl',
     supportsStepsLength: true,
     bloomProfile: null,
+    liteRecommended: true,
   },
   'patternv0.23.wgsl': {
     extendedLayout: true,
@@ -209,4 +212,12 @@ export const SHADER_REGISTRY: Readonly<Record<string, ShaderMeta>> = {
 /** Look up metadata for a shader, or null if the filename is not registered. */
 export function getShaderMeta(shaderFile: string): ShaderMeta | null {
   return SHADER_REGISTRY[shaderFile] ?? null;
+}
+
+/** Return the first lite-recommended shader id, or a safe fallback. */
+export function getLiteRecommendedShader(): string {
+  for (const [id, meta] of Object.entries(SHADER_REGISTRY)) {
+    if (meta.liteRecommended) return id;
+  }
+  return 'patternv0.21.wgsl';
 }

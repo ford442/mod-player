@@ -97,7 +97,8 @@ export function useWebGPURender(
   setDebugInfo: React.Dispatch<React.SetStateAction<DebugInfo>>,
   setWebgpuAvailable: (v: boolean) => void,
   bloomProcessorRef?: React.MutableRefObject<BloomPostProcessor | null>,
-  oscTextureRef?: React.MutableRefObject<GPUTexture | null>
+  oscTextureRef?: React.MutableRefObject<GPUTexture | null>,
+  liteMode?: boolean,
 ) {
   const [gpuReady, setGpuReady] = useState(false);
 
@@ -350,7 +351,7 @@ export function useWebGPURender(
           }
         }
 
-        const useCompute = isHighPrec && computeStateRef.current && canUseComputePath(p.matrix);
+        const useCompute = !liteMode && isHighPrec && computeStateRef.current && canUseComputePath(p.matrix);
         if (useCompute) {
           const rawPacked = packPatternMatrixComputeInput(p.matrix, p.padTopChannel);
           const rawBuffer = createBufferWithData(device, rawPacked.packedData, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
@@ -460,7 +461,7 @@ export function useWebGPURender(
     if (cellsBufferRef.current) cellsBufferRef.current.destroy();
     const isHighPrec = shaderFile.includes('v0.36') || shaderFile.includes('v0.37') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.47') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49') || shaderFile.includes('v0.50') || shaderFile.includes('v0.51');
 
-    const useCompute = isHighPrec && computeStateRef.current && canUseComputePath(p.matrix);
+    const useCompute = !liteMode && isHighPrec && computeStateRef.current && canUseComputePath(p.matrix);
     if (useCompute) {
       const rawPacked = packPatternMatrixComputeInput(p.matrix, p.padTopChannel);
       const rawBuffer = createBufferWithData(device, rawPacked.packedData, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);

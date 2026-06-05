@@ -1,6 +1,9 @@
 // Shared geometry constants for shader layouts
 import { getShaderMeta } from './shaderRegistry';
 
+/** Maximum visible rows in lite/mobile mode. */
+export const LITE_MAX_VISIBLE_ROWS = 32;
+
 // Grid rectangle for pattern display (normalized coordinates)
 export const GRID_RECT = {
   x: 0.05,  // Left margin
