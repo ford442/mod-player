@@ -6,6 +6,7 @@ import { useWebGPURender, type WebGPURenderParams, type DebugInfo } from '../hoo
 import { BloomPostProcessor } from '../utils/bloomPostProcessor';
 import { WEBGL_HYBRID_SHADERS, supportsStepsLength } from '../utils/shaderVersion';
 import { getShaderMeta } from '../utils/shaderRegistry';
+import { detectRuntimeBase } from '../src/lib/paths';
 import { getBloomProfile } from '../utils/bloomProfiles';
 
 const DEFAULT_CHANNELS = 4;
@@ -371,7 +372,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
       ? { layers: [...bloomLayers], finalFormat: navigator.gpu.getPreferredCanvasFormat() }
       : { finalFormat: navigator.gpu.getPreferredCanvasFormat() };
     const bloom = new BloomPostProcessor(device, canvas, context, bloomOptions);
-    bloom.setBaseUrl(import.meta.env.BASE_URL);
+    bloom.setBaseUrl(detectRuntimeBase());
     bloom.init().then(() => {
       bloomRef.current = bloom;
     }).catch((err: unknown) => {

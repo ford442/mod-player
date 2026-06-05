@@ -25,6 +25,7 @@ import type {
     EmscriptenOpenMPTModule,
     CreateOpenMPTModule,
 } from './types';
+import { withBase } from '../src/lib/paths';
 
 // ── Public constants ─────────────────────────────────────────────────
 
@@ -137,8 +138,7 @@ export class OpenMPTWorkletEngine extends MiniEventEmitter<EngineEventMap> {
      */
     constructor(options?: NativeEngineOptions) {
         super();
-        // Default to Vite's BASE_URL + worklets/
-        this.basePath = options?.basePath ?? `${import.meta.env.BASE_URL}worklets/`;
+        this.basePath = options?.basePath ?? withBase('worklets/');
         this.sharedOutputBuffer = options?.sharedOutputBuffer ?? null;
     }
 
@@ -174,7 +174,7 @@ export class OpenMPTWorkletEngine extends MiniEventEmitter<EngineEventMap> {
             let glueModule: Record<string, unknown>;
             // The JS worklet processor (openmpt-worklet.js) references AudioWorkletProcessor
             // and cannot be imported on the main thread. Only try the native Emscripten glue.
-            const nativeUrl = `${import.meta.env.BASE_URL}worklets/openmpt-native.js`;
+            const nativeUrl = withBase('worklets/openmpt-native.js');
             glueModule = await import(/* @vite-ignore */ nativeUrl) as Record<string, unknown>;
             const createModule = (glueModule.default || glueModule['createOpenMPTModule']) as CreateOpenMPTModule;
 

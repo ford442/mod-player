@@ -36,7 +36,7 @@ import {
 } from '../utils/computeNoteDuration';
 import type { BloomPostProcessor } from '../utils/bloomPostProcessor';
 import { GRID_RECT } from '../utils/geometryConstants';
-import { detectRuntimeBase } from '../src/lib/paths';
+import { detectRuntimeBase, withBase } from '../src/lib/paths';
 
 export type DebugInfo = {
   layoutMode: string;
@@ -276,8 +276,12 @@ export function useWebGPURender(
         textureResourcesRef.current = null;
         bezelTextureResourcesRef.current = null;
 
-        const shaderBase = import.meta.env.BASE_URL;
-        const shaderSource = await fetch(`${shaderBase}shaders/${shaderFile}`).then(r => r.text());
+        const shaderUrl = withBase(`shaders/${shaderFile}`);
+        const shaderResponse = await fetch(shaderUrl);
+        if (!shaderResponse.ok) {
+          throw new Error(`Could not load shader at ${shaderUrl} (${shaderResponse.status})`);
+        }
+        const shaderSource = await shaderResponse.text();
         if (cancelled) return;
         const module = device.createShaderModule({ code: shaderSource });
         if ('getCompilationInfo' in module) module.getCompilationInfo().catch(() => {});
@@ -317,7 +321,12 @@ export function useWebGPURender(
         if (shouldUseBackgroundPass(shaderFile)) {
           try {
             const backgroundShaderFile = getBackgroundShaderFile(shaderFile);
-            const backgroundSource = await fetch(`${shaderBase}shaders/${backgroundShaderFile}`).then(r => r.text());
+            const backgroundShaderUrl = withBase(`shaders/${backgroundShaderFile}`);
+            const backgroundResponse = await fetch(backgroundShaderUrl);
+            if (!backgroundResponse.ok) {
+              throw new Error(`Could not load background shader at ${backgroundShaderUrl} (${backgroundResponse.status})`);
+            }
+            const backgroundSource = await backgroundResponse.text();
             const bezelModule = device.createShaderModule({ code: backgroundSource });
             const bezelBindLayout = device.createBindGroupLayout({ entries: [{ binding: 0, visibility: GPUShaderStage.FRAGMENT, buffer: { type: 'uniform' } }, { binding: 1, visibility: GPUShaderStage.FRAGMENT, sampler: { type: 'filtering' } }, { binding: 2, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float' } }] });
             bezelPipelineRef.current = device.createRenderPipeline({ layout: device.createPipelineLayout({ bindGroupLayouts: [bezelBindLayout] }), vertex: { module: bezelModule, entryPoint: 'vs' }, fragment: { module: bezelModule, entryPoint: 'fs', targets: [{ format }] }, primitive: { topology: 'triangle-list' } });

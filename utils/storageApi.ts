@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { withBase } from '../src/lib/paths';
 
 const storageBaseUrl = (import.meta.env.VITE_STORAGE_API_URL ?? '').trim().replace(/\/+$/, '');
 
@@ -70,7 +71,7 @@ export interface ShaderMeta {
 }
 
 function toApiUrl(path: string): string {
-  if (!storageBaseUrl) return path;
+  if (!storageBaseUrl) return withBase(path);
   return `${storageBaseUrl}${path}`;
 }
 
