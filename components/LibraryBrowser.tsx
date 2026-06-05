@@ -80,7 +80,7 @@ export function LibraryBrowser({
           />
           {onSaveModule && activeModule && (
             <button
-              onClick={() => void onSaveModule(activeModule)}
+              onClick={() => { void onSaveModule(activeModule).catch(() => undefined); }}
               disabled={savePending}
               className={`text-xs px-2 py-1 rounded border font-mono transition-colors ${
                 savePending
@@ -96,7 +96,7 @@ export function LibraryBrowser({
           )}
           {onSync && (
             <button
-              onClick={() => void onSync()}
+              onClick={() => { void onSync().catch(() => undefined); }}
               disabled={syncPending}
               className={`text-xs px-2 py-1 rounded border font-mono transition-colors ${
                 syncPending

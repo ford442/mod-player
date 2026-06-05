@@ -184,13 +184,6 @@ const SongSaveRequestSchema = z.object({
 
 export type SongSaveRequest = z.infer<typeof SongSaveRequestSchema>;
 
-const SyncResponseSchema = z.object({
-  success: z.boolean().optional(),
-  itemsAdded: z.number().optional(),
-  itemsUpdated: z.number().optional(),
-  message: z.string().optional(),
-}).passthrough();
-
 export async function saveSong(req: SongSaveRequest): Promise<RemoteSong> {
   if (!navigator.onLine) {
     throw new Error('You are offline. Connect to the internet and try again.');
@@ -241,7 +234,6 @@ export async function syncLibrary(): Promise<void> {
   if (!response.ok) {
     throw new Error(`Library sync failed (${response.status})`);
   }
-  // Parse the response for completeness (best-effort — backend may return 202 Accepted)
-  const payload: unknown = await response.json().catch(() => ({}));
-  SyncResponseSchema.safeParse(payload); // validate shape but we don't surface the data
+  // Consume response body to avoid resource leaks; body content is informational only.
+  await response.body?.cancel();
 }
