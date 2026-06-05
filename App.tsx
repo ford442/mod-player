@@ -18,12 +18,12 @@ import { useLibOpenMPT } from './hooks/useLibOpenMPT';
 import { usePlaylist } from './hooks/usePlaylist';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { useLocalStorage } from './hooks/useLocalStorage';
-import { useLibrary } from './hooks/useLibrary';
+import { useLibrary, useSaveSong, useSyncLibrary } from './hooks/useLibrary';
 import { useRateShader } from './hooks/useRateShader';
 import { cn } from './utils/cn';
 import { startProjectMBridge } from './utils/projectMBridge';
 import { fetchRemoteModule, inferFileNameFromUrl } from './utils/remoteMedia';
-import { SchemaMismatchError, type RemoteSong } from './utils/storageApi';
+import { SchemaMismatchError, type RemoteSong, type SongSaveRequest } from './utils/storageApi';
 import { supportsStepsLength, isLiteRecommendedShader } from './utils/shaderVersion';
 import { getLiteRecommendedShader } from './utils/shaderRegistry';
 import { DEVICE_CAPABILITIES, setLiteOverride } from './utils/deviceCapabilities';
@@ -216,6 +216,8 @@ function App() {
   const [cheatsheetOpen, setCheatsheetOpen] = useState<boolean>(false);
   const { songsQuery, shadersQuery } = useLibrary();
   const rateShaderMutation = useRateShader();
+  const saveSongMutation = useSaveSong();
+  const syncLibraryMutation = useSyncLibrary();
 
   // Channel VU data (from worklet channelStates)
   const channelVU = useMemo(() => {
@@ -317,6 +319,16 @@ function App() {
     }
     return 'Shader catalog unavailable. Ratings are temporarily offline.';
   }, [shadersQuery.error]);
+  const saveSongErrorMessage = useMemo(() => {
+    const error = saveSongMutation.error;
+    if (!error) return null;
+    return error instanceof Error ? error.message : 'Failed to save module to library.';
+  }, [saveSongMutation.error]);
+  const syncLibraryErrorMessage = useMemo(() => {
+    const error = syncLibraryMutation.error;
+    if (!error) return null;
+    return error instanceof Error ? error.message : 'Library sync failed.';
+  }, [syncLibraryMutation.error]);
 
   // Tier 2: restore per-module shader whenever the loaded module changes
   useEffect(() => {
@@ -339,6 +351,19 @@ function App() {
 
   // Playlist
   const playlist = usePlaylist();
+
+  // Save request derived from current module — passed to LibraryBrowser
+  const activeModuleForSave = useMemo((): SongSaveRequest | null => {
+    if (!isModuleLoaded) return null;
+    const title = status.replace(/^Loaded "/, '').replace(/"$/, '') || 'Unknown';
+    const currentItem = playlist.items[playlist.currentIndex];
+    const fileName = currentItem?.fileName;
+    const req: SongSaveRequest = { title };
+    if (fileName) req.fileName = fileName;
+    const numChannels = sequencerMatrix?.numChannels;
+    if (numChannels && numChannels > 0) req.channelCount = numChannels;
+    return req;
+  }, [isModuleLoaded, status, playlist.items, playlist.currentIndex, sequencerMatrix]);
 
   const handlePlaylistSelect = useCallback((index: number) => {
     const item = playlist.select(index);
@@ -1013,6 +1038,13 @@ function App() {
               isDarkMode={isDarkMode}
               onRefresh={() => void songsQuery.refetch()}
               onLoadSong={handleLibrarySongLoad}
+              onSync={() => syncLibraryMutation.mutateAsync()}
+              syncPending={syncLibraryMutation.isPending}
+              syncError={syncLibraryErrorMessage}
+              activeModule={activeModuleForSave}
+              onSaveModule={(req) => saveSongMutation.mutateAsync(req)}
+              savePending={saveSongMutation.isPending}
+              saveError={saveSongErrorMessage}
             />
           </Panel>
         )}

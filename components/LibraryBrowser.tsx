@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import type { RemoteSong } from '../utils/storageApi';
+import type { RemoteSong, SongSaveRequest } from '../utils/storageApi';
 
 interface LibraryBrowserProps {
   songs: RemoteSong[];
@@ -8,6 +8,13 @@ interface LibraryBrowserProps {
   isDarkMode: boolean;
   onRefresh: () => void;
   onLoadSong: (song: RemoteSong) => Promise<void>;
+  onSync?: () => Promise<void>;
+  syncPending?: boolean;
+  syncError?: string | null;
+  activeModule?: SongSaveRequest | null;
+  onSaveModule?: (req: SongSaveRequest) => Promise<void>;
+  savePending?: boolean;
+  saveError?: string | null;
 }
 
 function formatDuration(seconds?: number): string {
@@ -24,6 +31,13 @@ export function LibraryBrowser({
   isDarkMode,
   onRefresh,
   onLoadSong,
+  onSync,
+  syncPending = false,
+  syncError = null,
+  activeModule = null,
+  onSaveModule,
+  savePending = false,
+  saveError = null,
 }: LibraryBrowserProps) {
   const [search, setSearch] = useState('');
   const [loadingId, setLoadingId] = useState<string | null>(null);
@@ -64,6 +78,38 @@ export function LibraryBrowser({
             onChange={event => setSearch(event.target.value)}
             className={`text-xs font-mono px-2 py-1 rounded border outline-none w-40 ${input}`}
           />
+          {onSaveModule && activeModule && (
+            <button
+              onClick={() => void onSaveModule(activeModule)}
+              disabled={savePending}
+              className={`text-xs px-2 py-1 rounded border font-mono transition-colors ${
+                savePending
+                  ? 'opacity-50 cursor-wait'
+                  : isDarkMode
+                    ? 'border-gray-700 text-cyan-400 hover:text-white'
+                    : 'border-gray-300 text-cyan-600 hover:text-gray-900'
+              }`}
+              title="Save current module to cloud library"
+            >
+              {savePending ? '⏳' : '💾 Save'}
+            </button>
+          )}
+          {onSync && (
+            <button
+              onClick={() => void onSync()}
+              disabled={syncPending}
+              className={`text-xs px-2 py-1 rounded border font-mono transition-colors ${
+                syncPending
+                  ? 'opacity-50 cursor-wait'
+                  : isDarkMode
+                    ? 'border-gray-700 text-gray-400 hover:text-white'
+                    : 'border-gray-300 text-gray-500 hover:text-gray-900'
+              }`}
+              title="Sync cloud library"
+            >
+              {syncPending ? '⏳' : '⟳ Sync'}
+            </button>
+          )}
           <button
             onClick={onRefresh}
             className={`text-xs px-2 py-1 rounded border font-mono ${isDarkMode ? 'border-gray-700 text-gray-400 hover:text-white' : 'border-gray-300 text-gray-500 hover:text-gray-900'}`}
@@ -130,6 +176,16 @@ export function LibraryBrowser({
       {loadError && (
         <div className="px-4 py-2 text-xs font-mono text-red-400 border-t border-red-900/30">
           {loadError}
+        </div>
+      )}
+      {saveError && (
+        <div className="px-4 py-2 text-xs font-mono text-red-400 border-t border-red-900/30">
+          {saveError}
+        </div>
+      )}
+      {syncError && (
+        <div className="px-4 py-2 text-xs font-mono text-red-400 border-t border-red-900/30">
+          {syncError}
         </div>
       )}
     </div>

@@ -171,3 +171,77 @@ export async function rateShader(id: string, score: number): Promise<void> {
     throw new Error(`failed to rate shader (${response.status})`);
   }
 }
+
+// ─── Save Song ───────────────────────────────────────────────────────────────
+
+const SongSaveRequestSchema = z.object({
+  title: z.string().min(1),
+  fileName: z.string().optional(),
+  format: z.string().optional(),
+  channelCount: z.number().int().positive().optional(),
+  durationSeconds: z.number().nonnegative().optional(),
+}).passthrough();
+
+export type SongSaveRequest = z.infer<typeof SongSaveRequestSchema>;
+
+const SyncResponseSchema = z.object({
+  success: z.boolean().optional(),
+  itemsAdded: z.number().optional(),
+  itemsUpdated: z.number().optional(),
+  message: z.string().optional(),
+}).passthrough();
+
+export async function saveSong(req: SongSaveRequest): Promise<RemoteSong> {
+  if (!navigator.onLine) {
+    throw new Error('You are offline. Connect to the internet and try again.');
+  }
+  const validated = SongSaveRequestSchema.safeParse(req);
+  if (!validated.success) {
+    throw new Error('Invalid save request: title is required');
+  }
+  const response = await fetch(toApiUrl('/api/songs'), {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify(validated.data),
+  });
+  if (response.status === 409) {
+    throw new Error('This module is already in your library.');
+  }
+  if (response.status === 401 || response.status === 403) {
+    throw new Error('You do not have permission to save to the library.');
+  }
+  if (!response.ok) {
+    throw new Error(`Failed to save module (${response.status})`);
+  }
+  const payload: unknown = await response.json();
+  const parsed = SongSchema.safeParse(payload);
+  if (!parsed.success) {
+    throw new SchemaMismatchError('library format outdated: invalid /api/songs save response');
+  }
+  return normalizeSong(parsed.data);
+}
+
+export async function syncLibrary(): Promise<void> {
+  if (!navigator.onLine) {
+    throw new Error('You are offline. Connect to the internet and try again.');
+  }
+  const response = await fetch(toApiUrl('/api/admin/sync'), {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+  });
+  if (response.status === 401 || response.status === 403) {
+    throw new Error('Admin access required to trigger a library sync.');
+  }
+  if (!response.ok) {
+    throw new Error(`Library sync failed (${response.status})`);
+  }
+  // Parse the response for completeness (best-effort — backend may return 202 Accepted)
+  const payload: unknown = await response.json().catch(() => ({}));
+  SyncResponseSchema.safeParse(payload); // validate shape but we don't surface the data
+}

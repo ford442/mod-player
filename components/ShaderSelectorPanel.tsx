@@ -51,6 +51,7 @@ export function ShaderSelectorPanel({
 }: ShaderSelectorPanelProps) {
   const [open, setOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
+  const [rateError, setRateError] = useState<string | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
 
@@ -191,10 +192,11 @@ export function ShaderSelectorPanel({
                 event.preventDefault();
                 event.stopPropagation();
                 if (!onRateShader) return;
+                setRateError(null);
                 try {
                   await onRateShader(option.id, score);
                 } catch (error) {
-                  console.error('Failed to rate shader', error);
+                  setRateError(error instanceof Error ? error.message : 'Failed to rate shader');
                 }
               }}
               className={cn(
@@ -333,6 +335,9 @@ export function ShaderSelectorPanel({
           </div>
           {shaderCatalogError && (
             <div className="mt-2 text-[10px] text-red-400">{shaderCatalogError}</div>
+          )}
+          {rateError && (
+            <div className="mt-2 text-[10px] text-red-400">Rating failed: {rateError}</div>
           )}
           {remoteOnlyShaders.length > 0 && (
             <div className="mt-3 border-t border-gray-700/60 pt-2">
