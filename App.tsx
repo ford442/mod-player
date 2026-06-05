@@ -1042,7 +1042,9 @@ function App() {
               syncPending={syncLibraryMutation.isPending}
               syncError={syncLibraryErrorMessage}
               activeModule={activeModuleForSave}
-              onSaveModule={(req) => saveSongMutation.mutateAsync(req)}
+              onSaveModule={async (req) => {
+                await saveSongMutation.mutateAsync(req);
+              }}
               savePending={saveSongMutation.isPending}
               saveError={saveSongErrorMessage}
             />

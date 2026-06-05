@@ -9,6 +9,7 @@ import { getWorkletUrl } from './useWorkletLoader';
 import { computeNoteAges } from '../utils/patternExtractor';
 import { broadcastPcmBlock } from '../utils/projectMBridge';
 import { logWorkletDiagnostics } from '../audio-worklet/diagnostics';
+import { detectRuntimeBase, withBase } from '../src/lib/paths';
 
 export interface AudioGraphRefs {
   libopenmptRef:       React.MutableRefObject<LibOpenMPT | null>;
@@ -197,7 +198,7 @@ export async function startAudioPlayback(
         const ringByteOffset = engine.getRingBufByteOffset();
         if (wasmSAB && ringByteOffset > 0) {
           try {
-            const bridgeUrl = `${import.meta.env.BASE_URL}worklets/native-bridge-processor.js`;
+            const bridgeUrl = withBase('worklets/native-bridge-processor.js');
             await ctx.audioWorklet.addModule(bridgeUrl);
             const bridgeNode = new AudioWorkletNode(ctx, 'native-bridge-processor', {
               numberOfInputs: 0,
@@ -429,7 +430,7 @@ export async function startAudioPlayback(
         }
         if (wasmMemory) processorOptions.memory = wasmMemory;
         // Pass base URL so the worklet can resolve WASM/co-located assets correctly
-        processorOptions.baseUrl = import.meta.env.BASE_URL || '/';
+        processorOptions.baseUrl = detectRuntimeBase();
         
         // AUDIO-001 FIX COMPLETE: Wrap node creation in try-catch for better diagnostics
         let node: AudioWorkletNode;
@@ -452,7 +453,7 @@ export async function startAudioPlayback(
         // AudioWorklet classic scripts cannot use import() or importScripts(), so we
         // do the fetch here where fetch() is always available.
         console.log('[PLAY] Fetching libopenmpt assets for worklet...');
-        const workletBaseUrl = (import.meta.env.BASE_URL || '/') + 'worklets/';
+        const workletBaseUrl = withBase('worklets/');
         let libJsText: string;
         let libWasmBuffer: ArrayBuffer;
         try {

@@ -1,5 +1,6 @@
 import { type KeyboardEvent as ReactKeyboardEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { cn } from '../utils/cn';
+import { withBase } from '../src/lib/paths';
 import type { ShaderMeta } from '../utils/storageApi';
 
 interface ShaderOption {
@@ -139,7 +140,7 @@ export function ShaderSelectorPanel({
     const isSelected = selectedShader === option.id;
     const isActive = activeIndex === index;
     const liveThumbnail = thumbnails[option.id];
-    const staticThumbnail = `${import.meta.env.BASE_URL}shaders/thumbnails/${option.id}.wgsl.png`;
+    const staticThumbnail = withBase(`shaders/thumbnails/${option.id}.wgsl.png`);
     const thumbnailSrc = liveThumbnail ?? staticThumbnail;
     const cloudMeta = catalogById.get(option.id);
 

@@ -1,7 +1,8 @@
 import type { MediaItem } from '../types';
+import { withBase } from '../src/lib/paths';
 
 // Adjust this path to match where you drop your files on the FTP
-const REMOTE_MEDIA_BASE_URL = `${import.meta.env.BASE_URL}media/`;
+const REMOTE_MEDIA_BASE_URL = withBase('media/');
 const moduleFetchCache = new Map<string, Promise<Uint8Array>>();
 const MAX_MODULE_CACHE_ENTRIES = 64;
 

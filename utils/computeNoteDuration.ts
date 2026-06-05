@@ -2,6 +2,7 @@
 // Replaces the CPU O(rows×channels) scan with a WebGPU compute pass.
 
 import type { PatternMatrix } from '../types';
+import { withBase } from '../src/lib/paths';
 
 const MAX_SHADER_ROWS = 1024; // Must match MAX_ROWS in compute_note_duration.wgsl
 
@@ -23,8 +24,12 @@ export async function initNoteDurationCompute(device: GPUDevice): Promise<NoteDu
     return cachedState;
   }
 
-  const shaderBase = import.meta.env.BASE_URL;
-  const shaderCode = await fetch(`${shaderBase}shaders/compute_note_duration.wgsl`).then((r) => r.text());
+  const shaderUrl = withBase('shaders/compute_note_duration.wgsl');
+  const shaderResponse = await fetch(shaderUrl);
+  if (!shaderResponse.ok) {
+    throw new Error(`Could not load shader at ${shaderUrl} (${shaderResponse.status})`);
+  }
+  const shaderCode = await shaderResponse.text();
 
   const module = device.createShaderModule({ code: shaderCode });
   if ('getCompilationInfo' in module) {
