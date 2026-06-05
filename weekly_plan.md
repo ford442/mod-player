@@ -1,8 +1,8 @@
-# Weekly Plan - XASM-1 (Web Worker parse landed → GPU compute duration port)
+# Weekly Plan - XASM-1 (GPU compute duration port landed → Mobile/low-end "lite" render mode)
 
 ## Today's focus
-**New Idea — GPU compute-shader port of the note-duration / sustain-span calculation (narrative §Performance; backlog "Compute-shader port of note-duration calculation").**
-Port `calculateNoteDurations` (DURA-001) in `utils/gpuPacking.ts` — currently an O(rows×channels) JS scan with ECx/note-off detection that runs on every pattern load (and now inside `workers/openmpt-parser.worker.ts`) — into a WebGPU compute pass. The compute shader runs over the packed pattern buffer, computes per-cell `{duration, isSustained, isExpressionOnly}`, and writes results into the per-cell GPU buffer the render shader already reads, so the CPU never walks the pattern. Keep the existing JS `calculateNoteDurations` as a CPU fallback for the HTML/ScriptProcessor/no-WebGPU paths and for the worker. Rationale: last week's Web Worker parse decoupled libopenmpt parsing from the main thread; the remaining per-load cost on large/dense `.it` patterns is this duration scan — moving it to the GPU makes it near-free and scales to dense patterns. Save-state written to `.swarm-state.md` at each iteration boundary.
+**User Idea — Mobile / low-end "lite" render mode.**
+Detect mobile + low-power GPU (or absence of WebGPU) and degrade the visualization gracefully: reduce visible row count, disable multi-layer bloom, and auto-select a cheap shader variant. The premium desktop path is untouched — lite mode is a parallel branch gated behind capability detection (plus a manual override toggle for testing). Rationale: the project audience is PUBLIC, and every render upgrade so far (multi-layer bloom, ACES, CRT post, GPU compute duration) has raised the desktop floor while widening the gap for phones and integrated GPUs. A lite path widens reach without compromising the desktop look. Save-state written to `.swarm-state.md` at each iteration boundary.
 
 ## Ideas
 <!-- User-written ideas Noah accumulates during the week. Routine prioritizes these. -->
@@ -12,7 +12,7 @@ Port `calculateNoteDurations` (DURA-001) in `utils/gpuPacking.ts` — currently 
 - [done — 2026-05-08] Keyboard shortcut set: space/arrows/1–9/L/M/F/D/? fully implemented in useKeyboardShortcuts.ts with cheatsheet + Media Session API
 - [done — 2026-05-29] SharedArrayBuffer oscilloscope pipeline from worklet → GPU texture (narrative §Advanced 4) — v0.55 shader confirmed present with `oscTexture: texture_1d<f32>` binding; PatternDisplay.tsx creates texture + uploads SAB buffer when v0.55 active; useLibOpenMPT.ts receives SAB from worklet; only missing piece was App.tsx registration — add `{ id: 'patternv0.55.wgsl', label: 'v0.55 (Oscilloscope)' }` to AVAILABLE_SHADERS
 - [done — 2026-05-30] Move initial module parse off the main thread into a Web Worker to avoid 300 ms–1 s freezes on large `.it` files (narrative §Advanced 3) — `workers/openmpt-parser.worker.ts` created, `useLibOpenMPT.ts`/`useAudioGraph.ts` refactored, lazy `ensureMainThreadModule()` for ScriptProcessor fallback; typecheck + build pass. NOT YET in a PR / not merged to main (lives on working branch).
-- [ ] (new — 2026-05-30) Mobile / low-end "lite" render mode: detect mobile + low-power GPU (or absence of WebGPU), reduce visible row count, disable multi-layer bloom, auto-select a cheap shader variant — widens the public audience without touching the premium desktop path
+- [in progress — 2026-06-05] Mobile / low-end "lite" render mode: detect mobile + low-power GPU (or absence of WebGPU), reduce visible row count, disable multi-layer bloom, auto-select a cheap shader variant — widens the public audience without touching the premium desktop path
 - [ ] (new — 2026-05-30) Dynamic per-instrument color palettes driven by the module: derive/assign a color per instrument and pass as a palette uniform/texture so melodic lines are distinguishable by timbre, not only pitch hue — extends the existing colorPalette uniform + multi-palette selector (PR #148)
 - [done — 2026-05-15] Darker-chassis toggle + drop shadow for white-chassis contrast — bezel dark-mode toggle landed in PR #186 (narrative §Graphical 6)
 - [done — 2026-05-15] Collapsible / default-hidden PatternDisplay debug panel — default-hidden + Mode=NONE fix in PR #186 (narrative §Graphical 8)
@@ -22,8 +22,9 @@ Port `calculateNoteDurations` (DURA-001) in `utils/gpuPacking.ts` — currently 
 
 ## Backlog
 <!-- Unfinished items, known bugs, deferred work. -->
-- [ ] **MERGE STATE:** working branch `claude/charming-johnson-I2pjU` is ~98 commits ahead of `main` with NO open PR — the Web Worker parse, v0.55 registration, and shuffle/stepsLength all live here un-merged. Open a PR and reconcile `main` so it stops drifting.
-- [ ] Compute-shader port of note-duration calculation (narrative §Performance) — **[in progress — 2026-05-30, today's focus]**
+- [ ] **VERIFY DURA-001:** GPU compute duration port landed (#239), typecheck + build green. Pending runtime browser smoke-test — confirm `[DURA-PARITY] ✓` prints in dev console with at least one MOD and one IT module (parity assertion vs CPU `calculateNoteDurations`). If parity fails it logs the first mismatching cell index + hex.
+- [ ] Mobile / low-end "lite" render mode — **[in progress — 2026-06-05, today's focus]**
+- [ ] Storage-manager SAVE-BACK + sync: cloud library *browser* landed (#242); remaining = POST `/api/songs`, `/api/admin/sync` button, shader-rating UI hookup polish — **decoupled Copilot issue this run** (no overlap with mobile-lite render files)
 - [ ] Bug 4: ▶️ Play button scrolls canvas off-screen (focus/scroll side effect — likely `autoFocus` or `scrollIntoView` on play button element)
 - [ ] Verify Bug 2 (ScriptProcessor fallback) — PR #189 diagnostics + PR #215 native bridge landed; spot-check console on prod at `test.1ink.us/xm-player/`
 - [ ] v0.52 (Night), v0.53 (Midnight), v0.54 (Neon Night) shaders — NOT YET CREATED; files do not exist in shaders/ or public/shaders/
@@ -32,6 +33,10 @@ Port `calculateNoteDurations` (DURA-001) in `utils/gpuPacking.ts` — currently 
 - [ ] Storage-manager integration: `/api/shaders`, `/api/songs`, rating hookup (narrative §Integration) — candidate decoupled Copilot issue (see today's dispatch)
 
 ## Done
+- [x] 2026-06-05 — DURA-001 GPU compute duration port: `shaders/compute_note_duration.wgsl` (+ public copy), `utils/computeNoteDuration.ts`, `packPatternMatrixComputeInput` + `verifyDurationParity` in `utils/gpuPacking.ts`, integrated into `hooks/useWebGPURender.ts` with CPU fallback + dev-mode byte-for-byte parity check. Landed via PR #239; typecheck + build green. (Runtime parity smoke-test still pending — see Backlog VERIFY DURA-001)
+- [x] 2026-06-03 — Project-M worklet-driven audio-clock-accurate PCM bridge (PR #250): `openmpt-worklet.js` PCM tap + `utils/projectMBridge.ts` enhancements for sample-accurate external visualization
+- [x] 2026-06-03 — Cloud library browser + shader rating integration (PR #242): `components/LibraryBrowser.tsx`, `hooks/useLibrary.ts`, `hooks/useRateShader.ts`, `utils/storageApi.ts` (zod-validated), `/api/songs`+`/api/shaders` fetch, rating UI in ShaderSelectorPanel
+- [x] 2026-06-05 — MERGE STATE resolved: working branch reconciled into `main` (PR #239); `main` now at #250, working branch in sync (0 ahead / 0 behind). No drift.
 - [x] 2026-05-30 — Web Worker module parse: `_openmpt_module_create_from_memory2()` + pattern-matrix pre-compute moved into `workers/openmpt-parser.worker.ts`; `useLibOpenMPT.ts`/`useAudioGraph.ts` refactored with lazy `ensureMainThreadModule()` ScriptProcessor fallback; typecheck + build pass (un-merged on working branch — see Backlog MERGE STATE)
 - [x] 2026-05-30 — Register `patternv0.55.wgsl` (Oscilloscope) in App.tsx AVAILABLE_SHADERS — closes SAB oscilloscope pipeline (commit 8b9fb14, PR #238)
 - [x] 2026-05-30 — Random-shader 🔀 shuffle button in ShaderSelectorPanel + v0.50 stepsLength clamping (PR #237)
@@ -82,10 +87,10 @@ Port `calculateNoteDurations` (DURA-001) in `utils/gpuPacking.ts` — currently 
 - [x] 2026-04-10 — Stale channel buffer + bind-group refresh fix; shader animation on second-song-load fix
 
 ## Last run
-Date: 2026-05-30
-Mode: New Idea
-Focus: GPU compute-shader port of the note-duration / sustain-span calculation (`calculateNoteDurations`, DURA-001) — move the per-load JS pattern scan onto a WebGPU compute pass, keep JS as CPU fallback
-Outcome: Last week's Web Worker module parse landed COMPLETE (typecheck + build green, `workers/openmpt-parser.worker.ts`) — NOT Fix First. Also confirmed landed: v0.55 oscilloscope registration (#238) and random-shader shuffle + v0.50 stepsLength (#237). Ideas section exhausted → New Idea mode; picked compute-shader duration port, appended mobile lite-mode + per-instrument palettes to Ideas. Flagged: working branch ~98 commits ahead of main with no open PR. Decoupled Copilot issue this run = storage-manager cloud library browser (no overlap with GPU compute files).
+Date: 2026-06-05
+Mode: User Idea
+Focus: Mobile / low-end "lite" render mode — capability detection (mobile + low-power GPU + no-WebGPU) → reduce visible rows, disable multi-layer bloom, auto-select a cheap shader variant, parallel to the untouched premium desktop path
+Outcome: Last week's DURA-001 GPU compute duration port landed COMPLETE via PR #239 (typecheck + build green; runtime parity smoke-test still pending). MERGE STATE backlog item RESOLVED — `main` reconciled, working branch in sync (0/0), now at #250. Also landed since last run: cloud library browser + rating (#242), Project-M PCM bridge (#250). NOT Fix First (typecheck green once deps installed — note: fresh container needs `npm install`). Ideas had 2 unfinished user items → User Idea mode; picked mobile lite-mode, marked [in progress — 2026-06-05]. Per-instrument palettes left in Ideas for next run. Decoupled Copilot issue this run = storage-manager save-back + sync + rating-hookup completion (no overlap with mobile-lite render files; shared App.tsx flagged as open question).
 
 ---
 
