@@ -37,7 +37,7 @@ import {
 } from '../utils/computeNoteDuration';
 import type { BloomPostProcessor } from '../utils/bloomPostProcessor';
 import { GRID_RECT } from '../utils/geometryConstants';
-import { detectRuntimeBase, withBase } from '../src/lib/paths';
+import { detectRuntimeBase } from '../src/lib/paths';
 
 export type DebugInfo = {
   layoutMode: string;
