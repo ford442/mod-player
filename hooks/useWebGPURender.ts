@@ -13,6 +13,7 @@ import {
   shouldEnableAlphaBlending,
   supportsStepsLength,
 } from '../utils/shaderVersion';
+import { getShaderMeta, getLiteRecommendedShader } from '../utils/shaderRegistry';
 import {
   alignTo,
   clampPlayhead,
@@ -43,6 +44,18 @@ export type DebugInfo = {
   errors: string[];
   uniforms: Record<string, number | string>;
 };
+
+async function fetchShaderSource(shaderBase: string, shaderName: string): Promise<string> {
+  const response = await fetch(`${shaderBase}shaders/${shaderName}`);
+  if (!response.ok) {
+    throw new Error(`Failed to load shader "${shaderName}" (${response.status} ${response.statusText})`);
+  }
+  const source = await response.text();
+  if (!source.trim()) {
+    throw new Error(`Shader "${shaderName}" loaded as an empty file`);
+  }
+  return source;
+}
 
 // All per-frame render parameters — updated every React render via ref assignment
 export interface WebGPURenderParams {
@@ -277,12 +290,19 @@ export function useWebGPURender(
         bezelTextureResourcesRef.current = null;
 
         const shaderBase = import.meta.env.BASE_URL;
-        const shaderSource = await fetch(`${shaderBase}shaders/${shaderFile}`).then(r => r.text());
+        let activeShaderFile = shaderFile;
+        if (!getShaderMeta(activeShaderFile)) {
+          const fallbackShader = getLiteRecommendedShader();
+          console.warn(`[WebGPU] Shader "${activeShaderFile}" is not registered; falling back to "${fallbackShader}".`);
+          activeShaderFile = fallbackShader;
+        }
+
+        const shaderSource = await fetchShaderSource(shaderBase, activeShaderFile);
         if (cancelled) return;
         const module = device.createShaderModule({ code: shaderSource });
         if ('getCompilationInfo' in module) module.getCompilationInfo().catch(() => {});
 
-        const layoutType = getLayoutType(shaderFile);
+        const layoutType = getLayoutType(activeShaderFile);
         layoutTypeRef.current = layoutType;
         useExtendedRef.current = layoutType === 'extended';
         if (layoutType !== 'extended') {
@@ -303,7 +323,7 @@ export function useWebGPURender(
           bindGroupLayout = device.createBindGroupLayout({ entries: [{ binding: 0, visibility: GPUShaderStage.FRAGMENT | GPUShaderStage.VERTEX, buffer: { type: 'read-only-storage' } }, { binding: 1, visibility: GPUShaderStage.FRAGMENT | GPUShaderStage.VERTEX, buffer: { type: 'uniform' } }] });
         }
 
-        const enableAlphaBlend = shouldEnableAlphaBlending(shaderFile);
+        const enableAlphaBlend = shouldEnableAlphaBlending(activeShaderFile);
         const targets: GPUColorTargetState[] = [{ format, ...(enableAlphaBlend ? { blend: { color: { srcFactor: 'src-alpha', dstFactor: 'one-minus-src-alpha', operation: 'add' }, alpha: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha', operation: 'add' } } } : {}) }];
         try {
           pipelineRef.current = device.createRenderPipeline({ layout: device.createPipelineLayout({ bindGroupLayouts: [bindGroupLayout] }), vertex: { module, entryPoint: 'vs' }, fragment: { module, entryPoint: 'fs', targets }, primitive: { topology: 'triangle-list' } });
@@ -314,10 +334,10 @@ export function useWebGPURender(
         const uniformSize = layoutType === 'extended' ? 128 : (layoutType === 'texture' ? 64 : 32);
         const uniformBuffer = device.createBuffer({ size: alignTo(uniformSize, 256), usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
 
-        if (shouldUseBackgroundPass(shaderFile)) {
+        if (shouldUseBackgroundPass(activeShaderFile)) {
           try {
-            const backgroundShaderFile = getBackgroundShaderFile(shaderFile);
-            const backgroundSource = await fetch(`${shaderBase}shaders/${backgroundShaderFile}`).then(r => r.text());
+            const backgroundShaderFile = getBackgroundShaderFile(activeShaderFile);
+            const backgroundSource = await fetchShaderSource(shaderBase, backgroundShaderFile);
             const bezelModule = device.createShaderModule({ code: backgroundSource });
             const bezelBindLayout = device.createBindGroupLayout({ entries: [{ binding: 0, visibility: GPUShaderStage.FRAGMENT, buffer: { type: 'uniform' } }, { binding: 1, visibility: GPUShaderStage.FRAGMENT, sampler: { type: 'filtering' } }, { binding: 2, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float' } }] });
             bezelPipelineRef.current = device.createRenderPipeline({ layout: device.createPipelineLayout({ bindGroupLayouts: [bezelBindLayout] }), vertex: { module: bezelModule, entryPoint: 'vs' }, fragment: { module: bezelModule, entryPoint: 'fs', targets: [{ format }] }, primitive: { topology: 'triangle-list' } });
@@ -340,7 +360,7 @@ export function useWebGPURender(
         });
 
         const p = renderParamsRef.current;
-        const isHighPrec = shaderFile.includes('v0.36') || shaderFile.includes('v0.37') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.47') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49') || shaderFile.includes('v0.50') || shaderFile.includes('v0.51') || shaderFile.includes('v0.55');
+        const isHighPrec = activeShaderFile.includes('v0.36') || activeShaderFile.includes('v0.37') || activeShaderFile.includes('v0.38') || activeShaderFile.includes('v0.39') || activeShaderFile.includes('v0.40') || activeShaderFile.includes('v0.42') || activeShaderFile.includes('v0.43') || activeShaderFile.includes('v0.44') || activeShaderFile.includes('v0.45') || activeShaderFile.includes('v0.46') || activeShaderFile.includes('v0.47') || activeShaderFile.includes('v0.48') || activeShaderFile.includes('v0.49') || activeShaderFile.includes('v0.50') || activeShaderFile.includes('v0.51') || activeShaderFile.includes('v0.55');
 
         // DURA-001: initialize compute pipeline for high-precision shaders
         if (isHighPrec && !computeStateRef.current) {
@@ -400,7 +420,7 @@ export function useWebGPURender(
 
         const needsTexture = layoutType === 'texture' || layoutType === 'extended';
         if (needsTexture) {
-          const isVideoShader = shaderFile.includes('v0.20') || shaderFile.includes('v0.23') || shaderFile.includes('v0.24') || shaderFile.includes('v0.25');
+          const isVideoShader = activeShaderFile.includes('v0.20') || activeShaderFile.includes('v0.23') || activeShaderFile.includes('v0.24') || activeShaderFile.includes('v0.25');
           if (isVideoShader) ensureVideoPlaceholder(device); else await ensureButtonTexture(device);
         }
 
