@@ -56,8 +56,8 @@ interface MainLayoutProps {
   channelStates: ChannelShadowState[];
   beatPhase: number;
   grooveAmount: number;
-  kickTrigger: boolean;
-  activeChannels: boolean[];
+  kickTrigger: number;
+  activeChannels: number[];
   isModuleLoaded: boolean;
   volume: number;
   pan: number;

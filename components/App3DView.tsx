@@ -27,8 +27,8 @@ interface App3DViewProps {
   channelStates: ChannelShadowState[];
   beatPhase: number;
   grooveAmount: number;
-  kickTrigger: boolean;
-  activeChannels: boolean[];
+  kickTrigger: number;
+  activeChannels: number[];
   volume: number;
   pan: number;
   isLooping: boolean;
