@@ -1,115 +1,37 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { Header } from './components/Header';
-import { Controls } from './components/Controls';
-import { PatternDisplay } from './components/PatternDisplay';
-import { MediaOverlay } from './components/MediaOverlay';
-import { Studio3D } from './components/Studio3D';
-import { KeyboardShortcutHelp } from './components/KeyboardShortcutHelp';
-
-import { ChannelMeters } from './components/ChannelMeters';
-import { MetadataPanel } from './components/MetadataPanel';
+import { App3DView } from './components/App3DView';
+import { MainLayout } from './components/MainLayout';
 import type { ModuleMetadata } from './components/MetadataPanel';
-import { Playlist } from './components/Playlist';
-import { LibraryBrowser } from './components/LibraryBrowser';
-import { SeekBar } from './components/SeekBar';
-import { Panel } from './components/Panel';
-import { ShaderSelectorPanel } from './components/ShaderSelectorPanel';
 import { useLibOpenMPT } from './hooks/useLibOpenMPT';
 import { usePlaylist } from './hooks/usePlaylist';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { useLocalStorage } from './hooks/useLocalStorage';
 import { useLibrary, useSaveSong, useSyncLibrary } from './hooks/useLibrary';
 import { useRateShader } from './hooks/useRateShader';
-import { cn } from './utils/cn';
 import { startProjectMBridge } from './utils/projectMBridge';
 import { fetchRemoteModule, inferFileNameFromUrl } from './utils/remoteMedia';
 import { SchemaMismatchError, type RemoteSong, type SongSaveRequest } from './utils/storageApi';
 import { supportsStepsLength, isLiteRecommendedShader } from './utils/shaderVersion';
 import { getLiteRecommendedShader } from './utils/shaderRegistry';
-import { DEVICE_CAPABILITIES, setLiteOverride } from './utils/deviceCapabilities';
+import { DEVICE_CAPABILITIES } from './utils/deviceCapabilities';
 import type { MediaItem } from './types';
-import { 
-  DEFAULT_BLOOM_PRESET, 
-  DEFAULT_COLOR_SCHEME, 
-  type BloomPreset, 
+import {
+  DEFAULT_BLOOM_PRESET,
+  DEFAULT_COLOR_SCHEME,
+  type BloomPreset,
   type ColorScheme,
   type NightPreset,
   NIGHT_PRESETS,
   DEFAULT_NIGHT_PRESET,
 } from './types/bloomPresets';
-
-// Shader Definitions
-const DEFAULT_SHADER = 'patternv0.50.wgsl';
-
-const SHADER_GROUPS = {
-  SQUARE: [
-    { id: 'patternv0.44.wgsl', label: 'v0.44 (Frosted Wall 64)' },
-    { id: 'patternv0.43.wgsl', label: 'v0.43 (Frosted Wall 32)' },
-    { id: 'patternv0.40.wgsl', label: 'v0.40 (Frosted Grid)' },
-    { id: 'patternv0.39.wgsl', label: 'v0.39 (Modern)' },
-    { id: 'patternv0.21.wgsl', label: 'v0.21 (Wall)' },
-  ],
-  CIRCULAR: [
-    { id: 'patternv0.50.wgsl', label: 'v0.50 (Trap Frosted Lens)' },
-    { id: 'patternv0.51.wgsl', label: 'v0.51 (Playhead Arc)' },
-    { id: 'patternv0.55.wgsl', label: 'v0.55 (Oscilloscope)' },
-    { id: 'patternv0.49.wgsl', label: 'v0.49 (Trap Frosted Glass)' },
-    { id: 'patternv0.48.wgsl', label: 'v0.48 (Trap Frosted Disc)' },
-    { id: 'patternv0.47.wgsl', label: 'v0.47 (Trap Frosted)' },
-    { id: 'patternv0.46.wgsl', label: 'v0.46 (Frosted Glass)' },
-    { id: 'patternv0.45.wgsl', label: 'v0.45 (Frosted Bloom)' },
-    { id: 'patternv0.45b.wgsl', label: 'v0.45b (Note-On Sustain)' },
-    { id: 'patternv0.42.wgsl', label: 'v0.42 (Frosted Disc)' },
-    { id: 'patternv0.38.wgsl', label: 'v0.38 (Glass)' },
-    { id: 'patternv0.35_bloom.wgsl', label: 'v0.35 (Bloom)' },
-    { id: 'patternv0.30.wgsl', label: 'v0.30 (Disc)' },
-  ],
-  VIDEO: [
-    { id: 'patternv0.23.wgsl', label: 'v0.23 (Clouds)' },
-    { id: 'patternv0.24.wgsl', label: 'v0.24 (Tunnel)' },
-  ]
-};
-
-const ALL_SHADER_OPTIONS = [
-  ...SHADER_GROUPS.SQUARE.map(s => ({ ...s, group: 'Square' as const })),
-  ...SHADER_GROUPS.CIRCULAR.map(s => ({ ...s, group: 'Circular' as const })),
-  ...SHADER_GROUPS.VIDEO.map(s => ({ ...s, group: 'Video' as const })),
-];
-const AVAILABLE_SHADERS = ALL_SHADER_OPTIONS;
-
-// Flat set of all valid shader IDs (used for localStorage validation)
-const ALL_SHADER_IDS = new Set<string>([
-  ...AVAILABLE_SHADERS.map(s => s.id),
-]);
-
-// Available UI themes.
-// Each theme value maps to a `data-theme` attribute on <html> and a CSS selector
-// in index.css that overrides the --panel-*, --text-*, --edge-*, and --meter-* variables.
-export type AppTheme = 'light' | 'dark' | 'precision' | 'amber-mono' | 'beige-classic';
-
-/** Themes that use light backgrounds (isDarkMode = false for these). */
-const LIGHT_THEMES: ReadonlySet<AppTheme> = new Set(['light', 'beige-classic']);
-
-const THEME_OPTIONS: { value: AppTheme; label: string }[] = [
-  { value: 'light',         label: '☀️ Light' },
-  { value: 'dark',          label: '🌙 Dark' },
-  { value: 'precision',     label: '🖤 Precision' },
-  { value: 'amber-mono',    label: '🟡 Amber' },
-  { value: 'beige-classic', label: '🤍 Classic' },
-];
-
-// Compute a fast, dependency-free hash from the first 16 bytes of a module buffer.
-// Used as a stable per-module key for localStorage shader memory.
-function computeModuleHash(data: Uint8Array): string {
-  return Array.from(data.slice(0, 16))
-    .map(b => b.toString(16).padStart(2, '0'))
-    .join('');
-}
-
-// Public / demo mode — evaluated once at module load from URL params.
-// Activated by ?public=1 or ?demo=1; value doesn't change during the page lifecycle.
-const _urlParams = new URLSearchParams(window.location.search);
-const IS_PUBLIC_MODE = _urlParams.get('public') === '1' || _urlParams.get('demo') === '1';
+import {
+  DEFAULT_SHADER,
+  ALL_SHADER_IDS,
+  LIGHT_THEMES,
+  computeModuleHash,
+  AVAILABLE_SHADERS,
+  type AppTheme,
+} from './appConfig';
 
 function App() {
   // Tier 1: global last-used shader — persisted across page reloads
@@ -568,12 +490,6 @@ function App() {
     : (isDarkMode ? 0.3 : 1.0);
   const dimFactor = effectiveDimFactor;
 
-  // Determine shader based on view mode when in 3D
-  const get3DShader = () => {
-    if (viewMode === 'wall') return 'patternv0.21.wgsl';
-    return 'patternv0.38.wgsl';
-  };
-
   // In lite mode, substitute a cheap shader for rendering unless the user
   // has already manually selected a lite-recommended one.
   const displayShaderFile = useMemo(() => {
@@ -583,481 +499,176 @@ function App() {
     return shaderFile;
   }, [liteMode, shaderFile]);
 
-  // Render in 3D mode
   if (is3DMode) {
-    const shader3D = get3DShader();
     return (
-      <>
-        <Studio3D
-          darkMode={isDarkMode}
-          viewMode={viewMode}
-          onDarkModeToggle={() => setTheme(isDarkMode ? 'light' : 'dark')}
-          onViewModeToggle={() => setViewMode(viewMode === 'device' ? 'wall' : 'device')}
-          onExitStudio={() => setIs3DMode(false)}
-          dimFactor={dimFactor}
-          headerContent={
-            <div className="scale-75 origin-top-left">
-            <Header status={status} isModuleLoaded={isModuleLoaded} />
-            {/* === AUDIO ENGINE DIAGNOSTICS === */}
-            <div className={cn("debug-section audio-diagnostics mb-2 inline-flex flex-col rounded border px-2 py-1 text-[10px] font-mono", isDarkMode ? "border-gray-700 bg-black/50 text-gray-300" : "border-gray-300 bg-white/80 text-gray-700")}>
-              <h4 className="m-0 mb-1 border-b pb-1 font-bold">🎛️ Audio Engine</h4>
-              <div className="debug-grid grid grid-cols-2 gap-x-4 gap-y-1">
-                <div><strong>Context:</strong> {syncDebug.audioContextState}</div>
-                <div><strong>Sample Rate:</strong> {syncDebug.sampleRate} Hz</div>
-                <div><strong>Base Latency:</strong> {syncDebug.baseLatency.toFixed(2)} ms</div>
-                <div><strong>Output Latency:</strong> {syncDebug.outputLatency.toFixed(2)} ms</div>
-                <div><strong>Drift:</strong> {syncDebug.driftMs} ms <span style={{color: Math.abs(syncDebug.driftAccumulator) > 0.008 ? "#ff4444" : "#44ff88"}}>({syncDebug.driftAccumulator.toFixed(4)})</span></div>
-                <div><strong>Last Corrected:</strong> {syncDebug.lastCorrectedTime.toFixed(3)} s</div>
-                <div><strong>Last Worklet Update:</strong> {syncDebug.lastWorkletUpdate.toFixed(3)} s</div>
-                <div><strong>Seek Pending:</strong> <span style={{color: syncDebug.seekPending ? "#ffaa00" : "#44ff88"}}>{syncDebug.seekPending ? "YES" : "No"}</span></div>
-                <div><strong>Buffer:</strong> {(syncDebug.bufferMs / 1000).toFixed(2)} s</div>
-                <div><strong>Starvation Count:</strong> {syncDebug.starvationCount}</div>
-              </div>
-            </div>
-            </div>
-          }
-          patternDisplayContent={
-            <div className="scale-75 origin-center">
-              <PatternDisplay
-                key={shader3D}
-                matrix={sequencerMatrix}
-                playheadRow={playbackRowFraction}
-                isPlaying={isPlaying}
-                bpm={120}
-                timeSec={playbackSeconds}
-                tickOffset={playbackRowFraction % 1}
-                channels={channelStates}
-                beatPhase={beatPhase}
-                grooveAmount={grooveAmount}
-                kickTrigger={kickTrigger}
-                activeChannels={activeChannels}
-                isModuleLoaded={isModuleLoaded}
-                shaderFile={shader3D}
-                volume={volume}
-                pan={pan}
-                isLooping={isLooping}
-                totalRows={totalPatternRows}
-                onPlay={play}
-                onStop={() => stopMusic(false)}
-                onFileSelected={handleFileSelected}
-                onLoopToggle={() => setIsLooping(!isLooping)}
-                onSeek={(row) => seekToStep(row)}
-                onVolumeChange={setVolume}
-                onPanChange={setPan}
-                externalVideoSource={null}
-                dimFactor={dimFactor}
-                analyserNode={analyserNode}
-                debugPanelOpen={debugPanelOpen}
-                onCloseDebug={() => setDebugPanelOpen(false)}
-                onOpenDebug={() => setDebugPanelOpen(true)}
-                // PERFORMANCE OPTIMIZATION: Pass ref for high-frequency updates
-                playbackStateRef={playbackStateRef}
-                oscBufferRef={oscBufferRef}
-                // Bloom settings from preset
-                bloomIntensity={bloomPreset.intensity}
-                bloomThreshold={bloomPreset.threshold}
-              />
-            </div>
-          }
-          controlsContent={
-            <div className="scale-75 origin-top-left">
-              <Controls
-                isReady={isReady}
-                isPlaying={isPlaying}
-                isModuleLoaded={isModuleLoaded}
-                onFileSelected={handleFileSelected}
-                onPlay={play}
-                onStop={() => stopMusic(false)}
-                isLooping={isLooping}
-                onLoopToggle={() => setIsLooping(!isLooping)}
-                volume={volume}
-                setVolume={setVolume}
-                pan={pan}
-                setPan={setPan}
-                onMediaAdd={handleMediaAdd}
-                onRemoteMediaSelect={handleRemoteMediaSelect}
-                remoteMediaList={[
-                  { id: '1', kind: 'video', url: 'clouds.mp4', fileName: 'Clouds Demo (MP4)', mimeType: 'video/mp4' }
-                ]}
-                bloomPreset={bloomPreset}
-                onBloomPresetChange={setBloomPreset}
-                colorScheme={colorScheme}
-                onColorSchemeChange={setColorScheme}
-              />
-            </div>
-          }
-          mediaOverlayContent={
-            mediaVisible && mediaItem ? (
-              <div className="scale-75 origin-center">
-                <MediaOverlay
-                  item={mediaItem}
-                  visible={mediaVisible}
-                  onClose={() => setMediaVisible(false)}
-                  onUpdate={(partial) => {
-                    if (mediaItem) setMediaItem({ ...mediaItem, ...partial });
-                  }}
-                />
-              </div>
-            ) : undefined
-          }
-          playheadX={playbackSeconds * 10.0}
-          channels={channelStates}
-        />
-        {cheatsheetOpen && <KeyboardShortcutHelp onClose={() => setCheatsheetOpen(false)} />}
-      </>
+      <App3DView
+        isDarkMode={isDarkMode}
+        viewMode={viewMode}
+        setViewMode={setViewMode}
+        setIs3DMode={setIs3DMode}
+        setTheme={setTheme}
+        dimFactor={dimFactor}
+        status={status}
+        isModuleLoaded={isModuleLoaded}
+        syncDebug={syncDebug}
+        sequencerMatrix={sequencerMatrix}
+        playbackRowFraction={playbackRowFraction}
+        isPlaying={isPlaying}
+        playbackSeconds={playbackSeconds}
+        channelStates={channelStates}
+        beatPhase={beatPhase}
+        grooveAmount={grooveAmount}
+        kickTrigger={kickTrigger}
+        activeChannels={activeChannels}
+        volume={volume}
+        pan={pan}
+        isLooping={isLooping}
+        totalPatternRows={totalPatternRows}
+        play={play}
+        stopMusic={stopMusic}
+        seekToStep={seekToStep}
+        setIsLooping={setIsLooping}
+        setVolume={setVolume}
+        setPan={setPan}
+        handleFileSelected={handleFileSelected}
+        handleMediaAdd={handleMediaAdd}
+        handleRemoteMediaSelect={handleRemoteMediaSelect}
+        analyserNode={analyserNode}
+        debugPanelOpen={debugPanelOpen}
+        setDebugPanelOpen={setDebugPanelOpen}
+        playbackStateRef={playbackStateRef}
+        oscBufferRef={oscBufferRef}
+        bloomPreset={bloomPreset}
+        setBloomPreset={setBloomPreset}
+        colorScheme={colorScheme}
+        setColorScheme={setColorScheme}
+        mediaItem={mediaItem}
+        mediaVisible={mediaVisible}
+        setMediaVisible={setMediaVisible}
+        setMediaItem={setMediaItem}
+        isReady={isReady}
+        cheatsheetOpen={cheatsheetOpen}
+        setCheatsheetOpen={setCheatsheetOpen}
+      />
     );
   }
 
-  // 2D Mode Render
   return (
-    <div className="min-h-screen bg-panel-base text-[var(--text-primary)] p-4 flex flex-col items-center transition-colors duration-300">
-      <div className="w-full max-w-[1280px]">
-        <Header status={status} isModuleLoaded={isModuleLoaded} />
-
-        {/* Global Controls */}
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-4">
-            <div className="flex gap-2">
-                <button
-                  onClick={() => setIs3DMode(true)}
-                  className="px-4 py-2 bg-blue-600 text-white text-sm font-mono rounded-lg shadow-lg hover:bg-blue-700 transition-colors border border-blue-500"
-                >
-                  🎬 3D Mode
-                </button>
-                {/* Theme selector */}
-                <select
-                  value={theme}
-                  onChange={(e) => setTheme(e.target.value as AppTheme)}
-                  className={cn(
-                    'px-3 py-2 text-sm font-mono rounded-lg shadow-lg transition-colors border outline-none cursor-pointer',
-                    isDarkMode
-                      ? 'bg-gray-800 text-white border-gray-700 hover:bg-gray-700'
-                      : 'bg-white text-black border-gray-300 hover:bg-gray-50',
-                  )}
-                  title="Switch UI theme"
-                >
-                  {THEME_OPTIONS.map(opt => (
-                    <option key={opt.value} value={opt.value}>{opt.label}</option>
-                  ))}
-                </select>
-                <button
-                  onClick={toggleAudioEngine}
-                  disabled={!isWorkletSupported || !!workletLoadError}
-                  title={workletLoadError ? `Worklet Error: ${workletLoadError}` : !isWorkletSupported ? "AudioWorklet not supported" : "Toggle Audio Engine (Worklet vs ScriptProcessor)"}
-                  className={`px-4 py-2 text-sm font-mono rounded-lg shadow-lg transition-colors border ${
-                    !isWorkletSupported || !!workletLoadError
-                      ? 'bg-gray-300 text-gray-500 cursor-not-allowed border-gray-400 opacity-50'
-                      : activeEngine === 'native-worklet'
-                        ? 'bg-purple-600 text-white border-purple-500 hover:bg-purple-700'
-                        : activeEngine === 'worklet'
-                          ? 'bg-green-600 text-white border-green-500 hover:bg-green-700'
-                          : 'bg-yellow-500 text-black border-yellow-400 hover:bg-yellow-600'
-                  }`}
-                >
-                  {activeEngine === 'native-worklet' ? '🚀 Native' : activeEngine === 'worklet' ? '⚡ Worklet' : '🐌 Script'}
-                </button>
-                <button
-                  onClick={() => {
-                    const next = !liteMode;
-                    setLiteMode(next);
-                    setLiteOverride(next);
-                  }}
-                  className={cn(
-                    'px-4 py-2 text-sm font-mono rounded-lg shadow-lg transition-colors border',
-                    liteMode
-                      ? 'bg-orange-600 text-white border-orange-500 hover:bg-orange-700'
-                      : 'bg-gray-700 text-gray-200 border-gray-600 hover:bg-gray-600',
-                  )}
-                  title={liteMode ? 'Lite mode active (mobile/low-power)' : 'Desktop mode'}
-                >
-                  {liteMode ? '⚡ Lite' : '🖥️ Full'}
-                </button>
-            </div>
-
-            <div className={cn('flex flex-wrap gap-2 p-2 rounded-xl border', isDarkMode ? 'bg-black border-gray-800' : 'bg-gray-200 border-gray-300')}>
-                {!IS_PUBLIC_MODE && (
-                  <>
-                    <ShaderSelectorPanel
-                      shaderOptions={AVAILABLE_SHADERS}
-                      selectedShader={shaderFile}
-                      onSelectShader={setShaderFile}
-                      onRandomShader={handleRandomShader}
-                      favorites={validShaderFavorites}
-                      recents={validShaderRecents}
-                      thumbnails={shaderThumbnails}
-                      onToggleFavorite={toggleShaderFavorite}
-                      isDarkMode={isDarkMode}
-                      shaderCatalog={shadersQuery.data ?? []}
-                      shaderCatalogError={shaderCatalogErrorMessage}
-                      onRateShader={async (shaderId, score) => {
-                        await rateShaderMutation.mutateAsync({ id: shaderId, score });
-                      }}
-                      ratingInFlightShaderId={rateShaderMutation.isPending ? rateShaderMutation.variables?.id ?? null : null}
-                    />
-                    <div className={cn('w-px h-6', isDarkMode ? 'bg-gray-800' : 'bg-gray-300')}></div>
-                  </>
-                )}
-                <div className="flex items-center gap-1">
-                    <span className="text-[10px] font-bold text-gray-500 uppercase px-1">Palette</span>
-                    <select
-                        className={cn('text-xs font-mono p-1 rounded border outline-none', isDarkMode ? 'bg-gray-800 border-gray-600 text-white' : 'bg-white border-gray-300 text-black')}
-                        value={colorPalette}
-                        onChange={(e) => setColorPalette(parseInt(e.target.value, 10))}
-                    >
-                        <option value={0}>Rainbow</option>
-                        <option value={1}>Warm</option>
-                        <option value={2}>Cool</option>
-                        <option value={3}>Neon</option>
-                        <option value={4}>Acid</option>
-                        <option value={5}>Fifths</option>
-                    </select>
-                </div>
-                {isStepsShader && (
-                  <>
-                    <div className={cn('w-px h-6', isDarkMode ? 'bg-gray-800' : 'bg-gray-300')}></div>
-                    <button
-                      onClick={() => setStepsLength(stepsLength === 32 ? 64 : 32)}
-                      className={cn(
-                        'text-xs font-mono px-2 py-1 rounded border transition-colors',
-                        isDarkMode
-                          ? 'bg-gray-800 text-gray-300 border-gray-600 hover:bg-gray-700 hover:text-white'
-                          : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50',
-                      )}
-                      title="Toggle pattern length (32 or 64 steps visible)"
-                    >
-                      {stepsLength} Steps
-                    </button>
-                  </>
-                )}
-            </div>
-        </div>
-
-        {/* Main Display Area */}
-        <div className={cn('relative rounded-xl overflow-hidden shadow-2xl mb-6 border', isDarkMode ? 'bg-black border-gray-800' : 'bg-white border-gray-300')}>
-           <PatternDisplay
-             key={displayShaderFile}
-             matrix={sequencerMatrix}
-             playheadRow={playbackRowFraction}
-             isPlaying={isPlaying}
-             bpm={120}
-             timeSec={playbackSeconds}
-             tickOffset={playbackRowFraction % 1}
-             channels={channelStates}
-             beatPhase={beatPhase}
-             grooveAmount={grooveAmount}
-             kickTrigger={kickTrigger}
-             activeChannels={activeChannels}
-             isModuleLoaded={isModuleLoaded}
-             shaderFile={displayShaderFile}
-             volume={volume}
-             pan={pan}
-             isLooping={isLooping}
-             totalRows={totalPatternRows}
-             onPlay={play}
-             onStop={() => stopMusic(false)}
-             onFileSelected={handleFileSelected}
-             onLoopToggle={() => setIsLooping(!isLooping)}
-             onSeek={(row) => seekToStep(row)}
-             onVolumeChange={setVolume}
-              onPanChange={setPan}
-              externalVideoSource={null}
-              dimFactor={dimFactor}
-              analyserNode={analyserNode}
-              debugPanelOpen={debugPanelOpen}
-              onCloseDebug={() => setDebugPanelOpen(false)}
-              onOpenDebug={() => setDebugPanelOpen(true)}
-              // PERFORMANCE OPTIMIZATION: Pass ref for high-frequency updates
-              playbackStateRef={playbackStateRef}
-              oscBufferRef={oscBufferRef}
-             // Bloom settings from preset
-             bloomIntensity={(isNightShader && nightModeEnabled) ? nightConfig.bloomIntensity : bloomPreset.intensity}
-             bloomThreshold={bloomPreset.threshold}
-             colorPalette={colorPalette}
-             stepsLength={stepsLength}
-             onStepsLengthToggle={() => setStepsLength(stepsLength === 32 ? 64 : 32)}
-             chassisDark={chassisDark}
-             // Night Mode 2.0
-             nightModeEnabled={isNightShader && nightModeEnabled}
-             nightPreset={nightModeEnabled ? nightConfig.presetIndex : 0}
-             vignetteStrength={nightConfig.vignetteStrength}
-             filmGrain={nightConfig.filmGrain}
-             invertMix={nightConfig.invertMix}
-             // CRT effect
-             crtEnabled={crtEnabled}
-             // Lite mode
-             liteMode={liteMode}
-           />
-
-           <MediaOverlay
-             item={mediaItem}
-             visible={mediaVisible}
-             onClose={() => setMediaVisible(false)}
-             onUpdate={(partial) => {
-                 if (mediaItem) setMediaItem({ ...mediaItem, ...partial });
-             }}
-           />
-        </div>
-
-        {/* Controls */}
-        <Controls
-          isReady={isReady}
-          isPlaying={isPlaying}
-          isModuleLoaded={isModuleLoaded}
-          onFileSelected={handleFileSelected}
-          onPlay={play}
-          onStop={() => stopMusic(false)}
-          isLooping={isLooping}
-          onLoopToggle={() => setIsLooping(!isLooping)}
-          volume={volume}
-          setVolume={setVolume}
-          pan={pan}
-          setPan={setPan}
-          onMediaAdd={handleMediaAdd}
-          onRemoteMediaSelect={handleRemoteMediaSelect}
-          remoteMediaList={[
-             { id: '1', kind: 'video', url: 'clouds.mp4', fileName: 'Clouds Demo (MP4)', mimeType: 'video/mp4' }
-          ]}
-          bloomPreset={bloomPreset}
-          onBloomPresetChange={setBloomPreset}
-          colorScheme={colorScheme}
-          onColorSchemeChange={setColorScheme}
-          chassisDark={chassisDark}
-          onToggleChassisDark={() => setChassisDark(!chassisDark)}
-          // Night Mode 2.0
-          nightModeEnabled={nightModeEnabled}
-          nightModePreset={nightModePreset}
-          onNightModeToggle={() => setNightModeEnabled(!nightModeEnabled)}
-          onNightPresetChange={setNightModePreset}
-          isNightShader={isNightShader}
-          // CRT effect
-          crtEnabled={crtEnabled}
-          onToggleCrt={() => setCrtEnabled(!crtEnabled)}
-        />
-
-        {/* Seek Bar */}
-        {isModuleLoaded && (
-          <div className="mt-4">
-            <SeekBar
-              currentSeconds={playbackSeconds}
-              durationSeconds={0}
-              currentRow={playbackRowFraction}
-              totalRows={totalPatternRows}
-              isPlaying={isPlaying}
-              onSeekRow={seekToStep}
-            />
-          </div>
-        )}
-
-        {/* Panel Toggle Buttons */}
-        <div className="mt-4 flex flex-wrap gap-2">
-          {[
-            { key: 'meters', label: '📊 VU Meters', state: showChannelMeters, toggle: setShowChannelMeters },
-            { key: 'meta', label: 'ℹ️ Metadata', state: showMetadata, toggle: setShowMetadata },
-            { key: 'playlist', label: '📋 Playlist', state: showPlaylist, toggle: setShowPlaylist },
-            { key: 'library', label: '☁️ Browse Library', state: showLibraryBrowser, toggle: setShowLibraryBrowser },
-          ].map(({ key, label, state, toggle }) => (
-            <button
-              key={key}
-              onClick={() => toggle(!state)}
-              className={cn(
-                'px-3 py-1 text-xs font-mono rounded-lg border transition-colors',
-                state
-                  ? 'bg-cyan-900/30 text-cyan-300 border-cyan-800'
-                  : isDarkMode
-                    ? 'bg-gray-800 text-gray-500 border-gray-700 hover:text-gray-300'
-                    : 'bg-gray-200 text-gray-500 border-gray-300 hover:text-gray-700',
-              )}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-
-        {/* Virtual Hardware Panels */}
-        <div className="mt-4 grid grid-cols-1 lg:grid-cols-3 gap-4">
-          {/* Left Column: placeholder — PatternDisplay is rendered above */}
-          <div className="lg:col-span-2" />
-
-          {/* Right Column: Metadata + VU Meters */}
-          <div className="flex flex-col gap-4">
-            {showMetadata && (
-              <Panel variant="bezel" title="Module Info" titleAccent>
-                <MetadataPanel
-                  metadata={moduleMetadata}
-                  currentOrder={sequencerMatrix?.order ?? 0}
-                  currentRow={Math.floor(playbackRowFraction)}
-                  currentPattern={sequencerMatrix?.patternIndex ?? 0}
-                  matrix={sequencerMatrix}
-                  isPlaying={isPlaying}
-                  playbackSeconds={playbackSeconds}
-                />
-              </Panel>
-            )}
-            {showChannelMeters && (
-              <Panel variant="bezel" title="VU Meters" titleAccent>
-                <ChannelMeters
-                  channelVU={channelVU}
-                  numChannels={sequencerMatrix?.numChannels ?? 4}
-                  analyserNode={analyserNode}
-                  isPlaying={isPlaying}
-                />
-              </Panel>
-            )}
-          </div>
-        </div>
-
-        {/* Playlist */}
-        {showPlaylist && (
-          <div className="mt-4">
-            <Panel variant="raised" title="Playlist">
-              <Playlist
-                items={playlist.items}
-                currentIndex={playlist.currentIndex}
-                isPlaying={isPlaying}
-                shuffle={playlist.shuffle}
-                repeat={playlist.repeat}
-                onSelect={handlePlaylistSelect}
-                onRemove={playlist.remove}
-                onClear={playlist.clear}
-                onPrev={handlePlaylistPrev}
-                onNext={handlePlaylistNext}
-                onShuffleToggle={playlist.toggleShuffle}
-                onRepeatCycle={playlist.cycleRepeat}
-                onFilesAdded={handlePlaylistFilesAdded}
-              />
-            </Panel>
-          </div>
-        )}
-
-        {/* Cloud Library */}
-        {showLibraryBrowser && (
-          <Panel variant="raised" title="Cloud Library" className="mt-4">
-            <LibraryBrowser
-              songs={songsQuery.data ?? []}
-              loading={songsQuery.isLoading}
-              error={libraryErrorMessage}
-              isDarkMode={isDarkMode}
-              onRefresh={() => void songsQuery.refetch()}
-              onLoadSong={handleLibrarySongLoad}
-              onSync={() => syncLibraryMutation.mutateAsync()}
-              syncPending={syncLibraryMutation.isPending}
-              syncError={syncLibraryErrorMessage}
-              activeModule={activeModuleForSave}
-              onSaveModule={async (req) => {
-                await saveSongMutation.mutateAsync(req);
-              }}
-              savePending={saveSongMutation.isPending}
-              saveError={saveSongErrorMessage}
-            />
-          </Panel>
-        )}
-
-        <div className="mt-8 text-center text-xs opacity-50">
-             <p>Supports .mod, .xm, .s3m, .it files.</p>
-             <p>WebGPU required for visualization.</p>
-        </div>
-      </div>
-      {cheatsheetOpen && <KeyboardShortcutHelp onClose={() => setCheatsheetOpen(false)} />}
-    </div>
+    <MainLayout
+      isDarkMode={isDarkMode}
+      theme={theme}
+      setTheme={setTheme}
+      setIs3DMode={setIs3DMode}
+      liteMode={liteMode}
+      setLiteMode={setLiteMode}
+      isWorkletSupported={isWorkletSupported}
+      workletLoadError={workletLoadError}
+      toggleAudioEngine={toggleAudioEngine}
+      activeEngine={activeEngine}
+      shaderFile={shaderFile}
+      displayShaderFile={displayShaderFile}
+      setShaderFile={setShaderFile}
+      handleRandomShader={handleRandomShader}
+      validShaderFavorites={validShaderFavorites}
+      validShaderRecents={validShaderRecents}
+      shaderThumbnails={shaderThumbnails}
+      toggleShaderFavorite={toggleShaderFavorite}
+      shaderCatalog={shadersQuery.data ?? []}
+      shaderCatalogError={shaderCatalogErrorMessage}
+      onRateShader={async (shaderId, score) => { await rateShaderMutation.mutateAsync({ id: shaderId, score }); }}
+      ratingInFlightShaderId={rateShaderMutation.isPending ? rateShaderMutation.variables?.id ?? null : null}
+      colorPalette={colorPalette}
+      setColorPalette={setColorPalette}
+      isStepsShader={isStepsShader}
+      stepsLength={stepsLength}
+      setStepsLength={setStepsLength}
+      sequencerMatrix={sequencerMatrix}
+      playbackRowFraction={playbackRowFraction}
+      isPlaying={isPlaying}
+      playbackSeconds={playbackSeconds}
+      channelStates={channelStates}
+      beatPhase={beatPhase}
+      grooveAmount={grooveAmount}
+      kickTrigger={kickTrigger}
+      activeChannels={activeChannels}
+      isModuleLoaded={isModuleLoaded}
+      volume={volume}
+      pan={pan}
+      isLooping={isLooping}
+      totalPatternRows={totalPatternRows}
+      play={play}
+      stopMusic={stopMusic}
+      seekToStep={seekToStep}
+      setIsLooping={setIsLooping}
+      setVolume={setVolume}
+      setPan={setPan}
+      handleFileSelected={handleFileSelected}
+      analyserNode={analyserNode}
+      debugPanelOpen={debugPanelOpen}
+      setDebugPanelOpen={setDebugPanelOpen}
+      playbackStateRef={playbackStateRef}
+      oscBufferRef={oscBufferRef}
+      bloomPreset={bloomPreset}
+      setBloomPreset={setBloomPreset}
+      colorScheme={colorScheme}
+      setColorScheme={setColorScheme}
+      isNightShader={isNightShader}
+      nightModeEnabled={nightModeEnabled}
+      nightConfig={nightConfig}
+      nightModePreset={nightModePreset}
+      setNightModeEnabled={setNightModeEnabled}
+      setNightModePreset={setNightModePreset}
+      crtEnabled={crtEnabled}
+      setCrtEnabled={setCrtEnabled}
+      chassisDark={chassisDark}
+      setChassisDark={setChassisDark}
+      dimFactor={dimFactor}
+      mediaItem={mediaItem}
+      mediaVisible={mediaVisible}
+      setMediaVisible={setMediaVisible}
+      setMediaItem={setMediaItem}
+      handleMediaAdd={handleMediaAdd}
+      handleRemoteMediaSelect={handleRemoteMediaSelect}
+      isReady={isReady}
+      channelVU={channelVU}
+      moduleMetadata={moduleMetadata}
+      showChannelMeters={showChannelMeters}
+      setShowChannelMeters={setShowChannelMeters}
+      showMetadata={showMetadata}
+      setShowMetadata={setShowMetadata}
+      showPlaylist={showPlaylist}
+      setShowPlaylist={setShowPlaylist}
+      showLibraryBrowser={showLibraryBrowser}
+      setShowLibraryBrowser={setShowLibraryBrowser}
+      playlistItems={playlist.items}
+      playlistCurrentIndex={playlist.currentIndex}
+      playlistIsPlaying={isPlaying}
+      playlistShuffle={playlist.shuffle}
+      playlistRepeat={playlist.repeat}
+      onPlaylistSelect={handlePlaylistSelect}
+      onPlaylistRemove={playlist.remove}
+      onPlaylistClear={playlist.clear}
+      onPlaylistPrev={handlePlaylistPrev}
+      onPlaylistNext={handlePlaylistNext}
+      onPlaylistShuffleToggle={playlist.toggleShuffle}
+      onPlaylistRepeatCycle={playlist.cycleRepeat}
+      onPlaylistFilesAdded={handlePlaylistFilesAdded}
+      songsData={songsQuery.data}
+      songsLoading={songsQuery.isLoading}
+      libraryErrorMessage={libraryErrorMessage}
+      onRefreshLibrary={() => void songsQuery.refetch()}
+      handleLibrarySongLoad={handleLibrarySongLoad}
+      onSyncLibrary={async () => { await syncLibraryMutation.mutateAsync(); }}
+      syncPending={syncLibraryMutation.isPending}
+      syncLibraryErrorMessage={syncLibraryErrorMessage}
+      activeModuleForSave={activeModuleForSave}
+      onSaveModule={async (req) => { await saveSongMutation.mutateAsync(req); }}
+      savePending={saveSongMutation.isPending}
+      saveSongErrorMessage={saveSongErrorMessage}
+      cheatsheetOpen={cheatsheetOpen}
+      setCheatsheetOpen={setCheatsheetOpen}
+      status={status}
+    />
   );
 }
 
