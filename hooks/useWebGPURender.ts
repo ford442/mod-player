@@ -37,7 +37,7 @@ import {
 } from '../utils/computeNoteDuration';
 import type { BloomPostProcessor } from '../utils/bloomPostProcessor';
 import { GRID_RECT } from '../utils/geometryConstants';
-import { detectRuntimeBase } from '../src/lib/paths';
+import { withBase } from '../src/lib/paths';
 
 export type DebugInfo = {
   layoutMode: string;
@@ -45,8 +45,8 @@ export type DebugInfo = {
   uniforms: Record<string, number | string>;
 };
 
-async function fetchShaderSource(shaderBase: string, shaderName: string): Promise<string> {
-  const response = await fetch(`${shaderBase}shaders/${shaderName}`);
+async function fetchShaderSource(shaderName: string): Promise<string> {
+  const response = await fetch(withBase(`shaders/${shaderName}`));
   if (!response.ok) {
     throw new Error(`Failed to load shader "${shaderName}" (${response.status} ${response.statusText})`);
   }
@@ -207,10 +207,9 @@ export function useWebGPURender(
 
   const ensureButtonTexture = async (device: GPUDevice) => {
     if (textureResourcesRef.current) return;
-    const runtimeBase = detectRuntimeBase();
     const textureUrl = shaderFile.includes('v0.30')
-      ? `${runtimeBase}unlit-button-2.png`
-      : `${runtimeBase}unlit-button.png`;
+      ? withBase('unlit-button-2.png')
+      : withBase('unlit-button.png');
     console.log('[WebGPU] Loading button texture:', textureUrl);
     let bitmap: ImageBitmap;
     try {
@@ -289,7 +288,6 @@ export function useWebGPURender(
         textureResourcesRef.current = null;
         bezelTextureResourcesRef.current = null;
 
-        const shaderBase = import.meta.env.BASE_URL;
         let activeShaderFile = shaderFile;
         if (!getShaderMeta(activeShaderFile)) {
           const fallbackShader = getLiteRecommendedShader();
@@ -297,7 +295,7 @@ export function useWebGPURender(
           activeShaderFile = fallbackShader;
         }
 
-        const shaderSource = await fetchShaderSource(shaderBase, activeShaderFile);
+        const shaderSource = await fetchShaderSource(activeShaderFile);
         if (cancelled) return;
         const module = device.createShaderModule({ code: shaderSource });
         if ('getCompilationInfo' in module) module.getCompilationInfo().catch(() => {});
@@ -337,7 +335,7 @@ export function useWebGPURender(
         if (shouldUseBackgroundPass(activeShaderFile)) {
           try {
             const backgroundShaderFile = getBackgroundShaderFile(activeShaderFile);
-            const backgroundSource = await fetchShaderSource(shaderBase, backgroundShaderFile);
+            const backgroundSource = await fetchShaderSource(backgroundShaderFile);
             const bezelModule = device.createShaderModule({ code: backgroundSource });
             const bezelBindLayout = device.createBindGroupLayout({ entries: [{ binding: 0, visibility: GPUShaderStage.FRAGMENT, buffer: { type: 'uniform' } }, { binding: 1, visibility: GPUShaderStage.FRAGMENT, sampler: { type: 'filtering' } }, { binding: 2, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float' } }] });
             bezelPipelineRef.current = device.createRenderPipeline({ layout: device.createPipelineLayout({ bindGroupLayouts: [bezelBindLayout] }), vertex: { module: bezelModule, entryPoint: 'vs' }, fragment: { module: bezelModule, entryPoint: 'fs', targets: [{ format }] }, primitive: { topology: 'triangle-list' } });

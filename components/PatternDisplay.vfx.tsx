@@ -3,6 +3,7 @@
 
 import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react';
 import { ChannelShadowState, PatternMatrix } from '../types';
+import { withBase } from '../src/lib/paths';
 
 // VFX Settings interface
 interface VFXSettings {
@@ -196,7 +197,7 @@ export const PatternDisplayVFX: React.FC<{
       context.configure({ device, format, alphaMode: 'premultiplied' });
       
       // Load enhanced shader
-      const response = await fetch(`/shaders-enhanced/${shaderFile}`);
+      const response = await fetch(withBase(`shaders-enhanced/${shaderFile}`));
       const shaderCode = await response.text();
       
       const shaderModule = device.createShaderModule({ code: shaderCode });
