@@ -9,6 +9,7 @@
  */
 
 import { useCallback, useRef, useState } from 'react';
+import { detectRuntimeBase } from '../src/lib/paths';
 
 export interface WorkletLoadResult {
   success: boolean;
@@ -42,11 +43,7 @@ export interface UseWorkletLoaderOptions {
  * browsers. A version query parameter forces a fresh load after deploys.
  */
 export const getWorkletUrl = (): string => {
-  // Try multiple strategies for URL construction, ordered by reliability
-
-  // Strategy 1: Use Vite's BASE_URL (most reliable for Vite builds)
-  const viteBase = import.meta.env.BASE_URL || '/';
-  const base = viteBase.endsWith('/') ? viteBase : `${viteBase}/`;
+  const base = detectRuntimeBase();
   // BUMP this version whenever openmpt-worklet.js changes to bust browser caches
   const WORKLET_VERSION = '2';
   const url = `${base}worklets/openmpt-worklet.js?v=${WORKLET_VERSION}`;
@@ -63,9 +60,7 @@ export const getWorkletUrl = (): string => {
  * Uses the same robust BASE_URL logic as getWorkletUrl().
  */
 export const getNativeGlueUrl = (): string => {
-  const base = import.meta.env.BASE_URL || '/';
-  const normalized = base.endsWith('/') ? base : `${base}/`;
-  return `${normalized}worklets/openmpt-native.js`;
+  return `${detectRuntimeBase()}worklets/openmpt-native.js`;
 };
 
 export const getAbsoluteWorkletUrl = (): string => {
@@ -133,7 +128,7 @@ export function useWorkletLoader(options: UseWorkletLoaderOptions = {}) {
       url: workletUrl,
       audioContextState: audioContext.state,
       sampleRate: audioContext.sampleRate,
-      baseUrl: import.meta.env.BASE_URL,
+      baseUrl: detectRuntimeBase(),
       timestamp: new Date().toISOString(),
       loadAttempts: 0,
     };
@@ -259,7 +254,7 @@ export function useWorkletLoader(options: UseWorkletLoaderOptions = {}) {
       url: getWorkletUrl(),
       audioContextState: 'unknown',
       sampleRate: 0,
-      baseUrl: import.meta.env.BASE_URL,
+      baseUrl: detectRuntimeBase(),
       timestamp: new Date().toISOString(),
       loadAttempts: loadAttemptsRef.current,
     };

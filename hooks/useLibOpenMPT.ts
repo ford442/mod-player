@@ -5,10 +5,11 @@ import { computeNoteAges } from '../utils/patternExtractor';
 import { startAudioPlayback, AudioGraphRefs, AudioGraphCallbacks, AudioGraphConfig } from './useAudioGraph';
 import { useWorkletLoader, getWorkletUrl, getNativeGlueUrl, getAbsoluteWorkletUrl } from './useWorkletLoader';
 import { logWorkletDiagnostics } from '../audio-worklet/diagnostics';
+import { withBase } from '../src/lib/paths';
 
 
 // Use Vite BASE_URL for correct resolution under subdirectory deployment
-const DEFAULT_MODULE_URL = `${import.meta.env.BASE_URL}4-mat_madness.mod`;
+const DEFAULT_MODULE_URL = withBase('4-mat_madness.mod');
 
 // AUDIO-001 FIX COMPLETE: Use centralized worklet URL construction from useWorkletLoader
 const WORKLET_URL = getWorkletUrl();

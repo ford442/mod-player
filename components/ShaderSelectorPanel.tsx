@@ -1,5 +1,6 @@
 import { type KeyboardEvent as ReactKeyboardEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { cn } from '../utils/cn';
+import { withBase } from '../src/lib/paths';
 import type { ShaderMeta } from '../utils/storageApi';
 
 interface ShaderOption {
@@ -51,6 +52,7 @@ export function ShaderSelectorPanel({
 }: ShaderSelectorPanelProps) {
   const [open, setOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
+  const [rateError, setRateError] = useState<string | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
 
@@ -138,7 +140,7 @@ export function ShaderSelectorPanel({
     const isSelected = selectedShader === option.id;
     const isActive = activeIndex === index;
     const liveThumbnail = thumbnails[option.id];
-    const staticThumbnail = `${import.meta.env.BASE_URL}shaders/thumbnails/${option.id}.wgsl.png`;
+    const staticThumbnail = withBase(`shaders/thumbnails/${option.id}.wgsl.png`);
     const thumbnailSrc = liveThumbnail ?? staticThumbnail;
     const cloudMeta = catalogById.get(option.id);
 
@@ -191,10 +193,11 @@ export function ShaderSelectorPanel({
                 event.preventDefault();
                 event.stopPropagation();
                 if (!onRateShader) return;
+                setRateError(null);
                 try {
                   await onRateShader(option.id, score);
                 } catch (error) {
-                  console.error('Failed to rate shader', error);
+                  setRateError(error instanceof Error ? error.message : 'Failed to rate shader');
                 }
               }}
               className={cn(
@@ -333,6 +336,9 @@ export function ShaderSelectorPanel({
           </div>
           {shaderCatalogError && (
             <div className="mt-2 text-[10px] text-red-400">{shaderCatalogError}</div>
+          )}
+          {rateError && (
+            <div className="mt-2 text-[10px] text-red-400">Rating failed: {rateError}</div>
           )}
           {remoteOnlyShaders.length > 0 && (
             <div className="mt-3 border-t border-gray-700/60 pt-2">

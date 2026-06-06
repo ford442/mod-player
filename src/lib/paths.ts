@@ -14,11 +14,12 @@ export const detectRuntimeBase = (): string => {
   if (viteBase && viteBase !== '/') {
     return viteBase.endsWith('/') ? viteBase : `${viteBase}/`;
   }
-  const pathSegments = window.location.pathname.split('/').filter(Boolean);
-  if (pathSegments.length > 0) {
-    return `/${pathSegments[0]}/`;
+  const pathname = window.location.pathname || '/';
+  if (pathname.endsWith('/')) {
+    return pathname;
   }
-  return '/';
+  const lastSlash = pathname.lastIndexOf('/');
+  return lastSlash >= 0 ? pathname.slice(0, lastSlash + 1) : '/';
 };
 
 /**
@@ -27,12 +28,10 @@ export const detectRuntimeBase = (): string => {
  * @returns The full URL with base path
  */
 export const withBase = (p: string): string => {
-  const base = import.meta.env.BASE_URL || '/'
-  // Remove leading slash from path to avoid double slashes
-  const cleanPath = p.replace(/^\//, '')
-  // Combine base (which always ends with /) with clean path
-  return base + cleanPath
-}
+  const base = detectRuntimeBase();
+  const cleanPath = p.replace(/^\//, '');
+  return `${base}${cleanPath}`;
+};
 
 /**
  * Creates an absolute URL from a path, handling base URL correctly.
@@ -40,7 +39,7 @@ export const withBase = (p: string): string => {
  * @returns Full absolute URL string
  */
 export const withBaseAbsolute = (p: string): string => {
-  const base = import.meta.env.BASE_URL || '/'
-  const cleanPath = p.replace(/^\//, '')
-  return new URL(cleanPath, window.location.origin + base).toString()
-}
+  const base = detectRuntimeBase();
+  const cleanPath = p.replace(/^\//, '');
+  return new URL(cleanPath, `${window.location.origin}${base}`).toString();
+};
