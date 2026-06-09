@@ -11,7 +11,7 @@
 ## Technology Stack (Summary)
 - React 18 + TypeScript + Vite
 - libopenmpt (WASM) via AudioWorklet (JS + optional native C++)
-- WebGPU + WGSL (pattern visualizer, bloom, chassis)
+- WebGPU + WGSL (pattern visualizer, bloom, chassis); WebGL2 GLSL reference renderer (`?renderer=webgl2`); HTML fallback
 - Three.js / React Three Fiber (optional 3D mode)
 - Tailwind + custom CSS variables
 
@@ -20,6 +20,13 @@
 - Shader versioning logic in PatternDisplay.tsx is load-bearing — do not refactor lightly
 - Data packing (Uint32Array) must stay in sync with WGSL shaders
 - COOP/COEP headers required for SharedArrayBuffer + WASM workers
+
+## Pattern Renderer Backends
+- **webgpu** (default): production WGSL shaders via `hooks/useWebGPURender.ts`
+- **webgl2**: GLSL 3.00 ES in `src/renderers/webgl2/` — use for shader porting, Playwright pixel tests (`window.currentPatternRenderer.readPixels()`), debug modes (Alt+D in dev)
+- **html**: DOM grid via `PatternSequencer` — `?renderer=html`
+
+Shared data packing: `utils/gpuPacking.ts`. WebGL2 lens-cap GLSL mirrors `hooks/webGLShaders.ts`.
 
 ## Grok Guidelines
 - **Respect the existing structure**: The AGENTS.md and CLAUDE.md already contain deep technical detail. Use them as primary reference.

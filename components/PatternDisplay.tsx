@@ -3,6 +3,15 @@ import { ChannelShadowState, PatternMatrix, PlaybackState } from '../types';
 
 import { useWebGLOverlay } from '../hooks/useWebGLOverlay';
 import { useWebGPURender, type WebGPURenderParams, type DebugInfo } from '../hooks/useWebGPURender';
+import { useWebGL2PatternRender } from '../src/renderers/webgl2/useWebGL2PatternRender';
+import { PatternHTMLFallback } from '../src/renderers/html/PatternHTMLFallback';
+import {
+  resolvePatternRenderer,
+  subscribeRendererPreference,
+  setRendererOverride,
+} from '../src/renderers/rendererSelection';
+import { setCurrentPatternRenderer } from '../src/renderers/global';
+import type { PatternRendererBackend } from '../src/renderers/types';
 import { BloomPostProcessor } from '../utils/bloomPostProcessor';
 import { WEBGL_HYBRID_SHADERS, supportsStepsLength } from '../utils/shaderVersion';
 import { getShaderMeta } from '../utils/shaderRegistry';
@@ -130,6 +139,10 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   const themeBlendRef = useRef<number>(nightModeEnabled ? 1.0 : 0.0);
 
   const [webgpuAvailable, setWebgpuAvailable] = useState(true);
+  const [webgl2Available, setWebgl2Available] = useState(true);
+  const [activeBackend, setActiveBackend] = useState<PatternRendererBackend>(() => resolvePatternRenderer());
+
+  useEffect(() => subscribeRendererPreference(setActiveBackend), []);
   const [localTime, setLocalTime] = useState(0);
   const [invertChannels, setInvertChannels] = useState(false);
   // Internal stepsLength state — used when the prop is not controlled by the parent.
@@ -161,7 +174,10 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
 
   const numChannels = matrix?.numChannels ?? DEFAULT_CHANNELS;
 
-  const isOverlayActive = !liteMode && WEBGL_HYBRID_SHADERS.has(shaderFile);
+  const useWebGPU = activeBackend === 'webgpu';
+  const useWebGL2 = activeBackend === 'webgl2';
+  const useHTML = activeBackend === 'html';
+  const isOverlayActive = useWebGPU && !liteMode && WEBGL_HYBRID_SHADERS.has(shaderFile);
 
   const padTopChannel = shaderFile.includes('v0.16') || shaderFile.includes('v0.17') || shaderFile.includes('v0.21') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.47') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49') || shaderFile.includes('v0.50') || shaderFile.includes('v0.51') || shaderFile.includes('v0.55');
 
@@ -325,18 +341,53 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   // explicit deps, guaranteeing the cells buffer is rebuilt when a new module is loaded.
   const oscTextureRef = useRef<GPUTexture | null>(null);
 
-  const { gpuReady, render, deviceRef: gpuDevRef } = useWebGPURender(
+  const { gpuReady, render: renderWebGPU, deviceRef: gpuDevRef } = useWebGPURender(
     canvasRef, glCanvasRef, shaderFile,
     syncCanvasSize, renderParamsRef, matrix, padTopChannel, setDebugInfo, setWebgpuAvailable,
     bloomRef,
     oscTextureRef,
     liteMode,
+    useWebGPU,
   );
+
+  const { glReady, render: renderWebGL2 } = useWebGL2PatternRender(
+    canvasRef, shaderFile,
+    syncCanvasSize, renderParamsRef, matrix, padTopChannel, setDebugInfo, setWebgl2Available,
+    liteMode,
+    crtEnabledRef,
+    useWebGL2,
+  );
+
+  const gpuReadyEffective = useWebGPU ? gpuReady : useWebGL2 ? glReady : false;
+  const render = useWebGPU ? renderWebGPU : useWebGL2 ? renderWebGL2 : () => {};
 
   // Keep resize reconfiguration refs in sync
   useEffect(() => {
     gpuDeviceRef.current = gpuDevRef.current;
   });
+
+  // Expose WebGPU renderer handle for agent/CI pixel tests
+  useEffect(() => {
+    if (!useWebGPU || !gpuReady) return;
+    const canvas = canvasRef.current;
+    setCurrentPatternRenderer({
+      backend: 'webgpu',
+      readPixels: () => {
+        if (!canvas) return null;
+        const gl = canvas.getContext('webgl2');
+        // WebGPU canvas — readback requires copyTextureToBuffer; return null for now
+        void gl;
+        return null;
+      },
+      getCanvas: () => canvas,
+      setDebugMode: () => {},
+      getDebugMode: () => 'normal',
+      setScrollSpeed: () => {},
+      getScrollSpeed: () => 1,
+      resize: () => handleResize(),
+    });
+    return () => setCurrentPatternRenderer(null);
+  }, [useWebGPU, gpuReady, handleResize]);
 
   // Create oscilloscope 1D texture when GPU is ready and v0.55 is active
   useEffect(() => {
@@ -359,7 +410,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   useEffect(() => {
     const device = gpuDevRef.current;
     const canvas = canvasRef.current;
-    if (!device || !canvas || !gpuReady) return;
+    if (!device || !canvas || !gpuReady || !useWebGPU) return;
     if (liteMode) return; // Skip bloom entirely in lite mode
     const context = canvas.getContext('webgpu') as GPUCanvasContext | null;
     if (!context) return;
@@ -383,7 +434,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
       bloomRef.current?.destroy();
       bloomRef.current = null;
     };
-  }, [gpuReady, shaderFile, liteMode]);
+  }, [gpuReady, shaderFile, liteMode, useWebGPU]);
 
   // DEV: Alt+B cycles bloom layer isolation (trigger → sustain → expression/trace → all)
   useEffect(() => {
@@ -504,8 +555,10 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
           { width: 2048, height: 1, depthOrArrayLayers: 1 }
         );
       }
-      if (gpuReady) {
-        bloomRef.current?.updateCRT(crtEnabledRef.current ? 1.0 : 0.0);
+      if (gpuReadyEffective && !useHTML) {
+        if (useWebGPU) {
+          bloomRef.current?.updateCRT(crtEnabledRef.current ? 1.0 : 0.0);
+        }
         renderRef.current?.();
         if (isOverlayActive) drawWebGL();
       }
@@ -515,7 +568,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
       isActive = false;
       if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
     };
-  }, [isModuleLoaded, isPlaying, gpuReady, drawWebGL]);
+  }, [isModuleLoaded, isPlaying, gpuReadyEffective, drawWebGL, useWebGPU, useHTML, isOverlayActive]);
 
   return (
     <div
@@ -565,24 +618,46 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
         </button>
       )}
 
-      <canvas
-        ref={canvasRef}
-        data-shader-preview-source="true"
-        width={canvasMetrics.width}
-        height={canvasMetrics.height}
-        onClick={handleCanvasClick}
-        className={`${padTopChannel && !shaderFile.includes('v0.40') && !shaderFile.includes('v0.43') && !shaderFile.includes('v0.44') ? 'rounded bg-black shadow-inner border border-black/50' : ''} cursor-pointer`}
-        style={{ width: 'auto', height: 'auto', maxWidth: '100%', maxHeight: '100%', aspectRatio: `${canvasMetrics.width} / ${canvasMetrics.height}`, objectFit: 'contain', position: 'relative' }}
-      />
-      <canvas
-        ref={glCanvasRef}
-        width={canvasMetrics.width}
-        height={canvasMetrics.height}
-        className="absolute top-0 left-0 pointer-events-none"
-        style={{ width: 'auto', height: 'auto', maxWidth: '100%', maxHeight: '100%', aspectRatio: `${canvasMetrics.width} / ${canvasMetrics.height}`, objectFit: 'contain', zIndex: 2, position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', display: isOverlayActive ? 'block' : 'none' }}
-      />
+      {useHTML ? (
+        <PatternHTMLFallback
+          matrix={matrix}
+          playheadRow={playheadRow}
+          totalRows={totalRows ?? matrix?.numRows ?? 64}
+          bpm={bpm}
+          {...(onSeek ? { onSeek } : {})}
+        />
+      ) : (
+        <>
+          <canvas
+            ref={canvasRef}
+            data-shader-preview-source="true"
+            data-renderer={activeBackend}
+            width={canvasMetrics.width}
+            height={canvasMetrics.height}
+            onClick={handleCanvasClick}
+            className={`${padTopChannel && !shaderFile.includes('v0.40') && !shaderFile.includes('v0.43') && !shaderFile.includes('v0.44') ? 'rounded bg-black shadow-inner border border-black/50' : ''} cursor-pointer`}
+            style={{ width: 'auto', height: 'auto', maxWidth: '100%', maxHeight: '100%', aspectRatio: `${canvasMetrics.width} / ${canvasMetrics.height}`, objectFit: 'contain', position: 'relative' }}
+          />
+          <canvas
+            ref={glCanvasRef}
+            width={canvasMetrics.width}
+            height={canvasMetrics.height}
+            className="absolute top-0 left-0 pointer-events-none"
+            style={{ width: 'auto', height: 'auto', maxWidth: '100%', maxHeight: '100%', aspectRatio: `${canvasMetrics.width} / ${canvasMetrics.height}`, objectFit: 'contain', zIndex: 2, position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', display: isOverlayActive ? 'block' : 'none' }}
+          />
+        </>
+      )}
 
-      {!webgpuAvailable && <div className="error">WebGPU not available in this browser.</div>}
+      {!useHTML && useWebGPU && !webgpuAvailable && (
+        <div className="error absolute inset-0 flex items-center justify-center bg-black/80 text-red-400 text-sm font-mono p-4">
+          WebGPU not available — use <code className="mx-1">?renderer=webgl2</code> or <code className="mx-1">?renderer=html</code>
+        </div>
+      )}
+      {!useHTML && useWebGL2 && !webgl2Available && (
+        <div className="error absolute inset-0 flex items-center justify-center bg-black/80 text-red-400 text-sm font-mono p-4">
+          WebGL2 not available — use <code className="mx-1">?renderer=html</code>
+        </div>
+      )}
 
       {!debugPanelOpen && (
         <button
@@ -601,11 +676,32 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
             <button onClick={onCloseDebug} className="text-gray-500 hover:text-white">✕</button>
           </div>
           <div className="mb-2">
-            <span className="text-gray-400">Mode:</span>
+            <span className="text-gray-400">Renderer:</span>
+            <select
+              value={activeBackend}
+              onChange={(e) => {
+                const next = e.target.value as PatternRendererBackend;
+                setRendererOverride(next);
+                setActiveBackend(next);
+              }}
+              className="ml-2 bg-[#111] border border-green-500/40 text-green-300 rounded px-1 py-0.5 text-[10px]"
+            >
+              <option value="webgpu">webgpu</option>
+              <option value="webgl2">webgl2</option>
+              <option value="html">html</option>
+            </select>
+          </div>
+          <div className="mb-2">
+            <span className="text-gray-400">Layout:</span>
             <span className={`ml-2 font-bold ${debugInfo.layoutMode.includes('32') ? 'text-blue-400' : debugInfo.layoutMode.includes('64') ? 'text-purple-400' : 'text-orange-400'}`}>
               {debugInfo.layoutMode}
             </span>
           </div>
+          {import.meta.env.DEV && activeBackend === 'webgl2' && (
+            <div className="mb-2 text-[10px] text-yellow-300">
+              Alt+D cycles debug modes (wireframe, UV, playhead…)
+            </div>
+          )}
           {debugInfo.errors.length > 0 && (
             <div className="mb-2">
               <div className="text-red-400 font-bold mb-1">Errors:</div>

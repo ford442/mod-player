@@ -13,7 +13,7 @@
 - **React 18 + TypeScript + Vite** — UI framework and build tooling
 - **libopenmpt (WASM)** — Accurate tracker module audio playback, loaded from CDN
 - **Web Audio API + AudioWorklet** — Audio rendering pipeline (ScriptProcessorNode fallback)
-- **WebGPU + WGSL** — Hardware-accelerated visualization; falls back to an HTML grid view
+- **WebGPU + WGSL** — Hardware-accelerated visualization; **WebGL2** GLSL reference renderer and **HTML** grid as fallbacks
 - **Tailwind CSS** — Styling
 - **Three.js / React-Three-Fiber** — Optional 3D visualization mode
 
@@ -36,7 +36,7 @@ mod-player/
 ├── components/
 │   ├── PatternDisplay.tsx       # PRIMARY VISUALIZATION — WebGPU context, shaders, render loop
 │   ├── Controls.tsx             # File upload, play/stop, volume/pan sliders
-│   ├── PatternSequencer.tsx     # HTML fallback pattern grid (no WebGPU)
+│   ├── PatternSequencer.tsx     # HTML fallback pattern grid (wired via src/renderers/html/)
 │   ├── MediaOverlay.tsx         # Synchronized image/video overlay during playback
 │   ├── MediaPanel.tsx           # Media file management UI
 │   ├── ChannelMeters.tsx        # Real-time per-channel VU meters
@@ -57,6 +57,10 @@ mod-player/
 │   ├── bloomPostProcessor.ts    # WebGPU multi-pass bloom effect
 │   └── remoteMedia.ts           # Fetches/caches MOD files and media from remote servers
 │
+├── src/renderers/               # Pattern renderer abstraction (webgpu/webgl2/html selection)
+│   ├── rendererSelection.ts     # ?renderer= URL param, localStorage, DEBUG_RENDERER
+│   ├── webgl2/                  # GLSL 3.00 ES reference renderer + bloom
+│   └── html/                    # PatternHTMLFallback (wraps PatternSequencer)
 ├── shaders/                     # WGSL source shaders (~56 files, e.g. patternv0.45.wgsl)
 ├── shaders-enhanced/            # Experimental enhanced shader variants
 ├── public/
@@ -86,7 +90,17 @@ npm run build:emcc   # Alternative Emscripten build (scripts/build-wasm.sh)
 python3 deploy.py    # Build + SFTP upload to production server
 ```
 
-**Browser requirement:** WebGPU requires Chrome 113+, Edge 113+, or Arc. For headless testing pass `--enable-unsafe-webgpu`.
+**Browser requirement:** WebGPU requires Chrome 113+, Edge 113+, or Arc. For headless testing pass `--enable-unsafe-webgpu`. Use `?renderer=webgl2` when WebGPU is unavailable or for GLSL-based debugging.
+
+### Pattern Renderer Backends
+
+| Backend | Entry | Use case |
+|---------|-------|----------|
+| `webgpu` | default | Production visuals (WGSL + bloom) |
+| `webgl2` | `?renderer=webgl2` | Reference GLSL port, Playwright screenshots, `window.currentPatternRenderer.readPixels()` |
+| `html` | `?renderer=html` | Lightweight DOM grid, no GPU |
+
+Toggle via debug panel (🔍), `localStorage.xasm1_pattern_renderer`, or `window.DEBUG_RENDERER`. WebGL2 debug: **Alt+D** cycles wireframe/UV/playhead modes (dev only).
 
 **Deployment env var:** `VITE_APP_BASE_PATH=/xm-player/ npm run build` for subdirectory hosting.
 

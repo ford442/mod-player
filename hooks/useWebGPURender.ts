@@ -112,6 +112,7 @@ export function useWebGPURender(
   bloomProcessorRef?: React.MutableRefObject<BloomPostProcessor | null>,
   oscTextureRef?: React.MutableRefObject<GPUTexture | null>,
   liteMode?: boolean,
+  enabled = true,
 ) {
   const [gpuReady, setGpuReady] = useState(false);
 
@@ -251,6 +252,10 @@ export function useWebGPURender(
 
   // Main WebGPU initialization
   useEffect(() => {
+    if (!enabled) {
+      setGpuReady(false);
+      return;
+    }
     const canvas = canvasRef.current;
     if (!canvas) return;
     if (!('gpu' in navigator)) { setWebgpuAvailable(false); return; }
@@ -460,7 +465,7 @@ export function useWebGPURender(
       deviceRef.current = null;
       contextRef.current = null;
     };
-  }, [shaderFile, syncCanvasSize]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [shaderFile, syncCanvasSize, enabled]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Update cells buffer when matrix changes.
   // Uses `matrix` and `padTopChannel` as direct React deps (not via renderParamsRef) so React
