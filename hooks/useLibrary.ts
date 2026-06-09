@@ -12,12 +12,14 @@ export function useLibrary() {
     queryKey: libraryQueryKeys.songs,
     queryFn: fetchRemoteSongs,
     staleTime: 60_000,
+    retry: false,
   });
 
   const shadersQuery = useQuery({
     queryKey: libraryQueryKeys.shaders,
     queryFn: fetchShaders,
     staleTime: 60_000,
+    retry: false,
   });
 
   return { songsQuery, shadersQuery };

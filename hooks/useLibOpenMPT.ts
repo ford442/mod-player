@@ -8,6 +8,7 @@ import {
   getWorkletUrl,
   getNativeGlueUrl,
   getAbsoluteWorkletUrl,
+  isNativeGlueAvailable,
   withBase,
 } from './useWorkletLoader';
 import { logWorkletDiagnostics } from '../audio-worklet/diagnostics';
@@ -847,9 +848,9 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
         try {
           const nativeGlueUrl = getNativeGlueUrl();
           console.log('[INIT] Probing for native engine at:', nativeGlueUrl);
-          const probeResp = await fetch(nativeGlueUrl, { method: 'HEAD' });
-          if (probeResp.ok) {
-            console.log('[INIT] Native C++/Wasm AudioWorklet engine available');
+          const glueIsSafe = await isNativeGlueAvailable(nativeGlueUrl);
+          if (glueIsSafe) {
+            console.log('[INIT] Native C++/Wasm AudioWorklet glue detected');
 
             // Allocate the ring-buffer SharedArrayBuffer before constructing the engine
             // so it can be stored and forwarded to the engine constructor.
@@ -876,10 +877,10 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
             setActiveEngine('native-worklet');
             console.log('[INIT] Native engine initialized');
           } else {
-            console.log('[INIT] Native engine not found (status:', probeResp.status, ')');
+            console.log('[INIT] Native engine glue not available — using JS AudioWorklet fallback');
           }
         } catch (nativeErr) {
-          console.log('[INIT] Native C++/Wasm engine not available (using JS fallback):', nativeErr);
+          console.warn('[INIT] Native engine probe failed — using JS AudioWorklet fallback:', nativeErr);
           setIsNativeWorkletAvailable(false);
         }
       } catch (e) {
