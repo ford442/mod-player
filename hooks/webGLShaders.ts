@@ -421,7 +421,8 @@ export function buildFragmentShader(useNoteSustainTailMode: boolean, isV021: boo
         uint rowOffset = (durationFlags >> 1u) & 63u;
         bool isNoteOffFlag = (durationFlags & 1u) != 0u;
         bool isSustaining = hasNote && (durationRaw > 1u) && (rowOffset > 0u) && !isNoteOffFlag;
-        bool isNoteOnRow = hasNote && (rowOffset == 0u);
+        bool is_trigger = ((packedB & 0x8000u) != 0u) || (rowOffset == 0u && hasNote && !isNoteOffFlag);
+        bool isNoteOnRow = is_trigger && hasNote;
         // 0.0 at note start → 1.0 at note end; used to fade trail glow
         float sustainProgress = (durationRaw > 1u) ? float(rowOffset) / float(durationRaw) : 0.0;
 
@@ -494,17 +495,16 @@ export function buildFragmentShader(useNoteSustainTailMode: boolean, isV021: boo
             if (hasNote && !isExpressionOnly) {
                 float pitchHue = pitchClassFromIndex(note);
                 noteColor = neonPalette(pitchHue);
-                if (isNoteOnRow) {
-                    // Strong glow for note-on
-                    midIntensity = 0.6 + bloom * 2.0;
+                if (is_trigger) {
+                    // TRIG-001: trigger node — large, brilliant
+                    midIntensity = 1.0 + bloom * 2.5;
                     if (USE_NOTE_SUSTAIN_TAIL_MODE && v_active > 0.0) {
-                        midIntensity = max(midIntensity, 0.6 + v_active * (0.8 + bloom));
+                        midIntensity = max(midIntensity, 0.8 + v_active * (1.0 + bloom));
                     }
                 } else if (isSustaining && !USE_NOTE_SUSTAIN_TAIL_MODE) {
-                    // Sustain: fades from 0.5 (note start) to 0.25 (note end)
-                    // Clamped to 0.15 minimum for a dim ringing glow
-                    float sustainBright = 0.5 - sustainProgress * 0.25;
-                    midIntensity = max(sustainBright, 0.15);
+                    // Sustain tail — smaller, dimmer
+                    float sustainBright = 0.35 - sustainProgress * 0.15;
+                    midIntensity = max(sustainBright, 0.12);
                 }
                 if (isMuted) midIntensity *= 0.3;
             }
@@ -527,8 +527,11 @@ export function buildFragmentShader(useNoteSustainTailMode: boolean, isV021: boo
             botColor = amberColor * (1.5 + bloom * 2.0);
         }
 
-        // Draw unified lens cap
-        vec2 lensSize = vec2(0.6, 0.82);
+        // TRIG-001: trigger nodes larger; sustain tails smaller
+        vec2 triggerLens = vec2(0.72, 0.92);
+        vec2 sustainLens = vec2(0.44, 0.58);
+        vec2 defaultLens = vec2(0.6, 0.82);
+        vec2 lensSize = is_trigger ? triggerLens : (isSustaining ? sustainLens : defaultLens);
         vec4 lens = drawUnifiedLensCap(
             lensUV, lensSize,
             vec4(topColor, topIntensity),

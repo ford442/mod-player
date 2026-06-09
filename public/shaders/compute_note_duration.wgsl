@@ -213,10 +213,14 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
                    ((duration & 0xFFu) << 8u) |
                    (volPacked & 0xFFu);
 
-        let outB = ((outEffCmd & 0xFFu) << 24u) |
+        var outB = ((outEffCmd & 0xFFu) << 24u) |
                    ((outEffVal & 0xFFu) << 16u) |
                    ((durationFlags & 0x7Fu) << 8u) |
                    (outVolCmd & 0xFFu);
+        // TRIG-001: explicit trigger flag on note-on rows
+        if (rowOffset == 0u && !isNoteOffFlag) {
+            outB = outB | 0x8000u;
+        }
 
         outputCells[idx]     = outA;
         outputCells[idx + 1u] = outB;

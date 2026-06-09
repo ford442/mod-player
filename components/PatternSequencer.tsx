@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { PatternMatrix } from '../types';
+import { calculateNoteDurations } from '../utils/gpuPacking';
 
 interface PatternSequencerProps {
   matrix: PatternMatrix | null;
@@ -101,6 +102,8 @@ export const PatternSequencer: React.FC<PatternSequencerProps> = ({ matrix, curr
   };
 
   // 4. Always run this useMemo too
+  const durationGrid = useMemo(() => calculateNoteDurations(matrix), [matrix]);
+
   const patternTiles = useMemo(() => {
     if (!matrix) return null;
 
@@ -162,22 +165,36 @@ export const PatternSequencer: React.FC<PatternSequencerProps> = ({ matrix, curr
                       const cells = patternRows[stepIdx] || Array.from({ length: columns }, () => ({ type: 'empty', text: '' }));
                       const cell = cells[chIdx];
                       const cellNote = cell && /[A-G]#?-/i.test(cell.text || '') ? cell.text : '';
+                      const dInfo = durationGrid[stepIdx]?.[chIdx];
+                      const isTrigger = dInfo?.isTrigger ?? false;
+                      const isSustain = dInfo?.isSustained ?? false;
                       const isActive = stepIdx === (currentRow % patternLen);
 
                       let cellColor = 'rgba(60,60,70,0.3)'; // empty/dim
-                      let cellGlow = {};
+                      let cellGlow: React.CSSProperties = {};
+                      let cellScaleY = 1;
 
-                      if (cellNote) {
-                        const hue = noteToHue(cellNote);
-                        const light = octaveToLightness(cellNote);
-                        cellColor = `hsl(${hue} 85% ${light}%)`;
+                      const cellNoteVal = cell && 'note' in cell ? cell.note : undefined;
+                      if (cellNote || (cellNoteVal && cellNoteVal > 0)) {
+                        const noteText = cellNote || `note-${cellNoteVal}`;
+                        const hue = noteToHue(noteText);
+                        const light = isTrigger
+                          ? octaveToLightness(noteText) + 8
+                          : isSustain
+                            ? octaveToLightness(noteText) - 12
+                            : octaveToLightness(noteText);
+                        const sat = isTrigger ? 92 : isSustain ? 55 : 75;
+                        cellColor = `hsl(${hue} ${sat}% ${Math.max(28, light)}%)`;
+                        cellScaleY = isTrigger ? 1.55 : isSustain ? 0.75 : 1.0;
 
-                        if (isActive) {
-                          // Active step: brightest neon glow
-                          cellGlow = { boxShadow: `0 0 16px hsl(${hue} 95% ${light + 5}%)AA, 0 0 32px hsl(${hue} 90% ${light}%)66` };
+                        if (isTrigger) {
+                          cellGlow = { boxShadow: `0 0 18px hsl(${hue} 95% ${light + 10}%)CC, 0 0 28px hsl(195 90% 65%)55` };
+                        } else if (isSustain) {
+                          cellGlow = { boxShadow: `0 0 5px ${cellColor}44` };
+                        } else if (isActive) {
+                          cellGlow = { boxShadow: `0 0 12px hsl(${hue} 90% ${light}%)88` };
                         } else {
-                          // Inactive but has note: subtle glow
-                          cellGlow = { boxShadow: `0 0 6px ${cellColor}55` };
+                          cellGlow = { boxShadow: `0 0 4px ${cellColor}40` };
                         }
                       } else if (isActive) {
                         // Active but empty: white/neutral glow
@@ -199,8 +216,8 @@ export const PatternSequencer: React.FC<PatternSequencerProps> = ({ matrix, curr
                           style={{
                             background: cellColor,
                             ...cellGlow,
-                            transform: isActive ? 'scaleY(1.3)' : undefined,
-                            opacity: cellNote ? (isActive ? 1 : 0.75) : (isActive ? 0.6 : 0.3),
+                            transform: `scaleY(${isActive ? Math.max(cellScaleY, 1.2) : cellScaleY})`,
+                            opacity: (cellNote || cellNoteVal) ? (isTrigger ? 1 : isSustain ? 0.55 : isActive ? 0.9 : 0.7) : (isActive ? 0.6 : 0.3),
                             minWidth: 4,
                             maxWidth: 20,
                           }}
