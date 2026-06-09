@@ -682,7 +682,6 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
               onChange={(e) => {
                 const next = e.target.value as PatternRendererBackend;
                 setRendererOverride(next);
-                persistRendererPreference(next);
                 setActiveBackend(next);
               }}
               className="ml-2 bg-[#111] border border-green-500/40 text-green-300 rounded px-1 py-0.5 text-[10px]"
