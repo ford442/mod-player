@@ -190,6 +190,25 @@ struct FragmentConstants {
   housingSize: vec2<f32>,
 };
 
+// TRIG-001: Duration + trigger metadata (high-precision packing)
+struct NoteDurationInfo {
+  duration: u32,
+  rowOffset: u32,
+  isNoteOff: bool,
+  isTrigger: bool,
+}
+
+fn unpackDurationInfo(packedA: u32, packedB: u32) -> NoteDurationInfo {
+  var info: NoteDurationInfo;
+  info.duration = (packedA >> 8) & 0xFFu;
+  if (info.duration == 0u) { info.duration = 1u; }
+  let durationFlags = (packedB >> 8) & 0x7Fu;
+  info.rowOffset = durationFlags >> 1u;
+  info.isNoteOff = (durationFlags & 1u) != 0u;
+  info.isTrigger = ((packedB & 0x8000u) != 0u) || (info.rowOffset == 0u && !info.isNoteOff);
+  return info;
+}
+
 fn getFragmentConstants() -> FragmentConstants {
   var c: FragmentConstants;
   c.bgColor = vec3<f32>(0.04, 0.04, 0.05);
@@ -399,41 +418,61 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     let topLed = drawFrostedGlassCap(topUV, topSize, topColor, isActive, aa, select(0.0, 1.0, isActive), topColor, select(0.0, 1.0, isActive));
     finalColor = mix(finalColor, topLed.rgb, topLed.a);
 
-    // COMPONENT 2: MAIN NOTE LIGHT
+    // COMPONENT 2: MAIN NOTE LIGHT — TRIG-001 dual-state (trigger node + sustain tail)
     let mainUV = btnUV - vec2<f32>(0.5, 0.5);
-    let mainSize = vec2<f32>(0.55, 0.45);
+    var mainSize = vec2<f32>(0.55, 0.45);
 
     var noteColor = vec3<f32>(0.15);
     var lightAmount = 0.0;
     var noteGlow = 0.0;
 
-    if (hasNote) {
+    let dInfo = unpackDurationInfo(in.packedA, in.packedB);
+    let hasPitchNote = (noteChar >= 1u) && (noteChar <= 96u);
+    let has_sustain = hasPitchNote && !dInfo.isNoteOff;
+    let is_trigger = dInfo.isTrigger && hasPitchNote;
+    let is_sustain_tail = has_sustain && !is_trigger && dInfo.rowOffset > 0u;
+
+    if (has_sustain) {
       let pitchHue = pitchClassFromPacked(in.packedA);
       let baseColor = selectPalette(uniforms.colorPalette, pitchHue);
       let instBand = inst & 15u;
       let instBright = 0.85 + (select(0.0, f32(instBand) / 15.0, instBand > 0u)) * 0.15;
-      noteColor = baseColor * instBright;
+      let flash = f32(ch.trigger) * select(0.0, 1.4, is_trigger);
+      let strike = playheadActivation * select(0.4, 3.5, is_trigger);
+      let beatBoost = 1.0 + kick * select(0.15, 0.5, is_trigger);
+      let dist = length(mainUV);
 
-      let linger = exp(-ch.noteAge * 1.2);
-      let strike = playheadActivation * 3.5;
-      let flash = f32(ch.trigger) * 1.2;
+      if (is_trigger) {
+        // === TRIGGER NODE: large, brilliant, prominent ===
+        mainSize = vec2<f32>(0.62, 0.52);
+        let trigger_intensity = smoothstep(0.45, 0.0, dist / max(mainSize.x, 0.001));
+        let trigger_color = vec3<f32>(0.3, 0.85, 1.0);
+        noteColor = mix(trigger_color, baseColor * instBright, 0.55);
+        lightAmount = (trigger_intensity * 1.35 + flash + strike) * clamp(ch.volume, 0.0, 1.2) * beatBoost;
+        let bloom_halo = smoothstep(0.7, 0.0, dist / max(mainSize.x, 0.001)) * 0.6;
+        noteColor += trigger_color * bloom_halo;
+      } else if (is_sustain_tail) {
+        // === SUSTAIN TAIL: smaller, dimmer trail ===
+        mainSize = vec2<f32>(0.30, 0.24);
+        let tail_intensity = smoothstep(0.18, 0.0, dist / max(mainSize.x, 0.001)) * 0.65;
+        let tail_color = vec3<f32>(0.15, 0.45, 0.65);
+        let fade = 1.0 - (f32(dInfo.rowOffset) / max(f32(dInfo.duration), 1.0)) * 0.35;
+        noteColor = mix(tail_color, baseColor * instBright * 0.45, 0.35);
+        lightAmount = tail_intensity * fade * clamp(ch.volume, 0.0, 1.0) * 0.55;
+      } else {
+        // Single-row / pluck — treat as trigger-sized but slightly softer
+        mainSize = vec2<f32>(0.50, 0.42);
+        let pluck_intensity = smoothstep(0.38, 0.0, dist / max(mainSize.x, 0.001));
+        noteColor = baseColor * instBright;
+        lightAmount = pluck_intensity * clamp(ch.volume, 0.0, 1.2);
+      }
 
-      let totalSteps = f32(uniforms.numRows);
-      let d = fract((f32(in.row) + uniforms.tickOffset - uniforms.playheadRow) / totalSteps) * totalSteps;
-      let coreDist = min(d, totalSteps - d);
-      let energy = 0.03 / (coreDist + 0.001);
-      let trail = exp(-7.0 * max(0.0, -d));
-      let activeVal = clamp(pow(energy, 1.3) + trail, 0.0, 1.0);
-
-      // Beat-reactive: brighter pulse on kick
-      let beatBoost = 1.0 + kick * 0.5;
-      lightAmount = (activeVal * 0.9 + flash + strike + (linger * 2.5)) * clamp(ch.volume, 0.0, 1.2) * beatBoost;
       if (isMuted) { lightAmount *= 0.2; }
       noteGlow = lightAmount;
     }
 
-    let displayColor = noteColor * max(lightAmount, 0.12) * (1.0 + bloom * 8.0);
-    let isLit = (lightAmount > 0.05);
+    let displayColor = noteColor * max(lightAmount, 0.08) * (1.0 + bloom * select(4.0, 8.0, is_trigger));
+    let isLit = (lightAmount > 0.04);
     let mainPad = drawFrostedGlassCap(mainUV, mainSize, displayColor, isLit, aa, noteGlow, displayColor, noteGlow);
     finalColor = mix(finalColor, mainPad.rgb, mainPad.a);
 
