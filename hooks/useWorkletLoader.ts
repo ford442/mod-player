@@ -9,7 +9,9 @@
  */
 
 import { useCallback, useRef, useState } from 'react';
-import { detectRuntimeBase } from '../src/lib/paths';
+import { detectRuntimeBase, withBase } from '../src/lib/paths';
+
+export { withBase };
 
 export interface WorkletLoadResult {
   success: boolean;

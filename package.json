@@ -4,7 +4,7 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "sync:shaders": "rsync -av --delete --exclude='legacy/' --exclude='thumbnails/' --exclude='README.md' shaders/ public/shaders/",
+    "sync:shaders": "node scripts/sync-shaders.mjs",
     "predev": "npm run sync:shaders",
     "dev": "vite",
     "prebuild": "npm run sync:shaders",
