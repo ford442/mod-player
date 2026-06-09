@@ -239,6 +239,7 @@ struct NoteDurationInfo {
   duration: u32,      // Total note duration in rows
   rowOffset: u32,     // How many rows from note start (0 = note-on)
   isNoteOff: bool,    // Whether this cell is the note-off row
+  isTrigger: bool,    // TRIG-001: explicit note-on trigger row
 }
 
 // DURA: Unpack duration info from packed cell data
@@ -253,6 +254,7 @@ fn unpackDurationInfo(packedA: u32, packedB: u32) -> NoteDurationInfo {
   let durationFlags = (packedB >> 8) & 0x7Fu;
   info.rowOffset = durationFlags >> 1u;
   info.isNoteOff = (durationFlags & 1u) != 0u;
+  info.isTrigger = ((packedB & 0x8000u) != 0u) || (info.rowOffset == 0u && !info.isNoteOff);
 
   return info;
 }
@@ -589,11 +591,11 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     dInfo.rowOffset = durationFlags >> 1u;
     dInfo.isNoteOff = (durationFlags & 1u) != 0u;
 
-    // AMBER-BLUE: Cell-type classification
-    let isNoteOn   = (note > 0u && note < NOTE_OFF_MIN && dInfo.rowOffset == 0u);
+    // AMBER-BLUE: Cell-type classification (TRIG-001 trigger vs sustain tail)
+    let isNoteOn   = (note > 0u && note < NOTE_OFF_MIN && dInfo.isTrigger);
     let isNoteOff  = (note >= NOTE_OFF_MIN);
     let isExprOnly = (!isNoteOn && !isNoteOff && isExpressionOnly);
-    let isSustain  = (note > 0u && note < NOTE_OFF_MIN && dInfo.duration > 1u && dInfo.rowOffset > 0u && !dInfo.isNoteOff);
+    let isSustain  = (note > 0u && note < NOTE_OFF_MIN && !dInfo.isTrigger && dInfo.duration > 0u && dInfo.rowOffset > 0u && !dInfo.isNoteOff);
     let isDead     = (!isNoteOn && !isExprOnly && !isSustain && !isNoteOff);
 
     let ch = channels[in.channel];
@@ -628,10 +630,11 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
       noteColor = baseColor * instBright * octBright;
 
       if (isNoteOn) {
-        midIntensity = calculateSustainBrightness(dInfo, 0.8 + bloom * 2.0);
+        // Trigger node: full brightness + bloom halo
+        midIntensity = calculateSustainBrightness(dInfo, 1.1 + bloom * 2.5);
       } else {
-        // Sustain tail: fixed ~45% intensity
-        midIntensity = 0.45 + bloom * 0.5;
+        // Sustain tail: dimmer, thinner visual weight
+        midIntensity = 0.32 + bloom * 0.35;
       }
       if (isMuted) { midIntensity *= 0.25; }
     } else if (isNoteOff) {
@@ -662,7 +665,10 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
 
     // --- DRAW UNIFIED LENS CAP ---
     let lensUV = btnUV - vec2<f32>(0.5, 0.5);
-    let lensSize = vec2<f32>(0.6, 0.82);
+    // TRIG-001: trigger nodes are larger/brighter; sustain tails are smaller
+    let triggerLens = vec2<f32>(0.72, 0.92);
+    let sustainLens = vec2<f32>(0.44, 0.58);
+    let lensSize = select(sustainLens, triggerLens, isNoteOn);
 
     let unifiedLens = drawUnifiedLensCap(
         lensUV, lensSize,

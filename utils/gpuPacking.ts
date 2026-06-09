@@ -20,6 +20,16 @@ const NOTE_MAX = 119;  // Maximum valid note (C0–B9, covers MOD/XM/IT full ran
 /** Any note value ≥ NOTE_OFF_MIN is a note-off, note-cut, or note-fade event. */
 const NOTE_OFF_MIN = 120;
 
+/** Bit 15 of packedB — explicit note-on trigger flag (TRIG-001). */
+export const PACKEDB_TRIGGER_FLAG = 0x8000;
+
+/** Read TRIG-001 trigger flag from packedB. Falls back to rowOffset==0 when bit unset. */
+export const isTriggerFromPackedB = (packedB: number, rowOffset: number, isNoteOff: boolean): boolean => {
+  if (isNoteOff) return false;
+  if ((packedB & PACKEDB_TRIGGER_FLAG) !== 0) return true;
+  return rowOffset === 0;
+};
+
 export const PLAYHEAD_EPSILON = 0.0001;
 
 export const alignTo = (val: number, align: number): number =>
@@ -446,7 +456,9 @@ export const packPatternMatrixHighPrecision = (matrix: PatternMatrix | null, pad
       }
       
       const cell = rowCells[c];
-      const dInfo = durationInfo[r]?.[c] || { duration: 1, rowOffset: 0, isNoteOff: false };
+      const dInfo = durationInfo[r]?.[c] || {
+        duration: 1, rowOffset: 0, isNoteOff: false, isTrigger: false, isSustained: false,
+      };
       cellsWritten++;
 
       let note = 0, inst = 0, volCmd = 0, volVal = 0, effCmd = 0, effVal = 0;
@@ -518,11 +530,11 @@ export const packPatternMatrixHighPrecision = (matrix: PatternMatrix | null, pad
       //   - inst: 8 bits (bit 7 is expression-only flag)
       //   - duration: 8 bits (1-255 rows)
       //   - volPacked: 4 bits volCmd + 4 bits volVal (upper nibbles)
-      // packedB: [effCmd:8][effVal:8][durationFlags:7][reserved:1][volCmd:8]
+      // packedB: [effCmd:8][effVal:8][durationFlags:7][trigger:1][volCmd:8]
       //   - effCmd: 8 bits (effect command)
       //   - effVal: 8 bits (effect value)
       //   - durationFlags: 7 bits [rowOffset:6][isNoteOff:1]
-      //   - reserved: 1 bit
+      //   - trigger: bit 15 — 1.0 on note-on row (TRIG-001)
       //   - volCmd: 8 bits (full volume command for shader)
       
       const duration = Math.min(dInfo.duration, 255);
@@ -540,10 +552,14 @@ export const packPatternMatrixHighPrecision = (matrix: PatternMatrix | null, pad
                            ((duration & 0xFF) << 8) | 
                            (volPacked & 0xFF);
       
-      packedData[offset + 1] = ((effCmd & 0xFF) << 24) | 
-                               ((effVal & 0xFF) << 16) | 
-                               ((durationFlags & 0x7F) << 8) | 
-                               (volCmd & 0xFF);
+      let packedB = ((effCmd & 0xFF) << 24) |
+                    ((effVal & 0xFF) << 16) |
+                    ((durationFlags & 0x7F) << 8) |
+                    (volCmd & 0xFF);
+      if (dInfo.isTrigger && !dInfo.isNoteOff) {
+        packedB |= PACKEDB_TRIGGER_FLAG;
+      }
+      packedData[offset + 1] = packedB;
     }
   }
 
