@@ -3,9 +3,14 @@ import { LibOpenMPT, ModuleInfo, PatternMatrix, ChannelShadowState, PlaybackStat
 import { OpenMPTWorkletEngine, NATIVE_RING_BUF_BYTES } from '../audio-worklet/OpenMPTWorkletEngine';
 import { computeNoteAges } from '../utils/patternExtractor';
 import { startAudioPlayback, AudioGraphRefs, AudioGraphCallbacks, AudioGraphConfig } from './useAudioGraph';
-import { useWorkletLoader, getWorkletUrl, getNativeGlueUrl, getAbsoluteWorkletUrl } from './useWorkletLoader';
+import {
+  useWorkletLoader,
+  getWorkletUrl,
+  getNativeGlueUrl,
+  getAbsoluteWorkletUrl,
+  withBase,
+} from './useWorkletLoader';
 import { logWorkletDiagnostics } from '../audio-worklet/diagnostics';
-import { withBase } from '../src/lib/paths';
 
 
 // Use Vite BASE_URL for correct resolution under subdirectory deployment
