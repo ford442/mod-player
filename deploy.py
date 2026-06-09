@@ -99,14 +99,32 @@ def deploy_bundle(build_path: Path) -> bool:
         return False
 
 
+def validate_build_base_path(build_path: Path) -> None:
+    """Warn when dist was built without the /xm-player/ base path (breaks CSS/JS on deploy)."""
+    index_html = build_path / "index.html"
+    if not index_html.is_file():
+        return
+    html = index_html.read_text(encoding="utf-8")
+    expected_prefix = f"/{PROJECT_NAME}/"
+    if expected_prefix not in html and 'src="/assets/' in html:
+        print(
+            f"ERROR: {index_html} was built with base '/' but deploy target is '{expected_prefix}'.\n"
+            f"       CSS and layout will break on test.1ink.us/xm-player/.\n"
+            f"       Rebuild with:  npm run build:xm-player"
+        )
+        sys.exit(1)
+
+
 def main():
     print(f"\n=== Deploying '{PROJECT_NAME}' via Contabo -> test.1ink.us/xm-player ===\n")
 
     build_path = Path(BUILD_DIR)
     if not build_path.exists() or not build_path.is_dir():
         print(f"ERROR: Build directory '{BUILD_DIR}/' does not exist.")
-        print("Run:  VITE_APP_BASE_PATH=/xm-player/ npm run build")
+        print("Run:  npm run build:xm-player")
         sys.exit(1)
+
+    validate_build_base_path(build_path)
 
     try:
         health = requests.get(f"{CONTABO_BASE_URL}/api/deploy/health", timeout=10)
