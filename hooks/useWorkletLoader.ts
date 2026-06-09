@@ -65,6 +65,26 @@ export const getNativeGlueUrl = (): string => {
   return `${detectRuntimeBase()}worklets/openmpt-native.js`;
 };
 
+/**
+ * Probe whether openmpt-native.js is Emscripten glue safe to import on the main thread.
+ * AudioWorklet processor scripts reference AudioWorkletProcessor and must NOT be import()'d here.
+ */
+export async function isNativeGlueAvailable(url: string): Promise<boolean> {
+  try {
+    const response = await fetch(url, { method: 'GET', cache: 'no-cache' });
+    if (!response.ok) return false;
+    const text = await response.text();
+    const hasFactory = text.includes('createOpenMPTModule');
+    // Never import() scripts that register an AudioWorkletProcessor on the main thread
+    const isWorkletProcessorScript =
+      /extends\s+AudioWorkletProcessor/.test(text) ||
+      /registerProcessor\s*\(/.test(text);
+    return hasFactory && !isWorkletProcessorScript;
+  } catch {
+    return false;
+  }
+}
+
 export const getAbsoluteWorkletUrl = (): string => {
   const relativeUrl = getWorkletUrl();
   return new URL(relativeUrl, window.location.href).toString();

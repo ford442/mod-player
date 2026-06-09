@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { withBase } from '../src/lib/paths';
+import { detectRuntimeBase } from '../src/lib/paths';
 
 const storageBaseUrl = (import.meta.env.VITE_STORAGE_API_URL ?? '').trim().replace(/\/+$/, '');
 
@@ -70,9 +70,14 @@ export interface ShaderMeta {
   userRating: number | null;
 }
 
+/** Resolve API path with subdirectory base (e.g. /xm-player/api/songs). */
 function toApiUrl(path: string): string {
-  if (!storageBaseUrl) return withBase(path);
-  return `${storageBaseUrl}${path}`;
+  const normalized = path.startsWith('/') ? path : `/${path}`;
+  if (storageBaseUrl) {
+    return `${storageBaseUrl}${normalized}`;
+  }
+  const base = detectRuntimeBase().replace(/\/$/, '');
+  return `${base}${normalized}`;
 }
 
 function normalizeSong(raw: z.infer<typeof SongSchema>): RemoteSong {
@@ -116,22 +121,36 @@ function normalizeShader(raw: z.infer<typeof ShaderSchema>): ShaderMeta {
   };
 }
 
-async function fetchJson(url: string): Promise<unknown> {
-  const response = await fetch(url, {
-    method: 'GET',
-    headers: { Accept: 'application/json' },
-  });
-  if (!response.ok) {
-    throw new Error(`storage manager request failed (${response.status})`);
+/**
+ * Fetch JSON from the storage API. Returns null on 404/network errors so callers
+ * can degrade gracefully (empty playlist / shader catalog).
+ */
+async function fetchJsonGraceful(url: string, label: string): Promise<unknown | null> {
+  try {
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+    });
+    if (!response.ok) {
+      console.warn(`[storageApi] ${label} not reachable (${response.status}). Degraded mode active.`);
+      return null;
+    }
+    return await response.json();
+  } catch (error) {
+    console.warn(`[storageApi] ${label} network error — degraded mode active:`, error);
+    return null;
   }
-  return response.json();
 }
 
 export async function fetchRemoteSongs(): Promise<RemoteSong[]> {
-  const payload = await fetchJson(toApiUrl('/api/songs'));
+  const url = toApiUrl('/api/songs');
+  const payload = await fetchJsonGraceful(url, '/api/songs');
+  if (payload === null) return [];
+
   const parsed = SongListSchema.safeParse(payload);
   if (!parsed.success) {
-    throw new SchemaMismatchError('library format outdated: invalid /api/songs response');
+    console.warn('[storageApi] invalid /api/songs response — degraded mode active.');
+    return [];
   }
   const songs = Array.isArray(parsed.data)
     ? parsed.data
@@ -140,14 +159,24 @@ export async function fetchRemoteSongs(): Promise<RemoteSong[]> {
       : 'items' in parsed.data
         ? parsed.data.items
         : parsed.data.results;
-  return songs.map(normalizeSong);
+
+  try {
+    return songs.map(normalizeSong);
+  } catch (error) {
+    console.warn('[storageApi] song normalization failed — degraded mode active:', error);
+    return [];
+  }
 }
 
 export async function fetchShaders(): Promise<ShaderMeta[]> {
-  const payload = await fetchJson(toApiUrl('/api/shaders'));
+  const url = toApiUrl('/api/shaders');
+  const payload = await fetchJsonGraceful(url, '/api/shaders');
+  if (payload === null) return [];
+
   const parsed = ShaderListSchema.safeParse(payload);
   if (!parsed.success) {
-    throw new SchemaMismatchError('library format outdated: invalid /api/shaders response');
+    console.warn('[storageApi] invalid /api/shaders response — degraded mode active.');
+    return [];
   }
   const shaders = Array.isArray(parsed.data)
     ? parsed.data
@@ -235,6 +264,5 @@ export async function syncLibrary(): Promise<void> {
   if (!response.ok) {
     throw new Error(`Library sync failed (${response.status})`);
   }
-  // Consume response body to avoid resource leaks; body content is informational only.
   await response.body?.cancel();
 }

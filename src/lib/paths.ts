@@ -19,7 +19,13 @@ export const detectRuntimeBase = (): string => {
     return pathname;
   }
   const lastSlash = pathname.lastIndexOf('/');
-  return lastSlash >= 0 ? pathname.slice(0, lastSlash + 1) : '/';
+  const lastSegment = lastSlash >= 0 ? pathname.slice(lastSlash + 1) : pathname;
+  // File path like /xm-player/index.html → directory /xm-player/
+  if (lastSegment.includes('.')) {
+    return lastSlash >= 0 ? pathname.slice(0, lastSlash + 1) : '/';
+  }
+  // App mount without trailing slash: /xm-player → /xm-player/
+  return `${pathname}/`;
 };
 
 /**
