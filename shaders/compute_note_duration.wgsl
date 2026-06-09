@@ -217,8 +217,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
                    ((outEffVal & 0xFFu) << 16u) |
                    ((durationFlags & 0x7Fu) << 8u) |
                    (outVolCmd & 0xFFu);
-        // TRIG-001: explicit trigger flag on note-on rows
-        if (rowOffset == 0u && !isNoteOffFlag) {
+        // TRIG-001: explicit trigger flag on note-on rows (isNoteOffFlag is u32, not bool)
+        if (rowOffset == 0u && isNoteOffFlag == 0u) {
             outB = outB | 0x8000u;
         }
 

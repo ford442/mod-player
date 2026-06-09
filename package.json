@@ -11,6 +11,7 @@
     "build:worklet": "bash ./build-wasm.sh",
     "build:emcc": "bash scripts/build-wasm.sh",
     "build": "tsc && node --max-old-space-size=4096 node_modules/.bin/vite build",
+    "build:xm-player": "VITE_APP_BASE_PATH=/xm-player/ npm run build",
     "preview": "vite preview",
     "lint": "exit 0",
     "typecheck": "tsc --noEmit",
