@@ -198,5 +198,9 @@ declare global {
     libopenmpt: LibOpenMPT;
     _libopenmptReject?: (reason: Error) => void;
     webkitAudioContext?: typeof AudioContext;
+    /** Force pattern renderer backend: `webgpu` | `webgl2` | `html` */
+    DEBUG_RENDERER?: 'webgpu' | 'webgl2' | 'html';
+    /** Agent/CI handle — set by the active pattern renderer */
+    currentPatternRenderer: import('./src/renderers/types').CurrentPatternRenderer | null;
   }
 }

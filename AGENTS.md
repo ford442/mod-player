@@ -8,7 +8,7 @@
 - **Bundler / Dev Server:** Vite 5
 - **Styling:** Tailwind CSS 3.3 + PostCSS + Autoprefixer, with custom scrollbars and a five-theme CSS variable system in `index.css`
 - **3D Graphics:** `@react-three/fiber` + `@react-three/drei` + `three`
-- **Visualization:** WebGPU (WGSL shaders), *not* WebGL
+- **Visualization:** WebGPU (WGSL shaders) primary; **WebGL2** GLSL reference renderer (`src/renderers/webgl2/`) and **HTML** fallback
 - **Audio Backend:** `libopenmpt` (WASM) inside a customized AudioWorklet
 - **Native Audio Engine:** C++17 → Emscripten (`build-wasm.sh` or `scripts/build-wasm.sh`)
 - **Module System:** ES modules (`"type": "module"` in `package.json`)
@@ -60,7 +60,8 @@ If the JS AudioWorklet fails to initialize WASM, `hooks/useAudioGraph.ts` falls 
   - **Video:** v0.23 (Clouds), v0.24 (Tunnel)
 - **Pipeline:** Shaders are fetched as raw text strings (often via `fetch()` or bundled strings) and passed into the WebGPU render pipeline in components like `PatternDisplay.tsx` and `Studio3D.tsx`.
 - **Bloom:** Post-processing bloom passes live in `utils/bloomPostProcessor.ts`; presets are defined in `types/bloomPresets.ts`.
-- **Compatibility:** WebGPU support is required for the shader visualizer. If unavailable, the app falls back to an HTML pattern renderer (`components/PatternSequencer.tsx`).
+- **Compatibility:** Three-tier renderer chain: WebGPU → WebGL2 → HTML. Select with `?renderer=webgpu|webgl2|html`, debug panel, or `window.DEBUG_RENDERER`. HTML fallback: `src/renderers/html/PatternHTMLFallback.tsx` (wraps `PatternSequencer.tsx`).
+- **Agent/CI:** `window.currentPatternRenderer` exposes `readPixels()`, `setDebugMode()`, `getCanvas()` on WebGL2/HTML backends.
 - **Critical Coupling:** Shaders are not pure assets. `PatternDisplay.tsx` parses the shader **filename** (e.g., `patternv0.37.wgsl`) to determine layout type, buffer packing strategy, canvas size, and whether shader-embedded UI controls exist. Changing a shader's uniform struct requires a matching update to `createUniformPayload()` in TypeScript.
 
 ## Data Packing for GPU
@@ -74,6 +75,7 @@ Tracker cells are bit-packed into `Uint32Array` before upload to the GPU:
 
 ## Directory Map
 - **`/components`** – React UI elements (`App.tsx`, `PatternDisplay.tsx`, `Controls.tsx`, `Studio3D.tsx`, `MediaOverlay.tsx`, `ChannelMeters.tsx`, `PatternSequencer.tsx`, `Playlist.tsx`, `SeekBar.tsx`, etc.)
+- **`/src/renderers`** – Pattern renderer selection + WebGL2 reference implementation + HTML fallback wrapper
 - **`/hooks`** – Core logic hooks
   - `useLibOpenMPT.ts` – Main audio bridge and state
   - `useAudioGraph.ts` – Audio graph construction and playback start
