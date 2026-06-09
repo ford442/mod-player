@@ -48,8 +48,6 @@ VENDOR_DIR="$PROJECT_ROOT/vendor/libopenmpt"
 
 # libopenmpt paths (override with env vars or auto-clone below)
 LIBOPENMPT_DIR="${LIBOPENMPT_DIR:-$VENDOR_DIR}"
-LIBOPENMPT_INCLUDE="${LIBOPENMPT_INCLUDE:-$LIBOPENMPT_DIR/include}"
-LIBOPENMPT_LIB="${LIBOPENMPT_LIB:-$LIBOPENMPT_DIR/bin}"
 
 # Debug mode
 DEBUG_FLAGS="-O3 -DNDEBUG"
@@ -69,23 +67,105 @@ fi
 
 echo "📦 Emscripten version: $(emcc --version | head -1)"
 
-# Auto-clone and build libopenmpt if headers are not already present
-if [[ ! -f "$LIBOPENMPT_INCLUDE/libopenmpt/libopenmpt.h" ]]; then
-    echo "📥 libopenmpt headers not found – cloning from GitHub…"
-    mkdir -p "$PROJECT_ROOT/vendor"
-    git clone --depth 1 --branch OpenMPT-1.31 \
-        https://github.com/OpenMPT/openmpt.git "$VENDOR_DIR"
+# ── libopenmpt discovery / build ─────────────────────────────────────
+# Installed layout (post `make CONFIG=emscripten`):  include/libopenmpt/libopenmpt.h
+# Git source layout (pre-make):                      libopenmpt/libopenmpt.h at repo root
+libopenmpt_header_path() {
+    local include_root="$1"
+    echo "$include_root/libopenmpt/libopenmpt.h"
+}
 
+find_libopenmpt_include_root() {
+    local dir="$1"
+    local candidate
+    for candidate in "$dir/include" "$dir"; do
+        if [[ -f "$(libopenmpt_header_path "$candidate")" ]]; then
+            echo "$candidate"
+            return 0
+        fi
+    done
+    return 1
+}
+
+find_libopenmpt_lib_dir() {
+    local dir="$1"
+    local candidate
+    for candidate in "$dir/bin" "$dir/lib"; do
+        if [[ -f "$candidate/libopenmpt.a" ]]; then
+            echo "$candidate"
+            return 0
+        fi
+    done
+    return 1
+}
+
+resolve_libopenmpt_paths() {
+    local include_root lib_dir
+
+    if [[ -n "${LIBOPENMPT_INCLUDE:-}" ]] && [[ -f "$(libopenmpt_header_path "$LIBOPENMPT_INCLUDE")" ]]; then
+        LIBOPENMPT_INCLUDE="$LIBOPENMPT_INCLUDE"
+    elif include_root="$(find_libopenmpt_include_root "$LIBOPENMPT_DIR")"; then
+        LIBOPENMPT_INCLUDE="$include_root"
+    else
+        return 1
+    fi
+
+    if [[ -n "${LIBOPENMPT_LIB:-}" ]] && [[ -f "$LIBOPENMPT_LIB/libopenmpt.a" ]]; then
+        LIBOPENMPT_LIB="$LIBOPENMPT_LIB"
+    elif lib_dir="$(find_libopenmpt_lib_dir "$LIBOPENMPT_DIR")"; then
+        LIBOPENMPT_LIB="$lib_dir"
+    else
+        return 1
+    fi
+
+    return 0
+}
+
+build_libopenmpt_in_place() {
     echo "🔨 Building libopenmpt for Emscripten (this takes a few minutes)…"
-    pushd "$VENDOR_DIR" >/dev/null
+    pushd "$LIBOPENMPT_DIR" >/dev/null
     make CONFIG=emscripten -j"$(nproc 2>/dev/null || echo 2)"
     popd >/dev/null
+}
 
-    # After the Makefile build, headers are in include/ and libs in bin/
-    LIBOPENMPT_INCLUDE="$VENDOR_DIR/include"
-    LIBOPENMPT_LIB="$VENDOR_DIR/bin"
-    echo "✅ libopenmpt built at $VENDOR_DIR"
-fi
+ensure_libopenmpt() {
+    if resolve_libopenmpt_paths; then
+        echo "✅ libopenmpt ready at $LIBOPENMPT_DIR"
+        return 0
+    fi
+
+    mkdir -p "$PROJECT_ROOT/vendor"
+
+    if [[ ! -d "$LIBOPENMPT_DIR" ]]; then
+        echo "📥 libopenmpt not found – cloning from GitHub…"
+        git clone --depth 1 --branch OpenMPT-1.31 \
+            https://github.com/OpenMPT/openmpt.git "$VENDOR_DIR"
+    elif [[ ! -f "$LIBOPENMPT_DIR/Makefile" ]]; then
+        echo "⚠️  $LIBOPENMPT_DIR exists but is not an OpenMPT checkout – recloning…"
+        rm -rf "$LIBOPENMPT_DIR"
+        git clone --depth 1 --branch OpenMPT-1.31 \
+            https://github.com/OpenMPT/openmpt.git "$VENDOR_DIR"
+    else
+        echo "📦 Using existing OpenMPT checkout at $LIBOPENMPT_DIR"
+    fi
+
+    if ! find_libopenmpt_lib_dir "$LIBOPENMPT_DIR" >/dev/null; then
+        build_libopenmpt_in_place
+    fi
+
+    if ! resolve_libopenmpt_paths; then
+        echo "❌ libopenmpt headers or static library still missing after build." >&2
+        echo "   Expected header: <include-root>/libopenmpt/libopenmpt.h" >&2
+        echo "   Searched include roots: $LIBOPENMPT_DIR/include, $LIBOPENMPT_DIR" >&2
+        echo "   Searched lib dirs:     $LIBOPENMPT_DIR/bin, $LIBOPENMPT_DIR/lib" >&2
+        echo "   Try: rm -rf $LIBOPENMPT_DIR && $0" >&2
+        exit 1
+    fi
+
+    echo "✅ libopenmpt built at $LIBOPENMPT_DIR"
+}
+
+ensure_libopenmpt
 
 echo "📁 Source:     $CPP_DIR"
 echo "📁 Output:     $OUTPUT_DIR"
