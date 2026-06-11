@@ -16,7 +16,10 @@
     "lint": "exit 0",
     "typecheck": "tsc --noEmit",
     "test:duration-parity": "node utils/__debug__/durationParity.test.cjs",
-    "test:shader-registry": "node utils/__debug__/shaderRegistry.test.cjs"
+    "test:trigger-tail": "node utils/__debug__/triggerTailPacking.test.cjs",
+    "test:shader-registry": "node utils/__debug__/shaderRegistry.test.cjs",
+    "capture:trigger-tail": "node scripts/capture-trigger-tail.mjs",
+    "audit:shader-modes": "node scripts/audit-shader-modes.mjs"
   },
   "dependencies": {
     "@react-three/drei": "^9.122.0",

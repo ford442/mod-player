@@ -476,10 +476,9 @@ export function buildFragmentShader(useNoteSustainTailMode: boolean, isV021: boo
                     // Note-on row near playhead
                     topIntensity = v_active * 0.8;
                 } else if (isSustaining && !USE_NOTE_SUSTAIN_TAIL_MODE) {
-                    // Sustain trail: fades from 0.4 (note start) to 0.2 (note end)
-                    // Clamped to 0.15 minimum to keep a dim glow visible
-                    float sustainFade = 0.4 - sustainProgress * 0.2;
-                    topIntensity = max(sustainFade, 0.15);
+                    // Sustain trail: very dim top emitter — tail glow lives in mid emitter
+                    float sustainFade = 0.12 - sustainProgress * 0.06;
+                    topIntensity = max(sustainFade, 0.04);
                 } else if (USE_NOTE_SUSTAIN_TAIL_MODE && isNoteOnRow && v_active > 0.0) {
                     topIntensity = max(topIntensity, v_active * 0.8);
                 } else if (isNoteOff || isNoteOffFlag) {
@@ -489,24 +488,35 @@ export function buildFragmentShader(useNoteSustainTailMode: boolean, isV021: boo
             }
             topColor = blueColor * (1.5 + bloom * 2.0);
 
-            // EMITTER 2 (MIDDLE): Pitch-colored note indicator
+            // EMITTER 2 (MIDDLE): Pitch-colored note indicator — TRIG-001 hybrid
+            vec3 triggerCol = vec3(0.25, 0.82, 1.0);
+            vec3 tailCol    = vec3(0.12, 0.38, 0.55);
             vec3 noteColor = vec3(0.15);
             midIntensity = 0.12;
             if (hasNote && !isExpressionOnly) {
                 float pitchHue = pitchClassFromIndex(note);
-                noteColor = neonPalette(pitchHue);
+                vec3 pitchColor = neonPalette(pitchHue);
+                float dist = length(lensUV);
                 if (is_trigger) {
-                    // TRIG-001: trigger node — large, brilliant
-                    midIntensity = 1.0 + bloom * 2.5;
+                    // TRIGGER NODE: large, brilliant, bloom halo
+                    float trigIntensity = smoothstep(0.42, 0.0, dist);
+                    noteColor = mix(triggerCol, pitchColor, 0.35);
+                    midIntensity = trigIntensity * (1.1 + bloom * 2.0);
+                    midIntensity += smoothstep(0.68, 0.0, dist) * 0.55;
                     if (USE_NOTE_SUSTAIN_TAIL_MODE && v_active > 0.0) {
                         midIntensity = max(midIntensity, 0.8 + v_active * (1.0 + bloom));
                     }
                 } else if (isSustaining && !USE_NOTE_SUSTAIN_TAIL_MODE) {
-                    // Sustain tail — smaller, dimmer
-                    float sustainBright = 0.35 - sustainProgress * 0.15;
-                    midIntensity = max(sustainBright, 0.12);
+                    // SUSTAIN TAIL: smaller, thinner, darker
+                    float tailIntensity = smoothstep(0.16, 0.0, dist) * 0.60;
+                    float fade = 1.0 - sustainProgress * 0.35;
+                    noteColor = mix(tailCol, pitchColor * 0.45, 0.25);
+                    midIntensity = tailIntensity * fade;
+                } else {
+                    noteColor = pitchColor;
+                    midIntensity = smoothstep(0.38, 0.0, dist) * 0.7;
                 }
-                if (isMuted) midIntensity *= 0.3;
+                if (isMuted) midIntensity *= 0.25;
             }
             midColor = noteColor;
 
