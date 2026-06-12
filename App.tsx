@@ -32,6 +32,12 @@ import {
   AVAILABLE_SHADERS,
   type AppTheme,
 } from './appConfig';
+import {
+  calculateNoteDurations,
+  packPatternMatrixHighPrecision,
+  PACKEDB_TRIGGER_FLAG,
+  isTriggerFromPackedB,
+} from './utils/gpuPacking';
 import { generateInstrumentPalette, generateEmptyInstrumentPalette } from './utils/instrumentPalette';
 
 function App() {
@@ -119,6 +125,93 @@ function App() {
     workletLoadError,
     oscBufferRef,
   } = useLibOpenMPT(volume);
+
+  // Headless Chrome / Playwright automation hooks (dev server + CI captures)
+  useEffect(() => {
+    window.__TEST_HOOKS__ = {
+      seekToRow: (row: number) => seekToStep(row),
+      isModuleLoaded: () => isModuleLoaded,
+      getPatternRenderer: () => window.currentPatternRenderer,
+      loadModuleFromUrl: async (url: string) => {
+        const resp = await fetch(url);
+        if (!resp.ok) throw new Error(`fetch failed: ${resp.status}`);
+        const buf = new Uint8Array(await resp.arrayBuffer());
+        const name = url.split('/').pop() || 'module.mod';
+        await loadFile(buf, name);
+      },
+      getTriggerTailStats: () => {
+        if (!sequencerMatrix) return null;
+        const d = calculateNoteDurations(sequencerMatrix);
+        let triggers = 0;
+        let sustains = 0;
+        for (const row of d) {
+          for (const cell of row) {
+            if (cell.isTrigger) triggers++;
+            if (cell.isSustained) sustains++;
+          }
+        }
+        return {
+          triggers,
+          sustains,
+          rows: sequencerMatrix.numRows,
+          channels: sequencerMatrix.numChannels,
+        };
+      },
+      /** Per-row note + TRIG-001 state for Playwright / grok cli verification */
+      getRowNotes: (row: number) => {
+        if (!sequencerMatrix) return null;
+        const d = calculateNoteDurations(sequencerMatrix);
+        const raw = sequencerMatrix.rows[row] ?? [];
+        const channels = sequencerMatrix.numChannels;
+        const cells = [];
+        for (let ch = 0; ch < channels; ch++) {
+          const cell = raw[ch];
+          const info = d[row]?.[ch];
+          cells.push({
+            ch,
+            note: cell?.note ?? 0,
+            inst: cell?.inst ?? 0,
+            isTrigger: info?.isTrigger ?? false,
+            isSustained: info?.isSustained ?? false,
+            duration: info?.duration ?? 0,
+            rowOffset: info?.rowOffset ?? 0,
+            isNoteOff: info?.isNoteOff ?? false,
+          });
+        }
+        return { row, channels, cells };
+      },
+      /** Packed GPU cell + trigger bit for cross-check against duration oracle */
+      getPackedCell: (row: number, ch: number) => {
+        if (!sequencerMatrix) return null;
+        const { packedData } = packPatternMatrixHighPrecision(sequencerMatrix, false);
+        const cols = sequencerMatrix.numChannels;
+        const offset = (row * cols + ch) * 2;
+        const packedA = packedData[offset] ?? 0;
+        const packedB = packedData[offset + 1] ?? 0;
+        const durationFlags = (packedB >> 8) & 0x7f;
+        const rowOffset = durationFlags >> 1;
+        const isNoteOff = (durationFlags & 1) !== 0;
+        const note = (packedA >> 24) & 0xff;
+        const hasPitch = note >= 1 && note <= 119;
+        return {
+          row,
+          ch,
+          packedA,
+          packedB,
+          note,
+          duration: (packedA >> 8) & 0xff,
+          triggerFlag: (packedB & PACKEDB_TRIGGER_FLAG) !== 0,
+          rowOffset,
+          isNoteOff,
+          isTrigger: isTriggerFromPackedB(packedB, rowOffset, isNoteOff, hasPitch),
+        };
+      },
+      getPlaybackRow: () => Math.floor(playbackRowFraction),
+      getActiveRenderer: () => window.currentPatternRenderer?.backend ?? null,
+      getShaderFile: () => localStorage.getItem('xasm1_last_shader'),
+    };
+    return () => { delete window.__TEST_HOOKS__; };
+  }, [seekToStep, isModuleLoaded, sequencerMatrix, loadFile, playbackRowFraction]);
 
   // Project-M popup integration: broadcast PCM frames via BroadcastChannel
   useEffect(() => {

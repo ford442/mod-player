@@ -62,3 +62,19 @@ export const isLiteRecommendedShader = (shaderFile: string): boolean => {
   const meta = getShaderMeta(shaderFile);
   return meta?.liteRecommended ?? false;
 };
+
+/** Shaders that use packPatternMatrixHighPrecision (DURA + TRIG-001 trigger flag). */
+const HIGH_PRECISION_SHADER_MARKERS = [
+  'v0.36', 'v0.37', 'v0.38', 'v0.39', 'v0.40', 'v0.42', 'v0.43', 'v0.44',
+  'v0.45', 'v0.46', 'v0.47', 'v0.48', 'v0.49', 'v0.50', 'v0.51', 'v0.55',
+] as const;
+
+export const usesHighPrecisionPacking = (shaderFile: string): boolean =>
+  HIGH_PRECISION_SHADER_MARKERS.some((marker) => shaderFile.includes(marker));
+
+/**
+ * v0.45b uses playhead-scrolled sustain (note-on cell drives duration window).
+ * All other high-precision shaders use static trigger nodes + dim sustain tails.
+ */
+export const usesStrictPlayheadSustainMode = (shaderFile: string): boolean =>
+  shaderFile.includes('v0.45b');

@@ -269,6 +269,7 @@ struct NoteDurationInfo {
   duration: u32,
   rowOffset: u32,
   isNoteOff: bool,
+  isTrigger: bool,  // TRIG-001: explicit note-on row (packedB bit 15)
 }
 
 fn unpackDurationInfo(packedA: u32, packedB: u32) -> NoteDurationInfo {
@@ -278,6 +279,7 @@ fn unpackDurationInfo(packedA: u32, packedB: u32) -> NoteDurationInfo {
   let durationFlags = (packedB >> 8) & 0x7Fu;
   info.rowOffset = durationFlags >> 1u;
   info.isNoteOff = (durationFlags & 1u) != 0u;
+  info.isTrigger = ((packedB & 0x8000u) != 0u) || (info.rowOffset == 0u && !info.isNoteOff);
   return info;
 }
 
@@ -349,8 +351,8 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
 
       let dInfo = unpackDurationInfo(in.packedA, in.packedB);
       let isRealNoteOff = dInfo.isNoteOff || note >= NOTE_OFF_MIN;
-      let isTrigger = dInfo.rowOffset == 0u && !isRealNoteOff;
-      let isSustain = dInfo.rowOffset > 0u && !isRealNoteOff;
+      let isTrigger = dInfo.isTrigger && !isRealNoteOff;
+      let isSustain = dInfo.rowOffset > 0u && !isRealNoteOff && !dInfo.isTrigger;
 
       let ch = channels[in.channel];
       let durationF = f32(dInfo.duration);

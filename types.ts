@@ -206,5 +206,42 @@ declare global {
     DEBUG_RENDERER?: 'webgpu' | 'webgl2' | 'html';
     /** Agent/CI handle — set by the active pattern renderer */
     currentPatternRenderer: import('./src/renderers/types').CurrentPatternRenderer | null;
+    /** Headless Chrome / Playwright automation hooks (dev + CI) */
+    __TEST_HOOKS__?: {
+      seekToRow: (row: number) => void;
+      isModuleLoaded: () => boolean;
+      getPatternRenderer: () => import('./src/renderers/types').CurrentPatternRenderer | null;
+      loadModuleFromUrl: (url: string) => Promise<void>;
+      getTriggerTailStats: () => { triggers: number; sustains: number; rows: number; channels: number } | null;
+      getRowNotes: (row: number) => {
+        row: number;
+        channels: number;
+        cells: Array<{
+          ch: number;
+          note: number;
+          inst: number;
+          isTrigger: boolean;
+          isSustained: boolean;
+          duration: number;
+          rowOffset: number;
+          isNoteOff: boolean;
+        }>;
+      } | null;
+      getPackedCell: (row: number, ch: number) => {
+        row: number;
+        ch: number;
+        packedA: number;
+        packedB: number;
+        note: number;
+        duration: number;
+        triggerFlag: boolean;
+        rowOffset: number;
+        isNoteOff: boolean;
+        isTrigger: boolean;
+      } | null;
+      getPlaybackRow: () => number;
+      getActiveRenderer: () => string | null;
+      getShaderFile: () => string | null;
+    };
   }
 }

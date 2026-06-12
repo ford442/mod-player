@@ -630,11 +630,16 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
       noteColor = baseColor * instBright * octBright;
 
       if (isNoteOn) {
-        // Trigger node: full brightness + bloom halo
-        midIntensity = calculateSustainBrightness(dInfo, 1.1 + bloom * 2.5);
+        // TRIGGER NODE: brilliant flash + bloom halo (TRIG-001)
+        let trigCol = vec3<f32>(0.25, 0.82, 1.0);
+        noteColor = mix(trigCol, noteColor, 0.35);
+        midIntensity = calculateSustainBrightness(dInfo, 1.2 + bloom * 2.8);
       } else {
-        // Sustain tail: dimmer, thinner visual weight
-        midIntensity = 0.32 + bloom * 0.35;
+        // SUSTAIN TAIL: dim, thin trail — no lane flooding
+        let tailCol = vec3<f32>(0.12, 0.38, 0.55);
+        let fade = 1.0 - (f32(dInfo.rowOffset) / max(f32(dInfo.duration), 1.0)) * 0.35;
+        noteColor = mix(tailCol, noteColor * 0.45, 0.25);
+        midIntensity = (0.14 + bloom * 0.12) * fade;
       }
       if (isMuted) { midIntensity *= 0.25; }
     } else if (isNoteOff) {

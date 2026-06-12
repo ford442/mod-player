@@ -20,12 +20,26 @@ const NOTE_MAX = 119;  // Maximum valid note (C0–B9, covers MOD/XM/IT full ran
 /** Any note value ≥ NOTE_OFF_MIN is a note-off, note-cut, or note-fade event. */
 const NOTE_OFF_MIN = 120;
 
+/**
+ * TRIG-001 — Trigger + Sustain Tail hybrid (see docs/planning/trigger-sustain-tails.md)
+ *
+ * Plan semantics (RGBA32Float texture) → actual packing (2×u32 per cell):
+ *   has_sustain  ↔  packedA note byte in [NOTE_MIN..NOTE_MAX] on sustain rows (DURA-003 copies pitch)
+ *   is_trigger   ↔  packedB bit 15 (PACKEDB_TRIGGER_FLAG = 0x8000)
+ *   duration     ↔  packedA bits 8–15
+ *   rowOffset    ↔  packedB durationFlags bits 1–6
+ */
 /** Bit 15 of packedB — explicit note-on trigger flag (TRIG-001). */
 export const PACKEDB_TRIGGER_FLAG = 0x8000;
 
-/** Read TRIG-001 trigger flag from packedB. Falls back to rowOffset==0 when bit unset. */
-export const isTriggerFromPackedB = (packedB: number, rowOffset: number, isNoteOff: boolean): boolean => {
-  if (isNoteOff) return false;
+/** Read TRIG-001 trigger flag from packedB. Falls back to rowOffset==0 only when a note is present. */
+export const isTriggerFromPackedB = (
+  packedB: number,
+  rowOffset: number,
+  isNoteOff: boolean,
+  hasNote = false,
+): boolean => {
+  if (isNoteOff || !hasNote) return false;
   if ((packedB & PACKEDB_TRIGGER_FLAG) !== 0) return true;
   return rowOffset === 0;
 };

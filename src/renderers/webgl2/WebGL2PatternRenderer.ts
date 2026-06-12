@@ -123,7 +123,7 @@ export class WebGL2PatternRenderer {
   }
 
   private initPattern(gl: WebGL2RenderingContext, shaderFile: string): void {
-    const useNoteSustainTailMode = shaderFile.includes('v0.45b');
+    const useNoteSustainTailMode = shaderFile.includes('v0.45b'); // TRIG-001: strict playhead sustain (v0.45b only)
     const isV021 = shaderFile.includes('v0.21');
     const vsSource = buildVertexShader(useNoteSustainTailMode, isV021);
     const fsSource = buildPatternFragmentShader(useNoteSustainTailMode, isV021);
