@@ -1,8 +1,8 @@
-# Weekly Plan - XASM-1 (GPU compute duration port landed → Mobile/low-end "lite" render mode)
+# Weekly Plan - XASM-1 (Mobile/low-end "lite" render mode landed → Dynamic per-instrument color palettes)
 
 ## Today's focus
-**User Idea — Mobile / low-end "lite" render mode.**
-Detect mobile + low-power GPU (or absence of WebGPU) and degrade the visualization gracefully: reduce visible row count, disable multi-layer bloom, and auto-select a cheap shader variant. The premium desktop path is untouched — lite mode is a parallel branch gated behind capability detection (plus a manual override toggle for testing). Rationale: the project audience is PUBLIC, and every render upgrade so far (multi-layer bloom, ACES, CRT post, GPU compute duration) has raised the desktop floor while widening the gap for phones and integrated GPUs. A lite path widens reach without compromising the desktop look. Save-state written to `.swarm-state.md` at each iteration boundary.
+**User Idea — Dynamic per-instrument color palettes.**
+Derive/assign a distinct color per instrument index from the loaded module and pass it to the pattern shaders as a palette LUT (uniform array or a small 1-D texture), so melodic lines become distinguishable by *timbre*, not only by pitch hue. The instrument byte is already packed into `PackedA` (`[Note(8)|Instr(8)|VolCmd(8)|VolVal(8)]`) — the shader can index a per-instrument palette directly. This extends the existing `colorPalette` uniform + multi-palette selector (PR #148) from 5 fixed global palettes to a module-derived per-instrument scheme, gated behind a UI mode toggle so the current pitch-hue behavior remains the default. Rationale: audience is PUBLIC; per-instrument color is the single highest-readability upgrade left for dense multi-channel patterns, and the packing + uniform plumbing already exist. Save-state written to `.swarm-state.md` at each iteration boundary.
 
 ## Ideas
 <!-- User-written ideas Noah accumulates during the week. Routine prioritizes these. -->
@@ -12,8 +12,8 @@ Detect mobile + low-power GPU (or absence of WebGPU) and degrade the visualizati
 - [done — 2026-05-08] Keyboard shortcut set: space/arrows/1–9/L/M/F/D/? fully implemented in useKeyboardShortcuts.ts with cheatsheet + Media Session API
 - [done — 2026-05-29] SharedArrayBuffer oscilloscope pipeline from worklet → GPU texture (narrative §Advanced 4) — v0.55 shader confirmed present with `oscTexture: texture_1d<f32>` binding; PatternDisplay.tsx creates texture + uploads SAB buffer when v0.55 active; useLibOpenMPT.ts receives SAB from worklet; only missing piece was App.tsx registration — add `{ id: 'patternv0.55.wgsl', label: 'v0.55 (Oscilloscope)' }` to AVAILABLE_SHADERS
 - [done — 2026-05-30] Move initial module parse off the main thread into a Web Worker to avoid 300 ms–1 s freezes on large `.it` files (narrative §Advanced 3) — `workers/openmpt-parser.worker.ts` created, `useLibOpenMPT.ts`/`useAudioGraph.ts` refactored, lazy `ensureMainThreadModule()` for ScriptProcessor fallback; typecheck + build pass. NOT YET in a PR / not merged to main (lives on working branch).
-- [in progress — 2026-06-05] Mobile / low-end "lite" render mode: detect mobile + low-power GPU (or absence of WebGPU), reduce visible row count, disable multi-layer bloom, auto-select a cheap shader variant — widens the public audience without touching the premium desktop path
-- [ ] (new — 2026-05-30) Dynamic per-instrument color palettes driven by the module: derive/assign a color per instrument and pass as a palette uniform/texture so melodic lines are distinguishable by timbre, not only pitch hue — extends the existing colorPalette uniform + multi-palette selector (PR #148)
+- [done — 2026-06-12] Mobile / low-end "lite" render mode: capability detection (`utils/deviceCapabilities.ts`), `?lite=1|0` + localStorage override, v0.21 auto-substitution, bloom + WebGL-overlay skipped, 512×512 canvas, DPR capped to 1.0 — landed via PR #251; desktop path untouched. Runtime browser verification still pending (see Backlog).
+- [in progress — 2026-06-12] Dynamic per-instrument color palettes driven by the module: derive/assign a color per instrument and pass as a palette uniform/texture so melodic lines are distinguishable by timbre, not only pitch hue — extends the existing colorPalette uniform + multi-palette selector (PR #148)
 - [done — 2026-05-15] Darker-chassis toggle + drop shadow for white-chassis contrast — bezel dark-mode toggle landed in PR #186 (narrative §Graphical 6)
 - [done — 2026-05-15] Collapsible / default-hidden PatternDisplay debug panel — default-hidden + Mode=NONE fix in PR #186 (narrative §Graphical 8)
 - [done — 2026-04-24] Persist last-used shader in localStorage + per-module memory (PR #145)
@@ -22,9 +22,11 @@ Detect mobile + low-power GPU (or absence of WebGPU) and degrade the visualizati
 
 ## Backlog
 <!-- Unfinished items, known bugs, deferred work. -->
+- [ ] **VERIFY MOBILE-LITE (runtime):** mobile-lite landed (#251), typecheck + build green. Pending browser smoke-test — confirm (1) `?lite=1` forces lite (v0.21, no bloom, no WebGL overlay, 512×512, DPR=1), (2) `?lite=0` forces full desktop even on mobile UA, (3) desktop default renders byte-identical to pre-change, (4) no WebGPU console errors on either path. Test on a real phone + a desktop emulated-mobile profile.
+- [ ] **PR #263 OPEN (draft):** "Fix libopenmpt WASM builds: STATIC_LIB=1 and tarball vendor" — follow-up to the #262 WASM-build fixes. Decide: review + merge, or close as superseded by #262. WASM-build pipeline remains the most fragile part of the stack (4 build-fix PRs this cycle: #260/#261/#262 + #263).
+- [ ] **Issue #252 STILL OPEN:** storage-manager save-back + sync *landed* via #254 (closes #253), but #252 (which also covers the **shader-rating UI hookup** in `ShaderSelectorPanel`) was never closed — confirm rating-hookup is wired and close #252, or carve the remnant into a fresh issue.
 - [ ] **VERIFY DURA-001:** GPU compute duration port landed (#239), typecheck + build green. Pending runtime browser smoke-test — confirm `[DURA-PARITY] ✓` prints in dev console with at least one MOD and one IT module (parity assertion vs CPU `calculateNoteDurations`). If parity fails it logs the first mismatching cell index + hex.
-- [ ] Mobile / low-end "lite" render mode — **[in progress — 2026-06-05, today's focus]**
-- [ ] Storage-manager SAVE-BACK + sync: cloud library *browser* landed (#242); remaining = POST `/api/songs`, `/api/admin/sync` button, shader-rating UI hookup polish — **decoupled Copilot issue this run** (no overlap with mobile-lite render files)
+- [ ] Dynamic per-instrument color palettes — **[in progress — 2026-06-12, today's focus]**
 - [ ] Bug 4: ▶️ Play button scrolls canvas off-screen (focus/scroll side effect — likely `autoFocus` or `scrollIntoView` on play button element)
 - [ ] Verify Bug 2 (ScriptProcessor fallback) — PR #189 diagnostics + PR #215 native bridge landed; spot-check console on prod at `test.1ink.us/xm-player/`
 - [ ] v0.52 (Night), v0.53 (Midnight), v0.54 (Neon Night) shaders — NOT YET CREATED; files do not exist in shaders/ or public/shaders/
@@ -33,6 +35,13 @@ Detect mobile + low-power GPU (or absence of WebGPU) and degrade the visualizati
 - [ ] Storage-manager integration: `/api/shaders`, `/api/songs`, rating hookup (narrative §Integration) — candidate decoupled Copilot issue (see today's dispatch)
 
 ## Done
+- [x] 2026-06-12 — MOBILE-LITE render mode (User Idea, last week's focus): `utils/deviceCapabilities.ts` capability detection (mobile UA / no-WebGPU / low-power adapter hint), `?lite=1|0` + `localStorage xasm1_lite_mode` override, v0.21 auto-substitution via `displayShaderFile` (stored desktop pref untouched), bloom init + WebGL overlay skipped, canvas 512×512, DPR capped to 1.0, compute path gated. Touched App.tsx, MainLayout.tsx, PatternDisplay.tsx, useWebGPURender.ts, geometryConstants.ts, shaderRegistry.ts, shaderVersion.ts. Landed via PR #251; typecheck + build green. (Runtime browser smoke-test still pending — see Backlog VERIFY MOBILE-LITE.)
+- [x] 2026-06-12 — Storage-manager SAVE-BACK + library sync (last week's decoupled Copilot issue): POST `/api/songs` save-back + sync action landed via PR #254 (closes #253). NOTE: issue #252 (same area + rating hookup) left open — see Backlog.
+- [x] 2026-06-12 — TRIG-001 trigger nodes with sustain tails (PR #259)
+- [x] 2026-06-12 — Production-grade WebGL2 fallback pattern renderer (PR #258): `src/renderers/webgl2/` WebGL2PatternRenderer + useWebGL2PatternRender
+- [x] 2026-06-12 — Split files >1000 lines into <700-line modules (PR #257); codex subpath asset URL / resource-loading fix (PR #256)
+- [x] 2026-06-12 — Deploy/base-path hardening: withBase import + cross-platform shader sync for CI (#260), WebGPU compute WGSL error + xm-player deploy base path (#261), `.env.production` for `/xm-player/` base
+- [x] 2026-06-12 — libopenmpt WASM build fixes: STATIC_LIB header discovery + tarball extract dir (PR #262); storage API 404 hang + native worklet main-thread probe fix (commit d4f72ea)
 - [x] 2026-06-05 — DURA-001 GPU compute duration port: `shaders/compute_note_duration.wgsl` (+ public copy), `utils/computeNoteDuration.ts`, `packPatternMatrixComputeInput` + `verifyDurationParity` in `utils/gpuPacking.ts`, integrated into `hooks/useWebGPURender.ts` with CPU fallback + dev-mode byte-for-byte parity check. Landed via PR #239; typecheck + build green. (Runtime parity smoke-test still pending — see Backlog VERIFY DURA-001)
 - [x] 2026-06-03 — Project-M worklet-driven audio-clock-accurate PCM bridge (PR #250): `openmpt-worklet.js` PCM tap + `utils/projectMBridge.ts` enhancements for sample-accurate external visualization
 - [x] 2026-06-03 — Cloud library browser + shader rating integration (PR #242): `components/LibraryBrowser.tsx`, `hooks/useLibrary.ts`, `hooks/useRateShader.ts`, `utils/storageApi.ts` (zod-validated), `/api/songs`+`/api/shaders` fetch, rating UI in ShaderSelectorPanel
@@ -87,10 +96,10 @@ Detect mobile + low-power GPU (or absence of WebGPU) and degrade the visualizati
 - [x] 2026-04-10 — Stale channel buffer + bind-group refresh fix; shader animation on second-song-load fix
 
 ## Last run
-Date: 2026-06-05
+Date: 2026-06-12
 Mode: User Idea
-Focus: Mobile / low-end "lite" render mode — capability detection (mobile + low-power GPU + no-WebGPU) → reduce visible rows, disable multi-layer bloom, auto-select a cheap shader variant, parallel to the untouched premium desktop path
-Outcome: Last week's DURA-001 GPU compute duration port landed COMPLETE via PR #239 (typecheck + build green; runtime parity smoke-test still pending). MERGE STATE backlog item RESOLVED — `main` reconciled, working branch in sync (0/0), now at #250. Also landed since last run: cloud library browser + rating (#242), Project-M PCM bridge (#250). NOT Fix First (typecheck green once deps installed — note: fresh container needs `npm install`). Ideas had 2 unfinished user items → User Idea mode; picked mobile lite-mode, marked [in progress — 2026-06-05]. Per-instrument palettes left in Ideas for next run. Decoupled Copilot issue this run = storage-manager save-back + sync + rating-hookup completion (no overlap with mobile-lite render files; shared App.tsx flagged as open question).
+Focus: Dynamic per-instrument color palettes — derive a color per instrument index from the module, pass as a palette LUT (uniform array / 1-D texture), index it in the pattern shaders via the already-packed instrument byte; gated behind a UI mode toggle so pitch-hue stays default
+Outcome: Last week's focus (mobile-lite render mode) landed COMPLETE via PR #251 — deviceCapabilities.ts + liteMode wired across App/MainLayout/PatternDisplay/useWebGPURender; typecheck + build green; runtime browser verification still pending (→ Backlog). Last week's decoupled Copilot issue (storage save-back + sync) landed via #254 (closes #253); issue #252 left open for the rating-hookup remnant (→ Backlog). Heavy infra cycle also landed: TRIG-001 sustain tails (#259), WebGL2 fallback renderer (#258), >1000-line file split (#257), codex asset-URL fix (#256), deploy/base-path hardening (#260/#261), libopenmpt WASM build fixes (#262). NOT Fix First — typecheck + build green, foundation stable; the open items are verification + one draft WASM PR (#263), none blocking. Ideas had one remaining unfinished user item (per-instrument palettes, sitting since 2026-05-30) → User Idea mode; picked it, marked [in progress — 2026-06-12]. Decoupled Copilot issue this run = Media overlay auto-sync + timing controls (MediaOverlay/MediaPanel/remoteMedia — zero overlap with palette/packing/shader-selector files). NOTE: chat-history tools (recent_chats/conversation_search) were unavailable this run; reconciliation done from git history + GitHub PRs/issues + .swarm-state.md only.
 
 ---
 
