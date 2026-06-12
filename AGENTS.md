@@ -153,6 +153,12 @@ python3 deploy.py
 ## Testing
 - **No formal unit-test framework** is currently installed (no Jest/Vitest/Playwright tests in `package.json`).
 - **Debug invariant test:** `utils/__debug__/packingInvariants.test.cjs` contains a Node.js script that tests GPU packing logic for buffer-size mismatches.
+- **Shader renderer screenshot check:** `scripts/screenshot-shader-check.mjs` captures the pattern visualizer for each renderer (`webgl2`, `html`, optionally `webgpu`) and a configurable list of shaders. Run it against a local preview with:
+  ```bash
+  npm run preview -- --port 4173 &
+  npm run screenshot:shaders
+  ```
+  Outputs are written to `/mnt/ramdisk/mod-player-screenshots` by default, including `report.json` and `SCREENSHOT_REPORT.md`.
 - **GitHub Actions** (`.github/workflows/ci.yml`) runs two jobs:
   1. `lint-and-build` – `npm install` → `npm run lint` (soft fail) → `tsc --noEmit` → `npm run build` → verifies `dist/index.html` and `dist/assets` exist.
   2. `wasm-smoke-test` – Installs Emscripten 3.1.50, verifies `build-wasm.sh` exists, and runs `shellcheck` (or `bash -n`) for syntax validation.
