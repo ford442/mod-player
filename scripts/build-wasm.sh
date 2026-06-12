@@ -8,14 +8,12 @@
 #        cd emsdk && ./emsdk install latest && ./emsdk activate latest
 #        source ./emsdk_env.sh
 #
-#   2. Build libopenmpt for Emscripten (or use pre-built):
-#        # Option A: Build from source
-#        cd libopenmpt && make CONFIG=emscripten
-#        # Option B: Use pre-built .a from a known location
-#        export LIBOPENMPT_DIR=/path/to/libopenmpt
+#   2. libopenmpt source (auto-downloaded if missing):
+#        vendor/libopenmpt-0.8.4+release  (from lib.openmpt.org tarball)
+#        Or override: export LIBOPENMPT_DIR=/path/to/libopenmpt
 #
-#   3. Set environment:
-#        export LIBOPENMPT_DIR=/path/to/libopenmpt  (contains include/ and lib/)
+#   3. Emscripten builds need STATIC_LIB=1 (handled automatically) to produce
+#      bin/libopenmpt.a for linking with emcc.
 #
 # Usage:
 #   ./scripts/build-wasm.sh [--debug]
@@ -32,6 +30,7 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 # Source Emscripten
 CANDIDATES=(
+    "/opt/emsdk/emsdk_env.sh"
     "/workspaces/codepit/emsdk/emsdk_env.sh"   # GitHub Codespace
     "/content/build_space/emsdk/emsdk_env.sh"  # Colab
     "$PROJECT_ROOT/emsdk/emsdk_env.sh"
@@ -44,10 +43,23 @@ done
 
 CPP_DIR="$PROJECT_ROOT/cpp"
 OUTPUT_DIR="$PROJECT_ROOT/public/worklets"
-VENDOR_DIR="$PROJECT_ROOT/vendor/libopenmpt"
+VENDOR_ROOT="$PROJECT_ROOT/vendor"
+LIBOPENMPT_VERSION="0.8.4"
+LIBOPENMPT_TARBALL="libopenmpt-${LIBOPENMPT_VERSION}+release.makefile.tar.gz"
+LIBOPENMPT_VENDOR_NAME="libopenmpt-${LIBOPENMPT_VERSION}+release"
+LIBOPENMPT_VENDOR_DIR="$VENDOR_ROOT/$LIBOPENMPT_VENDOR_NAME"
+LEGACY_VENDOR_DIR="$VENDOR_ROOT/libopenmpt"
 
-# libopenmpt paths (override with env vars or auto-clone below)
-LIBOPENMPT_DIR="${LIBOPENMPT_DIR:-$VENDOR_DIR}"
+# libopenmpt paths (override with LIBOPENMPT_DIR env var)
+LIBOPENMPT_DIR="${LIBOPENMPT_DIR:-$LIBOPENMPT_VENDOR_DIR}"
+LIBOPENMPT_MAKE_FLAGS=(
+    CONFIG=emscripten
+    STATIC_LIB=1
+    SHARED_LIB=0
+    DYNLINK=0
+    EXAMPLES=0
+    OPENMPT123=0
+)
 
 # Debug mode
 DEBUG_FLAGS="-O3 -DNDEBUG"
@@ -89,14 +101,49 @@ find_libopenmpt_include_root() {
 
 find_libopenmpt_lib_dir() {
     local dir="$1"
-    local candidate
+    local candidate found
+
     for candidate in "$dir/bin" "$dir/lib"; do
         if [[ -f "$candidate/libopenmpt.a" ]]; then
             echo "$candidate"
             return 0
         fi
     done
+
+    found="$(find "$dir/bin" -maxdepth 2 -name 'libopenmpt.a' -print -quit 2>/dev/null || true)"
+    if [[ -n "$found" ]]; then
+        dirname "$found"
+        return 0
+    fi
+
     return 1
+}
+
+is_valid_openmpt_source() {
+    local dir="$1"
+    [[ -f "$dir/Makefile" ]] && find_libopenmpt_include_root "$dir" >/dev/null
+}
+
+download_libopenmpt_tarball() {
+    local dest_parent="$1"
+    local dest="$dest_parent/$LIBOPENMPT_VENDOR_NAME"
+    local archive="$dest_parent/$LIBOPENMPT_TARBALL"
+
+    mkdir -p "$dest_parent"
+    echo "📥 Downloading libopenmpt ${LIBOPENMPT_VERSION}…"
+    if ! wget -q "https://lib.openmpt.org/files/libopenmpt/src/${LIBOPENMPT_TARBALL}" -O "$archive"; then
+        echo "❌ Failed to download ${LIBOPENMPT_TARBALL}" >&2
+        exit 1
+    fi
+    if ! tar xzf "$archive" -C "$dest_parent"; then
+        echo "❌ Failed to extract ${LIBOPENMPT_TARBALL}" >&2
+        exit 1
+    fi
+    rm -f "$archive"
+    if [[ ! -d "$dest" ]]; then
+        echo "❌ Expected directory '$dest' after extract." >&2
+        exit 1
+    fi
 }
 
 resolve_libopenmpt_paths() {
@@ -122,10 +169,25 @@ resolve_libopenmpt_paths() {
 }
 
 build_libopenmpt_in_place() {
-    echo "🔨 Building libopenmpt for Emscripten (this takes a few minutes)…"
+    echo "🔨 Building libopenmpt for Emscripten (STATIC_LIB=1; this takes a few minutes)…"
     pushd "$LIBOPENMPT_DIR" >/dev/null
-    make CONFIG=emscripten -j"$(nproc 2>/dev/null || echo 2)"
+    make "${LIBOPENMPT_MAKE_FLAGS[@]}" -j"$(nproc 2>/dev/null || echo 2)" bin/libopenmpt.a
     popd >/dev/null
+}
+
+report_libopenmpt_failure() {
+  echo "❌ libopenmpt is not ready after build." >&2
+  if ! find_libopenmpt_include_root "$LIBOPENMPT_DIR" >/dev/null; then
+    echo "   Missing header: libopenmpt/libopenmpt.h" >&2
+    echo "   Checked: $LIBOPENMPT_DIR/include and $LIBOPENMPT_DIR" >&2
+  fi
+  if ! find_libopenmpt_lib_dir "$LIBOPENMPT_DIR" >/dev/null; then
+    echo "   Missing static library: libopenmpt.a" >&2
+    echo "   Checked: $LIBOPENMPT_DIR/bin and $LIBOPENMPT_DIR/lib" >&2
+    echo "   Note: emscripten defaults to STATIC_LIB=0; this script forces STATIC_LIB=1." >&2
+  fi
+  echo "   Try: rm -rf $VENDOR_ROOT && $0" >&2
+  exit 1
 }
 
 ensure_libopenmpt() {
@@ -134,19 +196,25 @@ ensure_libopenmpt() {
         return 0
     fi
 
-    mkdir -p "$PROJECT_ROOT/vendor"
-
-    if [[ ! -d "$LIBOPENMPT_DIR" ]]; then
-        echo "📥 libopenmpt not found – cloning from GitHub…"
-        git clone --depth 1 --branch OpenMPT-1.31 \
-            https://github.com/OpenMPT/openmpt.git "$VENDOR_DIR"
-    elif [[ ! -f "$LIBOPENMPT_DIR/Makefile" ]]; then
-        echo "⚠️  $LIBOPENMPT_DIR exists but is not an OpenMPT checkout – recloning…"
-        rm -rf "$LIBOPENMPT_DIR"
-        git clone --depth 1 --branch OpenMPT-1.31 \
-            https://github.com/OpenMPT/openmpt.git "$VENDOR_DIR"
+    if [[ -n "${LIBOPENMPT_DIR:-}" ]] && [[ "$LIBOPENMPT_DIR" != "$LIBOPENMPT_VENDOR_DIR" ]] && is_valid_openmpt_source "$LIBOPENMPT_DIR"; then
+        echo "📦 Using LIBOPENMPT_DIR=$LIBOPENMPT_DIR"
+    elif is_valid_openmpt_source "$LIBOPENMPT_VENDOR_DIR"; then
+        LIBOPENMPT_DIR="$LIBOPENMPT_VENDOR_DIR"
+        echo "📦 Using vendored libopenmpt at $LIBOPENMPT_DIR"
+    elif is_valid_openmpt_source "$LEGACY_VENDOR_DIR"; then
+        LIBOPENMPT_DIR="$LEGACY_VENDOR_DIR"
+        echo "📦 Using legacy vendor checkout at $LIBOPENMPT_DIR"
     else
-        echo "📦 Using existing OpenMPT checkout at $LIBOPENMPT_DIR"
+        if [[ -d "$LEGACY_VENDOR_DIR" ]] && ! is_valid_openmpt_source "$LEGACY_VENDOR_DIR"; then
+            echo "⚠️  Removing incomplete legacy vendor tree at $LEGACY_VENDOR_DIR"
+            rm -rf "$LEGACY_VENDOR_DIR"
+        fi
+        if [[ -d "$LIBOPENMPT_VENDOR_DIR" ]] && ! is_valid_openmpt_source "$LIBOPENMPT_VENDOR_DIR"; then
+            echo "⚠️  Removing incomplete vendor tree at $LIBOPENMPT_VENDOR_DIR"
+            rm -rf "$LIBOPENMPT_VENDOR_DIR"
+        fi
+        download_libopenmpt_tarball "$VENDOR_ROOT"
+        LIBOPENMPT_DIR="$LIBOPENMPT_VENDOR_DIR"
     fi
 
     if ! find_libopenmpt_lib_dir "$LIBOPENMPT_DIR" >/dev/null; then
@@ -154,12 +222,7 @@ ensure_libopenmpt() {
     fi
 
     if ! resolve_libopenmpt_paths; then
-        echo "❌ libopenmpt headers or static library still missing after build." >&2
-        echo "   Expected header: <include-root>/libopenmpt/libopenmpt.h" >&2
-        echo "   Searched include roots: $LIBOPENMPT_DIR/include, $LIBOPENMPT_DIR" >&2
-        echo "   Searched lib dirs:     $LIBOPENMPT_DIR/bin, $LIBOPENMPT_DIR/lib" >&2
-        echo "   Try: rm -rf $LIBOPENMPT_DIR && $0" >&2
-        exit 1
+        report_libopenmpt_failure
     fi
 
     echo "✅ libopenmpt built at $LIBOPENMPT_DIR"

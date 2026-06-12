@@ -105,9 +105,10 @@ fi
 
 # ── 3. Build libopenmpt ─────────────────────────────────────────────
 if ! find_libopenmpt_lib_dir "$LIBOPENMPT_DIR" >/dev/null; then
-    echo "🔨 Building libopenmpt..."
+    echo "🔨 Building libopenmpt (STATIC_LIB=1)..."
     pushd "$LIBOPENMPT_DIR" >/dev/null
-    make CONFIG=emscripten -j"$(nproc 2>/dev/null || echo 2)"
+    make CONFIG=emscripten STATIC_LIB=1 SHARED_LIB=0 DYNLINK=0 EXAMPLES=0 OPENMPT123=0 \
+        -j"$(nproc 2>/dev/null || echo 2)" bin/libopenmpt.a
     popd >/dev/null
 fi
 
