@@ -224,6 +224,7 @@ function App() {
   const [mediaItem, setMediaItem] = useState<MediaItem | null>(null);
   // Track object URLs created from local files so we can revoke them on replacement/unmount
   const mediaObjectUrlRef = useRef<string | null>(null);
+  const [mediaFades] = useLocalStorage<{ in: number; out: number }>('xasm1_media_fades', { in: 500, out: 500 });
 
   // Panel visibility
   const [showChannelMeters, setShowChannelMeters] = useState<boolean>(true);
@@ -652,6 +653,7 @@ function App() {
         mediaVisible={mediaVisible}
         setMediaVisible={setMediaVisible}
         setMediaItem={setMediaItem}
+        mediaFades={mediaFades}
         isReady={isReady}
         cheatsheetOpen={cheatsheetOpen}
         setCheatsheetOpen={setCheatsheetOpen}
@@ -736,6 +738,7 @@ function App() {
       mediaVisible={mediaVisible}
       setMediaVisible={setMediaVisible}
       setMediaItem={setMediaItem}
+      mediaFades={mediaFades}
       handleMediaAdd={handleMediaAdd}
       handleRemoteMediaSelect={handleRemoteMediaSelect}
       isReady={isReady}

@@ -53,6 +53,7 @@ interface App3DViewProps {
   setColorScheme: (v: ColorScheme) => void;
   mediaItem: MediaItem | null;
   mediaVisible: boolean;
+  mediaFades?: { in: number; out: number };
   setMediaVisible: (v: boolean) => void;
   setMediaItem: (item: MediaItem | null) => void;
   isReady: boolean;
@@ -105,6 +106,7 @@ export function App3DView({
   mediaVisible,
   setMediaVisible,
   setMediaItem,
+  mediaFades,
   isReady,
   cheatsheetOpen,
   setCheatsheetOpen,
@@ -217,6 +219,8 @@ export function App3DView({
               <MediaOverlay
                 item={mediaItem}
                 visible={mediaVisible}
+                fadeInMs={mediaFades?.in}
+                fadeOutMs={mediaFades?.out}
                 onClose={() => setMediaVisible(false)}
                 onUpdate={(partial) => {
                   if (mediaItem) setMediaItem({ ...mediaItem, ...partial });

@@ -95,6 +95,7 @@ interface MainLayoutProps {
   dimFactor: number;
   mediaItem: MediaItem | null;
   mediaVisible: boolean;
+  mediaFades?: { in: number; out: number };
   setMediaVisible: (v: boolean) => void;
   setMediaItem: (item: MediaItem | null) => void;
   handleMediaAdd: (file: File) => void;
@@ -216,6 +217,7 @@ export function MainLayout({
   mediaVisible,
   setMediaVisible,
   setMediaItem,
+  mediaFades,
   handleMediaAdd,
   handleRemoteMediaSelect,
   isReady,
@@ -456,6 +458,8 @@ export function MainLayout({
            <MediaOverlay
              item={mediaItem}
              visible={mediaVisible}
+             fadeInMs={mediaFades?.in}
+             fadeOutMs={mediaFades?.out}
              onClose={() => setMediaVisible(false)}
              onUpdate={(partial) => {
                  if (mediaItem) setMediaItem({ ...mediaItem, ...partial });
