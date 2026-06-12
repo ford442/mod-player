@@ -58,6 +58,8 @@ interface PatternDisplayProps {
   onCloseDebug?: () => void;
   onOpenDebug?: () => void;
   colorPalette?: number;
+  paletteMode?: number;
+  instrumentPalette?: Uint8Array;
   chassisDark?: boolean;
   /** Controlled pattern steps count (32 or 64). When provided, overrides internal state.
    *  Only meaningful for shaders that use slot [24] as stepsLength (v0.21, v0.39, v0.40). */
@@ -114,6 +116,8 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   onCloseDebug,
   onOpenDebug,
   colorPalette = 0,
+  paletteMode = 0,
+  instrumentPalette,
   stepsLength: stepsLengthProp,
   onStepsLengthToggle,
   chassisDark = false,
@@ -179,14 +183,14 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   const useHTML = activeBackend === 'html';
   const isOverlayActive = useWebGPU && !liteMode && WEBGL_HYBRID_SHADERS.has(shaderFile);
 
-  const padTopChannel = shaderFile.includes('v0.16') || shaderFile.includes('v0.17') || shaderFile.includes('v0.21') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.47') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49') || shaderFile.includes('v0.50') || shaderFile.includes('v0.51') || shaderFile.includes('v0.55');
+  const padTopChannel = shaderFile.includes('v0.16') || shaderFile.includes('v0.17') || shaderFile.includes('v0.21') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.47') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49') || shaderFile.includes('v0.50') || shaderFile.includes('v0.51') || shaderFile.includes('v0.55') || shaderFile.includes('v0.56');
 
   const isHorizontal = shaderFile.includes('v0.13') || shaderFile.includes('v0.14') || shaderFile.includes('v0.16') || shaderFile.includes('v0.17') || shaderFile.includes('v0.21') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40');
 
   const canvasMetrics = useMemo(() => {
     if (liteMode) return { width: 512, height: 512 };
     if (shaderFile.includes('v0.27') || shaderFile.includes('v0.28')) return { width: 1024, height: 1008 };
-    if (shaderFile.includes('v0.21') || shaderFile.includes('v0.37') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.47') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49') || shaderFile.includes('v0.50') || shaderFile.includes('v0.51') || shaderFile.includes('v0.55')) return { width: 1024, height: 1024 };
+    if (shaderFile.includes('v0.21') || shaderFile.includes('v0.37') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.47') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49') || shaderFile.includes('v0.50') || shaderFile.includes('v0.51') || shaderFile.includes('v0.55') || shaderFile.includes('v0.56')) return { width: 1024, height: 1024 };
     if (isHorizontal) return { width: 1024, height: 1024 };
     if (shaderFile.includes('v0.25') || shaderFile.includes('v0.30') || shaderFile.includes('v0.35')) return { width: 1024, height: 1024 };
     return { width: Math.max(800, numChannels * cellWidth), height: 600 };
@@ -306,6 +310,8 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     localTime, isHorizontal, externalVideoSource,
     canvasMetrics,
     colorPalette,
+    paletteMode,
+    instrumentPalette,
     stepsLength,
     chassisDark,
     vignetteStrength, filmGrain, invertMix, nightPreset,
@@ -321,6 +327,8 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     localTime, isHorizontal, externalVideoSource,
     canvasMetrics,
     colorPalette,
+    paletteMode,
+    instrumentPalette,
     stepsLength,
     chassisDark,
     vignetteStrength, filmGrain, invertMix, nightPreset,

@@ -46,6 +46,9 @@ interface MainLayoutProps {
   ratingInFlightShaderId: string | null;
   colorPalette: number;
   setColorPalette: (v: number) => void;
+  paletteMode: number;
+  setPaletteMode: (v: number) => void;
+  instrumentPalette: Uint8Array;
   isStepsShader: boolean;
   stepsLength: 32 | 64;
   setStepsLength: (v: 32 | 64) => void;
@@ -162,6 +165,9 @@ export function MainLayout({
   ratingInFlightShaderId,
   colorPalette,
   setColorPalette,
+  paletteMode,
+  setPaletteMode,
+  instrumentPalette,
   isStepsShader,
   stepsLength,
   setStepsLength,
@@ -351,6 +357,23 @@ export function MainLayout({
                         <option value={4}>Acid</option>
                         <option value={5}>Fifths</option>
                     </select>
+                    <button
+                      onClick={() => setPaletteMode(paletteMode === 0 ? 1 : 0)}
+                      disabled={!shaderFile.includes('v0.56')}
+                      title={shaderFile.includes('v0.56') ? 'Toggle pitch hue vs per-instrument color' : 'Per-instrument palette only available on v0.56'}
+                      className={cn(
+                        'text-[10px] font-mono px-2 py-1 rounded border transition-colors',
+                        shaderFile.includes('v0.56')
+                          ? paletteMode === 1
+                            ? 'bg-cyan-700 text-white border-cyan-500 hover:bg-cyan-600'
+                            : isDarkMode
+                              ? 'bg-gray-800 text-gray-300 border-gray-600 hover:bg-gray-700'
+                              : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                          : 'bg-gray-700 text-gray-500 border-gray-600 cursor-not-allowed opacity-50'
+                      )}
+                    >
+                      {paletteMode === 1 ? 'By Instrument' : 'By Pitch'}
+                    </button>
                 </div>
                 {isStepsShader && (
                   <>
@@ -413,6 +436,8 @@ export function MainLayout({
              bloomIntensity={(isNightShader && nightModeEnabled) ? nightConfig.bloomIntensity : bloomPreset.intensity}
              bloomThreshold={bloomPreset.threshold}
              colorPalette={colorPalette}
+             paletteMode={paletteMode}
+             instrumentPalette={instrumentPalette}
              stepsLength={stepsLength}
              onStepsLengthToggle={() => setStepsLength(stepsLength === 32 ? 64 : 32)}
              chassisDark={chassisDark}

@@ -32,6 +32,7 @@ import {
   AVAILABLE_SHADERS,
   type AppTheme,
 } from './appConfig';
+import { generateInstrumentPalette, generateEmptyInstrumentPalette } from './utils/instrumentPalette';
 
 function App() {
   // Tier 1: global last-used shader — persisted across page reloads
@@ -69,6 +70,8 @@ function App() {
   const [colorScheme, setColorScheme] = useState<ColorScheme>(DEFAULT_COLOR_SCHEME);
   // Persist colorPalette selection across page reloads
   const [colorPalette, setColorPalette] = useLocalStorage<number>('xasm1_colorPalette', 0);
+  // Per-instrument palette mode — persisted alongside the colorPalette selector
+  const [paletteMode, setPaletteMode] = useLocalStorage<number>('xasm1_paletteMode', 0);
 
   // Pattern length toggle — lifted to App.tsx so it can be shown in the toolbar
   // Uses supportsStepsLength() from shaderVersion.ts as the single source of truth
@@ -95,6 +98,7 @@ function App() {
     totalPatternRows,
     sequencerMatrix,
     channelStates,
+    instrumentNames,
     beatPhase,
     grooveAmount,
     kickTrigger,
@@ -161,17 +165,20 @@ function App() {
       numChannels: sequencerMatrix?.numChannels ?? 0,
       numOrders: totalPatternRows > 0 ? Math.ceil(totalPatternRows / (sequencerMatrix?.numRows || 64)) : 0,
       numPatterns: 0,
-      numInstruments: 0,
+      numInstruments: instrumentNames.length,
       durationSeconds: 0,
       currentBpm: 125,
-      instruments: [],
+      instruments: instrumentNames,
     };
-  }, [isModuleLoaded, sequencerMatrix, status, activeEngine, totalPatternRows]);
+  }, [isModuleLoaded, sequencerMatrix, status, activeEngine, totalPatternRows, instrumentNames]);
 
   // Shader change handler — Tier 1 (global) + Tier 2 (per-module) write
   const setShaderFile = useCallback((shader: string) => {
     _setStoredShader(shader);
     setShaderRecents(previousRecents => [shader, ...previousRecents.filter(s => s !== shader)].slice(0, 5));
+    // Per-instrument palette only makes sense for shaders that read it; switch back to pitch-hue
+    // on shaders that do not use the paletteMode uniform to avoid silent no-ops in the UI.
+    if (!shader.includes('v0.56')) setPaletteMode(0);
     if (moduleHash) {
       try {
         localStorage.setItem(`xasm1_module_shader_${moduleHash}`, shader);
@@ -179,7 +186,7 @@ function App() {
         // Ignore quota/security errors
       }
     }
-  }, [_setStoredShader, moduleHash, setShaderRecents]);
+  }, [_setStoredShader, moduleHash, setShaderRecents, setPaletteMode]);
 
   const toggleShaderFavorite = useCallback((shader: string) => {
     setShaderFavorites(
@@ -499,6 +506,12 @@ function App() {
     return shaderFile;
   }, [liteMode, shaderFile]);
 
+  // Derive a stable per-instrument palette from the loaded module's instrument names.
+  const instrumentPalette = useMemo(() => {
+    if (!instrumentNames || instrumentNames.length === 0) return generateEmptyInstrumentPalette();
+    return generateInstrumentPalette(instrumentNames.length, instrumentNames);
+  }, [instrumentNames]);
+
   if (is3DMode) {
     return (
       <App3DView
@@ -579,6 +592,9 @@ function App() {
       ratingInFlightShaderId={rateShaderMutation.isPending ? rateShaderMutation.variables?.id ?? null : null}
       colorPalette={colorPalette}
       setColorPalette={setColorPalette}
+      paletteMode={paletteMode}
+      setPaletteMode={setPaletteMode}
+      instrumentPalette={instrumentPalette}
       isStepsShader={isStepsShader}
       stepsLength={stepsLength}
       setStepsLength={setStepsLength}

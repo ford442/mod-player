@@ -38,6 +38,7 @@ import {
 import type { BloomPostProcessor } from '../utils/bloomPostProcessor';
 import { GRID_RECT } from '../utils/geometryConstants';
 import { withBase } from '../src/lib/paths';
+import { generateEmptyInstrumentPalette, MAX_INSTRUMENT_PALETTE_SIZE } from '../utils/instrumentPalette';
 
 export type DebugInfo = {
   layoutMode: string;
@@ -97,6 +98,9 @@ export interface WebGPURenderParams {
   filmGrain?: number;
   nightPreset?: number;
   invertMix?: number;
+  // Per-instrument palette mode
+  paletteMode?: number;
+  instrumentPalette?: Uint8Array | undefined;
 }
 
 export function useWebGPURender(
@@ -136,9 +140,11 @@ export function useWebGPURender(
   const computeStateRef = useRef<NoteDurationComputeState | null>(null);
   const bezelBindGroupRef = useRef<GPUBindGroup | null>(null);
   const bezelUniformBufferRef = useRef<GPUBuffer | null>(null);
+  const instrumentPaletteTextureRef = useRef<GPUTexture | null>(null);
+  const instrumentPaletteVersionRef = useRef<Uint8Array | null>(null);
 
   // Persistent typed arrays to avoid GC pressure
-  const uniformBufferDataRef = useRef(new ArrayBuffer(128));
+  const uniformBufferDataRef = useRef(new ArrayBuffer(144));
   const uniformUintRef = useRef(new Uint32Array(uniformBufferDataRef.current));
   const uniformFloatRef = useRef(new Float32Array(uniformBufferDataRef.current));
   const bezelBufferDataRef = useRef(new ArrayBuffer(128));
@@ -171,6 +177,9 @@ export function useWebGPURender(
       );
       if (shaderFile.includes('v0.55') && oscTextureRef?.current) {
         entries.push({ binding: 6, resource: oscTextureRef.current.createView() });
+      }
+      if (shaderFile.includes('v0.56') && instrumentPaletteTextureRef.current) {
+        entries.push({ binding: 7, resource: instrumentPaletteTextureRef.current.createView() });
       }
     } else if (layoutType === 'texture') {
       if (!textureResourcesRef.current) {
@@ -321,6 +330,9 @@ export function useWebGPURender(
           if (shaderFile.includes('v0.55')) {
             extendedEntries.push({ binding: 6, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'unfilterable-float' } });
           }
+          if (shaderFile.includes('v0.56')) {
+            extendedEntries.push({ binding: 7, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float' } });
+          }
           bindGroupLayout = device.createBindGroupLayout({ entries: extendedEntries });
         } else {
           bindGroupLayout = device.createBindGroupLayout({ entries: [{ binding: 0, visibility: GPUShaderStage.FRAGMENT | GPUShaderStage.VERTEX, buffer: { type: 'read-only-storage' } }, { binding: 1, visibility: GPUShaderStage.FRAGMENT | GPUShaderStage.VERTEX, buffer: { type: 'uniform' } }] });
@@ -334,8 +346,25 @@ export function useWebGPURender(
           pipelineRef.current = device.createRenderPipeline({ layout: device.createPipelineLayout({ bindGroupLayouts: [bindGroupLayout] }), vertex: { module, entryPoint: 'vertex_main' }, fragment: { module, entryPoint: 'fragment_main', targets }, primitive: { topology: 'triangle-list' } });
         }
 
-        const uniformSize = layoutType === 'extended' ? 128 : (layoutType === 'texture' ? 64 : 32);
+        const uniformSize = layoutType === 'extended' ? 132 : (layoutType === 'texture' ? 64 : 32);
         const uniformBuffer = device.createBuffer({ size: alignTo(uniformSize, 256), usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+
+        if (shaderFile.includes('v0.56')) {
+          const placeholder = generateEmptyInstrumentPalette();
+          const texture = device.createTexture({
+            size: [MAX_INSTRUMENT_PALETTE_SIZE, 1, 1],
+            format: 'rgba8unorm',
+            usage: GPUTextureUsage.COPY_DST | GPUTextureUsage.TEXTURE_BINDING,
+          });
+          device.queue.writeTexture(
+            { texture },
+            placeholder.buffer as ArrayBuffer,
+            { bytesPerRow: MAX_INSTRUMENT_PALETTE_SIZE * 4 },
+            { width: MAX_INSTRUMENT_PALETTE_SIZE, height: 1, depthOrArrayLayers: 1 }
+          );
+          instrumentPaletteTextureRef.current = texture;
+          instrumentPaletteVersionRef.current = placeholder;
+        }
 
         if (shouldUseBackgroundPass(activeShaderFile)) {
           try {
@@ -363,7 +392,7 @@ export function useWebGPURender(
         });
 
         const p = renderParamsRef.current;
-        const isHighPrec = activeShaderFile.includes('v0.36') || activeShaderFile.includes('v0.37') || activeShaderFile.includes('v0.38') || activeShaderFile.includes('v0.39') || activeShaderFile.includes('v0.40') || activeShaderFile.includes('v0.42') || activeShaderFile.includes('v0.43') || activeShaderFile.includes('v0.44') || activeShaderFile.includes('v0.45') || activeShaderFile.includes('v0.46') || activeShaderFile.includes('v0.47') || activeShaderFile.includes('v0.48') || activeShaderFile.includes('v0.49') || activeShaderFile.includes('v0.50') || activeShaderFile.includes('v0.51') || activeShaderFile.includes('v0.55');
+        const isHighPrec = activeShaderFile.includes('v0.36') || activeShaderFile.includes('v0.37') || activeShaderFile.includes('v0.38') || activeShaderFile.includes('v0.39') || activeShaderFile.includes('v0.40') || activeShaderFile.includes('v0.42') || activeShaderFile.includes('v0.43') || activeShaderFile.includes('v0.44') || activeShaderFile.includes('v0.45') || activeShaderFile.includes('v0.46') || activeShaderFile.includes('v0.47') || activeShaderFile.includes('v0.48') || activeShaderFile.includes('v0.49') || activeShaderFile.includes('v0.50') || activeShaderFile.includes('v0.51') || activeShaderFile.includes('v0.55') || activeShaderFile.includes('v0.56');
 
         // DURA-001: initialize compute pipeline for high-precision shaders
         if (isHighPrec && !computeStateRef.current) {
@@ -459,6 +488,11 @@ export function useWebGPURender(
         try { videoTextureRef.current.destroy(); } catch { /* ignore */ }
         videoTextureRef.current = null;
       }
+      if (instrumentPaletteTextureRef.current) {
+        try { instrumentPaletteTextureRef.current.destroy(); } catch { /* ignore */ }
+        instrumentPaletteTextureRef.current = null;
+      }
+      instrumentPaletteVersionRef.current = null;
       if (deviceRef.current) {
         try { deviceRef.current.destroy(); } catch { /* ignore */ }
       }
@@ -482,7 +516,7 @@ export function useWebGPURender(
     bindGroupRef.current = null;
     renderFrameCountRef.current = 0;
     if (cellsBufferRef.current) cellsBufferRef.current.destroy();
-    const isHighPrec = shaderFile.includes('v0.36') || shaderFile.includes('v0.37') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.47') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49') || shaderFile.includes('v0.50') || shaderFile.includes('v0.51');
+    const isHighPrec = shaderFile.includes('v0.36') || shaderFile.includes('v0.37') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.47') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49') || shaderFile.includes('v0.50') || shaderFile.includes('v0.51') || shaderFile.includes('v0.56');
 
     const useCompute = !liteMode && isHighPrec && computeStateRef.current && canUseComputePath(p.matrix);
     if (useCompute) {
@@ -605,6 +639,25 @@ export function useWebGPURender(
 
     const p = renderParamsRef.current;
 
+    // Upload per-instrument palette texture when the module-derived palette changes.
+    if (shaderFile.includes('v0.56') && p.instrumentPalette && p.instrumentPalette !== instrumentPaletteVersionRef.current) {
+      instrumentPaletteTextureRef.current?.destroy();
+      const texture = device.createTexture({
+        size: [MAX_INSTRUMENT_PALETTE_SIZE, 1, 1],
+        format: 'rgba8unorm',
+        usage: GPUTextureUsage.COPY_DST | GPUTextureUsage.TEXTURE_BINDING,
+      });
+      device.queue.writeTexture(
+        { texture },
+        (p.instrumentPalette as Uint8Array).buffer as ArrayBuffer,
+        { bytesPerRow: MAX_INSTRUMENT_PALETTE_SIZE * 4 },
+        { width: MAX_INSTRUMENT_PALETTE_SIZE, height: 1, depthOrArrayLayers: 1 }
+      );
+      instrumentPaletteTextureRef.current = texture;
+      instrumentPaletteVersionRef.current = p.instrumentPalette;
+      refreshBindGroup(device);
+    }
+
     if (uniformBufferRef.current) {
       const numRows = p.matrix?.numRows ?? DEFAULT_ROWS;
       const rawChannels = p.matrix?.numChannels ?? DEFAULT_CHANNELS;
@@ -645,7 +698,7 @@ export function useWebGPURender(
 
       let effectiveCellW = p.cellWidth;
       let effectiveCellH = p.cellHeight;
-      if (shaderFile.includes('v0.21') || shaderFile.includes('v0.40') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.47') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49') || shaderFile.includes('v0.50') || shaderFile.includes('v0.51') || shaderFile.includes('v0.55')) {
+      if (shaderFile.includes('v0.21') || shaderFile.includes('v0.40') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.47') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49') || shaderFile.includes('v0.50') || shaderFile.includes('v0.51') || shaderFile.includes('v0.55') || shaderFile.includes('v0.56')) {
         effectiveCellW = (GRID_RECT.w * actualCanvasW) / stepsCount;
         effectiveCellH = (GRID_RECT.h * actualCanvasH) / numChannels;
       } else if (shaderFile.includes('v0.39')) {
@@ -662,7 +715,7 @@ export function useWebGPURender(
       const uniformByteLength = fillUniformPayload(layoutTypeRef.current, {
         numRows: visibleRows, numChannels,
         playheadRow: tickRow,
-        playheadRowAsFloat: shaderFile.includes('v0.21') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.47') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49') || shaderFile.includes('v0.50') || shaderFile.includes('v0.51') || shaderFile.includes('v0.55'),
+        playheadRowAsFloat: shaderFile.includes('v0.21') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.47') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49') || shaderFile.includes('v0.50') || shaderFile.includes('v0.51') || shaderFile.includes('v0.55') || shaderFile.includes('v0.56'),
         isPlaying: p.isPlaying,
         cellW: effectiveCellW, cellH: effectiveCellH,
         canvasW: actualCanvasW, canvasH: actualCanvasH,
@@ -687,6 +740,7 @@ export function useWebGPURender(
         filmGrain: p.filmGrain ?? 0.0,
         nightPreset: p.nightPreset ?? 0,
         invertMix: p.invertMix ?? 0.0,
+        paletteMode: p.paletteMode ?? 0,
         // Only pass stepsLength for shaders that use it at slot [24];
         // for circular shaders slot [24] is colorPalette, so stepsLength must be absent.
         ...(supportsStepsLength(shaderFile)
@@ -830,7 +884,7 @@ export function useWebGPURender(
     device.queue.submit([encoder.finish()]);
 
     // Update debug info - always update regardless of overlay state
-    const isOverlayActive = shaderFile.includes('v0.21') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.47') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49') || shaderFile.includes('v0.50') || shaderFile.includes('v0.51') || shaderFile.includes('v0.55');
+    const isOverlayActive = shaderFile.includes('v0.21') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.47') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49') || shaderFile.includes('v0.50') || shaderFile.includes('v0.51') || shaderFile.includes('v0.55') || shaderFile.includes('v0.56');
     const layoutModeName = isCircularLayoutShader(shaderFile) ? 'CIRCULAR (WebGPU)' :
       p.isHorizontal ? 'HORIZONTAL (WebGPU)' : 'STANDARD (WebGPU)';
     setDebugInfo((prev: DebugInfo) => ({

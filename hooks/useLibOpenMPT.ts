@@ -45,6 +45,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
   const [moduleInfo, setModuleInfo] = useState<ModuleInfo>({ title: "None", order: 0, row: 0, bpm: 125, numChannels: 0 });
   const [patternData, _setPatternData] = useState<Uint8Array | null>(null);
   const [sequencerMatrix, setSequencerMatrix] = useState<PatternMatrix | null>(null);
+  const [instrumentNames, setInstrumentNames] = useState<string[]>([]);
   const [sequencerCurrentRow, setSequencerCurrentRow] = useState<number>(0);
   const [sequencerGlobalRow, setSequencerGlobalRow] = useState<number>(0);
   const [playbackSeconds, setPlaybackSeconds] = useState<number>(0);
@@ -288,6 +289,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
       bpm: metadata.initialBpm,
       numChannels: metadata.numChannels,
     });
+    setInstrumentNames(metadata.instruments ?? []);
 
     patternMatricesRef.current = patternMatrices;
     setTotalPatternRows(metadata.totalPatternRows);
@@ -604,6 +606,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
     workletTimeRef.current = 0;
     workletOrderRef.current = 0;
     workletRowRef.current = 0;
+    if (destroy) setInstrumentNames([]);
 
     if (destroy && currentModulePtr.current !== 0 && libopenmptRef.current) {
       libopenmptRef.current._openmpt_module_destroy(currentModulePtr.current);
@@ -958,6 +961,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
     status, isReady, isPlaying, isModuleLoaded, moduleInfo, patternData,
     loadFile: loadModule, play, stopMusic, sequencerMatrix, sequencerCurrentRow, sequencerGlobalRow,
     totalPatternRows, playbackSeconds, playbackRowFraction, channelStates, beatPhase, grooveAmount, kickTrigger, activeChannels,
+    instrumentNames,
     isLooping, setIsLooping, seekToStep: seekToStepWrapper, panValue, setPanValue,
     activeEngine, isWorkletSupported, toggleAudioEngine, syncDebug,
     analyserNode: analyserRef.current,

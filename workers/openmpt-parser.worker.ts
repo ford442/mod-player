@@ -19,6 +19,8 @@ interface ParseResponse {
     initialBpm: number;
     durationSeconds: number;
     totalPatternRows: number;
+    numInstruments: number;
+    instruments: string[];
   };
 }
 
@@ -158,6 +160,14 @@ self.onmessage = async (e: MessageEvent<IncomingMessage>) => {
     const numChannels = lib._openmpt_module_get_num_channels(modPtr);
     const initialBpm = lib._openmpt_module_get_current_estimated_bpm(modPtr);
     const durationSeconds = lib._openmpt_module_get_duration_seconds(modPtr);
+    const numInstruments = lib._openmpt_module_get_num_instruments(modPtr);
+
+    const instruments: string[] = [];
+    for (let i = 0; i < numInstruments; i++) {
+      const namePtr = lib._openmpt_module_get_instrument_name(modPtr, i);
+      instruments.push(lib.UTF8ToString(namePtr));
+      lib._openmpt_free_string(namePtr);
+    }
 
     // Build pattern matrices
     const matrices: PatternMatrix[] = [];
@@ -182,6 +192,8 @@ self.onmessage = async (e: MessageEvent<IncomingMessage>) => {
         initialBpm,
         durationSeconds,
         totalPatternRows: totalRows,
+        numInstruments,
+        instruments,
       },
     };
 
