@@ -17,6 +17,7 @@ import {
   calculateHorizontalCellSize,
   calculateCapScale,
   getLayoutModeFromShader,
+  horizontalLayoutHasHeader,
   LAYOUT_MODES,
 } from '../utils/geometryConstants';
 import { detectRuntimeBase } from '../src/lib/paths';
@@ -471,10 +472,11 @@ export function useWebGLOverlay(
         layoutMode = p.stepsLength === 64 ? LAYOUT_MODES.HORIZONTAL_64 : LAYOUT_MODES.HORIZONTAL_32;
       }
       const channelCount = cols;
+      const hasHeaderRow = p.padTopChannel && horizontalLayoutHasHeader(channelCount);
 
       if (layoutMode === LAYOUT_MODES.HORIZONTAL_32) {
         {
-          const metrics = calculateHorizontalCellSize(gl.canvas.width, gl.canvas.height, 32, channelCount);
+          const metrics = calculateHorizontalCellSize(gl.canvas.width, gl.canvas.height, 32, channelCount, hasHeaderRow);
           effectiveCellW = metrics.cellW;
           effectiveCellH = metrics.cellH;
           offsetX = metrics.offsetX;
@@ -483,7 +485,7 @@ export function useWebGLOverlay(
         }
         if (uniforms.u_offset != null) gl.uniform2f(uniforms.u_offset, offsetX, offsetY);
       } else if (layoutMode === LAYOUT_MODES.HORIZONTAL_64) {
-        const metrics = calculateHorizontalCellSize(gl.canvas.width, gl.canvas.height, 64, channelCount);
+        const metrics = calculateHorizontalCellSize(gl.canvas.width, gl.canvas.height, 64, channelCount, hasHeaderRow);
         effectiveCellW = metrics.cellW;
         effectiveCellH = metrics.cellH;
         offsetX = metrics.offsetX;
@@ -513,7 +515,7 @@ export function useWebGLOverlay(
       gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
 
       const stepsForMode = layoutMode === LAYOUT_MODES.HORIZONTAL_32 ? 32 :
-        layoutMode === LAYOUT_MODES.HORIZONTAL_64 ? 64 : 64;
+        layoutMode === LAYOUT_MODES.HORIZONTAL_64 ? 64 : rows;
       const totalInstances = stepsForMode * cols;
 
       uniformVals['totalInstances'] = totalInstances;

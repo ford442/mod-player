@@ -7,6 +7,7 @@ import {
   calculateHorizontalCellSize,
   calculateCapScale,
   getLayoutModeFromShader,
+  horizontalLayoutHasHeader,
   LAYOUT_MODES,
 } from '../../../utils/geometryConstants';
 import { getShaderMeta } from '../../../utils/shaderRegistry';
@@ -358,15 +359,16 @@ export class WebGL2PatternRenderer {
     let effectiveCellH = params.cellHeight;
     let offsetX = 0;
     let offsetY = 0;
+    const hasHeaderRow = padTopChannel && horizontalLayoutHasHeader(cols);
 
     if (layoutMode === LAYOUT_MODES.HORIZONTAL_32) {
-      const m = calculateHorizontalCellSize(canvas.width, canvas.height, 32, cols);
+      const m = calculateHorizontalCellSize(canvas.width, canvas.height, 32, cols, hasHeaderRow);
       effectiveCellW = m.cellW;
       effectiveCellH = m.cellH;
       offsetX = m.offsetX;
       offsetY = m.offsetY;
     } else if (layoutMode === LAYOUT_MODES.HORIZONTAL_64) {
-      const m = calculateHorizontalCellSize(canvas.width, canvas.height, 64, cols);
+      const m = calculateHorizontalCellSize(canvas.width, canvas.height, 64, cols, hasHeaderRow);
       effectiveCellW = m.cellW;
       effectiveCellH = m.cellH;
       offsetX = m.offsetX;
@@ -411,7 +413,7 @@ export class WebGL2PatternRenderer {
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
 
     const stepsForMode = layoutMode === LAYOUT_MODES.HORIZONTAL_32 ? 32
-      : layoutMode === LAYOUT_MODES.HORIZONTAL_64 ? 64 : 64;
+      : layoutMode === LAYOUT_MODES.HORIZONTAL_64 ? 64 : rows;
     const totalInstances = stepsForMode * cols;
     uniformVals['totalInstances'] = totalInstances;
     uniformVals['layoutMode'] = layoutModeName;
