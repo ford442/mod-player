@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { fetchRemoteSongs, fetchShaders, saveSong, syncLibrary } from '../utils/storageApi';
-import type { SongSaveRequest } from '../utils/storageApi';
+import type { RemoteSong, SongSaveRequest } from '../utils/storageApi';
 
 export const libraryQueryKeys = {
   songs: ['library', 'songs'] as const,
@@ -30,7 +30,12 @@ export function useSaveSong() {
 
   return useMutation({
     mutationFn: (req: SongSaveRequest) => saveSong(req),
-    onSuccess: () => {
+    onSuccess: (savedSong) => {
+      queryClient.setQueryData<RemoteSong[]>(libraryQueryKeys.songs, current => {
+        if (!current) return [savedSong];
+        const withoutDuplicate = current.filter(song => song.id !== savedSong.id && song.downloadUrl !== savedSong.downloadUrl);
+        return [savedSong, ...withoutDuplicate];
+      });
       void queryClient.invalidateQueries({ queryKey: libraryQueryKeys.songs });
     },
   });
@@ -41,7 +46,8 @@ export function useSyncLibrary() {
 
   return useMutation({
     mutationFn: syncLibrary,
-    onSuccess: () => {
+    onSuccess: async () => {
+      await queryClient.refetchQueries({ queryKey: libraryQueryKeys.songs, type: 'active' });
       void queryClient.invalidateQueries({ queryKey: libraryQueryKeys.songs });
     },
   });

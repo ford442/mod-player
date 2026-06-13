@@ -12,6 +12,7 @@ export interface ModuleMetadata {
   durationSeconds: number;
   currentBpm: number;
   instruments: string[];
+  comments?: string;
 }
 
 interface MetadataPanelProps {

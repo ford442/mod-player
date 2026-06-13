@@ -46,6 +46,30 @@ const ShaderListSchema = z.union([
   z.object({ results: z.array(ShaderSchema) }),
 ]);
 
+const SongSaveResponseSchema = z.union([
+  SongSchema,
+  z.object({ song: SongSchema }),
+  z.object({ item: SongSchema }),
+  z.object({ result: SongSchema }),
+]);
+
+const ShaderRateResponseSchema = z.union([
+  z.null(),
+  ShaderSchema,
+  z.object({ shader: ShaderSchema }),
+  z.object({ item: ShaderSchema }),
+  z.object({ result: ShaderSchema }),
+]);
+
+const SyncResponseSchema = z.union([
+  z.null(),
+  z.object({
+    ok: z.boolean().optional(),
+    synced: z.number().int().nonnegative().optional(),
+    message: z.string().optional(),
+  }).passthrough(),
+]);
+
 export class SchemaMismatchError extends Error {
   constructor(message: string) {
     super(message);
@@ -68,6 +92,11 @@ export interface ShaderMeta {
   averageRating: number | null;
   voteCount: number | null;
   userRating: number | null;
+}
+
+export interface SyncLibraryResult {
+  synced: number | null;
+  message: string | null;
 }
 
 /** Resolve API path with subdirectory base (e.g. /xm-player/api/songs). */
@@ -119,6 +148,16 @@ function normalizeShader(raw: z.infer<typeof ShaderSchema>): ShaderMeta {
     voteCount: raw.voteCount ?? raw.vote_count ?? raw.votes ?? null,
     userRating: raw.userRating ?? raw.user_rating ?? null,
   };
+}
+
+function unwrapSongSaveResponse(parsed: z.infer<typeof SongSaveResponseSchema>): z.infer<typeof SongSchema> {
+  const wrapped = parsed as { song?: z.infer<typeof SongSchema>; item?: z.infer<typeof SongSchema>; result?: z.infer<typeof SongSchema> };
+  return wrapped.song ?? wrapped.item ?? wrapped.result ?? (parsed as z.infer<typeof SongSchema>);
+}
+
+function unwrapShaderRateResponse(parsed: Exclude<z.infer<typeof ShaderRateResponseSchema>, null>): z.infer<typeof ShaderSchema> {
+  const wrapped = parsed as { shader?: z.infer<typeof ShaderSchema>; item?: z.infer<typeof ShaderSchema>; result?: z.infer<typeof ShaderSchema> };
+  return wrapped.shader ?? wrapped.item ?? wrapped.result ?? (parsed as z.infer<typeof ShaderSchema>);
 }
 
 /**
@@ -188,7 +227,7 @@ export async function fetchShaders(): Promise<ShaderMeta[]> {
   return shaders.map(normalizeShader);
 }
 
-export async function rateShader(id: string, score: number): Promise<void> {
+export async function rateShader(id: string, score: number): Promise<ShaderMeta | null> {
   const response = await fetch(toApiUrl(`/api/shaders/${encodeURIComponent(id)}/rate`), {
     method: 'POST',
     headers: {
@@ -200,6 +239,18 @@ export async function rateShader(id: string, score: number): Promise<void> {
   if (!response.ok) {
     throw new Error(`failed to rate shader (${response.status})`);
   }
+  if (response.status === 204) {
+    return null;
+  }
+  const payload: unknown = await response.json();
+  const parsed = ShaderRateResponseSchema.safeParse(payload);
+  if (!parsed.success) {
+    throw new SchemaMismatchError('library format outdated: invalid /api/shaders/{id}/rate response');
+  }
+  if (parsed.data === null) {
+    return null;
+  }
+  return normalizeShader(unwrapShaderRateResponse(parsed.data));
 }
 
 // ─── Save Song ───────────────────────────────────────────────────────────────
@@ -240,14 +291,14 @@ export async function saveSong(req: SongSaveRequest): Promise<RemoteSong> {
     throw new Error(`Failed to save module (${response.status})`);
   }
   const payload: unknown = await response.json();
-  const parsed = SongSchema.safeParse(payload);
+  const parsed = SongSaveResponseSchema.safeParse(payload);
   if (!parsed.success) {
     throw new SchemaMismatchError('library format outdated: invalid /api/songs save response');
   }
-  return normalizeSong(parsed.data);
+  return normalizeSong(unwrapSongSaveResponse(parsed.data));
 }
 
-export async function syncLibrary(): Promise<void> {
+export async function syncLibrary(): Promise<SyncLibraryResult> {
   if (!navigator.onLine) {
     throw new Error('You are offline. Connect to the internet and try again.');
   }
@@ -264,5 +315,16 @@ export async function syncLibrary(): Promise<void> {
   if (!response.ok) {
     throw new Error(`Library sync failed (${response.status})`);
   }
-  await response.body?.cancel();
+  if (response.status === 204) {
+    return { synced: null, message: null };
+  }
+  const payload: unknown = await response.json();
+  const parsed = SyncResponseSchema.safeParse(payload);
+  if (!parsed.success || parsed.data === null) {
+    return { synced: null, message: null };
+  }
+  return {
+    synced: parsed.data.synced ?? null,
+    message: parsed.data.message ?? null,
+  };
 }

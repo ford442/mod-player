@@ -3,6 +3,7 @@ import { Header } from './Header';
 import { Controls } from './Controls';
 import { PatternDisplay } from './PatternDisplay';
 import { MediaOverlay } from './MediaOverlay';
+import { MediaPanel, type MediaFades } from './MediaPanel';
 import { KeyboardShortcutHelp } from './KeyboardShortcutHelp';
 import { ChannelMeters } from './ChannelMeters';
 import { MetadataPanel } from './MetadataPanel';
@@ -41,6 +42,7 @@ interface MainLayoutProps {
   shaderThumbnails: Record<string, string>;
   toggleShaderFavorite: (s: string) => void;
   shaderCatalog: ShaderMeta[];
+  shaderCatalogLoading: boolean;
   shaderCatalogError: string | null;
   onRateShader: (shaderId: string, score: number) => Promise<void>;
   ratingInFlightShaderId: string | null;
@@ -96,8 +98,12 @@ interface MainLayoutProps {
   mediaItem: MediaItem | null;
   mediaVisible: boolean;
   mediaFades?: { in: number; out: number };
+  moduleMediaFileName?: string;
+  moduleMediaHintText?: string;
   setMediaVisible: (v: boolean) => void;
   setMediaItem: (item: MediaItem | null) => void;
+  onMediaRemove: (id: string) => void;
+  onMediaFadesChange: (fades: MediaFades) => void;
   handleMediaAdd: (file: File) => void;
   handleRemoteMediaSelect: (item: MediaItem) => void;
   isReady: boolean;
@@ -126,6 +132,7 @@ interface MainLayoutProps {
   onPlaylistFilesAdded: (files: FileList) => void;
   songsData: RemoteSong[] | undefined;
   songsLoading: boolean;
+  songsRefreshing: boolean;
   libraryErrorMessage: string | null;
   onRefreshLibrary: () => void;
   handleLibrarySongLoad: (song: RemoteSong) => Promise<void>;
@@ -161,6 +168,7 @@ export function MainLayout({
   shaderThumbnails,
   toggleShaderFavorite,
   shaderCatalog,
+  shaderCatalogLoading,
   shaderCatalogError,
   onRateShader,
   ratingInFlightShaderId,
@@ -218,6 +226,10 @@ export function MainLayout({
   setMediaVisible,
   setMediaItem,
   mediaFades,
+  moduleMediaFileName,
+  moduleMediaHintText,
+  onMediaRemove,
+  onMediaFadesChange,
   handleMediaAdd,
   handleRemoteMediaSelect,
   isReady,
@@ -246,6 +258,7 @@ export function MainLayout({
   onPlaylistFilesAdded,
   songsData,
   songsLoading,
+  songsRefreshing,
   libraryErrorMessage,
   onRefreshLibrary,
   handleLibrarySongLoad,
@@ -338,6 +351,7 @@ export function MainLayout({
                       onToggleFavorite={toggleShaderFavorite}
                       isDarkMode={isDarkMode}
                       shaderCatalog={shaderCatalog}
+                      shaderCatalogLoading={shaderCatalogLoading}
                       shaderCatalogError={shaderCatalogError}
                       onRateShader={onRateShader}
                       ratingInFlightShaderId={ratingInFlightShaderId}
@@ -598,12 +612,35 @@ export function MainLayout({
           </div>
         )}
 
+        <div className="mt-4">
+          <Panel variant="raised" title="Media Overlay">
+            <MediaPanel
+              media={mediaItem ? [mediaItem] : []}
+              activeMediaId={mediaVisible ? mediaItem?.id : undefined}
+              onSelect={(id) => {
+                if (id && mediaItem?.id === id) {
+                  setMediaVisible(true);
+                  return;
+                }
+                setMediaVisible(false);
+              }}
+              onRemove={onMediaRemove}
+              moduleFileName={moduleMediaFileName}
+              moduleHintText={moduleMediaHintText}
+              onApplyDetected={handleRemoteMediaSelect}
+              fades={mediaFades}
+              onFadesChange={onMediaFadesChange}
+            />
+          </Panel>
+        </div>
+
         {/* Cloud Library */}
         {showLibraryBrowser && (
           <Panel variant="raised" title="Cloud Library" className="mt-4">
             <LibraryBrowser
               songs={songsData ?? []}
               loading={songsLoading}
+              refreshPending={songsRefreshing}
               error={libraryErrorMessage}
               isDarkMode={isDarkMode}
               onRefresh={onRefreshLibrary}

@@ -4,6 +4,7 @@ import type { RemoteSong, SongSaveRequest } from '../utils/storageApi';
 interface LibraryBrowserProps {
   songs: RemoteSong[];
   loading: boolean;
+  refreshPending?: boolean;
   error: string | null;
   isDarkMode: boolean;
   onRefresh: () => void;
@@ -27,6 +28,7 @@ function formatDuration(seconds?: number): string {
 export function LibraryBrowser({
   songs,
   loading,
+  refreshPending = false,
   error,
   isDarkMode,
   onRefresh,
@@ -112,13 +114,26 @@ export function LibraryBrowser({
           )}
           <button
             onClick={onRefresh}
-            className={`text-xs px-2 py-1 rounded border font-mono ${isDarkMode ? 'border-gray-700 text-gray-400 hover:text-white' : 'border-gray-300 text-gray-500 hover:text-gray-900'}`}
+            disabled={refreshPending}
+            className={`text-xs px-2 py-1 rounded border font-mono ${
+              refreshPending
+                ? 'opacity-50 cursor-wait'
+                : isDarkMode
+                  ? 'border-gray-700 text-gray-400 hover:text-white'
+                  : 'border-gray-300 text-gray-500 hover:text-gray-900'
+            }`}
             title="Refresh library"
           >
-            ↻
+            {refreshPending ? '⏳' : '↻'}
           </button>
         </div>
       </div>
+
+      {refreshPending && !loading && !error && (
+        <div className={`px-4 py-2 text-xs font-mono border-b ${isDarkMode ? 'border-gray-800 text-gray-500' : 'border-gray-200 text-gray-500'}`}>
+          Refreshing cloud library…
+        </div>
+      )}
 
       {loading ? (
         <div className={`py-8 text-center text-sm font-mono ${isDarkMode ? 'text-gray-500' : 'text-gray-400'}`}>Loading cloud library…</div>

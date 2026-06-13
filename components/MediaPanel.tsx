@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import type { MediaItem } from '../types';
-import { deriveMediaCandidates, checkMediaAvailability } from '../utils/remoteMedia';
+import { deriveMediaCandidates, checkMediaAvailability, createRemoteMediaItem } from '../utils/remoteMedia';
 
 export interface MediaFades {
   in: number;
@@ -28,19 +28,21 @@ export function loadMediaFades(): MediaFades {
 
 interface MediaPanelProps {
   media: MediaItem[];
-  activeMediaId?: string;
+  activeMediaId?: string | undefined;
   onSelect: (id?: string) => void;
   onRemove: (id: string) => void;
-  moduleFileName?: string;
-  moduleComment?: string;
-  onApplyDetected?: (url: string) => void;
-  fades?: MediaFades;
+  moduleFileName?: string | undefined;
+  moduleHintText?: string | undefined;
+  onApplyDetected?: (item: MediaItem) => void;
+  fades?: MediaFades | undefined;
   onFadesChange?: (fades: MediaFades) => void;
 }
 
-export const MediaPanel: React.FC<MediaPanelProps> = ({ media, activeMediaId, onSelect, onRemove, moduleFileName, moduleComment, onApplyDetected, fades, onFadesChange }) => {
+export const MediaPanel: React.FC<MediaPanelProps> = ({ media, activeMediaId, onSelect, onRemove, moduleFileName, moduleHintText, onApplyDetected, fades, onFadesChange }) => {
   const [focusedId, setFocusedId] = useState<string | null>(activeMediaId || null);
   const [detectedUrl, setDetectedUrl] = useState<string | null>(null);
+  const [detecting, setDetecting] = useState(false);
+  const [detectError, setDetectError] = useState<string | null>(null);
   const effectiveFades = fades ?? DEFAULT_FADES;
 
   const mediaMap = useMemo(() => new Map(media.map(item => [item.id, item])), [media]);
@@ -49,23 +51,35 @@ export const MediaPanel: React.FC<MediaPanelProps> = ({ media, activeMediaId, on
   // AbortController lock prevents the dev double-invocation from double-probing.
   useEffect(() => {
     setDetectedUrl(null);
+    setDetectError(null);
     if (!moduleFileName) return undefined;
     const controller = new AbortController();
     (async () => {
-      const candidates = deriveMediaCandidates(moduleFileName, moduleComment);
-      for (const url of candidates) {
-        if (controller.signal.aborted) return;
-        // eslint-disable-next-line no-await-in-loop
-        const ok = await checkMediaAvailability(url);
-        if (controller.signal.aborted) return;
-        if (ok) {
-          setDetectedUrl(url);
-          return;
+      setDetecting(true);
+      try {
+        const candidates = deriveMediaCandidates(moduleFileName, moduleHintText);
+        for (const url of candidates) {
+          if (controller.signal.aborted) return;
+          // eslint-disable-next-line no-await-in-loop
+          const ok = await checkMediaAvailability(url);
+          if (controller.signal.aborted) return;
+          if (ok) {
+            setDetectedUrl(url);
+            return;
+          }
+        }
+      } catch (error) {
+        if (!controller.signal.aborted) {
+          setDetectError(error instanceof Error ? error.message : 'Auto-detect failed');
+        }
+      } finally {
+        if (!controller.signal.aborted) {
+          setDetecting(false);
         }
       }
     })();
     return () => controller.abort();
-  }, [moduleFileName, moduleComment]);
+  }, [moduleFileName, moduleHintText]);
 
   const handleOpen = (id: string) => {
     setFocusedId(id);
@@ -85,12 +99,22 @@ export const MediaPanel: React.FC<MediaPanelProps> = ({ media, activeMediaId, on
         <div className="mb-3 flex items-center gap-2 text-xs bg-cyan-900/40 border border-cyan-500/30 rounded px-2 py-1">
           <span className="text-cyan-200">Auto-detected media</span>
           <button
-            onClick={() => { onApplyDetected?.(detectedUrl); setDetectedUrl(null); }}
+            onClick={() => { onApplyDetected?.(createRemoteMediaItem(detectedUrl)); setDetectedUrl(null); }}
             className="bg-cyan-600 text-white px-2 py-0.5 rounded"
           >
             Apply
           </button>
         </div>
+      )}
+
+      {!detectedUrl && detecting && (
+        <div className="mb-3 text-xs text-gray-400">Scanning for synced media…</div>
+      )}
+      {!detectedUrl && !detecting && !detectError && moduleFileName && (
+        <div className="mb-3 text-xs text-gray-500">No synced media suggestion found for this module.</div>
+      )}
+      {detectError && (
+        <div className="mb-3 text-xs text-red-400">Auto-detect failed: {detectError}</div>
       )}
 
       <div className="mb-3 flex flex-wrap gap-4 text-xs text-gray-300">

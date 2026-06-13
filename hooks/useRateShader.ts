@@ -46,8 +46,16 @@ export function useRateShader() {
         queryClient.setQueryData(libraryQueryKeys.shaders, context.previous);
       }
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: libraryQueryKeys.shaders });
+    onSuccess: (serverShader, variables) => {
+      if (serverShader) {
+        queryClient.setQueryData<ShaderMeta[]>(libraryQueryKeys.shaders, current => {
+          if (!current) return [serverShader];
+          const hasMatch = current.some(shader => shader.id === variables.id);
+          if (!hasMatch) return [serverShader, ...current];
+          return current.map(shader => (shader.id === variables.id ? { ...shader, ...serverShader } : shader));
+        });
+      }
+      void queryClient.invalidateQueries({ queryKey: libraryQueryKeys.shaders });
     },
   });
 }

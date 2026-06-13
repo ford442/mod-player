@@ -20,6 +20,7 @@ interface ShaderSelectorPanelProps {
   onToggleFavorite: (shaderId: string) => void;
   isDarkMode: boolean;
   shaderCatalog: ShaderMeta[];
+  shaderCatalogLoading?: boolean;
   shaderCatalogError?: string | null;
   onRateShader?: (shaderId: string, score: number) => Promise<void>;
   ratingInFlightShaderId?: string | null;
@@ -46,6 +47,7 @@ export function ShaderSelectorPanel({
   onToggleFavorite,
   isDarkMode,
   shaderCatalog,
+  shaderCatalogLoading = false,
   shaderCatalogError,
   onRateShader,
   ratingInFlightShaderId = null,
@@ -334,6 +336,12 @@ export function ShaderSelectorPanel({
           <div className="grid max-h-[60vh] grid-cols-2 gap-2 overflow-y-auto pr-1 sm:grid-cols-3 lg:grid-cols-4">
             {shaderOptions.map((option, index) => renderShaderCard(option, index))}
           </div>
+          {shaderCatalogLoading && (
+            <div className="mt-2 text-[10px] text-gray-500">Loading cloud shader ratings…</div>
+          )}
+          {!shaderCatalogLoading && shaderCatalog.length === 0 && !shaderCatalogError && (
+            <div className="mt-2 text-[10px] text-gray-500">Cloud shader ratings are not available yet.</div>
+          )}
           {shaderCatalogError && (
             <div className="mt-2 text-[10px] text-red-400">{shaderCatalogError}</div>
           )}

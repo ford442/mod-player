@@ -105,6 +105,7 @@ function App() {
     sequencerMatrix,
     channelStates,
     instrumentNames,
+    moduleComments,
     beatPhase,
     grooveAmount,
     kickTrigger,
@@ -222,9 +223,10 @@ function App() {
   // Media Overlay State
   const [mediaVisible, setMediaVisible] = useState<boolean>(false);
   const [mediaItem, setMediaItem] = useState<MediaItem | null>(null);
+  const [currentModuleFileName, setCurrentModuleFileName] = useState<string>('');
   // Track object URLs created from local files so we can revoke them on replacement/unmount
   const mediaObjectUrlRef = useRef<string | null>(null);
-  const [mediaFades] = useLocalStorage<{ in: number; out: number }>('xasm1_media_fades', { in: 500, out: 500 });
+  const [mediaFades, setMediaFades] = useLocalStorage<{ in: number; out: number }>('xasm1_media_fades', { in: 500, out: 500 });
 
   // Panel visibility
   const [showChannelMeters, setShowChannelMeters] = useState<boolean>(true);
@@ -263,8 +265,9 @@ function App() {
       durationSeconds: 0,
       currentBpm: 125,
       instruments: instrumentNames,
+      comments: moduleComments,
     };
-  }, [isModuleLoaded, sequencerMatrix, status, activeEngine, totalPatternRows, instrumentNames]);
+  }, [isModuleLoaded, sequencerMatrix, status, activeEngine, totalPatternRows, instrumentNames, moduleComments]);
 
   // Shader change handler — Tier 1 (global) + Tier 2 (per-module) write
   const setShaderFile = useCallback((shader: string) => {
@@ -369,6 +372,7 @@ function App() {
   // Wrapper: compute per-module hash then load — used by all load call sites
   const loadFileWithHash = useCallback((fileData: Uint8Array, fileName: string) => {
     setModuleHash(computeModuleHash(fileData));
+    setCurrentModuleFileName(fileName);
     loadFile(fileData, fileName);
   }, [loadFile]);
 
@@ -383,6 +387,8 @@ function App() {
     const fileName = currentItem?.fileName;
     const req: SongSaveRequest = { title };
     if (fileName) req.fileName = fileName;
+    const extension = fileName?.split('.').pop()?.trim().toLowerCase();
+    if (extension) req.format = extension;
     const numChannels = sequencerMatrix?.numChannels;
     if (numChannels && numChannels > 0) req.channelCount = numChannels;
     return req;
@@ -583,6 +589,23 @@ function App() {
     setMediaVisible(true);
   };
 
+  const handleMediaRemove = useCallback((id: string) => {
+    if (mediaItem?.id !== id) return;
+    if (mediaItem.isObjectUrl && mediaObjectUrlRef.current === mediaItem.url) {
+      URL.revokeObjectURL(mediaItem.url);
+      mediaObjectUrlRef.current = null;
+    }
+    setMediaVisible(false);
+    setMediaItem(null);
+  }, [mediaItem]);
+
+  const moduleMediaHintText = useMemo(() => {
+    const parts = [moduleComments, ...instrumentNames]
+      .map(value => value.trim())
+      .filter(Boolean);
+    return parts.join('\n');
+  }, [moduleComments, instrumentNames]);
+
   // Calculate Dim Factor — Night Mode overrides when on v0.35_bloom
   const isNightShader = shaderFile.includes('v0.35_bloom');
   const nightConfig = NIGHT_PRESETS[nightModePreset];
@@ -682,6 +705,7 @@ function App() {
       shaderThumbnails={shaderThumbnails}
       toggleShaderFavorite={toggleShaderFavorite}
       shaderCatalog={shadersQuery.data ?? []}
+      shaderCatalogLoading={shadersQuery.isLoading || shadersQuery.isFetching}
       shaderCatalogError={shaderCatalogErrorMessage}
       onRateShader={async (shaderId, score) => { await rateShaderMutation.mutateAsync({ id: shaderId, score }); }}
       ratingInFlightShaderId={rateShaderMutation.isPending ? rateShaderMutation.variables?.id ?? null : null}
@@ -739,6 +763,10 @@ function App() {
       setMediaVisible={setMediaVisible}
       setMediaItem={setMediaItem}
       mediaFades={mediaFades}
+      moduleMediaFileName={currentModuleFileName}
+      moduleMediaHintText={moduleMediaHintText}
+      onMediaRemove={handleMediaRemove}
+      onMediaFadesChange={setMediaFades}
       handleMediaAdd={handleMediaAdd}
       handleRemoteMediaSelect={handleRemoteMediaSelect}
       isReady={isReady}
@@ -767,6 +795,7 @@ function App() {
       onPlaylistFilesAdded={handlePlaylistFilesAdded}
       songsData={songsQuery.data}
       songsLoading={songsQuery.isLoading}
+      songsRefreshing={songsQuery.isFetching && !songsQuery.isLoading}
       libraryErrorMessage={libraryErrorMessage}
       onRefreshLibrary={() => void songsQuery.refetch()}
       handleLibrarySongLoad={handleLibrarySongLoad}

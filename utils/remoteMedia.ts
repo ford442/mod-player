@@ -12,6 +12,21 @@ const MAX_MEDIA_CACHE_ENTRIES = 64;
 
 const MEDIA_EXTENSIONS = ['jpg', 'png', 'gif', 'webp', 'mp4', 'webm'] as const;
 const EXPLICIT_MEDIA_URL_RE = /\bhttps?:\/\/\S+\.(?:jpe?g|png|gif|webp|mp4|webm)\b/i;
+const EXPLICIT_MEDIA_FILE_RE = /\b([^\s"'`<>]+\.(?:jpe?g|png|gif|webp|mp4|webm))\b/i;
+const MEDIA_HINT_PREFIX_RE = /^(?:MEDIA|ART|VIDEO|VISUAL):\s*(\S+)/i;
+
+function buildCandidateUrl(modFilename: string, candidate: string): string {
+  if (/^https?:\/\//i.test(candidate)) {
+    return candidate;
+  }
+  const normalized = candidate.replace(/^\.?\//, '');
+  if (normalized.includes('/')) {
+    return `${REMOTE_MEDIA_BASE_URL}${normalized}`;
+  }
+  const lastSlash = modFilename.lastIndexOf('/');
+  const dir = lastSlash >= 0 ? modFilename.slice(0, lastSlash + 1) : '';
+  return `${REMOTE_MEDIA_BASE_URL}${dir}${encodeURIComponent(normalized)}`;
+}
 
 /**
  * Derive candidate media URLs for a given module filename.
@@ -21,7 +36,7 @@ const EXPLICIT_MEDIA_URL_RE = /\bhttps?:\/\/\S+\.(?:jpe?g|png|gif|webp|mp4|webm)
  * Strict opt-in fallback: scan an optional comment for an explicit `MEDIA:`
  * token or a bare media URL. Anything else (homepages, sample names) is ignored.
  */
-export function deriveMediaCandidates(modFilename: string, comment?: string): string[] {
+export function deriveMediaCandidates(modFilename: string, hintText?: string): string[] {
   const candidates: string[] = [];
   const seen = new Set<string>();
   const push = (url: string) => {
@@ -43,13 +58,15 @@ export function deriveMediaCandidates(modFilename: string, comment?: string): st
     }
   }
 
-  if (comment) {
-    for (const line of comment.split(/\r?\n/)) {
+  if (hintText) {
+    for (const line of hintText.split(/\r?\n/)) {
       const trimmed = line.trim();
-      const mediaPrefix = trimmed.match(/^MEDIA:\s*(\S+)/i);
-      if (mediaPrefix?.[1]) push(mediaPrefix[1]);
+      const mediaPrefix = trimmed.match(MEDIA_HINT_PREFIX_RE);
+      if (mediaPrefix?.[1]) push(buildCandidateUrl(modFilename, mediaPrefix[1]));
+      const fileMatch = trimmed.match(EXPLICIT_MEDIA_FILE_RE);
+      if (fileMatch?.[1]) push(buildCandidateUrl(modFilename, fileMatch[1]));
     }
-    const urlMatch = comment.match(EXPLICIT_MEDIA_URL_RE);
+    const urlMatch = hintText.match(EXPLICIT_MEDIA_URL_RE);
     if (urlMatch?.[0]) push(urlMatch[0]);
   }
 
@@ -89,6 +106,28 @@ export function checkMediaAvailability(url: string): Promise<boolean> {
 
   mediaAvailabilityCache.set(url, pending);
   return pending;
+}
+
+export function inferMediaKind(url: string): MediaItem['kind'] {
+  const lower = url.toLowerCase();
+  if (/\.(mp4|webm|mkv|mov)(?:[?#].*)?$/.test(lower)) return 'video';
+  if (/\.gif(?:[?#].*)?$/.test(lower)) return 'gif';
+  return 'image';
+}
+
+export function createRemoteMediaItem(url: string): MediaItem {
+  const kind = inferMediaKind(url);
+  return {
+    id: `remote-media-${url}`,
+    url,
+    fileName: inferFileNameFromUrl(url),
+    kind,
+    mimeType: kind === 'video' ? 'video/mp4' : kind === 'gif' ? 'image/gif' : 'image/jpeg',
+    muted: kind === 'video',
+    loop: kind !== 'image',
+    fit: 'contain',
+    isObjectUrl: false,
+  };
 }
 
 export const fetchRemoteMedia = async (): Promise<MediaItem[]> => {

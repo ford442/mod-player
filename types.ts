@@ -136,6 +136,7 @@ export interface WorkerParseMetadata {
   totalPatternRows: number;
   numInstruments: number;
   instruments: string[];
+  comments: string;
 }
 
 export interface WorkerParseResponse {

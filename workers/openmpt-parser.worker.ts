@@ -21,6 +21,7 @@ interface ParseResponse {
     totalPatternRows: number;
     numInstruments: number;
     instruments: string[];
+    comments: string;
   };
 }
 
@@ -155,6 +156,12 @@ self.onmessage = async (e: MessageEvent<IncomingMessage>) => {
     );
     const title = lib.UTF8ToString(titlePtr);
     lib._openmpt_free_string(titlePtr);
+    const commentsPtr = lib._openmpt_module_get_metadata(
+      modPtr,
+      lib.stringToUTF8('message')
+    );
+    const comments = lib.UTF8ToString(commentsPtr);
+    lib._openmpt_free_string(commentsPtr);
 
     const numOrders = lib._openmpt_module_get_num_orders(modPtr);
     const numChannels = lib._openmpt_module_get_num_channels(modPtr);
@@ -194,6 +201,7 @@ self.onmessage = async (e: MessageEvent<IncomingMessage>) => {
         totalPatternRows: totalRows,
         numInstruments,
         instruments,
+        comments,
       },
     };
 
