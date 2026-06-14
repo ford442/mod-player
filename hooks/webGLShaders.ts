@@ -140,8 +140,16 @@ export function buildVertexShader(useNoteSustainTailMode: boolean, isV021: boole
             if (v_hasNote < 0.5) capScale = 0.0;
             capScale *= 1.0 + (0.2 * activation);
 
-            float cellX = u_offset.x + float(stepIndex)  * u_cellSize.x;
-            float cellY = u_offset.y + float(trackIndex) * u_cellSize.y;
+            // Mirror patternv0.40.wgsl header-row channelIndex remapping.
+            bool hasHeader = u_cols > 1.0 && (u_offset.y / u_resolution.y) > 0.14;
+            float dataChannels = u_cols - (hasHeader ? 1.0 : 0.0);
+            float effectiveChannel = float(trackIndex);
+            float channelIndex = (hasHeader && effectiveChannel > 0.0)
+                ? effectiveChannel - 1.0
+                : effectiveChannel;
+
+            float cellX = u_offset.x + float(stepIndex) * u_cellSize.x;
+            float cellY = u_offset.y + (channelIndex / max(1.0, dataChannels)) * (dataChannels * u_cellSize.y);
 
             vec2 centered = a_pos * capScale + vec2(cellX + u_cellSize.x * 0.5, cellY + u_cellSize.y * 0.5);
             vec2 ndc = (centered / u_resolution) * 2.0 - 1.0;
@@ -162,7 +170,7 @@ export function buildVertexShader(useNoteSustainTailMode: boolean, isV021: boole
             // Match WGSL: cell center is at ring-start, not ring-center
             float pixelRadius = minRadius + trackIndexF * ringDepth;
 
-            float totalSteps = 64.0;
+            float totalSteps = max(u_rows, 1.0);
             float anglePerStep = (2.0 * PI) / totalSteps;
             float theta = -1.570796 + float(stepIndex) * anglePerStep;
 

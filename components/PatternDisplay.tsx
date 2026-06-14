@@ -635,7 +635,10 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
           {...(onSeek ? { onSeek } : {})}
         />
       ) : (
-        <>
+        <div
+          className="relative max-w-full max-h-full"
+          style={{ width: 'fit-content', height: 'fit-content' }}
+        >
           <canvas
             ref={canvasRef}
             data-shader-preview-source="true"
@@ -643,17 +646,17 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
             width={canvasMetrics.width}
             height={canvasMetrics.height}
             onClick={handleCanvasClick}
-            className={`${padTopChannel && !shaderFile.includes('v0.40') && !shaderFile.includes('v0.43') && !shaderFile.includes('v0.44') ? 'rounded bg-black shadow-inner border border-black/50' : ''} cursor-pointer`}
-            style={{ width: 'auto', height: 'auto', maxWidth: '100%', maxHeight: '100%', aspectRatio: `${canvasMetrics.width} / ${canvasMetrics.height}`, objectFit: 'contain', position: 'relative' }}
+            className={`${padTopChannel && !shaderFile.includes('v0.40') && !shaderFile.includes('v0.43') && !shaderFile.includes('v0.44') ? 'rounded bg-black shadow-inner border border-black/50' : ''} cursor-pointer block`}
+            style={{ width: 'auto', height: 'auto', maxWidth: '100%', maxHeight: '100%', aspectRatio: `${canvasMetrics.width} / ${canvasMetrics.height}`, objectFit: 'contain' }}
           />
           <canvas
             ref={glCanvasRef}
             width={canvasMetrics.width}
             height={canvasMetrics.height}
-            className="absolute top-0 left-0 pointer-events-none"
-            style={{ width: 'auto', height: 'auto', maxWidth: '100%', maxHeight: '100%', aspectRatio: `${canvasMetrics.width} / ${canvasMetrics.height}`, objectFit: 'contain', zIndex: 2, position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', display: isOverlayActive ? 'block' : 'none' }}
+            className="absolute inset-0 pointer-events-none"
+            style={{ display: isOverlayActive ? 'block' : 'none', zIndex: 2, width: '100%', height: '100%' }}
           />
-        </>
+        </div>
       )}
 
       {!useHTML && useWebGPU && !webgpuAvailable && (

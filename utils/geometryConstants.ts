@@ -32,23 +32,41 @@ export const LAYOUT_MODES = {
 
 export type LayoutMode = typeof LAYOUT_MODES[keyof typeof LAYOUT_MODES];
 
-// Calculate horizontal cell size based on canvas dimensions
+export type HorizontalCellMetrics = {
+  cellW: number;
+  cellH: number;
+  offsetX: number;
+  offsetY: number;
+  /** Channels that carry pattern data (excludes optional header/pad row). */
+  dataChannels: number;
+};
+
+// Calculate horizontal cell size based on canvas dimensions.
+// When hasHeaderRow is true (padTopChannel), row height matches WGSL gridRect math:
+// data rows divide gridRect.h by dataChannels, not the padded channel count.
 export function calculateHorizontalCellSize(
   canvasWidth: number,
   canvasHeight: number,
   steps: number,
-  numChannels: number
-): { cellW: number; cellH: number; offsetX: number; offsetY: number } {
+  numChannels: number,
+  hasHeaderRow = false,
+): HorizontalCellMetrics {
   const gridW = canvasWidth * GRID_RECT.w;
   const gridH = canvasHeight * GRID_RECT.h;
-  
+
+  const dataChannels = hasHeaderRow ? Math.max(1, numChannels - 1) : numChannels;
   const cellW = gridW / steps;
-  const cellH = gridH / numChannels;
-  
+  const cellH = gridH / dataChannels;
+
   const offsetX = canvasWidth * GRID_RECT.x;
   const offsetY = canvasHeight * GRID_RECT.y;
-  
-  return { cellW, cellH, offsetX, offsetY };
+
+  return { cellW, cellH, offsetX, offsetY, dataChannels };
+}
+
+/** True when WGSL horizontal shaders reserve channel 0 as a header/pad row. */
+export function horizontalLayoutHasHeader(numChannels: number): boolean {
+  return numChannels > 1 && GRID_RECT.y > 0.15;
 }
 
 // Calculate cap scale for pixel-perfect button sizing
