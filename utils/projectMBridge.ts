@@ -50,6 +50,15 @@ interface ProjectMPcmMessage {
 // the worklet path is active as long as the page is alive).
 let _workletPcmChannel: BroadcastChannel | null = null;
 
+// ── Worklet-path liveness, used to suppress the legacy RAF path ───────────────
+// broadcastPcmBlock() stamps this on every call. The legacy RAF send() loop
+// checks it and stays silent while the worklet path is actively delivering
+// blocks, so Project-M never receives duplicated (stereo worklet + mono RAF)
+// PCM. If the worklet path falls silent (e.g. the engine switches to the
+// ScriptProcessor fallback), the RAF path resumes within WORKLET_ACTIVE_WINDOW_MS.
+let _lastWorkletBroadcast = 0;
+const WORKLET_ACTIVE_WINDOW_MS = 250;
+
 /**
  * Broadcast a pre-rendered PCM block to Project-M receivers.
  *
@@ -69,6 +78,9 @@ export function broadcastPcmBlock(buffer: Float32Array, channels: 1 | 2): void {
   const isIframe = window.parent !== window;
 
   if (!isPopup && !isIframe) return;
+
+  // Mark the worklet path as live so the legacy RAF loop yields to it.
+  _lastWorkletBroadcast = performance.now();
 
   if (!_workletPcmChannel) {
     _workletPcmChannel = new BroadcastChannel('projectm-audio');
@@ -139,6 +151,16 @@ export function startProjectMBridge(analyser: AnalyserNode | null): () => void {
   let rafId: number;
 
   function send() {
+    // Yield to the worklet-driven path while it is actively delivering blocks.
+    // broadcastPcmBlock() carries authentic fixed-size stereo straight from the
+    // WASM renderer; sending the AnalyserNode tap on top of it would duplicate
+    // PCM (mono + stereo) into the same receivers. Only fall back to this path
+    // when the worklet has gone quiet (non-worklet engine / ScriptProcessor).
+    if (performance.now() - _lastWorkletBroadcast < WORKLET_ACTIVE_WINDOW_MS) {
+      rafId = requestAnimationFrame(send);
+      return;
+    }
+
     analyserNode.getFloatTimeDomainData(buf);
     // Use slice() so the transfer doesn't detach the reusable buffer
     const copy = buf.slice();

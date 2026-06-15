@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { App3DView } from './components/App3DView';
 import { MainLayout } from './components/MainLayout';
+import { ProjectMEmbedView } from './components/ProjectMEmbedView';
 import type { ModuleMetadata } from './components/MetadataPanel';
 import { useLibOpenMPT } from './hooks/useLibOpenMPT';
 import { usePlaylist } from './hooks/usePlaylist';
@@ -30,6 +31,7 @@ import {
   LIGHT_THEMES,
   computeModuleHash,
   AVAILABLE_SHADERS,
+  IS_PROJECTM_EMBED,
   type AppTheme,
 } from './appConfig';
 import {
@@ -628,6 +630,31 @@ function App() {
     if (!instrumentNames || instrumentNames.length === 0) return generateEmptyInstrumentPalette();
     return generateInstrumentPalette(instrumentNames.length, instrumentNames);
   }, [instrumentNames]);
+
+  // Project-M embed / audio-only mode: render a compact transport-only UI and
+  // skip MainLayout / App3DView entirely so the heavy WebGPU pattern display
+  // never mounts. The PCM bridge (startProjectMBridge / broadcastPcmBlock) stays
+  // active regardless, so audio keeps flowing to the Project-M host.
+  if (IS_PROJECTM_EMBED) {
+    return (
+      <ProjectMEmbedView
+        status={status}
+        isReady={isReady}
+        isModuleLoaded={isModuleLoaded}
+        isPlaying={isPlaying}
+        isLooping={isLooping}
+        playbackSeconds={playbackSeconds}
+        playbackRow={Math.floor(playbackRowFraction)}
+        totalRows={totalPatternRows}
+        moduleTitle={moduleMetadata?.title ?? null}
+        play={play}
+        stopMusic={stopMusic}
+        seekToStep={seekToStep}
+        setIsLooping={setIsLooping}
+        handleFileSelected={handleFileSelected}
+      />
+    );
+  }
 
   if (is3DMode) {
     return (

@@ -72,3 +72,17 @@ export function computeModuleHash(data: Uint8Array): string {
 // Activated by ?public=1 or ?demo=1; value doesn't change during the page lifecycle.
 const _urlParams = new URLSearchParams(window.location.search);
 export const IS_PUBLIC_MODE = _urlParams.get('public') === '1' || _urlParams.get('demo') === '1';
+
+// Project-M embed / audio-only mode — evaluated once at module load.
+// Activated by ?projectm=1 (or a bare ?projectm), or by being opened with
+// window.name === 'mod-player' (the target name the Project-M host uses when
+// launching this player as a popup/iframe). In this mode the player acts purely
+// as a PCM feeder for the Project-M visualizer: the WebGPU/WebGL pattern display
+// is skipped to free GPU budget for the host, and a compact transport-only UI is
+// shown. The PCM bridge in utils/projectMBridge.ts auto-activates independently
+// whenever an opener/parent is present, so audio forwarding does not depend on
+// this flag. Value doesn't change during the page lifecycle.
+export const IS_PROJECTM_EMBED =
+  _urlParams.get('projectm') === '1' ||
+  _urlParams.has('projectm') ||
+  (typeof window !== 'undefined' && window.name === 'mod-player');
