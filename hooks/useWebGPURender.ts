@@ -36,7 +36,7 @@ import {
   type NoteDurationComputeState,
 } from '../utils/computeNoteDuration';
 import type { BloomPostProcessor } from '../utils/bloomPostProcessor';
-import { GRID_RECT } from '../utils/geometryConstants';
+import { GRID_RECT, getPolarRadii } from '../utils/geometryConstants';
 import { withBase } from '../src/lib/paths';
 import { generateEmptyInstrumentPalette, MAX_INSTRUMENT_PALETTE_SIZE } from '../utils/instrumentPalette';
 
@@ -706,11 +706,7 @@ export function useWebGPURender(
         effectiveCellH = actualCanvasH / numChannels;
       }
 
-      const minDim = Math.min(actualCanvasW, actualCanvasH);
-      const innerRadius = minDim * 0.15;
-      // v0.45 (non-b) intentionally shrinks to 0.40 to make room for buttons;
-      // all other circular shaders (including v0.45b) use 0.45 to align with the WebGL2 overlay.
-      const outerRadius = (shaderFile.includes('v0.45') && !shaderFile.includes('v0.45b')) ? minDim * 0.40 : minDim * 0.45;
+      const { innerRadius, outerRadius } = getPolarRadii(actualCanvasW, actualCanvasH, shaderFile);
 
       const uniformByteLength = fillUniformPayload(layoutTypeRef.current, {
         numRows: visibleRows, numChannels,

@@ -7,8 +7,10 @@ import {
   calculateHorizontalCellSize,
   calculateCapScale,
   getLayoutModeFromShader,
+  getPolarRadii,
   horizontalLayoutHasHeader,
   LAYOUT_MODES,
+  usesCircularRowPaging,
 } from '../../../utils/geometryConstants';
 import { getShaderMeta } from '../../../utils/shaderRegistry';
 import { detectRuntimeBase } from '../../../src/lib/paths';
@@ -126,7 +128,8 @@ export class WebGL2PatternRenderer {
   private initPattern(gl: WebGL2RenderingContext, shaderFile: string): void {
     const useNoteSustainTailMode = shaderFile.includes('v0.45b'); // TRIG-001: strict playhead sustain (v0.45b only)
     const isV021 = shaderFile.includes('v0.21');
-    const vsSource = buildVertexShader(useNoteSustainTailMode, isV021);
+    const useCircularPaging = usesCircularRowPaging(shaderFile);
+    const vsSource = buildVertexShader(useNoteSustainTailMode, isV021, useCircularPaging);
     const fsSource = buildPatternFragmentShader(useNoteSustainTailMode, isV021);
 
     const vs = compileShader(gl, gl.VERTEX_SHADER, vsSource, 'pattern-vs');
@@ -259,7 +262,6 @@ export class WebGL2PatternRenderer {
   ): void {
     const chassis = this.chassis!;
     const canvas = this.canvas!;
-    const minDim = Math.min(canvas.width, canvas.height);
 
     gl.useProgram(chassis.program);
     gl.bindVertexArray(this.chassisVao);
@@ -283,8 +285,9 @@ export class WebGL2PatternRenderer {
     setF('u_filmGrain', params.filmGrain ?? 0);
     setF('u_invertMix', params.invertMix ?? 0);
     setI('u_nightPreset', params.nightPreset ?? 0);
-    setF('u_innerRadius', minDim * 0.15);
-    setF('u_outerRadius', minDim * 0.45);
+    const { innerRadius, outerRadius } = getPolarRadii(canvas.width, canvas.height, this.shaderFile);
+    setF('u_innerRadius', innerRadius);
+    setF('u_outerRadius', outerRadius);
     setI('u_layoutMode', layoutMode === LAYOUT_MODES.CIRCULAR ? 1 : 0);
 
     uniformVals['chassis_themeBlend'] = (params.themeBlend ?? 0).toFixed(2);
@@ -375,9 +378,7 @@ export class WebGL2PatternRenderer {
       offsetY = m.offsetY;
     }
 
-    const minDim = Math.min(canvas.width, canvas.height);
-    const innerRadius = minDim * 0.15;
-    const outerRadius = minDim * 0.45;
+    const { innerRadius, outerRadius } = getPolarRadii(canvas.width, canvas.height, this.shaderFile);
 
     const u = res.uniforms;
     if (u.u_resolution) gl.uniform2f(u.u_resolution, canvas.width, canvas.height);
