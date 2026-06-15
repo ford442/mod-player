@@ -17,8 +17,10 @@ import {
   calculateHorizontalCellSize,
   calculateCapScale,
   getLayoutModeFromShader,
+  getPolarRadii,
   horizontalLayoutHasHeader,
   LAYOUT_MODES,
+  usesCircularRowPaging,
 } from '../utils/geometryConstants';
 import { detectRuntimeBase } from '../src/lib/paths';
 
@@ -80,6 +82,7 @@ export function useWebGLOverlay(
     }
     const useNoteSustainTailMode = shaderFile.includes('v0.45b');
     const isV021 = shaderFile.includes('v0.21');
+    const useCircularPaging = usesCircularRowPaging(shaderFile);
     console.group('🔧 initWebGL');
 
     // Clean up existing WebGL resources first
@@ -128,7 +131,7 @@ export function useWebGLOverlay(
     // --- VERTEX SHADER ---
     // Fetches cell data (packedA, packedB) and channel state in the VS,
     // passes as flat varyings to avoid per-pixel texelFetch.
-    const vsSource = buildVertexShader(useNoteSustainTailMode, isV021);
+    const vsSource = buildVertexShader(useNoteSustainTailMode, isV021, useCircularPaging);
 
     // Only compile if using a hybrid shader that needs WebGL caps
     if (!WEBGL_HYBRID_SHADERS.has(shaderFile)) {
@@ -426,10 +429,8 @@ export function useWebGLOverlay(
         setUniform('u_bloomIntensity', uniforms.u_bloomIntensity, gl.uniform1f.bind(gl), p.bloomIntensity ?? 1.0);
         setUniform('u_timeSec', uniforms.u_timeSec, gl.uniform1f.bind(gl), performance.now() / 1000.0);
 
-        // Dynamic radius uniforms — mirror WebGPU shader values
-        const minDim = Math.min(gl.canvas.width, gl.canvas.height);
-        const innerRadius = minDim * 0.15;
-        const outerRadius = minDim * 0.45;
+        // Dynamic radius uniforms — shared with WebGPU via getPolarRadii()
+        const { innerRadius, outerRadius } = getPolarRadii(gl.canvas.width, gl.canvas.height, p.shaderFile);
         setUniform('u_innerRadius', uniforms.u_innerRadius, gl.uniform1f.bind(gl), innerRadius);
         setUniform('u_outerRadius', uniforms.u_outerRadius, gl.uniform1f.bind(gl), outerRadius);
         uniformVals['u_innerRadius'] = innerRadius.toFixed(2);

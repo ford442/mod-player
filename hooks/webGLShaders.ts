@@ -1,7 +1,11 @@
 // WebGL2 GLSL shader source builders for the WebGL overlay subsystem.
 // Parameterized by two runtime booleans that get baked into GLSL constants.
 
-export function buildVertexShader(useNoteSustainTailMode: boolean, isV021: boolean): string {
+export function buildVertexShader(
+  useNoteSustainTailMode: boolean,
+  isV021: boolean,
+  useCircularPaging = false,
+): string {
   return `#version 300 es
     precision highp float;
     precision highp int;
@@ -41,6 +45,7 @@ export function buildVertexShader(useNoteSustainTailMode: boolean, isV021: boole
     const uint NOTE_FADE = 99u;  // Note-fade command
     const bool USE_NOTE_SUSTAIN_TAIL_MODE = ${useNoteSustainTailMode ? 'true' : 'false'};
     const bool IS_V021 = ${isV021 ? 'true' : 'false'};
+    const bool USE_CIRCULAR_PAGING = ${useCircularPaging ? 'true' : 'false'};
 
     void main() {
         int id = gl_InstanceID;
@@ -48,12 +53,14 @@ export function buildVertexShader(useNoteSustainTailMode: boolean, isV021: boole
         int stepIndex  = id / int(u_cols);
 
         // Page-aware cell data fetch.
-        // Horizontal layouts page through the pattern (32 or 64 steps per page);
-        // circular layouts show all rows directly but must clamp to valid range.
+        // Horizontal: page by 32/64 steps. Circular (v0.46): page by numRows.
         int actualRow;
         if (u_layoutMode == 2 || u_layoutMode == 3) {
             float stepsPerPageH = (u_layoutMode == 3) ? 64.0 : 32.0;
             int pageStart = int(floor(u_playhead / stepsPerPageH) * stepsPerPageH);
+            actualRow = clamp(pageStart + stepIndex, 0, int(u_rows) - 1);
+        } else if (USE_CIRCULAR_PAGING) {
+            int pageStart = int(floor(u_playhead / u_rows) * u_rows);
             actualRow = clamp(pageStart + stepIndex, 0, int(u_rows) - 1);
         } else {
             actualRow = clamp(stepIndex, 0, int(u_rows) - 1);
@@ -172,7 +179,9 @@ export function buildVertexShader(useNoteSustainTailMode: boolean, isV021: boole
 
             float totalSteps = max(u_rows, 1.0);
             float anglePerStep = (2.0 * PI) / totalSteps;
-            float theta = -1.570796 + float(stepIndex) * anglePerStep;
+            // Match WGSL: angular slot uses row % numRows (within a page, == stepIndex)
+            int angleRow = USE_CIRCULAR_PAGING ? (actualRow % int(u_rows)) : stepIndex;
+            float theta = -1.570796 + float(angleRow) * anglePerStep;
 
             float circumference = 2.0 * PI * pixelRadius;
             float arcLength = circumference / totalSteps;
@@ -260,6 +269,13 @@ export function buildFragmentShader(useNoteSustainTailMode: boolean, isV021: boo
         if (note < 1u || note > 96u) return 0.0;
         uint semi = (note - 1u) % 12u;
         return float(semi) / 12.0;
+    }
+
+    // Octave brightness: same pitch class across octaves, brighter in higher octaves (v0.50 parity)
+    float octaveBrightness(uint note) {
+        if (note < 1u || note > 96u) return 1.0;
+        uint oct = (note - 1u) / 12u;
+        return 0.65 + 0.35 * float(oct) / 9.0;
     }
 
     // --- SDF: Rounded Box ---
@@ -464,7 +480,7 @@ export function buildFragmentShader(useNoteSustainTailMode: boolean, isV021: boo
                     // Bright Blue/Cyan glow for active note
                     topIntensity = 3.0;
                     float pitchHue = pitchClassFromIndex(note);
-                    midColor = neonPalette(pitchHue);
+                    midColor = neonPalette(pitchHue) * octaveBrightness(note);
                     midIntensity = 0.6 + bloom * 2.0;
                     botIntensity = 0.6;
                 } else if (v_active > 0.5) {
@@ -503,7 +519,7 @@ export function buildFragmentShader(useNoteSustainTailMode: boolean, isV021: boo
             midIntensity = 0.12;
             if (hasNote && !isExpressionOnly) {
                 float pitchHue = pitchClassFromIndex(note);
-                vec3 pitchColor = neonPalette(pitchHue);
+                vec3 pitchColor = neonPalette(pitchHue) * octaveBrightness(note);
                 float dist = length(lensUV);
                 if (is_trigger) {
                     // TRIGGER NODE: large, brilliant, bloom halo
@@ -515,7 +531,7 @@ export function buildFragmentShader(useNoteSustainTailMode: boolean, isV021: boo
                         midIntensity = max(midIntensity, 0.8 + v_active * (1.0 + bloom));
                     }
                 } else if (isSustaining && !USE_NOTE_SUSTAIN_TAIL_MODE) {
-                    // SUSTAIN TAIL: smaller, thinner, darker
+                    // SUSTAIN TAIL: smaller, thinner, darker — pitch hue preserved, dimmed
                     float tailIntensity = smoothstep(0.16, 0.0, dist) * 0.60;
                     float fade = 1.0 - sustainProgress * 0.35;
                     noteColor = mix(tailCol, pitchColor * 0.45, 0.25);

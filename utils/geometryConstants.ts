@@ -12,11 +12,33 @@ export const GRID_RECT = {
   h: 0.7    // Height
 };
 
-// Polar ring dimensions for circular layouts
+// Polar ring dimensions for circular layouts (normalized 0–1 factors of minDim)
 export const POLAR_RINGS = {
-  INNER_RADIUS: 0.3,
-  OUTER_RADIUS: 0.9
+  INNER_RADIUS: 0.15,
+  OUTER_RADIUS: 0.45,
+  /** v0.45 (non-b) shrinks outer ring to make room for embedded UI controls */
+  OUTER_RADIUS_V045: 0.40,
 };
+
+/** Pixel inner/outer radii for circular shaders — keep WebGPU + WebGL overlay in sync. */
+export function getPolarRadii(
+  canvasWidth: number,
+  canvasHeight: number,
+  shaderFile: string,
+): { innerRadius: number; outerRadius: number } {
+  const minDim = Math.min(canvasWidth, canvasHeight);
+  const innerRadius = minDim * POLAR_RINGS.INNER_RADIUS;
+  const outerFactor =
+    shaderFile.includes('v0.45') && !shaderFile.includes('v0.45b')
+      ? POLAR_RINGS.OUTER_RADIUS_V045
+      : POLAR_RINGS.OUTER_RADIUS;
+  return { innerRadius, outerRadius: minDim * outerFactor };
+}
+
+/** Circular shaders that page rows by numRows (e.g. v0.46) — WebGL overlay must match. */
+export function usesCircularRowPaging(shaderFile: string): boolean {
+  return shaderFile.includes('v0.46');
+}
 
 // Cap/button configuration
 export const CAP_CONFIG = {
