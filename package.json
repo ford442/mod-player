@@ -11,7 +11,7 @@
     "build:worklet": "bash ./build-wasm.sh",
     "build:emcc": "bash scripts/build-wasm.sh",
     "build": "tsc && node --max-old-space-size=4096 node_modules/.bin/vite build",
-    "build:xm-player": "VITE_APP_BASE_PATH=/xm-player/ npm run build",
+    "build:xm-player": "VITE_APP_BASE_PATH=/xm-player/ VITE_STORAGE_API_URL=https://storage.noahcohn.com npm run build",
     "verify:build": "node scripts/verify-build.mjs",
     "build:xm-player:verify": "npm run build:xm-player && npm run verify:build",
     "preview": "vite preview",

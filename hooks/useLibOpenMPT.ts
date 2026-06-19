@@ -53,6 +53,34 @@ const WORKLET_ROW_SMOOTHING = 0.88;
 // ScriptProcessor / direct lib query: near-instant follow
 const DIRECT_ROW_SMOOTHING = 0.96;
 
+function isLibReadyForParse(lib: LibOpenMPT): boolean {
+  return typeof lib._openmpt_module_create_from_memory2 === 'function';
+}
+
+function parseOnMainThread(
+  lib: LibOpenMPT,
+  fileData: Uint8Array,
+  fileName: string,
+): WorkerParseResponse {
+  parserLog('main-thread parse', fileName, fileData.byteLength);
+  const parsed = parseModuleWithLib(lib, fileData, fileName);
+  if (!parsed.patternMatrices.length) {
+    throw new Error('No pattern data in module');
+  }
+  console.log(
+    `[Parser] main-thread parse OK (${fileName}):`,
+    parsed.metadata.numOrders,
+    'orders,',
+    parsed.patternMatrices.length,
+    'matrices',
+  );
+  return {
+    type: 'parsed',
+    patternMatrices: parsed.patternMatrices,
+    metadata: parsed.metadata,
+  };
+}
+
 async function resolveParsedModule(
   lib: LibOpenMPT,
   worker: Worker | null,
@@ -62,6 +90,13 @@ async function resolveParsedModule(
   fileName: string,
   onParseProgress?: (stage: 'fetch' | 'wasm' | 'patterns') => void,
 ): Promise<WorkerParseResponse> {
+  // Main thread already has initialized libopenmpt from index.html — use it directly.
+  // The worker re-fetches WASM from CDN (slow, can fail under strict COEP/CORP).
+  if (isLibReadyForParse(lib)) {
+    onParseProgress?.('patterns');
+    return parseOnMainThread(lib, fileDataCopy, fileName);
+  }
+
   let workerResult: WorkerParseResponse | WorkerParseError | null = null;
 
   if (worker) {
@@ -96,23 +131,7 @@ async function resolveParsedModule(
     }
   }
 
-  parserLog('main-thread parse', fileName, fileDataCopy.byteLength);
-  const parsed = parseModuleWithLib(lib, fileDataCopy, fileName);
-  if (!parsed.patternMatrices.length) {
-    throw new Error('No pattern data in module');
-  }
-  console.log(
-    `[Parser] main-thread parse OK (${fileName}):`,
-    parsed.metadata.numOrders,
-    'orders,',
-    parsed.patternMatrices.length,
-    'matrices',
-  );
-  return {
-    type: 'parsed',
-    patternMatrices: parsed.patternMatrices,
-    metadata: parsed.metadata,
-  };
+  return parseOnMainThread(lib, fileDataCopy, fileName);
 }
 
 export function useLibOpenMPT(initialVolume: number = 0.4) {
@@ -333,9 +352,9 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
     const fileDataCopy = fileData.slice();
     fileDataRef.current = fileDataCopy;
 
-    // Create / reuse the parser worker. If creation throws (404, CSP, MIME),
-    // mark it unhealthy and fall through to the main-thread parse.
-    if (!workerRef.current && parserWorkerHealthyRef.current) {
+    // Create parser worker only when main-thread lib is not yet ready (rare).
+    const useWorkerParse = !isLibReadyForParse(lib);
+    if (useWorkerParse && !workerRef.current && parserWorkerHealthyRef.current) {
       try {
         workerRef.current = createParserWorker((message) => {
           parserWorkerHealthyRef.current = false;
@@ -372,7 +391,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
     try {
       const parsed = await resolveParsedModule(
         lib,
-        parserWorkerHealthyRef.current ? workerRef.current : null,
+        useWorkerParse && parserWorkerHealthyRef.current ? workerRef.current : null,
         workerRef,
         fileData,
         fileDataCopy,
