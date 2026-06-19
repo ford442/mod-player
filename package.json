@@ -19,6 +19,7 @@
     "typecheck": "tsc --noEmit",
     "test:duration-parity": "node utils/__debug__/durationParity.test.cjs",
     "test:trigger-tail": "node utils/__debug__/triggerTailPacking.test.cjs",
+    "test:octave-brightness": "node utils/__debug__/octaveBrightness.test.cjs",
     "test:shader-registry": "node utils/__debug__/shaderRegistry.test.cjs",
     "test:circular-paging": "node utils/__debug__/circularPaging.test.cjs",
     "capture:trigger-tail": "node scripts/capture-trigger-tail.mjs",

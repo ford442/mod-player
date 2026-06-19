@@ -155,7 +155,7 @@ fn pitchClassFromIndex(note: u32) -> f32 {
 
 const NOTE_MAX: u32 = 119u;
 
-// Octave brightness: same pitch class across octaves, brighter in higher octaves (0.65 at C-0, 1.0 at B-9).
+// Octave brightness multiplier: higher octaves glow brighter (0.65 at C-0, 1.0 at B-9).
 fn octaveBrightness(note: u32) -> f32 {
   if (note == 0u || note > NOTE_MAX) { return 1.0; }
   let oct = (note - 1u) / 12u; // 0..9
@@ -273,7 +273,7 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     let inst          = (in.packedA >> 16) & 255u;
     let volCmd        = (in.packedA >>  8) & 255u;
     let effCmd        = (in.packedB >>  8) & 255u;
-    let hasNote       = (note > 0u) && (note <= 120u);
+    let hasNote       = (note >= 1u) && (note <= NOTE_MAX);
     let hasExpression = (volCmd > 0u) || (effCmd > 0u);
     let ch            = channels[in.channel];
     let isMuted       = (ch.isMuted == 1u);
