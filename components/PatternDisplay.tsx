@@ -11,6 +11,7 @@ import {
   subscribeRendererPreference,
   setRendererOverride,
   applyWebGPUFallback,
+  hasWebGPUAutoFallbackApplied,
 } from '../src/renderers/rendererSelection';
 import { setCurrentPatternRenderer } from '../src/renderers/global';
 import type { PatternRendererBackend } from '../src/renderers/types';
@@ -169,6 +170,8 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   // Safety net: init-time WebGPU failure → WebGL2/HTML without manual URL params.
   useLayoutEffect(() => {
     if (activeBackend !== 'webgpu' || webgpuAvailable) return;
+    // Guard against applying the automatic fallback more than once per session.
+    if (hasWebGPUAutoFallbackApplied()) return;
     const fallback = applyWebGPUFallback('WebGPU initialization failed');
     setActiveBackend(fallback);
   }, [activeBackend, webgpuAvailable]);

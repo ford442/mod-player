@@ -267,13 +267,24 @@ export function useWebGPURender(
     }
     const canvas = canvasRef.current;
     if (!canvas) return;
-    if (!('gpu' in navigator)) { setWebgpuAvailable(false); return; }
+    if (!('gpu' in navigator)) {
+      console.log('[Renderer] WebGPU API not available');
+      setWebgpuAvailable(false);
+      return;
+    }
     let cancelled = false;
 
     const init = async () => {
       try {
         const adapter = await navigator.gpu.requestAdapter();
-        if (!adapter || cancelled) { setWebgpuAvailable(false); return; }
+        if (!adapter) {
+          if (!cancelled) {
+            console.warn('[Renderer] WebGPU init failed: requestAdapter returned null');
+            setWebgpuAvailable(false);
+          }
+          return;
+        }
+        if (cancelled) return;
         const requiredFeatures: GPUFeatureName[] = [];
         if (adapter.features.has('float32-filterable')) requiredFeatures.push('float32-filterable');
         if (adapter.features.has('float32-blendable')) requiredFeatures.push('float32-blendable');
@@ -285,7 +296,14 @@ export function useWebGPURender(
         if (adapter.features.has('shader-f16')) requiredFeatures.push('shader-f16');
 
         const device = await adapter.requestDevice({ requiredFeatures });
-        if (!device || cancelled) { setWebgpuAvailable(false); return; }
+        if (!device) {
+          if (!cancelled) {
+            console.warn('[Renderer] WebGPU init failed: requestDevice returned null');
+            setWebgpuAvailable(false);
+          }
+          return;
+        }
+        if (cancelled) return;
 
         // Sync canvas to the correct DPR-scaled size *before* configuring the WebGPU
         // surface.  By this point the browser has completed layout, so
@@ -460,7 +478,8 @@ export function useWebGPURender(
 
         setGpuReady(true);
       } catch (error) {
-        console.error('Failed to initialize WebGPU pattern display', error);
+        const reason = error instanceof Error ? error.message : String(error);
+        console.error('[Renderer] WebGPU init failed:', reason);
         if (!cancelled) setWebgpuAvailable(false);
       }
     };

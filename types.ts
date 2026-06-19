@@ -153,7 +153,7 @@ export interface WorkerParseError {
 
 export interface WorkerParseProgress {
   type: 'progress';
-  stage: 'wasm' | 'patterns';
+  stage: 'fetch' | 'wasm' | 'patterns';
 }
 
 export type WorkerParseMessage = WorkerParseRequest;

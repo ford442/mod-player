@@ -3,6 +3,7 @@ import { parseModuleWithLib } from '../utils/parseModuleWithLib';
 import { parserLog } from '../utils/parserDebug';
 
 const CDN_JS_URL = 'https://wasm.noahcohn.com/libmpt/libopenmptjs.js';
+const CDN_FETCH_TIMEOUT_MS = 12_000;
 
 interface ParseRequest {
   type: 'parse';
@@ -25,7 +26,19 @@ type IncomingMessage = ParseRequest;
 
 async function loadLibOpenMPT(): Promise<LibOpenMPT> {
   parserLog('worker fetching libopenmpt from CDN');
-  const response = await fetch(CDN_JS_URL);
+  const abortController = new AbortController();
+  const fetchTimeout = self.setTimeout(
+    () => abortController.abort('CDN fetch timeout'),
+    CDN_FETCH_TIMEOUT_MS,
+  );
+
+  let response: Response;
+  try {
+    response = await fetch(CDN_JS_URL, { signal: abortController.signal });
+  } finally {
+    self.clearTimeout(fetchTimeout);
+  }
+
   if (!response.ok) {
     throw new Error(
       `Failed to fetch libopenmpt JS: ${response.status} ${response.statusText}`,
@@ -110,18 +123,25 @@ async function handleMessage(data: IncomingMessage): Promise<void> {
   }
 
   parserLog('worker parse start', fileName, fileData.byteLength);
-  self.postMessage({ type: 'progress', stage: 'wasm' } satisfies { type: 'progress'; stage: 'wasm' });
-  const lib = await loadLibOpenMPT();
-  self.postMessage({ type: 'progress', stage: 'patterns' } satisfies { type: 'progress'; stage: 'patterns' });
-  const { patternMatrices, metadata } = parseModuleWithLib(lib, fileData, fileName);
-  parserLog('worker parse done', metadata.numOrders, 'orders', patternMatrices.length, 'matrices');
+  self.postMessage({ type: 'progress', stage: 'fetch' } satisfies { type: 'progress'; stage: 'fetch' });
 
-  const response: ParseResponse = {
-    type: 'parsed',
-    patternMatrices,
-    metadata,
-  };
-  self.postMessage(response);
+  try {
+    self.postMessage({ type: 'progress', stage: 'wasm' } satisfies { type: 'progress'; stage: 'wasm' });
+    const lib = await loadLibOpenMPT();
+    self.postMessage({ type: 'progress', stage: 'patterns' } satisfies { type: 'progress'; stage: 'patterns' });
+    const { patternMatrices, metadata } = parseModuleWithLib(lib, fileData, fileName);
+    parserLog('worker parse done', metadata.numOrders, 'orders', patternMatrices.length, 'matrices');
+
+    const response: ParseResponse = {
+      type: 'parsed',
+      patternMatrices,
+      metadata,
+    };
+    self.postMessage(response);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Unknown worker parse error';
+    postError(message);
+  }
 }
 
 self.onmessage = (e: MessageEvent<IncomingMessage>) => {

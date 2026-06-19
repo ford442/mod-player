@@ -191,14 +191,19 @@ export async function resolvePatternRendererAsync(
  */
 export function applyWebGPUFallback(reason: string): PatternRendererBackend {
   const fallback = fallbackAfterWebGPU();
-  console.warn(`[Renderer] WebGPU unavailable (${reason}); falling back to ${fallback}`);
   if (!webgpuAutoFallbackApplied) {
     webgpuAutoFallbackApplied = true;
+    console.warn(`[Renderer] WebGPU unavailable (${reason}); falling back to ${fallback}`);
     persistRendererPreference(fallback);
     window.DEBUG_RENDERER = fallback;
     notifyRendererPreferenceChanged();
   }
   return fallback;
+}
+
+/** Returns true if the automatic WebGPU → WebGL2/HTML fallback has already run this session. */
+export function hasWebGPUAutoFallbackApplied(): boolean {
+  return webgpuAutoFallbackApplied;
 }
 
 /** Subscribe to renderer preference changes (storage events + custom events). */

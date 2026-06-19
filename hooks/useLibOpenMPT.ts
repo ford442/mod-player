@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { LibOpenMPT, ModuleInfo, PatternMatrix, ChannelShadowState, PlaybackState, SyncDebugInfo, WorkerParseResult, WorkerParseResponse } from '../types';
+import { LibOpenMPT, ModuleInfo, PatternMatrix, ChannelShadowState, PlaybackState, SyncDebugInfo, WorkerParseError, WorkerParseResponse } from '../types';
 import { OpenMPTWorkletEngine, NATIVE_RING_BUF_BYTES } from '../audio-worklet/OpenMPTWorkletEngine';
 import { computeNoteAges } from '../utils/patternExtractor';
 import { parseModuleWithLib } from '../utils/parseModuleWithLib';
@@ -60,9 +60,9 @@ async function resolveParsedModule(
   fileDataForWorker: Uint8Array,
   fileDataCopy: Uint8Array,
   fileName: string,
-  onParseProgress?: (stage: 'wasm' | 'patterns') => void,
+  onParseProgress?: (stage: 'fetch' | 'wasm' | 'patterns') => void,
 ): Promise<WorkerParseResponse> {
-  let workerResult: WorkerParseResult | null = null;
+  let workerResult: WorkerParseResponse | WorkerParseError | null = null;
 
   if (worker) {
     try {
@@ -80,14 +80,17 @@ async function resolveParsedModule(
       }
       if (workerResult.type === 'error') {
         console.warn(`[Parser] worker error (${fileName}):`, workerResult.message);
-      } else if (workerResult.type !== 'progress') {
+      } else {
         console.warn(`[Parser] worker returned empty patternMatrices (${fileName})`);
       }
     } catch (err) {
       console.warn(`[Parser] worker path failed (${fileName}) — main-thread fallback:`, err);
       parserLog('worker failed', fileName, err);
+    } finally {
+      // The worker is now either hung (timeout terminated it) or in a bad state;
+      // discard it so the next load gets a fresh worker.
       if (workerRefObj.current) {
-        workerRefObj.current.terminate();
+        try { workerRefObj.current.terminate(); } catch { /* ignore */ }
         workerRefObj.current = null;
       }
     }
@@ -330,23 +333,35 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
     const fileDataCopy = fileData.slice();
     fileDataRef.current = fileDataCopy;
 
-    // Create / reuse the parser worker when HEAD check passed at init
+    // Create / reuse the parser worker. If creation throws (404, CSP, MIME),
+    // mark it unhealthy and fall through to the main-thread parse.
     if (!workerRef.current && parserWorkerHealthyRef.current) {
-      workerRef.current = createParserWorker((message) => {
+      try {
+        workerRef.current = createParserWorker((message) => {
+          parserWorkerHealthyRef.current = false;
+          if (workerRef.current) {
+            try { workerRef.current.terminate(); } catch { /* ignore */ }
+            workerRef.current = null;
+          }
+          console.error(`[Parser] worker unhealthy (${fileName}):`, message);
+        });
+      } catch (workerErr) {
         parserWorkerHealthyRef.current = false;
-        console.error(`[Parser] worker unhealthy (${fileName}):`, message);
-      });
+        console.warn(`[processModuleData] Failed to create parser worker (${fileName}):`, workerErr);
+      }
     }
 
     setStatus(`Parsing "${fileName}"…`);
     parserLog('processModuleData start', fileName);
 
     const slowHintTimer = window.setTimeout(() => {
-      setStatus(`Parsing "${fileName}"… (loading WASM)`);
+      setStatus(`Parsing "${fileName}"… (still loading)`);
     }, PARSER_SLOW_HINT_MS);
 
-    const onParseProgress = (stage: 'wasm' | 'patterns') => {
-      if (stage === 'patterns') {
+    const onParseProgress = (stage: 'fetch' | 'wasm' | 'patterns') => {
+      if (stage === 'fetch') {
+        setStatus(`Parsing "${fileName}"… (fetching parser engine)`);
+      } else if (stage === 'patterns') {
         setStatus(`Parsing "${fileName}"… (reading patterns)`);
       }
     };
@@ -368,7 +383,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
       metadata = parsed.metadata;
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Module parse failed';
-      console.error(`[Parser] failed (${fileName}):`, err);
+      console.error(`[processModuleData] Parse failed (${fileName}):`, err);
       setStatus(`Error: ${message}`);
       return;
     } finally {
@@ -914,11 +929,14 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
         libopenmptRef.current = lib;
         setIsReady(true);
 
+        // Parser worker availability is determined by actually constructing the
+        // worker and attempting a parse. The HEAD check is diagnostic-only because
+        // Vite hashes worker chunks in production, so the source .ts URL may 404
+        // even though the emitted worker chunk is valid.
         void verifyParserWorkerUrl().then((ok) => {
-          parserWorkerHealthyRef.current = ok;
           if (!ok) {
             console.warn(
-              '[Parser] Worker script HEAD check failed — will use main-thread parse fallback',
+              '[Parser] Worker script HEAD check failed (diagnostic only; will still attempt worker parse)',
             );
           }
         });

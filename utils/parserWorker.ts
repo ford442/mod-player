@@ -1,5 +1,6 @@
-import type { WorkerParseMessage, WorkerParseResult } from '../types';
+import type { WorkerParseMessage, WorkerParseResult, WorkerParseResponse, WorkerParseError } from '../types';
 import { parserLog } from './parserDebug';
+import { createParserPromise } from './parserPromise';
 
 export const PARSER_WORKER_TIMEOUT_MS = 15_000;
 export const PARSER_SLOW_HINT_MS = 5_000;
@@ -9,7 +10,12 @@ export function getParserWorkerUrl(): string {
   return new URL('../workers/openmpt-parser.worker.ts', import.meta.url).href;
 }
 
-/** HEAD-check parser worker availability (mirrors useWorkletLoader.verifyWorkletFile). */
+/**
+ * HEAD-check parser worker availability.
+ * Note: this is diagnostic-only. In production Vite hashes worker chunks, so the
+ * source `.ts` URL used here may 404 even though the emitted worker chunk is valid.
+ * The real availability test is attempting `new Worker(...)` and handling errors.
+ */
 export async function verifyParserWorkerUrl(): Promise<boolean> {
   const url = getParserWorkerUrl();
   try {
@@ -49,47 +55,29 @@ export function parseInWorker(
   worker: Worker,
   message: WorkerParseMessage,
   transfer: Transferable[],
-  onProgress?: (stage: 'wasm' | 'patterns') => void,
+  onProgress?: (stage: 'fetch' | 'wasm' | 'patterns') => void,
   timeoutMs: number = PARSER_WORKER_TIMEOUT_MS,
-): Promise<WorkerParseResult> {
+): Promise<WorkerParseResponse | WorkerParseError> {
   const { fileName } = message;
 
-  return new Promise((resolve, reject) => {
-    const timer = window.setTimeout(() => {
-      cleanup();
-      reject(new Error(`Parser timed out after ${timeoutMs}ms`));
-    }, timeoutMs);
+  const { promise } = createParserPromise<WorkerParseResult>(
+    worker,
+    timeoutMs,
+    () => {
+      parserLog('posting to worker', fileName, message.fileData.byteLength);
+      worker.postMessage(message, transfer);
+    },
+    {
+      shouldResolve: (data) => data?.type !== 'progress',
+      onIntermediate: (data) => {
+        if (data.type === 'progress') {
+          parserLog('worker progress', fileName, data.stage);
+          onProgress?.(data.stage);
+        }
+      },
+    },
+  );
 
-    const onMessage = (e: MessageEvent<WorkerParseResult>) => {
-      const data = e.data;
-      if (data?.type === 'progress') {
-        parserLog('worker progress', fileName, data.stage);
-        onProgress?.(data.stage);
-        return;
-      }
-      cleanup();
-      parserLog('worker response', fileName, data?.type);
-      resolve(data);
-    };
-    const onError = (e: ErrorEvent) => {
-      cleanup();
-      reject(new Error(e.message || 'Parser worker error'));
-    };
-    const onMessageError = () => {
-      cleanup();
-      reject(new Error('Parser worker message deserialization failed'));
-    };
-    const cleanup = () => {
-      window.clearTimeout(timer);
-      worker.removeEventListener('message', onMessage);
-      worker.removeEventListener('error', onError);
-      worker.removeEventListener('messageerror', onMessageError);
-    };
-
-    worker.addEventListener('message', onMessage);
-    worker.addEventListener('error', onError);
-    worker.addEventListener('messageerror', onMessageError);
-    parserLog('posting to worker', fileName, message.fileData.byteLength);
-    worker.postMessage(message, transfer);
-  });
+  // Progress messages are handled by onIntermediate and never resolve the promise.
+  return promise as Promise<WorkerParseResponse | WorkerParseError>;
 }

@@ -1,0 +1,113 @@
+- generic [ref=e4]:
+  - banner [ref=e5]:
+    - heading "libopenmpt Note Viewer" [level=1] [ref=e6]
+    - paragraph [ref=e7]: Fetching "4-mat_madness.mod"... · Press ? for shortcuts
+  - generic [ref=e8]:
+    - generic [ref=e9]:
+      - button "🎬 3D Mode" [ref=e10] [cursor=pointer]
+      - combobox "Switch UI theme" [ref=e11] [cursor=pointer]:
+        - option "☀️ Light"
+        - option "🌙 Dark" [selected]
+        - option "🖤 Precision"
+        - option "🟡 Amber"
+        - option "🤍 Classic"
+      - button "⚡ Worklet" [disabled] [ref=e12]
+      - button "🖥️ Full" [ref=e13] [cursor=pointer]
+    - generic [ref=e14]:
+      - 'button "Shader Gallery: v0.50 (Trap Frosted Lens)" [ref=e16] [cursor=pointer]'
+      - generic [ref=e18]:
+        - generic [ref=e19]: Palette
+        - combobox [ref=e20]:
+          - option "Rainbow" [selected]
+          - option "Warm"
+          - option "Cool"
+          - option "Neon"
+          - option "Acid"
+          - option "Fifths"
+        - button "By Pitch" [disabled] [ref=e21]
+  - generic [ref=e23]:
+    - generic [ref=e35]: Tracker GPU-9000
+    - button "Open debug panel" [ref=e39] [cursor=pointer]: 🔍
+  - generic [ref=e40]:
+    - generic [ref=e41]:
+      - img [ref=e42]
+      - button "Choose File" [ref=e44]
+    - generic [ref=e45]:
+      - img [ref=e46]
+      - button "Choose File" [ref=e48]
+    - generic [ref=e50]:
+      - generic [ref=e51]: "Server Media:"
+      - combobox "Server Media:" [ref=e52]:
+        - option "Select File..." [disabled] [selected]
+        - option "Clouds Demo (MP4)"
+    - generic [ref=e53]:
+      - button "▶️ Play" [disabled] [ref=e54]
+      - button "⏹️ Stop" [ref=e55] [cursor=pointer]
+      - button "🔄 Loop" [ref=e56] [cursor=pointer]
+      - button "☀️ Light Chassis" [ref=e57] [cursor=pointer]
+      - button "📺 CRT" [ref=e58] [cursor=pointer]
+    - generic [ref=e60]:
+      - generic [ref=e61]: "💡 Bloom:"
+      - combobox "💡 Bloom:" [ref=e62]:
+        - option "Soft"
+        - option "Crisp" [selected]
+        - option "Heavy"
+        - option "Dreamy"
+    - generic [ref=e64]:
+      - generic [ref=e65]: "🎨 Colors:"
+      - combobox "🎨 Colors:" [ref=e66]:
+        - option "Chromatic"
+        - option "Golden Ratio" [selected]
+        - option "Warm/Cool"
+        - option "Rainbow"
+    - generic [ref=e67]:
+      - generic [ref=e68]: "Vol:"
+      - slider [ref=e69]: "0.5"
+    - generic [ref=e70]:
+      - generic [ref=e71]: "Pan:"
+      - slider [ref=e72]: "0"
+  - generic [ref=e73]:
+    - button "📊 VU Meters" [ref=e74] [cursor=pointer]
+    - button "ℹ️ Metadata" [ref=e75] [cursor=pointer]
+    - button "📋 Playlist" [ref=e76] [cursor=pointer]
+    - button "☁️ Browse Library" [ref=e77] [cursor=pointer]
+  - generic [ref=e79]:
+    - generic [ref=e80]:
+      - generic [ref=e81]: Module Info
+      - generic [ref=e83]: No module loaded
+    - generic [ref=e84]:
+      - generic [ref=e85]: VU Meters
+      - generic [ref=e88]:
+        - generic [ref=e91]: CH 1
+        - generic [ref=e94]: CH 2
+        - generic [ref=e97]: CH 3
+        - generic [ref=e100]: CH 4
+  - generic [ref=e104]:
+    - generic [ref=e105]: Playlist
+    - generic [ref=e107]:
+      - generic [ref=e108]:
+        - generic [ref=e109]: Playlist (0)
+        - generic [ref=e110]:
+          - button "Previous track" [disabled] [ref=e111]: ⏮
+          - button "Next track" [disabled] [ref=e112]: ⏭
+          - button "Shuffle Off" [ref=e113] [cursor=pointer]: 🔀
+          - button "No Repeat" [ref=e114] [cursor=pointer]: ➡️
+          - button "Add files to playlist" [ref=e115] [cursor=pointer]: ➕
+      - generic [ref=e117]: Drag & drop module files here
+  - generic [ref=e119]:
+    - generic [ref=e120]: Media Overlay
+    - generic [ref=e122]:
+      - heading "Media" [level=3] [ref=e123]
+      - generic [ref=e124]:
+        - generic [ref=e125]:
+          - text: Fade in
+          - slider "Fade in 500ms" [ref=e126]: "500"
+          - generic [ref=e127]: 500ms
+        - generic [ref=e128]:
+          - text: Fade out
+          - slider "Fade out 500ms" [ref=e129]: "500"
+          - generic [ref=e130]: 500ms
+      - generic [ref=e131]: No media added yet.
+  - generic [ref=e132]:
+    - paragraph [ref=e133]: Supports .mod, .xm, .s3m, .it files.
+    - paragraph [ref=e134]: WebGPU required for visualization.
