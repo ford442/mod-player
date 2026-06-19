@@ -105,3 +105,4 @@ Load the app: status should progress `Fetching` → `Parsing` → `Loaded` withi
 | `DEPLOY_TOKEN` | (see `deploy.py`) | Auth for storage.noahcohn.com |
 | `DEPLOY_CLEAN` | `1` | Set `0` to skip remote prune request |
 | `VITE_APP_BASE_PATH` | `/xm-player/` for production build | Asset URLs in `index.html` |
+| `VITE_STORAGE_API_URL` | `https://storage.noahcohn.com` (set in `build:xm-player`) | Library/shader API (`/api/songs`, `/api/shaders`) |

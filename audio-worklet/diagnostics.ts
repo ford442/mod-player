@@ -5,6 +5,8 @@
  * Use these functions to troubleshoot worklet initialization failures.
  */
 
+import { detectRuntimeBase } from '../src/lib/paths';
+
 export interface WorkletDiagnostics {
   audioContextSupported: boolean;
   audioWorkletSupported: boolean;
@@ -37,7 +39,7 @@ export function getWorkletDiagnostics(workletUrl: string): WorkletDiagnostics {
     hasSharedArrayBuffer: typeof SharedArrayBuffer !== 'undefined',
     hardwareConcurrency: typeof navigator !== 'undefined' ? navigator.hardwareConcurrency || 0 : 0,
     userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : 'unknown',
-    baseUrl: import.meta.env.BASE_URL,
+    baseUrl: detectRuntimeBase(),
     workletUrl,
     timestamp: new Date().toISOString(),
   };

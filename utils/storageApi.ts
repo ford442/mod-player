@@ -1,7 +1,15 @@
 import { z } from 'zod';
 import { detectRuntimeBase } from '../src/lib/paths';
 
-const storageBaseUrl = (import.meta.env.VITE_STORAGE_API_URL ?? '').trim().replace(/\/+$/, '');
+/** Production library API (storage_manager on Contabo). Dev uses Vite proxy when unset. */
+const PRODUCTION_STORAGE_API = 'https://storage.noahcohn.com';
+
+const storageBaseUrl = (() => {
+  const fromEnv = (import.meta.env.VITE_STORAGE_API_URL ?? '').trim().replace(/\/+$/, '');
+  if (fromEnv) return fromEnv;
+  if (import.meta.env.PROD) return PRODUCTION_STORAGE_API;
+  return '';
+})();
 
 const SongSchema = z.object({
   id: z.union([z.string(), z.number()]).optional(),
