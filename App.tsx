@@ -41,6 +41,7 @@ import {
   isTriggerFromPackedB,
 } from './utils/gpuPacking';
 import { generateInstrumentPalette, generateEmptyInstrumentPalette } from './utils/instrumentPalette';
+import { circularPageStart, overlayActualRow } from './utils/playheadPrediction';
 
 function App() {
   // Tier 1: global last-used shader — persisted across page reloads
@@ -103,6 +104,7 @@ function App() {
     isLooping,
     playbackSeconds,
     playbackRowFraction,
+    setPlaybackRowFraction,
     totalPatternRows,
     sequencerMatrix,
     channelStates,
@@ -133,6 +135,7 @@ function App() {
   useEffect(() => {
     window.__TEST_HOOKS__ = {
       seekToRow: (row: number) => seekToStep(row),
+      stopPlayback: () => stopMusic(false),
       isModuleLoaded: () => isModuleLoaded,
       getPatternRenderer: () => window.currentPatternRenderer,
       loadModuleFromUrl: async (url: string) => {
@@ -209,12 +212,81 @@ function App() {
           isTrigger: isTriggerFromPackedB(packedB, rowOffset, isNoteOff, hasPitch),
         };
       },
+      /** Force fractional playhead for paging regression (does not move audio) */
+      setPlayheadFraction: (value: number) => {
+        playbackStateRef.current = {
+          ...playbackStateRef.current,
+          playheadRow: value,
+          lastUpdateTimestamp: performance.now() / 1000,
+        };
+        setPlaybackRowFraction(value);
+      },
       getPlaybackRow: () => Math.floor(playbackRowFraction),
+      getPlaybackRowFraction: () => playbackRowFraction,
       getActiveRenderer: () => window.currentPatternRenderer?.backend ?? null,
-      getShaderFile: () => localStorage.getItem('xasm1_last_shader'),
+      getShaderFile: () => {
+        const raw = localStorage.getItem('xasm1_last_shader');
+        if (!raw) return null;
+        try {
+          return JSON.parse(raw) as string;
+        } catch {
+          return raw;
+        }
+      },
+      selectShader: (shader: string) => {
+        try {
+          localStorage.setItem('xasm1_last_shader', JSON.stringify(shader));
+          window.dispatchEvent(new StorageEvent('storage', { key: 'xasm1_last_shader' }));
+        } catch {
+          /* ignore */
+        }
+      },
+      /** Circular hybrid paging — overlay must fetch rows from current page, not 0..N-1 */
+      getCircularOverlayPaging: () => {
+        const matrix = sequencerMatrix;
+        if (!matrix) return { ok: false, reason: 'no matrix' };
+        const shader = localStorage.getItem('xasm1_last_shader') ?? '';
+        if (!shader.includes('v0.46')) {
+          return { ok: true, skipped: true, reason: 'not v0.46' };
+        }
+        const playhead = playbackStateRef.current.playheadRow;
+        const numRows = matrix.numRows;
+        const pageStart = circularPageStart(playhead, numRows);
+        const overlayEl = document.querySelector('[data-overlay-canvas="true"]');
+        const overlayActive =
+          overlayEl != null && getComputedStyle(overlayEl).display !== 'none';
+        const mismatches: Array<{
+          stepIndex: number;
+          expectedRow: number;
+          staleRow: number;
+          expectedNote: number;
+          staleNote: number;
+        }> = [];
+        const sampleSteps = [0, 1, 16, 32, 63];
+        for (const stepIndex of sampleSteps) {
+          if (stepIndex >= numRows) continue;
+          const expectedRow = overlayActualRow(stepIndex, playhead, numRows);
+          const staleRow = stepIndex;
+          if (pageStart === 0 || expectedRow === staleRow) continue;
+          const expectedNote = matrix.rows[expectedRow]?.[1]?.note ?? 0;
+          const staleNote = matrix.rows[staleRow]?.[1]?.note ?? 0;
+          if (expectedNote !== staleNote) {
+            mismatches.push({ stepIndex, expectedRow, staleRow, expectedNote, staleNote });
+          }
+        }
+        return {
+          ok: true,
+          playhead,
+          numRows,
+          pageStart,
+          overlayActive,
+          mismatches,
+          pagingDiffersAtPlayhead: pageStart > 0,
+        };
+      },
     };
     return () => { delete window.__TEST_HOOKS__; };
-  }, [seekToStep, isModuleLoaded, sequencerMatrix, loadFile, playbackRowFraction]);
+  }, [seekToStep, stopMusic, isModuleLoaded, sequencerMatrix, loadFile, playbackRowFraction, setPlaybackRowFraction, playbackStateRef]);
 
   // Project-M popup integration: broadcast PCM frames via BroadcastChannel
   useEffect(() => {

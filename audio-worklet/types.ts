@@ -36,6 +36,8 @@ export interface WorkletPositionData {
     currentPattern: number;
     currentOrder: number;
     bpm: number;
+    /** Module speed factor (MOD/XM), when available from the engine */
+    speed?: number;
     numChannels: number;
     /** Per-channel mono VU values, indices [0..numChannels-1] */
     channelVU: Float32Array;

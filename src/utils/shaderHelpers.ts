@@ -112,6 +112,7 @@ export const SHADER_CATEGORIES = {
     'patternv0.56.wgsl',
     'patternv0.51.wgsl',
     'patternv0.50.wgsl',
+    'patternv0.50b.wgsl',
     'patternv0.49.wgsl',
     'patternv0.48.wgsl',
     'patternv0.47.wgsl',
@@ -137,6 +138,7 @@ export function getShaderDescription(shaderFile: string): string {
   if (shaderFile.includes('v0.46')) return 'Frosted glass circular overlay with bezel ring';
   if (shaderFile.includes('v0.45')) return 'Frosted glass circular with bloom';
   if (shaderFile.includes('v0.47') || shaderFile.includes('v0.48')) return 'Trapcode-style frosted disc';
+  if (shaderFile.includes('v0.50b')) return 'Trapcode chassis + WebGL frosted lens overlay';
   if (shaderFile.includes('v0.49') || shaderFile.includes('v0.50') || shaderFile.includes('v0.51') || shaderFile.includes('v0.56')) return 'Trapcode-style frosted lens';
   if (shaderFile.includes('v0.40') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44')) return 'Frosted glass wall panel';
   if (shaderFile.includes('v0.38')) return 'Glass circular';

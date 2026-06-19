@@ -12,6 +12,7 @@ export const SHADER_GROUPS = {
   ],
   CIRCULAR: [
     { id: 'patternv0.50.wgsl', label: 'v0.50 (Trap Frosted Lens)' },
+    { id: 'patternv0.50b.wgsl', label: 'v0.50b (Hybrid Frosted Lens)' },
     { id: 'patternv0.51.wgsl', label: 'v0.51 (Playhead Arc)' },
     { id: 'patternv0.56.wgsl', label: 'v0.56 (Instrument Palette)' },
     { id: 'patternv0.55.wgsl', label: 'v0.55 (Oscilloscope)' },

@@ -10,6 +10,7 @@ import { computeNoteAges } from '../utils/patternExtractor';
 import { broadcastPcmBlock } from '../utils/projectMBridge';
 import { logWorkletDiagnostics } from '../audio-worklet/diagnostics';
 import { detectRuntimeBase, withBase } from '../src/lib/paths';
+import { applyWorkletPositionSample } from '../utils/playheadPrediction';
 
 export interface AudioGraphRefs {
   libopenmptRef:       React.MutableRefObject<LibOpenMPT | null>;
@@ -28,6 +29,9 @@ export interface AudioGraphRefs {
   workletTimestampRef: React.MutableRefObject<number>;
   lastWorkletUpdateRef: React.MutableRefObject<number>;
   workletBpmRef:       React.MutableRefObject<number>;
+  workletSpeedRef:     React.MutableRefObject<number>;
+  workletRowsPerSecRef: React.MutableRefObject<number>;
+  workletPositionSampleRef: React.MutableRefObject<import('../utils/playheadPrediction').WorkletPositionSample | null>;
   pendingSeekRef:      React.MutableRefObject<{ order: number; row: number; timestamp: number } | null>;
   seekAcknowledgedRef: React.MutableRefObject<boolean>;
   spFallbackTriggered: React.MutableRefObject<boolean>;
@@ -247,17 +251,25 @@ export async function startAudioPlayback(
 
         // Listen for position updates from the native engine
         engine.on('position', (data: WorkletPositionData) => {
-          const now = ctx.currentTime;
-          refs.workletOrderRef.current = data.currentOrder;
-          refs.workletRowRef.current = data.currentRow;
-          refs.workletTimeRef.current = data.positionMs / 1000;
-          refs.workletTimestampRef.current = data.workletTime || now;
-          refs.lastWorkletUpdateRef.current = now;
-
-          // TIMING FIX: Update BPM ref from worklet
-          if (data.bpm && data.bpm > 0) {
-            refs.workletBpmRef.current = data.bpm;
+          const heardAnchor = ctx.currentTime;
+          const positionPayload: {
+            order: number;
+            row: number;
+            positionSeconds: number;
+            workletTime: number;
+            bpm?: number;
+            speed?: number;
+          } = {
+            order: data.currentOrder,
+            row: data.currentRow,
+            positionSeconds: data.positionMs / 1000,
+            workletTime: data.workletTime ?? heardAnchor,
+            bpm: data.bpm,
+          };
+          if (data.speed != null && data.speed > 0) {
+            positionPayload.speed = data.speed;
           }
+          applyWorkletPositionSample(refs, positionPayload);
 
           // TIMING FIX: Check for seek acknowledgment
           if (refs.pendingSeekRef.current &&
@@ -477,19 +489,28 @@ export async function startAudioPlayback(
           const { type, order, row, positionSeconds, message, bpm, channelVU } = e.data;
 
           if (type === 'position') {
-            const now = ctx.currentTime;
-            refs.workletOrderRef.current = order;
-            refs.workletRowRef.current = row;
-            refs.workletTimeRef.current = positionSeconds;
-            refs.workletTimestampRef.current = e.data.workletTime || now;
-            // TIMING FIX: Use audio context time for consistency
-            refs.lastWorkletUpdateRef.current = now;
-
-            // TIMING FIX: Update BPM ref from worklet
+            const workletAudioTime = e.data.workletTime ?? ctx.currentTime;
+            const positionPayload: {
+              order: number;
+              row: number;
+              positionSeconds: number;
+              workletTime: number;
+              bpm?: number;
+              speed?: number;
+            } = {
+              order,
+              row,
+              positionSeconds,
+              workletTime: workletAudioTime,
+            };
             if (bpm && bpm > 0) {
-              refs.workletBpmRef.current = bpm;
+              positionPayload.bpm = bpm;
               callbacks.setModuleInfo((prev: ModuleInfo) => ({ ...prev, bpm }));
             }
+            if (e.data.speed != null && e.data.speed > 0) {
+              positionPayload.speed = e.data.speed;
+            }
+            applyWorkletPositionSample(refs, positionPayload);
 
             // TIMING FIX: Check for seek acknowledgment
             if (refs.pendingSeekRef.current &&
@@ -577,12 +598,16 @@ export async function startAudioPlayback(
                     outL.fill(0); outR.fill(0);
                   }
 
-                  // Update position refs for UI
-                  refs.workletOrderRef.current = mLib._openmpt_module_get_current_order(mPtr);
-                  refs.workletRowRef.current   = mLib._openmpt_module_get_current_row(mPtr);
-                  refs.workletTimeRef.current  = mLib._openmpt_module_get_position_seconds(mPtr);
-                  refs.workletTimestampRef.current = ctx.currentTime;
-                  refs.lastWorkletUpdateRef.current = ctx.currentTime;
+                  // Update position refs for UI (audio-clock tagged)
+                  const spTime = ctx.currentTime;
+                  applyWorkletPositionSample(refs, {
+                    order: mLib._openmpt_module_get_current_order(mPtr),
+                    row: mLib._openmpt_module_get_current_row(mPtr),
+                    positionSeconds: mLib._openmpt_module_get_position_seconds(mPtr),
+                    workletTime: spTime,
+                    bpm: mLib._openmpt_module_get_current_estimated_bpm(mPtr),
+                    speed: mLib._openmpt_module_get_current_speed(mPtr),
+                  });
                 };
 
                 spNode.connect(refs.analyserRef.current!);

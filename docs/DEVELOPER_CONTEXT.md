@@ -100,3 +100,62 @@
 ### Key Data Structures
 *   **`PatternMatrix`**: A 2D array of cells representing the current pattern window.
 *   **`ChannelShadowState`**: Real-time instantaneous data (volume, pan, frequency) for visual effects (e.g., lighting up a column when a note plays).
+
+---
+
+## 6. Production, COEP, and External Dependencies
+
+### Cross-Origin Isolation (COOP / COEP)
+
+The app needs **cross-origin isolation** so Emscripten can use `SharedArrayBuffer` / WASM workers (audio worklet + parser worker).
+
+| Header | Dev (`vite.config.ts`) | Production (`public/.htaccess` → `dist/.htaccess`) |
+|--------|------------------------|-----------------------------------------------------|
+| `Cross-Origin-Opener-Policy` | `same-origin` | `same-origin` |
+| `Cross-Origin-Embedder-Policy` | `credentialless` | `credentialless` |
+
+**Keep dev and production aligned on `credentialless`.** Older Apache configs used `require-corp`, which blocks any cross-origin script, WASM, or worker asset that does not send `Cross-Origin-Resource-Policy` (CORP) or proper CORS. That can break:
+
+- Main-thread `libopenmptjs.js` from CDN
+- The same script fetched again inside `openmpt-parser.worker`
+- esm.sh React importmap modules
+
+If production must use `require-corp`, every external dependency below must satisfy CORP **and** you should self-host libopenmpt under `/xm-player/` with explicit headers.
+
+### External CDN Chain (load order)
+
+1. Vite bundle (`index-*.js`, `index-*.css`)
+2. esm.sh React importmap (`react`, `react-dom/client`)
+3. `https://wasm.noahcohn.com/libmpt/libopenmptjs.js` (main thread, `index.html`)
+4. Same CDN URL inside `workers/openmpt-parser.worker.ts` (worker thread)
+5. Audio worklet scripts under `/xm-player/worklets/`
+
+`index.html` includes `preconnect` hints for `wasm.noahcohn.com` and `esm.sh`.
+
+### CORP / CORS Requirements
+
+| Resource | URL | Required for `credentialless` | Required for `require-corp` |
+|----------|-----|------------------------------|----------------------------|
+| libopenmpt JS + WASM | `wasm.noahcohn.com/libmpt/*` | CORS or CORP `cross-origin` (current CDN ✅) | CORP `cross-origin` on JS **and** `.wasm` |
+| React (importmap) | `esm.sh/react@18.2.0` | Typically works under `credentialless` | Verify CORP on each esm.sh response |
+| App static assets | `/xm-player/assets/*` | Same-origin | Same-origin |
+| Worklets | `/xm-player/worklets/*` | Same-origin | Same-origin |
+
+**Operational risk:** If the CDN drops `Cross-Origin-Resource-Policy: cross-origin`, parser worker or main-thread WASM init can fail under strict COEP. The parser path falls back to main-thread parse when the worker errors, but audio still depends on the CDN script in `index.html`.
+
+### Self-hosting libopenmpt (recommended for reproducible deploys)
+
+To remove CDN dependency:
+
+1. Copy `libopenmptjs.js` and its `.wasm` sibling into `public/libmpt/` (or vendor from a pinned libopenmpt release).
+2. Point `index.html` and `workers/openmpt-parser.worker.ts` at `${import.meta.env.BASE_URL}libmpt/libopenmptjs.js`.
+3. Serve with `Cross-Origin-Resource-Policy: cross-origin` if COEP is ever `require-corp`.
+4. Optionally add SRI (`integrity=`) on the script tag once the file hash is pinned.
+
+### Stale `/assets/` on the server
+
+Vite emits hashed filenames (`index-<hash>.js`, `index-<hash>.css`). Incremental deploys that only upload new files leave **orphaned** bundles (`modplayer.1iss`, old `index-*.js`). Always deploy with pruning enabled (default). See `docs/DEPLOY.md`.
+
+### Stylesheet contract
+
+Production CSS must be a Vite-extracted `assets/index-<hash>.css` linked from `index.html`. Names ending in `.1iss` or missing from `dist/` indicate a stale or corrupt deploy — `npm run verify:build` rejects these before upload.

@@ -170,6 +170,15 @@ fn pitchClassFromPacked(packed: u32) -> f32 {
   return f32(semitone) / 12.0;
 }
 
+const NOTE_MAX: u32 = 119u;
+
+// Octave brightness: same pitch class across octaves, brighter in higher octaves (0.65 at C-0, 1.0 at B-9).
+fn octaveBrightness(note: u32) -> f32 {
+  if (note == 0u || note > NOTE_MAX) { return 1.0; }
+  let oct = (note - 1u) / 12u; // 0..9
+  return 0.65 + 0.35 * f32(oct) / 9.0;
+}
+
 fn effectColorFromCode(code: u32, fallback: vec3<f32>) -> vec3<f32> {
   let c = toUpperAscii(code & 255u);
   switch c {
@@ -437,6 +446,7 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
       let baseColor = selectPalette(uniforms.colorPalette, pitchHue);
       let instBand = inst & 15u;
       let instBright = 0.85 + (select(0.0, f32(instBand) / 15.0, instBand > 0u)) * 0.15;
+      let octBright = octaveBrightness(noteChar);
       let flash = f32(ch.trigger) * select(0.0, 1.4, is_trigger);
       let strike = playheadActivation * select(0.4, 3.5, is_trigger);
       let beatBoost = 1.0 + kick * select(0.15, 0.5, is_trigger);
@@ -447,7 +457,7 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
         mainSize = vec2<f32>(0.62, 0.52);
         let trigger_intensity = smoothstep(0.45, 0.0, dist / max(mainSize.x, 0.001));
         let trigger_color = vec3<f32>(0.3, 0.85, 1.0);
-        noteColor = mix(trigger_color, baseColor * instBright, 0.55);
+        noteColor = mix(trigger_color, baseColor * instBright * octBright, 0.55);
         lightAmount = (trigger_intensity * 1.35 + flash + strike) * clamp(ch.volume, 0.0, 1.2) * beatBoost;
         let bloom_halo = smoothstep(0.7, 0.0, dist / max(mainSize.x, 0.001)) * 0.6;
         noteColor += trigger_color * bloom_halo;
@@ -457,13 +467,13 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
         let tail_intensity = smoothstep(0.18, 0.0, dist / max(mainSize.x, 0.001)) * 0.65;
         let tail_color = vec3<f32>(0.15, 0.45, 0.65);
         let fade = 1.0 - (f32(dInfo.rowOffset) / max(f32(dInfo.duration), 1.0)) * 0.35;
-        noteColor = mix(tail_color, baseColor * instBright * 0.45, 0.35);
+        noteColor = mix(tail_color, baseColor * instBright * octBright * 0.45, 0.35);
         lightAmount = tail_intensity * fade * clamp(ch.volume, 0.0, 1.0) * 0.55;
       } else {
         // Single-row / pluck — treat as trigger-sized but slightly softer
         mainSize = vec2<f32>(0.50, 0.42);
         let pluck_intensity = smoothstep(0.38, 0.0, dist / max(mainSize.x, 0.001));
-        noteColor = baseColor * instBright;
+        noteColor = baseColor * instBright * octBright;
         lightAmount = pluck_intensity * clamp(ch.volume, 0.0, 1.2);
       }
 

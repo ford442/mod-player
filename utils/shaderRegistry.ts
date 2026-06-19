@@ -13,7 +13,11 @@
  * layoutMode       – LAYOUT_MODES value consumed by WebGL overlay
  * background       – chassis/bezel shader fetched for the background pass
  * alphaBlending    – WebGPU pipeline needs premultiplied alpha blend
- * webglHybrid      – renders with WebGL frosted-caps overlay
+ * webglHybrid      – renders with WebGL frosted-caps overlay on top of the
+ *                    WebGPU chassis pass. When true, the WGSL shader should draw
+ *                    housing/plastic only (no drawUnifiedLensCap) to avoid double-
+ *                    bright LEDs; the WebGL layer owns three-emitter lens caps.
+ *                    Set false for native all-in-WGSL LEDs (single GPU context).
  * singlePassComposite – non-false: shader owns its own background (the value
  *                       is the chassis file name, kept for legacy callers)
  * supportsStepsLength – uniform slot [24] is stepsLength:u32 (not colorPalette)
@@ -202,7 +206,10 @@ export const SHADER_REGISTRY: Readonly<Record<string, ShaderMeta>> = {
   'patternv0.49.wgsl':  { ...C },
 
   // ── v0.50/v0.51 — three-emitter LED ──────────────────────────────────────
+  // v0.50  = native WGSL three-emitter (default, single GPU context)
+  // v0.50b = hybrid: WGSL chassis + WebGL2 frosted overlay (lite mode disables overlay)
   'patternv0.50.wgsl':  { ...C, bloomProfile: 'three-emitter' },
+  'patternv0.50b.wgsl': { ...C, webglHybrid: true, bloomProfile: 'three-emitter' },
   'patternv0.51.wgsl':  { ...C, bloomProfile: 'three-emitter' },
 
   // ── v0.55 — three-emitter LED + oscilloscope trace ────────────────────────

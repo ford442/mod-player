@@ -311,7 +311,7 @@ export function useWebGLOverlay(
 
   useEffect(() => {
     return initWebGL();
-  }, [paramsRef.current.shaderFile, initWebGL]); // re-init on shader change
+  }, [params.shaderFile, params.isOverlayActive, initWebGL]); // re-init when hybrid overlay activates or shader changes
 
   // Upload matrix data to the WebGL cell-data texture (RG32UI)
   useEffect(() => {
@@ -333,7 +333,7 @@ export function useWebGLOverlay(
     gl.bindTexture(gl.TEXTURE_2D, res.cellTexture);
     gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG32UI, cols, rows, 0, gl.RG_INTEGER, gl.UNSIGNED_INT, packedData);
-  }, [paramsRef.current.matrix, paramsRef.current.padTopChannel, paramsRef.current.shaderFile]);
+  }, [params.matrix, params.padTopChannel, params.shaderFile, params.isOverlayActive]);
 
   const drawWebGL = useCallback(() => {
     const p = paramsRef.current;

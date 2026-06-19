@@ -54,5 +54,16 @@ export default defineConfig(({ mode }) => {
       exclude: ['openmpt-native'],
     },
     assetsInclude: ['**/*.wasm'],
+    build: {
+      cssCodeSplit: true,
+      rollupOptions: {
+        output: {
+          // Literal [extname] — typos here (e.g. `.1iss`) corrupt production CSS URLs.
+          entryFileNames: 'assets/[name]-[hash].js',
+          chunkFileNames: 'assets/[name]-[hash].js',
+          assetFileNames: 'assets/[name]-[hash][extname]',
+        },
+      },
+    },
   }
 })

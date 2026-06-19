@@ -1,0 +1,17 @@
+# Apache overrides for xm-player static deploy (copied to dist/ root by Vite).
+# Ensures CSS is served as UTF-8 text, not mis-detected utf-16.
+# COOP/COEP match Vite dev (credentialless) so WASM workers and CDN libopenmpt load.
+
+<IfModule mod_headers.c>
+  Header set Cross-Origin-Opener-Policy "same-origin"
+  Header set Cross-Origin-Embedder-Policy "credentialless"
+
+  <FilesMatch "\.css$">
+    Header set Content-Type "text/css; charset=utf-8"
+  </FilesMatch>
+</IfModule>
+
+<IfModule mod_mime.c>
+  AddType text/css .css
+  RemoveCharset .css
+</IfModule>

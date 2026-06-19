@@ -92,6 +92,7 @@ export interface LibOpenMPT {
   _openmpt_module_get_num_orders: (modPtr: number) => number;
   _openmpt_module_get_order_pattern: (modPtr: number, order: number) => number;
   _openmpt_module_get_current_estimated_bpm: (modPtr: number) => number;
+  _openmpt_module_get_current_speed: (modPtr: number) => number;
   _openmpt_module_get_current_channel_vu_mono: (modPtr: number, channel: number) => number;
   _openmpt_module_get_num_instruments: (modPtr: number) => number;
   _openmpt_module_get_instrument_name: (modPtr: number, index: number) => number;
@@ -150,8 +151,13 @@ export interface WorkerParseError {
   message: string;
 }
 
+export interface WorkerParseProgress {
+  type: 'progress';
+  stage: 'wasm' | 'patterns';
+}
+
 export type WorkerParseMessage = WorkerParseRequest;
-export type WorkerParseResult = WorkerParseResponse | WorkerParseError;
+export type WorkerParseResult = WorkerParseResponse | WorkerParseError | WorkerParseProgress;
 
 export interface PlaybackState {
   playheadRow: number;
@@ -210,6 +216,8 @@ declare global {
     /** Headless Chrome / Playwright automation hooks (dev + CI) */
     __TEST_HOOKS__?: {
       seekToRow: (row: number) => void;
+      stopPlayback: () => void;
+      setPlayheadFraction: (value: number) => void;
       isModuleLoaded: () => boolean;
       getPatternRenderer: () => import('./src/renderers/types').CurrentPatternRenderer | null;
       loadModuleFromUrl: (url: string) => Promise<void>;
@@ -241,8 +249,27 @@ declare global {
         isTrigger: boolean;
       } | null;
       getPlaybackRow: () => number;
+      getPlaybackRowFraction: () => number;
       getActiveRenderer: () => string | null;
       getShaderFile: () => string | null;
+      selectShader: (shader: string) => void;
+      getCircularOverlayPaging: () => {
+        ok: boolean;
+        reason?: string;
+        skipped?: boolean;
+        playhead?: number;
+        numRows?: number;
+        pageStart?: number;
+        overlayActive?: boolean;
+        pagingDiffersAtPlayhead?: boolean;
+        mismatches?: Array<{
+          stepIndex: number;
+          expectedRow: number;
+          staleRow: number;
+          expectedNote: number;
+          staleNote: number;
+        }>;
+      };
     };
   }
 }

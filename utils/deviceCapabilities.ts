@@ -1,4 +1,5 @@
 import { LITE_MAX_VISIBLE_ROWS } from './geometryConstants';
+import { probeWebGPUAdapter } from '../src/renderers/rendererSelection';
 
 export interface DeviceCapabilities {
   isLite: boolean;
@@ -91,9 +92,12 @@ export const DEVICE_CAPABILITIES: DeviceCapabilities = detectCapabilities();
 
 // Fire-and-forget async GPU adapter inspection for low-power hints.
 // Only refines the decision if no manual override is active.
-if ('gpu' in navigator && !DEVICE_CAPABILITIES.reason.includes('override')) {
-  navigator.gpu
-    .requestAdapter({ powerPreference: 'low-power' })
+if (!DEVICE_CAPABILITIES.reason.includes('override')) {
+  probeWebGPUAdapter()
+    .then((adapterOk) => {
+      if (!adapterOk) return;
+      return navigator.gpu.requestAdapter({ powerPreference: 'low-power' });
+    })
     .then((adapter) => {
       if (!adapter) return;
       const info = adapter.info as GPUAdapterInfo | undefined;

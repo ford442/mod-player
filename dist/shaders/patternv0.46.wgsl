@@ -153,6 +153,15 @@ fn pitchClassFromIndex(note: u32) -> f32 {
   return f32(semi) / 12.0;
 }
 
+const NOTE_MAX: u32 = 119u;
+
+// Octave brightness: same pitch class across octaves, brighter in higher octaves (0.65 at C-0, 1.0 at B-9).
+fn octaveBrightness(note: u32) -> f32 {
+  if (note == 0u || note > NOTE_MAX) { return 1.0; }
+  let oct = (note - 1u) / 12u; // 0..9
+  return 0.65 + 0.35 * f32(oct) / 9.0;
+}
+
 struct FragmentConstants {
   bgColor: vec3<f32>,
   ledOnColor: vec3<f32>,
@@ -279,7 +288,7 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     if (!isMuted) {
       if (hasNote) {
         let pitchHue = pitchClassFromIndex(note);
-        let noteCol  = selectPalette(uniforms.colorPalette, pitchHue);
+        let noteCol  = selectPalette(uniforms.colorPalette, pitchHue) * octaveBrightness(note);
         var noteGlow = playheadActivation;
         if (ch.trigger > 0u && playheadActivation > 0.5) { noteGlow += 1.0; }
 

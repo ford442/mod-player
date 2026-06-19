@@ -395,12 +395,13 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
       }
     }
 
-    // Position reporting at ~60 Hz
-    if (currentTime - this.lastPositionReportTime >= this.positionReportInterval) {
+    // Position reporting every audio block — main thread extrapolates with audio clock
+    {
       const order = this.lib._openmpt_module_get_current_order(this.modulePtr);
       const row = this.lib._openmpt_module_get_current_row(this.modulePtr);
       const posSec = this.lib._openmpt_module_get_position_seconds(this.modulePtr);
       const bpm = this.lib._openmpt_module_get_current_estimated_bpm(this.modulePtr);
+      const speed = this.lib._openmpt_module_get_current_speed(this.modulePtr);
       const numCh = this.lib._openmpt_module_get_num_channels(this.modulePtr);
       const channelVU = [];
       for (let i = 0; i < Math.min(numCh, 32); i++) {
@@ -413,10 +414,10 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
         row,
         positionSeconds: posSec,
         bpm,
+        speed,
         workletTime: currentTime,
         channelVU,
       });
-      this.lastPositionReportTime = currentTime;
     }
 
     return true;

@@ -141,6 +141,7 @@ for (const [id, layers] of Object.entries(BLOOM_PROFILES)) {
 // Oscilloscope (v0.55) must use 'three-emitter-osc'
 const expected: Record<string, string> = {
   'patternv0.50.wgsl': 'three-emitter',
+  'patternv0.50b.wgsl': 'three-emitter',
   'patternv0.51.wgsl': 'three-emitter',
   'patternv0.55.wgsl': 'three-emitter-osc',
 };

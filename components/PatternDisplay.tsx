@@ -7,8 +7,10 @@ import { useWebGL2PatternRender } from '../src/renderers/webgl2/useWebGL2Pattern
 import { PatternHTMLFallback } from '../src/renderers/html/PatternHTMLFallback';
 import {
   resolvePatternRenderer,
+  resolvePatternRendererAsync,
   subscribeRendererPreference,
   setRendererOverride,
+  applyWebGPUFallback,
 } from '../src/renderers/rendererSelection';
 import { setCurrentPatternRenderer } from '../src/renderers/global';
 import type { PatternRendererBackend } from '../src/renderers/types';
@@ -147,6 +149,29 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   const [activeBackend, setActiveBackend] = useState<PatternRendererBackend>(() => resolvePatternRenderer());
 
   useEffect(() => subscribeRendererPreference(setActiveBackend), []);
+
+  // Async adapter probe — downgrade from optimistic webgpu before init when no adapter exists.
+  useEffect(() => {
+    let cancelled = false;
+    void resolvePatternRendererAsync().then((resolved) => {
+      if (cancelled) return;
+      setActiveBackend((current) => {
+        if (current === 'webgpu' && resolved !== 'webgpu') {
+          applyWebGPUFallback('no usable WebGPU adapter');
+          return resolved;
+        }
+        return current;
+      });
+    });
+    return () => { cancelled = true; };
+  }, []);
+
+  // Safety net: init-time WebGPU failure → WebGL2/HTML without manual URL params.
+  useLayoutEffect(() => {
+    if (activeBackend !== 'webgpu' || webgpuAvailable) return;
+    const fallback = applyWebGPUFallback('WebGPU initialization failed');
+    setActiveBackend(fallback);
+  }, [activeBackend, webgpuAvailable]);
   const [localTime, setLocalTime] = useState(0);
   const [invertChannels, setInvertChannels] = useState(false);
   // Internal stepsLength state — used when the prop is not controlled by the parent.
@@ -568,7 +593,10 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
           bloomRef.current?.updateCRT(crtEnabledRef.current ? 1.0 : 0.0);
         }
         renderRef.current?.();
-        if (isOverlayActive) drawWebGL();
+      }
+      // Hybrid frosted caps use WebGL2 — keep drawing when WebGPU is unavailable (e.g. headless CI).
+      if (isOverlayActive && isModuleLoaded && !useHTML) {
+        drawWebGL();
       }
     };
     animationFrameRef.current = requestAnimationFrame(loop);
@@ -651,6 +679,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
           />
           <canvas
             ref={glCanvasRef}
+            data-overlay-canvas="true"
             width={canvasMetrics.width}
             height={canvasMetrics.height}
             className="absolute inset-0 pointer-events-none"
@@ -659,11 +688,6 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
         </div>
       )}
 
-      {!useHTML && useWebGPU && !webgpuAvailable && (
-        <div className="error absolute inset-0 flex items-center justify-center bg-black/80 text-red-400 text-sm font-mono p-4">
-          WebGPU not available — use <code className="mx-1">?renderer=webgl2</code> or <code className="mx-1">?renderer=html</code>
-        </div>
-      )}
       {!useHTML && useWebGL2 && !webgl2Available && (
         <div className="error absolute inset-0 flex items-center justify-center bg-black/80 text-red-400 text-sm font-mono p-4">
           WebGL2 not available — use <code className="mx-1">?renderer=html</code>
