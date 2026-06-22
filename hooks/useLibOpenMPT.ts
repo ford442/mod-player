@@ -245,6 +245,10 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
   // Stabilize updateUI callback so startAudioPlayback always calls the latest version
   const updateUIRef = useRef<(() => void) | null>(null);
 
+  // RAF-loop kill switch: guards against a frame that is in-flight when stop/load
+  // is called from rescheduling itself and leaking a second updateUI loop.
+  const uiLoopActiveRef = useRef<boolean>(false);
+
   // Track if user has manually loaded a module (to prevent default from overwriting)
   const userModuleLoadedRef = useRef<boolean>(false);
 
@@ -321,25 +325,16 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
 
     console.log('[processModuleData] Processing module:', fileName, 'size:', fileData.byteLength);
 
-    // Always cancel any queued UI frame before loading a new module.
-    if (animationFrameHandle.current) {
-      cancelAnimationFrame(animationFrameHandle.current);
-      animationFrameHandle.current = 0;
-    }
+    // Perform a complete engine stop before loading the next module. This resets
+    // all timing/worklet refs, pauses any active native engine, disconnects the
+    // current AudioWorkletNode and clears its message handler so a stray late
+    // position report from the old module cannot corrupt the new module's state.
+    stopMusic(false);
 
-    // Use ref to check playing state to avoid dependency loop
-    if (isPlayingRef.current) {
-      console.log('[processModuleData] Stopping current playback');
-      isPlayingRef.current = false;
-      setIsPlaying(false);
-      if (audioContextRef.current) {
-        try { audioContextRef.current.suspend(); } catch { /* ignore */ }
-      }
-      if (audioWorkletNodeRef.current) {
-        try { audioWorkletNodeRef.current.disconnect(); } catch { /* ignore */ }
-        audioWorkletNodeRef.current = null;
-      }
-    }
+    // Mark UI as loading and clear stale playhead/fraction state so the display
+    // doesn't briefly snap to the previous module's position.
+    setIsModuleLoaded(false);
+    setPlaybackRowFraction(0);
 
     // Cleanup previous main-thread module (e.g. from prior ScriptProcessor fallback)
     if (currentModulePtr.current !== 0) {
@@ -481,6 +476,11 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
   const updateUI = useCallback(() => {
     // Use ref so this callback always sees the current isPlaying state
     if (!isPlayingRef.current) return;
+
+    // Mark the loop as active so this frame can reschedule itself. If stop/load
+    // runs while we are mid-frame, it will clear this flag and the reschedule
+    // below will be skipped, preventing leaked RAF loops.
+    uiLoopActiveRef.current = true;
 
     const lib = libopenmptRef.current;
     const modPtr = currentModulePtr.current;
@@ -679,7 +679,10 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
     }));
 
     lastUpdateTimeRef.current = performance.now() / 1000;
-    animationFrameHandle.current = requestAnimationFrame(updateUI);
+    // Only reschedule if stop/load hasn't killed the loop while we were running.
+    if (uiLoopActiveRef.current) {
+      animationFrameHandle.current = requestAnimationFrame(updateUI);
+    }
   }, [isPlaying, activeEngine, sequencerMatrix, kickTrigger, grooveAmount]);
 
   // Keep updateUIRef always pointing to the latest updateUI so
@@ -689,6 +692,8 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
   const stopMusic = useCallback((destroy: boolean = false) => {
     isPlayingRef.current = false;
     setIsPlaying(false);
+    // Prevent any in-flight updateUI frame from rescheduling itself.
+    uiLoopActiveRef.current = false;
     if (animationFrameHandle.current) cancelAnimationFrame(animationFrameHandle.current);
 
     // Pause native engine if active
@@ -700,8 +705,14 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
       audioContextRef.current.suspend();
     }
 
+    // Gracefully stop the old worklet before disconnecting: pause it so it stops
+    // rendering/posting, and detach the message handler so any late position
+    // reports from the previous module cannot overwrite the new module's state.
     if (audioWorkletNodeRef.current) {
-      audioWorkletNodeRef.current.disconnect();
+      const oldNode = audioWorkletNodeRef.current;
+      try { oldNode.port.postMessage({ type: 'pause' }); } catch { /* ignore */ }
+      try { oldNode.port.onmessage = null; } catch { /* ignore */ }
+      try { oldNode.disconnect(); } catch { /* ignore */ }
       audioWorkletNodeRef.current = null;
     }
 
@@ -737,6 +748,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
     workletSpeedRef.current = 6;
     workletRowsPerSecRef.current = rowsPerSecondFromBpm(125);
     workletPositionSampleRef.current = null;
+    workletBpmRef.current = 125;
     if (destroy) {
       setInstrumentNames([]);
       setModuleComments('');

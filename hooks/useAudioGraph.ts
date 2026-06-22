@@ -152,10 +152,15 @@ export async function startAudioPlayback(
       refs.analyserRef.current.smoothingTimeConstant = 0.8;
     }
 
-    // Disconnect previous source
+    // Disconnect previous source. Pause the old processor and detach its handler
+    // first so a late position report from the previous module cannot corrupt the
+    // new module's playhead state.
     if (refs.audioWorkletNodeRef.current) {
       console.log('[PLAY] Disconnecting previous AudioWorkletNode...');
-      refs.audioWorkletNodeRef.current.disconnect();
+      const oldNode = refs.audioWorkletNodeRef.current;
+      try { oldNode.port.postMessage({ type: 'pause' }); } catch { /* ignore */ }
+      try { oldNode.port.onmessage = null; } catch { /* ignore */ }
+      try { oldNode.disconnect(); } catch { /* ignore */ }
       refs.audioWorkletNodeRef.current = null;
     }
 
@@ -553,6 +558,8 @@ export async function startAudioPlayback(
                 && !refs.spFallbackTriggered.current) {
               refs.spFallbackTriggered.current = true;
               console.warn('[PLAY] Worklet WASM init failed — falling back to ScriptProcessorNode');
+              try { node.port.postMessage({ type: 'pause' }); } catch (_e) { /* ignore */ }
+              try { node.port.onmessage = null; } catch (_e) { /* ignore */ }
               try { node.disconnect(); } catch (_e) { /* ignore */ }
               refs.audioWorkletNodeRef.current = null;
 
