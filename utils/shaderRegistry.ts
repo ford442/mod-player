@@ -217,6 +217,9 @@ export const SHADER_REGISTRY: Readonly<Record<string, ShaderMeta>> = {
 
   // ── v0.56 — three-emitter LED + per-instrument palette ────────────────────
   'patternv0.56.wgsl':  { ...C, bloomProfile: 'three-emitter' },
+
+  // ── v0.57 — three-emitter LED + per-step volume/velocity reactivity ───────
+  'patternv0.57.wgsl':  { ...C, bloomProfile: 'three-emitter' },
 };
 
 /** Look up metadata for a shader, or null if the filename is not registered. */

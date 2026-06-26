@@ -67,6 +67,7 @@ export const isLiteRecommendedShader = (shaderFile: string): boolean => {
 const HIGH_PRECISION_SHADER_MARKERS = [
   'v0.36', 'v0.37', 'v0.38', 'v0.39', 'v0.40', 'v0.42', 'v0.43', 'v0.44',
   'v0.45', 'v0.46', 'v0.47', 'v0.48', 'v0.49', 'v0.50', 'v0.50b', 'v0.51', 'v0.55',
+  'v0.56', 'v0.57',
 ] as const;
 
 export const usesHighPrecisionPacking = (shaderFile: string): boolean =>
