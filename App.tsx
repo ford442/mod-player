@@ -42,6 +42,7 @@ import {
 } from './utils/gpuPacking';
 import { generateInstrumentPalette, generateEmptyInstrumentPalette } from './utils/instrumentPalette';
 import { circularPageStart, overlayActualRow } from './utils/playheadPrediction';
+import { preserveWindowScroll } from './utils/scrollContainer';
 
 function App() {
   // Tier 1: global last-used shader — persisted across page reloads
@@ -130,6 +131,11 @@ function App() {
     workletLoadError,
     oscBufferRef,
   } = useLibOpenMPT(volume);
+
+  // Prevent incidental document scroll when playback starts (row-follow, layout shifts, etc.).
+  const playGuarded = useCallback(() => {
+    preserveWindowScroll(() => play());
+  }, [play]);
 
   // Headless Chrome / Playwright automation hooks (dev server + CI captures)
   useEffect(() => {
@@ -519,10 +525,10 @@ function App() {
 
   // Keyboard shortcuts — stable callbacks via useCallback
   const onKbdPlayPause = useCallback(() => {
-    if (isPlaying) { stopMusic(false); } else { play(); }
-  }, [isPlaying, stopMusic, play]);
+    if (isPlaying) { stopMusic(false); } else { playGuarded(); }
+  }, [isPlaying, stopMusic, playGuarded]);
 
-  const onKbdPlay = useCallback(() => { play(); }, [play]);
+  const onKbdPlay = useCallback(() => { playGuarded(); }, [playGuarded]);
   const onKbdPause = useCallback(() => { stopMusic(false); }, [stopMusic]);
 
   const onKbdSeekForward = useCallback(() => seekToStep(Math.floor(playbackRowFraction) + 1),
@@ -719,7 +725,7 @@ function App() {
         playbackRow={Math.floor(playbackRowFraction)}
         totalRows={totalPatternRows}
         moduleTitle={moduleMetadata?.title ?? null}
-        play={play}
+        play={playGuarded}
         stopMusic={stopMusic}
         seekToStep={seekToStep}
         setIsLooping={setIsLooping}
@@ -753,7 +759,7 @@ function App() {
         pan={pan}
         isLooping={isLooping}
         totalPatternRows={totalPatternRows}
-        play={play}
+        play={playGuarded}
         stopMusic={stopMusic}
         seekToStep={seekToStep}
         setIsLooping={setIsLooping}
@@ -830,7 +836,7 @@ function App() {
       pan={pan}
       isLooping={isLooping}
       totalPatternRows={totalPatternRows}
-      play={play}
+      play={playGuarded}
       stopMusic={stopMusic}
       seekToStep={seekToStep}
       setIsLooping={setIsLooping}

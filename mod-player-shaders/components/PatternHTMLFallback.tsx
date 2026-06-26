@@ -3,6 +3,7 @@
 
 import React, { useEffect, useRef, useCallback } from 'react';
 import { PatternMatrix, ChannelShadowState } from '../types';
+import { scrollContainerToCenter } from '../../utils/scrollContainer';
 
 interface PatternHTMLFallbackProps {
   matrix: PatternMatrix | null;
@@ -52,13 +53,14 @@ export const PatternHTMLFallback: React.FC<PatternHTMLFallbackProps> = ({
   const numChannels = matrix?.numChannels ?? DEFAULT_CHANNELS;
   const rows = matrix?.rows ?? [];
 
-  // Scroll to keep playhead visible
+  // Scroll to keep playhead visible within the fallback container only.
   useEffect(() => {
-    if (!containerRef.current || !isPlaying) return;
-    
-    const rowElement = containerRef.current.querySelector(`[data-row="${Math.floor(playheadRow)}"]`);
-    if (rowElement) {
-      rowElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    const container = containerRef.current;
+    if (!container || !isPlaying) return;
+
+    const rowElement = container.querySelector(`[data-row="${Math.floor(playheadRow)}"]`);
+    if (rowElement instanceof HTMLElement) {
+      scrollContainerToCenter(container, rowElement);
     }
   }, [playheadRow, isPlaying]);
 
@@ -74,6 +76,7 @@ export const PatternHTMLFallback: React.FC<PatternHTMLFallbackProps> = ({
         width: '100%',
         height: '100%',
         overflow: 'auto',
+        overflowAnchor: 'none',
         backgroundColor: '#0a0a0c',
         fontFamily: 'monospace',
         fontSize: '12px',

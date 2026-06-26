@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useMemo, memo, forwardRef } from 'react';
 import type { PatternMatrix, PatternCell } from '../types';
+import { scrollContainerToCenter } from '../utils/scrollContainer';
 
 interface PatternViewerProps {
   matrix: PatternMatrix | null;
@@ -128,10 +129,13 @@ export const PatternViewer: React.FC<PatternViewerProps> = ({
 
   const displayChannels = Math.min(numChannels, MAX_INLINE_CHANNELS);
 
-  // Auto-scroll to keep current row centered
+  // Auto-scroll to keep current row centered within the list container only.
   useEffect(() => {
-    if (!isPlaying || !currentRowRef.current || !containerRef.current) return;
-    currentRowRef.current.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    if (!isPlaying) return;
+    const container = containerRef.current;
+    const row = currentRowRef.current;
+    if (!container || !row) return;
+    scrollContainerToCenter(container, row);
   }, [currentRow, isPlaying]);
 
   const rowRange = useMemo(() => {
@@ -185,7 +189,7 @@ export const PatternViewer: React.FC<PatternViewerProps> = ({
       {/* Pattern rows */}
       <div
         ref={containerRef}
-        className="overflow-y-auto overflow-x-auto font-mono text-xs leading-5"
+        className="overflow-y-auto overflow-x-auto font-mono text-xs leading-5 [overflow-anchor:none]"
         style={{ maxHeight: `${VISIBLE_ROWS * 1.25 + 1}rem` }}
       >
         {Array.from({ length: rowRange.end - rowRange.start }, (_, i) => {

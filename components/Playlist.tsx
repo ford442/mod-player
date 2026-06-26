@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
+import { scrollContainerToNearest } from '../utils/scrollContainer';
 
 export interface PlaylistItem {
   id: string;
@@ -41,12 +42,12 @@ export const Playlist: React.FC<PlaylistProps> = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
-  // Auto-scroll to current item
+  // Auto-scroll to current item within the playlist container only.
   useEffect(() => {
-    if (listRef.current && currentIndex >= 0) {
-      const el = listRef.current.children[currentIndex] as HTMLElement | undefined;
-      el?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-    }
+    const container = listRef.current;
+    if (!container || currentIndex < 0) return;
+    const el = container.children[currentIndex] as HTMLElement | undefined;
+    if (el) scrollContainerToNearest(container, el);
   }, [currentIndex]);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
@@ -132,7 +133,7 @@ export const Playlist: React.FC<PlaylistProps> = ({
       />
 
       {/* List */}
-      <div ref={listRef} className="max-h-48 overflow-y-auto pattern-scrollbar">
+      <div ref={listRef} className="max-h-48 overflow-y-auto pattern-scrollbar [overflow-anchor:none]">
         {items.length === 0 ? (
           <div className="px-4 py-6 text-center text-gray-500">
             {isDragOver ? 'Drop files here...' : 'Drag & drop module files here'}

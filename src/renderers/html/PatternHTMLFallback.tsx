@@ -39,7 +39,7 @@ export const PatternHTMLFallback: React.FC<PatternHTMLFallbackProps> = ({
   }, []);
 
   return (
-    <div className="pattern-html-fallback w-full h-full overflow-auto bg-[#0a0a0c] p-2">
+    <div className="pattern-html-fallback w-full h-full overflow-auto [overflow-anchor:none] bg-[#0a0a0c] p-2">
       <PatternSequencer
         matrix={matrix}
         currentRow={Math.floor(playheadRow)}
