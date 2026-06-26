@@ -3,8 +3,10 @@
 # COOP/COEP match Vite dev (credentialless) so WASM workers and CDN libopenmpt load.
 
 <IfModule mod_headers.c>
+  # Parent vhost may set require-corp; unset so credentialless wins (CDN libopenmpt, esm.sh).
+  Header always unset Cross-Origin-Embedder-Policy
   Header set Cross-Origin-Opener-Policy "same-origin"
-  Header set Cross-Origin-Embedder-Policy "credentialless"
+  Header always set Cross-Origin-Embedder-Policy "credentialless"
 
   <FilesMatch "\.css$">
     Header set Content-Type "text/css; charset=utf-8"
