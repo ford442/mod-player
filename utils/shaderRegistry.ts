@@ -100,6 +100,17 @@ export const SHADER_REGISTRY: Readonly<Record<string, ShaderMeta>> = {
     supportsStepsLength: false,
     bloomProfile: null,
   },
+  'patternv0.30b.wgsl': {
+    extendedLayout: true,
+    circular: false,
+    layoutMode: 'circular',
+    background: 'chassisv0.1.wgsl',
+    alphaBlending: false,
+    webglHybrid: false,
+    singlePassComposite: false,
+    supportsStepsLength: false,
+    bloomProfile: null,
+  },
   'patternv0.35_bloom.wgsl': {
     extendedLayout: true,
     circular: true,

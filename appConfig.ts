@@ -27,6 +27,7 @@ export const SHADER_GROUPS = {
     { id: 'patternv0.38.wgsl', label: 'v0.38 (Glass)' },
     { id: 'patternv0.35_bloom.wgsl', label: 'v0.35 (Bloom)' },
     { id: 'patternv0.30.wgsl', label: 'v0.30 (Disc)' },
+    { id: 'patternv0.30b.wgsl', label: 'v0.30b (Disc Playhead)' },
   ],
   VIDEO: [
     { id: 'patternv0.23.wgsl', label: 'v0.23 (Clouds)' },

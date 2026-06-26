@@ -12,6 +12,8 @@ import {
   getBackgroundShaderFile,
   shouldEnableAlphaBlending,
   supportsStepsLength,
+  usesHighPrecisionPacking,
+  usesPlayheadRowAsFloat,
 } from '../utils/shaderVersion';
 import { getShaderMeta, getLiteRecommendedShader } from '../utils/shaderRegistry';
 import {
@@ -410,7 +412,7 @@ export function useWebGPURender(
         });
 
         const p = renderParamsRef.current;
-        const isHighPrec = activeShaderFile.includes('v0.36') || activeShaderFile.includes('v0.37') || activeShaderFile.includes('v0.38') || activeShaderFile.includes('v0.39') || activeShaderFile.includes('v0.40') || activeShaderFile.includes('v0.42') || activeShaderFile.includes('v0.43') || activeShaderFile.includes('v0.44') || activeShaderFile.includes('v0.45') || activeShaderFile.includes('v0.46') || activeShaderFile.includes('v0.47') || activeShaderFile.includes('v0.48') || activeShaderFile.includes('v0.49') || activeShaderFile.includes('v0.50') || activeShaderFile.includes('v0.51') || activeShaderFile.includes('v0.55') || activeShaderFile.includes('v0.56') || activeShaderFile.includes('v0.57');
+        const isHighPrec = usesHighPrecisionPacking(activeShaderFile);
 
         // DURA-001: initialize compute pipeline for high-precision shaders
         if (isHighPrec && !computeStateRef.current) {
@@ -535,7 +537,7 @@ export function useWebGPURender(
     bindGroupRef.current = null;
     renderFrameCountRef.current = 0;
     if (cellsBufferRef.current) cellsBufferRef.current.destroy();
-    const isHighPrec = shaderFile.includes('v0.36') || shaderFile.includes('v0.37') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.47') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49') || shaderFile.includes('v0.50') || shaderFile.includes('v0.51') || shaderFile.includes('v0.56') || shaderFile.includes('v0.57');
+    const isHighPrec = usesHighPrecisionPacking(shaderFile);
 
     const useCompute = !liteMode && isHighPrec && computeStateRef.current && canUseComputePath(p.matrix);
     if (useCompute) {
@@ -730,7 +732,7 @@ export function useWebGPURender(
       const uniformByteLength = fillUniformPayload(layoutTypeRef.current, {
         numRows: visibleRows, numChannels,
         playheadRow: tickRow,
-        playheadRowAsFloat: shaderFile.includes('v0.21') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.47') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49') || shaderFile.includes('v0.50') || shaderFile.includes('v0.51') || shaderFile.includes('v0.55') || shaderFile.includes('v0.56') || shaderFile.includes('v0.57'),
+        playheadRowAsFloat: usesPlayheadRowAsFloat(shaderFile),
         isPlaying: p.isPlaying,
         cellW: effectiveCellW, cellH: effectiveCellH,
         canvasW: actualCanvasW, canvasH: actualCanvasH,
