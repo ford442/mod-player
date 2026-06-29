@@ -1,5 +1,5 @@
 // patternv0.30b.wgsl
-// v0.30 chrome disc aesthetic + v0.45b playhead-scrolled sustain (DURA/TRIG-001)
+// v0.30 chrome disc aesthetic + trigger-only note-on indicators with persistent glow (DURA/TRIG-001)
 
 struct Uniforms {
   numRows: u32,
@@ -28,10 +28,9 @@ const NOTE_MIN: u32     = 1u;
 const NOTE_MAX: u32     = 119u;
 const NOTE_OFF_MIN: u32 = 120u;
 
-// Sustain tuning (v0.45b)
-const SUSTAIN_GLOW: f32        = 0.45;
+// Sustain tuning — trigger cells stay lit for full note duration
 const TRIGGER_FLASH_BOOST: f32 = 1.4;
-const NOTE_AGE_TOLERANCE: f32  = 0.5;
+const NOTE_AGE_TOLERANCE: f32  = 0.6;
 const MIN_FADE_ROWS: f32       = 2.0;
 const MAX_FADE_ROWS: f32       = 6.0;
 const FADE_WINDOW_PCT: f32     = 0.30;
@@ -296,37 +295,37 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     let ch = channels[in.channel];
     let isMuted = (ch.isMuted == 1u);
 
-    // Playhead-scrolled sustain (v0.45b logic)
-    var sustainGlow = 0.0;
+    // Trigger-only persistent note-on (no duration-fill lines on sustain steps)
     var isTrigger = false;
-    var isSustain = false;
+    var noteActive = false;
+    var noteFade = 1.0;
 
     if (hasNote) {
       let dInfo = unpackDurationInfo(in.packedA, in.packedB);
       let isRealNoteOff = dInfo.isNoteOff || note >= NOTE_OFF_MIN;
       isTrigger = dInfo.isTrigger && !isRealNoteOff;
-      isSustain = dInfo.rowOffset > 0u && !isRealNoteOff && !dInfo.isTrigger;
 
-      let durationF = f32(dInfo.duration);
-      let noteRelativeAge = delta + f32(dInfo.rowOffset);
-      let isCurrentNote = abs(noteRelativeAge - ch.noteAge) < NOTE_AGE_TOLERANCE;
+      if (isTrigger) {
+        let durationF = f32(dInfo.duration);
+        let noteRelativeAge = delta + f32(dInfo.rowOffset);
+        noteActive = (noteRelativeAge >= 0.0 && noteRelativeAge < durationF) &&
+                     (abs(noteRelativeAge - ch.noteAge) < NOTE_AGE_TOLERANCE);
 
-      if ((isTrigger || isSustain) && durationF > 0.0 && noteRelativeAge >= 0.0 && noteRelativeAge < durationF && isCurrentNote) {
-        sustainGlow = select(1.0, SUSTAIN_GLOW, isSustain);
-
-        let fadeWindow = clamp(durationF * FADE_WINDOW_PCT, MIN_FADE_ROWS, MAX_FADE_ROWS);
-        let fadeStart = durationF - fadeWindow;
-        if (noteRelativeAge > fadeStart) {
-          let fadeT = (noteRelativeAge - fadeStart) / fadeWindow;
-          sustainGlow *= smoothstep(1.0, 0.0, fadeT);
+        if (noteActive && durationF > 0.0) {
+          let fadeWindow = clamp(durationF * FADE_WINDOW_PCT, MIN_FADE_ROWS, MAX_FADE_ROWS);
+          let fadeStart = durationF - fadeWindow;
+          if (noteRelativeAge > fadeStart) {
+            let fadeT = (noteRelativeAge - fadeStart) / fadeWindow;
+            noteFade = smoothstep(1.0, 0.0, fadeT);
+          }
         }
       }
     }
 
-    // COMPONENT 1: ACTIVITY LIGHT — only when note is actively sounding
+    // COMPONENT 1: ACTIVITY LIGHT — lit while this trigger's note is sounding
     let topUV = btnUV - vec2(0.5, 0.16);
     let topSize = vec2(0.20, 0.20);
-    let topActive = (sustainGlow > 0.0 || (isTrigger && ch.trigger > 0u && abs(delta) < 0.5)) && !isMuted;
+    let topActive = (isTrigger && noteActive && !isMuted);
     let topColor = vec3(0.0, 0.9, 1.0);
 
     let topLed = drawChromeIndicator(topUV, topSize, topColor, topActive, aa);
@@ -335,28 +334,25 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
       finalColor += topColor * topLed.a * 0.5;
     }
 
-    // COMPONENT 2: MAIN NOTE LIGHT
+    // COMPONENT 2: MAIN NOTE LIGHT — trigger cells only, persistent for note duration
     let mainUV = btnUV - vec2(0.5, 0.5);
     let mainSize = vec2(0.55, 0.45);
 
     var noteColor = vec3(0.2);
     var lightAmount = 0.0;
 
-    if (hasNote) {
+    if (isTrigger && noteActive) {
       let pitchHue = pitchClassFromNote(note);
       let baseColor = neonPalette(pitchHue);
       let instBand = inst & 15u;
       let instBright = 0.8 + (select(0.0, f32(instBand) / 15.0, instBand > 0u)) * 0.2;
       noteColor = baseColor * instBright;
 
-      lightAmount = sustainGlow * 0.85;
+      lightAmount = 0.92 * noteFade;
 
-      // Trigger flash at playhead only
-      if (isTrigger && abs(delta) < 0.5) {
-        lightAmount += TRIGGER_FLASH_BOOST * 0.35;
-        if (ch.trigger > 0u) {
-          lightAmount += TRIGGER_FLASH_BOOST * 0.45 * clamp(ch.volume, 0.0, 1.2);
-        }
+      // Extra flash when playhead hits the starting step
+      if (abs(delta) < 0.5 && ch.trigger > 0u) {
+        lightAmount += TRIGGER_FLASH_BOOST * 0.6 * clamp(ch.volume, 0.0, 1.2);
       }
 
       if (isMuted) { lightAmount *= 0.2; }
@@ -392,11 +388,6 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
 
     let botLed = drawChromeIndicator(botUV, botSize, effColor, isEffOn, aa);
     finalColor = mix(finalColor, botLed.rgb, botLed.a);
-
-    // COMPONENT 4: PLAYHEAD GLANCE
-    if (onPlayhead) {
-      finalColor += vec3(0.15, 0.2, 0.25) * housingMask * 0.4;
-    }
   }
 
   if (housingMask < 0.5) {
