@@ -298,8 +298,10 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     let ch = channels[in.channel];
     let isMuted = (ch.isMuted == 1u);
 
-    // Trigger-only: dim idle preview + steady active glow on the sounding note
+    // Note activity: trigger + sustain rows share duration tracking; main pad stays trigger-only
     var isTrigger = false;
+    var isSustain = false;
+    var isNoteActive = false;
     var isSounding = false;
     var noteFade = 1.0;
 
@@ -307,33 +309,34 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
       let dInfo = unpackDurationInfo(in.packedA, in.packedB);
       let isRealNoteOff = dInfo.isNoteOff || note >= NOTE_OFF_MIN;
       isTrigger = dInfo.isTrigger && !isRealNoteOff;
+      isSustain = dInfo.rowOffset > 0u && !isRealNoteOff && !dInfo.isTrigger;
 
-      if (isTrigger) {
+      if (isTrigger || isSustain) {
         let durationF = f32(dInfo.duration);
-        let triggerAge = delta + f32(dInfo.rowOffset);
+        let noteRelativeAge = delta + f32(dInfo.rowOffset);
 
-        // Hardware choke: only the channel's current note-on row sustains (integer-stable match)
-        let ageMatch = abs(triggerAge - ch.noteAge) < NOTE_AGE_TOLERANCE;
-        let withinLife = triggerAge >= 0.0 && triggerAge < durationF;
+        let ageMatch = abs(noteRelativeAge - ch.noteAge) < NOTE_AGE_TOLERANCE;
+        let withinLife = noteRelativeAge >= 0.0 && noteRelativeAge < durationF;
         let channelLive = ch.noteAge < 999.0;
-        isSounding = (uniforms.isPlaying == 1u) && withinLife && ageMatch && channelLive;
+        isNoteActive = (uniforms.isPlaying == 1u) && withinLife && ageMatch && channelLive;
+        isSounding = isTrigger && isNoteActive;
 
-        if (isSounding && durationF > 0.0) {
+        if (isNoteActive && durationF > 0.0) {
           let fadeWindow = clamp(durationF * FADE_WINDOW_PCT, MIN_FADE_ROWS, MAX_FADE_ROWS);
           let fadeStart = durationF - fadeWindow;
-          if (triggerAge > fadeStart) {
-            let fadeT = (triggerAge - fadeStart) / fadeWindow;
+          if (noteRelativeAge > fadeStart) {
+            let fadeT = (noteRelativeAge - fadeStart) / fadeWindow;
             noteFade = smoothstep(1.0, 0.0, fadeT);
           }
         }
       }
     }
 
-    // COMPONENT 1: ACTIVITY LIGHT — cyan only on trigger cells that are currently sounding
-    if (isTrigger) {
+    // COMPONENT 1: ACTIVITY LIGHT — cyan on trigger + sustain rows for full note duration
+    if (isTrigger || isSustain) {
       let topUV = btnUV - vec2(0.5, 0.16);
       let topSize = vec2(0.20, 0.20);
-      let topActive = isSounding && !isMuted;
+      let topActive = isNoteActive && !isMuted;
       let topColor = vec3(0.0, 0.9, 1.0);
 
       let topLed = drawChromeIndicator(topUV, topSize, topColor, topActive, aa);
