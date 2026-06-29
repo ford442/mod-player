@@ -203,6 +203,8 @@ fn drawChromeIndicator(
 
     var col = vec3<f32>(0.0);
     var alpha = 0.0;
+    let offLens = vec3<f32>(0.06, 0.07, 0.09);
+    let lensColor = select(offLens, color, isOn);
 
     if (dist < bezelR) {
         if (dist > lensR) {
@@ -220,12 +222,12 @@ fn drawChromeIndicator(
             let reflectDir = reflect(-lightDir, normal);
             let specular = pow(max(0.0, dot(reflectDir, vec3<f32>(0.0, 0.0, 1.0))), 10.0);
 
-            let baseColor = color;
+            let baseColor = lensColor;
             col = baseColor * (0.5 + 0.8 * diffuse);
-            col += vec3<f32>(1.0) * specular * 0.5;
+            col += vec3<f32>(1.0) * specular * select(0.12, 0.5, isOn);
 
             let rimGlow = exp(-pow(lensNormR, 2.0) * 6.0);
-            col += baseColor * rimGlow * 0.25;
+            col += baseColor * rimGlow * select(0.04, 0.25, isOn);
             alpha = 1.0;
         }
     } else {
@@ -327,16 +329,18 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
       }
     }
 
-    // COMPONENT 1: ACTIVITY LIGHT — cyan only on the one currently-sounding trigger
-    let topUV = btnUV - vec2(0.5, 0.16);
-    let topSize = vec2(0.20, 0.20);
-    let topActive = isSounding && !isMuted;
-    let topColor = vec3(0.0, 0.9, 1.0);
+    // COMPONENT 1: ACTIVITY LIGHT — cyan only on trigger cells that are currently sounding
+    if (isTrigger) {
+      let topUV = btnUV - vec2(0.5, 0.16);
+      let topSize = vec2(0.20, 0.20);
+      let topActive = isSounding && !isMuted;
+      let topColor = vec3(0.0, 0.9, 1.0);
 
-    let topLed = drawChromeIndicator(topUV, topSize, topColor, topActive, aa);
-    finalColor = mix(finalColor, topLed.rgb, topLed.a);
-    if (topActive) {
-      finalColor += topColor * topLed.a * 0.5;
+      let topLed = drawChromeIndicator(topUV, topSize, topColor, topActive, aa);
+      finalColor = mix(finalColor, topLed.rgb, topLed.a);
+      if (topActive) {
+        finalColor += topColor * topLed.a * 0.5;
+      }
     }
 
     // COMPONENT 2: MAIN NOTE LIGHT — dim pitch preview on all triggers, bright when sounding
