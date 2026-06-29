@@ -28,9 +28,10 @@ const NOTE_MIN: u32     = 1u;
 const NOTE_MAX: u32     = 119u;
 const NOTE_OFF_MIN: u32 = 120u;
 
-// Sustain tuning — trigger cells stay lit for full note duration
-const TRIGGER_FLASH_BOOST: f32 = 1.4;
-const NOTE_AGE_TOLERANCE: f32  = 0.6;
+// Note-on lighting — trigger cells only, steady persistent glow
+const IDLE_NOTE_GLOW: f32    = 0.22;
+const ACTIVE_NOTE_GLOW: f32    = 0.88;
+const NOTE_AGE_TOLERANCE: f32  = 1.25;
 const MIN_FADE_ROWS: f32       = 2.0;
 const MAX_FADE_ROWS: f32       = 6.0;
 const FADE_WINDOW_PCT: f32     = 0.30;
@@ -295,9 +296,9 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     let ch = channels[in.channel];
     let isMuted = (ch.isMuted == 1u);
 
-    // Trigger-only persistent note-on (no duration-fill lines on sustain steps)
+    // Trigger-only: dim idle preview + steady active glow on the sounding note
     var isTrigger = false;
-    var noteActive = false;
+    var isSounding = false;
     var noteFade = 1.0;
 
     if (hasNote) {
@@ -306,26 +307,30 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
       isTrigger = dInfo.isTrigger && !isRealNoteOff;
 
       if (isTrigger) {
-        let durationF = f32(dInfo.duration);
-        let noteRelativeAge = delta + f32(dInfo.rowOffset);
-        noteActive = (noteRelativeAge >= 0.0 && noteRelativeAge < durationF) &&
-                     (abs(noteRelativeAge - ch.noteAge) < NOTE_AGE_TOLERANCE);
+        durationF = f32(dInfo.duration);
+        triggerAge = delta + f32(dInfo.rowOffset);
 
-        if (noteActive && durationF > 0.0) {
+        // Hardware choke: only the channel's current note-on row sustains (integer-stable match)
+        let ageMatch = abs(triggerAge - ch.noteAge) < NOTE_AGE_TOLERANCE;
+        let withinLife = triggerAge >= 0.0 && triggerAge < durationF;
+        let channelLive = ch.noteAge < 999.0;
+        isSounding = (uniforms.isPlaying == 1u) && withinLife && ageMatch && channelLive;
+
+        if (isSounding && durationF > 0.0) {
           let fadeWindow = clamp(durationF * FADE_WINDOW_PCT, MIN_FADE_ROWS, MAX_FADE_ROWS);
           let fadeStart = durationF - fadeWindow;
-          if (noteRelativeAge > fadeStart) {
-            let fadeT = (noteRelativeAge - fadeStart) / fadeWindow;
+          if (triggerAge > fadeStart) {
+            let fadeT = (triggerAge - fadeStart) / fadeWindow;
             noteFade = smoothstep(1.0, 0.0, fadeT);
           }
         }
       }
     }
 
-    // COMPONENT 1: ACTIVITY LIGHT — lit while this trigger's note is sounding
+    // COMPONENT 1: ACTIVITY LIGHT — cyan only on the one currently-sounding trigger
     let topUV = btnUV - vec2(0.5, 0.16);
     let topSize = vec2(0.20, 0.20);
-    let topActive = (isTrigger && noteActive && !isMuted);
+    let topActive = isSounding && !isMuted;
     let topColor = vec3(0.0, 0.9, 1.0);
 
     let topLed = drawChromeIndicator(topUV, topSize, topColor, topActive, aa);
@@ -334,28 +339,27 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
       finalColor += topColor * topLed.a * 0.5;
     }
 
-    // COMPONENT 2: MAIN NOTE LIGHT — trigger cells only, persistent for note duration
+    // COMPONENT 2: MAIN NOTE LIGHT — dim pitch preview on all triggers, bright when sounding
     let mainUV = btnUV - vec2(0.5, 0.5);
     let mainSize = vec2(0.55, 0.45);
 
     var noteColor = vec3(0.2);
     var lightAmount = 0.0;
 
-    if (isTrigger && noteActive) {
+    if (isTrigger) {
       let pitchHue = pitchClassFromNote(note);
       let baseColor = neonPalette(pitchHue);
       let instBand = inst & 15u;
       let instBright = 0.8 + (select(0.0, f32(instBand) / 15.0, instBand > 0u)) * 0.2;
       noteColor = baseColor * instBright;
 
-      lightAmount = 0.92 * noteFade;
-
-      // Extra flash when playhead hits the starting step
-      if (abs(delta) < 0.5 && ch.trigger > 0u) {
-        lightAmount += TRIGGER_FLASH_BOOST * 0.6 * clamp(ch.volume, 0.0, 1.2);
+      if (isSounding) {
+        lightAmount = ACTIVE_NOTE_GLOW * noteFade;
+      } else {
+        lightAmount = IDLE_NOTE_GLOW;
       }
 
-      if (isMuted) { lightAmount *= 0.2; }
+      if (isMuted) { lightAmount *= 0.35; }
     } else if (note >= NOTE_OFF_MIN) {
       // Brief neutral pulse on note-off row at playhead
       if (abs(delta) < 0.5) {
