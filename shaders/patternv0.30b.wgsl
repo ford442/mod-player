@@ -28,13 +28,13 @@ const NOTE_MIN: u32     = 1u;
 const NOTE_MAX: u32     = 119u;
 const NOTE_OFF_MIN: u32 = 120u;
 
-// Note-on lighting — trigger cells only, steady persistent glow
-const IDLE_NOTE_GLOW: f32    = 0.22;
-const ACTIVE_NOTE_GLOW: f32    = 0.88;
-const NOTE_AGE_TOLERANCE: f32  = 1.25;
-const MIN_FADE_ROWS: f32       = 2.0;
-const MAX_FADE_ROWS: f32       = 6.0;
-const FADE_WINDOW_PCT: f32     = 0.30;
+// Note-on lighting — trigger cells only; instant on, fade-out at end
+const IDLE_NOTE_GLOW: f32      = 0.22;
+const ACTIVE_NOTE_GLOW: f32      = 0.88;
+const NOTE_AGE_TOLERANCE: f32    = 1.25;
+const MIN_FADE_ROWS: f32         = 2.0;
+const MAX_FADE_ROWS: f32         = 6.0;
+const FADE_WINDOW_PCT: f32       = 0.30;
 
 @group(0) @binding(0) var<storage, read> cells: array<u32>;
 @group(0) @binding(1) var<uniform> uniforms: Uniforms;
@@ -298,43 +298,52 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     let ch = channels[in.channel];
     let isMuted = (ch.isMuted == 1u);
 
-    // Trigger-only: dim idle preview + steady active glow on the sounding note
+    // Note activity: trigger + sustain rows track the full sounding arc until note-off
     var isTrigger = false;
+    var isSustain = false;
+    var isInSoundingArc = false;
     var isSounding = false;
-    var noteFade = 1.0;
+    var noteFadeOut = 1.0;
 
     if (hasNote) {
       let dInfo = unpackDurationInfo(in.packedA, in.packedB);
       let isRealNoteOff = dInfo.isNoteOff || note >= NOTE_OFF_MIN;
       isTrigger = dInfo.isTrigger && !isRealNoteOff;
+      isSustain = dInfo.rowOffset > 0u && !isRealNoteOff && !dInfo.isTrigger;
 
-      if (isTrigger) {
+      if (isTrigger || isSustain) {
         let durationF = f32(dInfo.duration);
-        let triggerAge = delta + f32(dInfo.rowOffset);
+        let noteRelativeAge = delta + f32(dInfo.rowOffset);
+        let cellOffset = f32(dInfo.rowOffset);
 
-        // Hardware choke: only the channel's current note-on row sustains (integer-stable match)
-        let ageMatch = abs(triggerAge - ch.noteAge) < NOTE_AGE_TOLERANCE;
-        let withinLife = triggerAge >= 0.0 && triggerAge < durationF;
+        let isCurrentNote = abs(noteRelativeAge - ch.noteAge) < NOTE_AGE_TOLERANCE;
         let channelLive = ch.noteAge < 999.0;
-        isSounding = (uniforms.isPlaying == 1u) && withinLife && ageMatch && channelLive;
+        let noteStillLive = ch.noteAge < durationF;
+        let cellInArc = cellOffset < durationF;
 
-        if (isSounding && durationF > 0.0) {
+        // Full arc (trigger + sustain) stays active from note-on through note-off
+        isInSoundingArc = (uniforms.isPlaying == 1u) && channelLive && noteStillLive &&
+                          cellInArc && isCurrentNote;
+        isSounding = isTrigger && isInSoundingArc;
+
+        // Fade-out only near note end — no fade-in
+        if (isInSoundingArc && durationF > 0.0) {
           let fadeWindow = clamp(durationF * FADE_WINDOW_PCT, MIN_FADE_ROWS, MAX_FADE_ROWS);
           let fadeStart = durationF - fadeWindow;
-          if (triggerAge > fadeStart) {
-            let fadeT = (triggerAge - fadeStart) / fadeWindow;
-            noteFade = smoothstep(1.0, 0.0, fadeT);
+          if (noteRelativeAge > fadeStart) {
+            let fadeT = (noteRelativeAge - fadeStart) / fadeWindow;
+            noteFadeOut = smoothstep(1.0, 0.0, fadeT);
           }
         }
       }
     }
 
-    // COMPONENT 1: ACTIVITY LIGHT — cyan only on trigger cells that are currently sounding
-    if (isTrigger) {
+    // COMPONENT 1: ACTIVITY LIGHT — cyan on trigger + sustain for full note, fade-out at end
+    if (isTrigger || isSustain) {
       let topUV = btnUV - vec2(0.5, 0.16);
       let topSize = vec2(0.20, 0.20);
-      let topActive = isSounding && !isMuted;
-      let topColor = vec3(0.0, 0.9, 1.0);
+      let topActive = isInSoundingArc && !isMuted && (noteFadeOut > 0.02);
+      let topColor = vec3(0.0, 0.9, 1.0) * noteFadeOut;
 
       let topLed = drawChromeIndicator(topUV, topSize, topColor, topActive, aa);
       finalColor = mix(finalColor, topLed.rgb, topLed.a);
@@ -358,7 +367,8 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
       noteColor = baseColor * instBright;
 
       if (isSounding) {
-        lightAmount = ACTIVE_NOTE_GLOW * noteFade;
+        // Snap to full brightness at note-on; only fade-out near note end
+        lightAmount = ACTIVE_NOTE_GLOW * noteFadeOut;
       } else {
         lightAmount = IDLE_NOTE_GLOW;
       }
