@@ -350,7 +350,7 @@ export function useWebGPURender(
           if (shaderFile.includes('v0.55')) {
             extendedEntries.push({ binding: 6, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'unfilterable-float' } });
           }
-          if (shaderFile.includes('v0.56')) {
+          if (shaderFile.includes('v0.52') || shaderFile.includes('v0.53') || shaderFile.includes('v0.54') || shaderFile.includes('v0.56')) {
             extendedEntries.push({ binding: 7, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float' } });
           }
           bindGroupLayout = device.createBindGroupLayout({ entries: extendedEntries });
@@ -369,7 +369,7 @@ export function useWebGPURender(
         const uniformSize = layoutType === 'extended' ? 132 : (layoutType === 'texture' ? 64 : 32);
         const uniformBuffer = device.createBuffer({ size: alignTo(uniformSize, 256), usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
 
-        if (shaderFile.includes('v0.56')) {
+        if (shaderFile.includes('v0.52') || shaderFile.includes('v0.53') || shaderFile.includes('v0.54') || shaderFile.includes('v0.56')) {
           const placeholder = generateEmptyInstrumentPalette();
           const texture = device.createTexture({
             size: [MAX_INSTRUMENT_PALETTE_SIZE, 1, 1],
@@ -661,7 +661,7 @@ export function useWebGPURender(
     const p = renderParamsRef.current;
 
     // Upload per-instrument palette texture when the module-derived palette changes.
-    if (shaderFile.includes('v0.56') && p.instrumentPalette && p.instrumentPalette !== instrumentPaletteVersionRef.current) {
+    if ((shaderFile.includes('v0.52') || shaderFile.includes('v0.53') || shaderFile.includes('v0.54') || shaderFile.includes('v0.56')) && p.instrumentPalette && p.instrumentPalette !== instrumentPaletteVersionRef.current) {
       instrumentPaletteTextureRef.current?.destroy();
       const texture = device.createTexture({
         size: [MAX_INSTRUMENT_PALETTE_SIZE, 1, 1],
@@ -719,7 +719,7 @@ export function useWebGPURender(
 
       let effectiveCellW = p.cellWidth;
       let effectiveCellH = p.cellHeight;
-      if (shaderFile.includes('v0.21') || shaderFile.includes('v0.40') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.47') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49') || shaderFile.includes('v0.50') || shaderFile.includes('v0.51') || shaderFile.includes('v0.55') || shaderFile.includes('v0.56') || shaderFile.includes('v0.57')) {
+      if (shaderFile.includes('v0.21') || shaderFile.includes('v0.40') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.47') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49') || shaderFile.includes('v0.50') || shaderFile.includes('v0.51') || shaderFile.includes('v0.52') || shaderFile.includes('v0.53') || shaderFile.includes('v0.54') || shaderFile.includes('v0.55') || shaderFile.includes('v0.56') || shaderFile.includes('v0.57')) {
         effectiveCellW = (GRID_RECT.w * actualCanvasW) / stepsCount;
         effectiveCellH = (GRID_RECT.h * actualCanvasH) / numChannels;
       } else if (shaderFile.includes('v0.39')) {
@@ -901,7 +901,7 @@ export function useWebGPURender(
     device.queue.submit([encoder.finish()]);
 
     // Update debug info - always update regardless of overlay state
-    const isOverlayActive = shaderFile.includes('v0.21') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.47') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49') || shaderFile.includes('v0.50') || shaderFile.includes('v0.51') || shaderFile.includes('v0.55') || shaderFile.includes('v0.56') || shaderFile.includes('v0.57');
+    const isOverlayActive = shaderFile.includes('v0.21') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.47') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49') || shaderFile.includes('v0.50') || shaderFile.includes('v0.51') || shaderFile.includes('v0.52') || shaderFile.includes('v0.53') || shaderFile.includes('v0.54') || shaderFile.includes('v0.55') || shaderFile.includes('v0.56') || shaderFile.includes('v0.57');
     const layoutModeName = isCircularLayoutShader(shaderFile) ? 'CIRCULAR (WebGPU)' :
       p.isHorizontal ? 'HORIZONTAL (WebGPU)' : 'STANDARD (WebGPU)';
     setDebugInfo((prev: DebugInfo) => ({

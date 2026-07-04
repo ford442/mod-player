@@ -66,8 +66,8 @@ export const isLiteRecommendedShader = (shaderFile: string): boolean => {
 /** Shaders that use packPatternMatrixHighPrecision (DURA + TRIG-001 trigger flag). */
 const HIGH_PRECISION_SHADER_MARKERS = [
   'v0.30b', 'v0.36', 'v0.37', 'v0.38', 'v0.39', 'v0.40', 'v0.42', 'v0.43', 'v0.44',
-  'v0.45', 'v0.46', 'v0.47', 'v0.48', 'v0.49', 'v0.50', 'v0.50b', 'v0.51', 'v0.55',
-  'v0.56', 'v0.57',
+  'v0.45', 'v0.46', 'v0.47', 'v0.48', 'v0.49', 'v0.50', 'v0.50b', 'v0.51', 'v0.52',
+  'v0.53', 'v0.54', 'v0.55', 'v0.56', 'v0.57',
 ] as const;
 
 export const usesHighPrecisionPacking = (shaderFile: string): boolean =>
@@ -89,5 +89,7 @@ export const usesPlayheadRowAsFloat = (shaderFile: string): boolean =>
   shaderFile.includes('v0.45') || shaderFile.includes('v0.46') ||
   shaderFile.includes('v0.47') || shaderFile.includes('v0.48') ||
   shaderFile.includes('v0.49') || shaderFile.includes('v0.50') ||
-  shaderFile.includes('v0.51') || shaderFile.includes('v0.55') ||
+  shaderFile.includes('v0.51') || shaderFile.includes('v0.52') ||
+  shaderFile.includes('v0.53') || shaderFile.includes('v0.54') ||
+  shaderFile.includes('v0.55') ||
   shaderFile.includes('v0.56') || shaderFile.includes('v0.57');

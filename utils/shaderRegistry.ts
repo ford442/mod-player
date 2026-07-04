@@ -226,6 +226,11 @@ export const SHADER_REGISTRY: Readonly<Record<string, ShaderMeta>> = {
   // ── v0.55 — three-emitter LED + oscilloscope trace ────────────────────────
   'patternv0.55.wgsl':  { ...C, bloomProfile: 'three-emitter-osc' },
 
+  // ── v0.52/v0.53/v0.54 — Night dark-theme circular three-emitter LED trio ───
+  'patternv0.52.wgsl':  { ...C, bloomProfile: 'three-emitter' },
+  'patternv0.53.wgsl':  { ...C, bloomProfile: 'three-emitter' },
+  'patternv0.54.wgsl':  { ...C, bloomProfile: 'three-emitter' },
+
   // ── v0.56 — three-emitter LED + per-instrument palette ────────────────────
   'patternv0.56.wgsl':  { ...C, bloomProfile: 'three-emitter' },
 
