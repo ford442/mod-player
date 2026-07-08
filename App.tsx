@@ -8,6 +8,7 @@ import { usePlaylist } from './hooks/usePlaylist';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { useLocalStorage } from './hooks/useLocalStorage';
 import { useLibrary, useSaveSong, useSyncLibrary } from './hooks/useLibrary';
+import { useLocalLibrary } from './hooks/useLocalLibrary';
 import { useRateShader } from './hooks/useRateShader';
 import { startProjectMBridge } from './utils/projectMBridge';
 import { fetchRemoteModule, inferFileNameFromUrl } from './utils/remoteMedia';
@@ -16,6 +17,7 @@ import { supportsStepsLength, isLiteRecommendedShader } from './utils/shaderVers
 import { getLiteRecommendedShader } from './utils/shaderRegistry';
 import { DEVICE_CAPABILITIES } from './utils/deviceCapabilities';
 import type { MediaItem } from './types';
+import type { LibraryEntry } from './types/localLibrary';
 import {
   DEFAULT_BLOOM_PRESET,
   DEFAULT_COLOR_SCHEME,
@@ -313,6 +315,7 @@ function App() {
   const [showMetadata, setShowMetadata] = useState<boolean>(true);
   const [showPlaylist, setShowPlaylist] = useState<boolean>(true);
   const [showLibraryBrowser, setShowLibraryBrowser] = useState<boolean>(false);
+  const [showLocalLibrary, setShowLocalLibrary] = useState<boolean>(false);
   const [debugPanelOpen, setDebugPanelOpen] = useLocalStorage<boolean>('xasm1.debugPanel.open', false);
   const [chassisDark, setChassisDark] = useLocalStorage<boolean>('xasm1_chassisDark', false);
   const [cheatsheetOpen, setCheatsheetOpen] = useState<boolean>(false);
@@ -320,6 +323,8 @@ function App() {
   const rateShaderMutation = useRateShader();
   const saveSongMutation = useSaveSong();
   const syncLibraryMutation = useSyncLibrary();
+  const localLibrary = useLocalLibrary();
+  const [activeLibraryEntryId, setActiveLibraryEntryId] = useState<string | null>(null);
 
   // Channel VU data (from worklet channelStates)
   const channelVU = useMemo(() => {
@@ -506,6 +511,14 @@ function App() {
     });
     loadFileWithHash(fileData, fileName);
   }, [loadFileWithHash, playlist]);
+
+  const handleLocalLibraryPlay = useCallback(async (entry: LibraryEntry) => {
+    const file = await localLibrary.resolveEntryFile(entry);
+    const data = new Uint8Array(await file.arrayBuffer());
+    loadFileWithHash(data, entry.fileName);
+    localLibrary.markPlayed(entry.id);
+    setActiveLibraryEntryId(entry.id);
+  }, [localLibrary.resolveEntryFile, localLibrary.markPlayed, loadFileWithHash]);
 
   // Sync pan with library
   useEffect(() => { setLibPan(pan); }, [pan, setLibPan]);
@@ -885,6 +898,21 @@ function App() {
       setShowPlaylist={setShowPlaylist}
       showLibraryBrowser={showLibraryBrowser}
       setShowLibraryBrowser={setShowLibraryBrowser}
+      showLocalLibrary={showLocalLibrary}
+      setShowLocalLibrary={setShowLocalLibrary}
+      localLibraryRoots={localLibrary.roots}
+      localLibraryLoading={localLibrary.isLoading}
+      localLibraryImporting={localLibrary.isImporting}
+      localLibraryImportProgress={localLibrary.importProgress}
+      localLibraryImportError={localLibrary.importError}
+      localLibraryFsAccessSupported={localLibrary.fsAccessSupported}
+      activeLibraryEntryId={activeLibraryEntryId}
+      onLocalLibraryImportFolder={() => void localLibrary.importFolder()}
+      onLocalLibraryImportWebkit={(files) => void localLibrary.importWebkitFiles(files)}
+      onLocalLibraryRescanRoot={(rootId) => void localLibrary.rescanRoot(rootId)}
+      onLocalLibraryRemoveRoot={(rootId) => void localLibrary.removeRoot(rootId)}
+      onLocalLibraryCancelImport={localLibrary.cancelImport}
+      onLocalLibraryPlay={handleLocalLibraryPlay}
       playlistItems={playlist.items}
       playlistCurrentIndex={playlist.currentIndex}
       playlistIsPlaying={isPlaying}

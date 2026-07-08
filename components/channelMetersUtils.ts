@@ -145,7 +145,8 @@ export function advanceChannelMeter(
   state.peakDb = peak.peakDb;
   state.holdUntil = peak.holdUntil;
 
-  const hot = updateHotIndicator(state.hotLatched, state.clearAt, smoothedDb, nowMs);
+  const hotLevelDb = Math.max(smoothedDb, instantDb);
+  const hot = updateHotIndicator(state.hotLatched, state.clearAt, hotLevelDb, nowMs);
   state.hotLatched = hot.hotLatched;
   state.clearAt = hot.clearAt;
 

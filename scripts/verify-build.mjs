@@ -16,13 +16,30 @@ const MIN_CSS_BYTES = Number(process.env.MIN_CSS_BYTES || 10000);
 const errors = [];
 
 function resolveAssetHref(href) {
-  let path = href;
-  const prefixes = [`/${PROJECT_NAME}/`, './', '/'];
-  for (const prefix of prefixes) {
-    if (path.startsWith(prefix)) {
-      path = path.slice(prefix.length);
-      break;
-    }
+  // Map index.html href to a path relative to dist/.
+  // Handles all common forms Vite (or post-processing) may emit when
+  // VITE_APP_BASE_PATH=/xm-player/ is active:
+  //   /xm-player/assets/...
+  //   xm-player/assets/...
+  //   ./xm-player/assets/...
+  //   ./assets/...
+  //   /assets/...
+  //   assets/...
+  let path = (href || '').trim();
+  // Strip leading ./ or / first
+  if (path.startsWith('./')) {
+    path = path.slice(2);
+  } else if (path.startsWith('/')) {
+    path = path.slice(1);
+  }
+  // Strip the project base prefix if present (handles "xm-player/..." variants)
+  const pfx = `${PROJECT_NAME}/`;
+  if (path.startsWith(pfx)) {
+    path = path.slice(pfx.length);
+  }
+  // Final safety strip of any remaining leading slash
+  if (path.startsWith('/')) {
+    path = path.slice(1);
   }
   return path;
 }

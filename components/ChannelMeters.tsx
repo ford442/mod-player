@@ -119,20 +119,19 @@ export const ChannelMeters: React.FC<ChannelMetersProps> = ({
       const frame = advanceChannelMeter(state, target, dtSec, nowMs);
       const levelNorm = dbToNormalized(frame.smoothedDb);
       const peakNorm = dbToNormalized(frame.peakDb);
-      const fillH = levelNorm * barH;
+      // At -60 dB floor (levelNorm === 0) still draw a 1-device-pixel sliver (R1).
+      const fillH = Math.max(levelNorm * barH, dpr);
 
       ctx.fillStyle = METER_BG;
       ctx.fillRect(x, 0, barW, barH);
 
-      if (fillH > 0) {
-        ctx.save();
-        ctx.beginPath();
-        ctx.rect(x, barH - fillH, barW, fillH);
-        ctx.clip();
-        ctx.fillStyle = applyDbGradient(ctx, x + barW / 2, 0, barH);
-        ctx.fillRect(x, 0, barW, barH);
-        ctx.restore();
-      }
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(x, barH - fillH, barW, fillH);
+      ctx.clip();
+      ctx.fillStyle = applyDbGradient(ctx, x + barW / 2, 0, barH);
+      ctx.fillRect(x, 0, barW, barH);
+      ctx.restore();
 
       if (peakNorm > 0) {
         const peakY = barH - peakNorm * barH;

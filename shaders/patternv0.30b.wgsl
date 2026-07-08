@@ -338,12 +338,12 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
       }
     }
 
-    // COMPONENT 1: ACTIVITY LIGHT — cyan on trigger + sustain for full note, fade-out at end
+    // COMPONENT 1: ACTIVITY LIGHT — cyan on trigger + sustain for full note, hard off at note end
     if (isTrigger || isSustain) {
       let topUV = btnUV - vec2(0.5, 0.16);
       let topSize = vec2(0.20, 0.20);
-      let topActive = isInSoundingArc && !isMuted && (noteFadeOut > 0.02);
-      let topColor = vec3(0.0, 0.9, 1.0) * noteFadeOut;
+      let topActive = isInSoundingArc && !isMuted;
+      let topColor = vec3(0.0, 0.9, 1.0);
 
       let topLed = drawChromeIndicator(topUV, topSize, topColor, topActive, aa);
       finalColor = mix(finalColor, topLed.rgb, topLed.a);

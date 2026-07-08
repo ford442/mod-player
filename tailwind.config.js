@@ -11,6 +11,7 @@ export default {
     "./App.tsx",
     "./components/**/*.{js,ts,jsx,tsx}",
     "./hooks/**/*.{js,ts,jsx,tsx}",
+    "./store/**/*.{js,ts,jsx,tsx}",
     "./utils/**/*.{js,ts,jsx,tsx}",
     "./audio-worklet/**/*.{js,ts,jsx,tsx}",
   ],

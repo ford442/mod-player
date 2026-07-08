@@ -72,11 +72,30 @@ MIN_CSS_BYTES = 10_000
 
 
 def resolve_asset_href(href: str) -> str:
-    """Map index.html href to a path relative to dist/."""
-    path = href
-    for prefix in (f"/{PROJECT_NAME}/", "./", "/"):
-        if path.startswith(prefix):
-            return path[len(prefix) :]
+    """Map index.html href to a path relative to dist/.
+
+    Handles all common forms Vite (or post-processing) may emit when
+    VITE_APP_BASE_PATH=/xm-player/ is active:
+      /xm-player/assets/...
+      xm-player/assets/...
+      ./xm-player/assets/...
+      ./assets/...
+      /assets/...
+      assets/...
+    """
+    path = href.strip()
+    # Strip leading ./ or / first
+    if path.startswith("./"):
+        path = path[2:]
+    elif path.startswith("/"):
+        path = path[1:]
+    # Strip the project base prefix if present (handles "xm-player/..." variants)
+    pfx = f"{PROJECT_NAME}/"
+    if path.startswith(pfx):
+        path = path[len(pfx) :]
+    # Final safety strip of any remaining leading slash
+    if path.startswith("/"):
+        path = path[1:]
     return path
 
 
@@ -126,7 +145,14 @@ def validate_build_base_path(build_path: Path) -> None:
         return
     html = index_html.read_text(encoding="utf-8")
     expected_prefix = f"/{PROJECT_NAME}/"
-    if expected_prefix not in html and 'src="/assets/' in html:
+    # Detect root-base builds: either classic /assets/ or the result of
+    # post-build naive replaces that leave bare "assets/" in bundle refs.
+    looks_like_root_base = (
+        'src="/assets/' in html
+        or 'href="/assets/' in html
+        or re.search(r'(?:src|href)=["\'](?:\./)?assets/[^"\']+\.(?:js|css)', html)
+    )
+    if expected_prefix not in html and looks_like_root_base:
         print(
             f"ERROR: {index_html} was built with base '/' but deploy target is '{expected_prefix}'.\n"
             f"       CSS and layout will break on test.1ink.us/xm-player/.\n"

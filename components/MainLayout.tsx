@@ -11,6 +11,7 @@ import type { ModuleMetadata } from './MetadataPanel';
 import { Playlist } from './Playlist';
 import type { PlaylistItem } from './Playlist';
 import { LibraryBrowser } from './LibraryBrowser';
+import { LibraryPanel } from './LibraryPanel';
 import { SeekBar } from './SeekBar';
 import { Panel } from './Panel';
 import { ShaderSelectorPanel } from './ShaderSelectorPanel';
@@ -21,6 +22,7 @@ import type { AppTheme } from '../appConfig';
 import type { PatternMatrix, ChannelShadowState, PlaybackState, MediaItem } from '../types';
 import type { BloomPreset, ColorScheme, NightPreset } from '../types/bloomPresets';
 import type { RemoteSong, SongSaveRequest, ShaderMeta } from '../utils/storageApi';
+import type { LibraryEntry, LibraryImportProgress, LibraryRoot } from '../types/localLibrary';
 
 interface MainLayoutProps {
   isDarkMode: boolean;
@@ -117,6 +119,21 @@ interface MainLayoutProps {
   setShowPlaylist: (v: boolean) => void;
   showLibraryBrowser: boolean;
   setShowLibraryBrowser: (v: boolean) => void;
+  showLocalLibrary: boolean;
+  setShowLocalLibrary: (v: boolean) => void;
+  localLibraryRoots: LibraryRoot[];
+  localLibraryLoading: boolean;
+  localLibraryImporting: boolean;
+  localLibraryImportProgress: LibraryImportProgress | null;
+  localLibraryImportError: string | null;
+  localLibraryFsAccessSupported: boolean;
+  activeLibraryEntryId?: string | null;
+  onLocalLibraryImportFolder: () => void;
+  onLocalLibraryImportWebkit: (files: FileList) => void;
+  onLocalLibraryRescanRoot: (rootId: string) => void;
+  onLocalLibraryRemoveRoot: (rootId: string) => void;
+  onLocalLibraryCancelImport: () => void;
+  onLocalLibraryPlay: (entry: LibraryEntry) => Promise<void>;
   playlistItems: PlaylistItem[];
   playlistCurrentIndex: number;
   playlistIsPlaying: boolean;
@@ -243,6 +260,21 @@ export function MainLayout({
   setShowPlaylist,
   showLibraryBrowser,
   setShowLibraryBrowser,
+  showLocalLibrary,
+  setShowLocalLibrary,
+  localLibraryRoots,
+  localLibraryLoading,
+  localLibraryImporting,
+  localLibraryImportProgress,
+  localLibraryImportError,
+  localLibraryFsAccessSupported,
+  activeLibraryEntryId,
+  onLocalLibraryImportFolder,
+  onLocalLibraryImportWebkit,
+  onLocalLibraryRescanRoot,
+  onLocalLibraryRemoveRoot,
+  onLocalLibraryCancelImport,
+  onLocalLibraryPlay,
   playlistItems,
   playlistCurrentIndex,
   playlistIsPlaying,
@@ -538,6 +570,7 @@ export function MainLayout({
             { key: 'meta', label: 'ℹ️ Metadata', state: showMetadata, toggle: setShowMetadata },
             { key: 'playlist', label: '📋 Playlist', state: showPlaylist, toggle: setShowPlaylist },
             { key: 'library', label: '☁️ Browse Library', state: showLibraryBrowser, toggle: setShowLibraryBrowser },
+            { key: 'collection', label: '📁 Library', state: showLocalLibrary, toggle: setShowLocalLibrary },
           ].map(({ key, label, state, toggle }) => (
             <button
               key={key}
@@ -652,6 +685,28 @@ export function MainLayout({
               onSaveModule={onSaveModule}
               savePending={savePending}
               saveError={saveSongErrorMessage}
+            />
+          </Panel>
+        )}
+
+        {/* Local Collection */}
+        {showLocalLibrary && (
+          <Panel variant="raised" title="Library" className="mt-4">
+            <LibraryPanel
+              roots={localLibraryRoots}
+              isLoading={localLibraryLoading}
+              isImporting={localLibraryImporting}
+              importProgress={localLibraryImportProgress}
+              importError={localLibraryImportError}
+              fsAccessSupported={localLibraryFsAccessSupported}
+              isDarkMode={isDarkMode}
+              activeEntryId={activeLibraryEntryId ?? null}
+              onImportFolder={onLocalLibraryImportFolder}
+              onImportWebkitFiles={onLocalLibraryImportWebkit}
+              onRescanRoot={onLocalLibraryRescanRoot}
+              onRemoveRoot={onLocalLibraryRemoveRoot}
+              onCancelImport={onLocalLibraryCancelImport}
+              onPlayEntry={onLocalLibraryPlay}
             />
           </Panel>
         )}
