@@ -14,6 +14,7 @@ import {
   usesStrictPlayheadSustainMode,
   isHorizontalLayoutShader,
   supportsStepsLength,
+  usesWebGLOverlayHorizontal,
 } from '../utils/shaderVersion';
 import {
   GRID_RECT,
@@ -84,8 +85,7 @@ export function useWebGLOverlay(
       return;
     }
     const useNoteSustainTailMode = usesStrictPlayheadSustainMode(shaderFile);
-    // v0.21 uses a special horizontal overlay path in the WebGL shader builder
-    const isV021 = shaderFile === 'patternv0.21.wgsl';
+    const isV021 = usesWebGLOverlayHorizontal(shaderFile);
     const useCircularPaging = usesCircularRowPaging(shaderFile);
     console.group('🔧 initWebGL');
 

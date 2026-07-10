@@ -26,9 +26,12 @@ logs/
 
 # Verification artifacts
 verification/
+artifacts/
 
 # Vendor source (cloned by build scripts)
 vendor/
+# Legacy duplicate — never commit; use vendor/ via scripts/build-wasm.sh
+libopenmpt-0.8.4+release/
 
 # OS files
 .DS_Store

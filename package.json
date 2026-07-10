@@ -9,10 +9,11 @@
     "dev": "vite",
     "prebuild": "npm run sync:shaders",
     "build:emcc": "bash scripts/build-wasm.sh",
-    "build:worklet": "bash scripts/build-wasm.sh",
+    "build:worklet": "echo '⚠️  build:worklet is deprecated — use npm run build:emcc (same script; outputs openmpt-native.* only)' >&2 && bash scripts/build-wasm.sh",
     "verify:native-exports": "node scripts/verify-native-exports.mjs",
     "build": "tsc && node --max-old-space-size=4096 node_modules/.bin/vite build",
     "build:xm-player": "VITE_APP_BASE_PATH=/xm-player/ VITE_STORAGE_API_URL=https://storage.noahcohn.com npm run build",
+    "vendor:libmpt": "node scripts/vendor-libopenmpt.mjs",
     "verify:wasm": "node scripts/verify-wasm-assets.mjs",
     "verify:build": "node scripts/verify-build.mjs",
     "build:xm-player:verify": "npm run build:xm-player && npm run verify:build",
@@ -28,7 +29,9 @@
     "capture:trigger-tail": "node scripts/capture-trigger-tail.mjs",
     "capture:v046-paging": "node scripts/capture-v046-paging.mjs",
     "audit:shader-modes": "node scripts/audit-shader-modes.mjs",
-    "screenshot:shaders": "node scripts/screenshot-shader-check.mjs"
+    "screenshot:shaders": "node scripts/screenshot-shader-check.mjs",
+    "smoke:visual": "node scripts/visual-smoke.mjs",
+    "smoke:visual:ci": "SMOKE_PROFILE=ci node scripts/visual-smoke.mjs"
   },
   "dependencies": {
     "@react-three/drei": "^9.122.0",
@@ -59,6 +62,7 @@
     "tailwindcss": "^3.3.3",
     "typescript": "^5.4.0",
     "typescript-eslint": "^8.22.0",
-    "vite": "^5.2.11"
+    "vite": "^5.2.11",
+    "playwright": "^1.52.0"
   }
 }

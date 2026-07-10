@@ -15,6 +15,19 @@ export interface NoteDurationComputeState {
 let cachedState: NoteDurationComputeState | null = null;
 let cachedDevice: GPUDevice | null = null;
 
+/** Release cached compute pipeline state (call before GPUDevice.destroy()). */
+export function disposeNoteDurationCompute(device?: GPUDevice | null): void {
+  if (!cachedState) return;
+  if (device && cachedDevice !== device) return;
+  try {
+    cachedState.paramsBuffer.destroy();
+  } catch {
+    // Device may already be lost.
+  }
+  cachedState = null;
+  cachedDevice = null;
+}
+
 /**
  * Fetch and compile the compute shader. Safe to call multiple times —
  * result is cached per device.

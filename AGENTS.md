@@ -15,12 +15,12 @@
 
 ## Key Configuration Files
 - **`package.json`** — Defines scripts (`dev`, `build`, `typecheck`, `lint`, `preview`, `build:worklet`, `build:emcc`), dependencies, and `"type": "module"`.
-- **`tsconfig.json`** — High strictness: `strict`, `noUnusedLocals`, `noUnusedParameters`, `noFallthroughCasesInSwitch`, `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`. Includes `.`, excludes `node_modules`, `dist`, `vite.config.ts`, `kimi_agents`, `jules_patch`.
+- **`tsconfig.json`** — High strictness. Excludes `archive/`, `jules_patch` (not production).
 - **`tsconfig.node.json`** — Composite project reference for `vite.config.ts`.
 - **`vite.config.ts`** — Base path from `VITE_APP_BASE_PATH`; React plugin; COOP/COEP headers (`same-origin` / `credentialless`); `watch.followSymlinks: false` (guards against CodeQL self-referential symlink); `optimizeDeps.exclude: ['openmpt-native']`; `assetsInclude: ['**/*.wasm']`.
 - **`tailwind.config.js`** — Explicit `content` paths only (no broad globs) to prevent build OOM. Custom theme extensions for `panel`, `edge`, `accent`, `glow`, `borderColor`, and `boxShadow`.
 - **`postcss.config.js`** — TailwindCSS + Autoprefixer.
-- **`eslint.config.js`** — Uses `@eslint/js`, `typescript-eslint`, `eslint-plugin-react-hooks`, `eslint-plugin-react-refresh`. Ignores `dist`, `public`, `vendor`, `node_modules`, `mod-player-shaders`, `kimi_agents`, `jules_patch`, `subdir`, `scripts`, `cpp`. Enforced via `npm run lint` (`eslint . --max-warnings 100`) as a hard CI gate.
+- **`eslint.config.js`** — Ignores `dist`, `public`, `vendor`, `archive`, `node_modules`, `jules_patch`, `subdir`, `scripts`, `cpp`. CI: `npm run lint` (max 100 warnings).
 - **`package-lock.json`** — Committed for reproducible installs. CI uses `npm ci`.
 
 ## Audio Architecture (Three Tiers + Fallback)
@@ -100,7 +100,8 @@ Tracker cells are bit-packed into `Uint32Array` before upload to the GPU:
   - `src/shaders/polar_chassis.wgsl` – Polar chassis shader
 - **`/docs`** – Technical guides (`BLOOM.md`, `planning/`, `agent-swarm/`)
 - **`/scripts`** – `build-wasm.sh`, `benchmark_loadFromURL.cjs`, `make_bezel_transparent.py`, `smoke-test-webgpu.mjs`, `verify-packing.mts`
-- **`/mod-player-shaders`** – Experimental shader workspace with its own summaries, additional WGSL files, and historical notes
+- **`/shaders-enhanced`** – Experimental WGSL prototypes (promote via `shaderRegistry.ts` when ready)
+- **`/archive`** – Demoted experiments; not imported by the app (see `docs/REPO_LAYOUT.md`)
 - **`/dist`** – Vite production build output (deployment artifact)
 
 ## Build, Dev, Test & Deploy Commands
@@ -185,6 +186,7 @@ python3 deploy.py
 - **GitHub Actions** (`.github/workflows/ci.yml`) runs two jobs:
   1. `lint-and-build` – `npm ci` → `npm run lint` (hard fail) → `npm run typecheck` → `npm run build` → verifies `dist/index.html` and `dist/assets` exist.
   2. `wasm-smoke-test` – Installs Emscripten **3.1.50**, verifies safe native build scripts, `verify:native-exports`, `bash -n`, and that tracked `openmpt-worklet.js` still looks like the JS processor.
+  3. `native-wasm-scheduled.yml` – Weekly (and manual) full `npm run build:emcc`; uploads `openmpt-native.*` artifacts and asserts the JS worklet is unchanged.
 
 ## Security & CORS Considerations
 - **COOP/COEP headers:** `vite.config.ts` sets:

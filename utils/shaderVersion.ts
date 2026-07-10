@@ -114,3 +114,15 @@ export const getUiExtraInstances = (shaderFile: string): number =>
 
 export const usesNightModeBezel = (shaderFile: string): boolean =>
   resolveShaderMeta(shaderFile).nightModeBezel;
+
+/** True when bezel uniform slots 16–22 carry transport/control fields. */
+export const needsChassisControlFields = (shaderFile: string): boolean =>
+  resolveShaderMeta(shaderFile).chassisControlEncoding !== 'none';
+
+/** Shader-embedded transport UI hit-testing (polar or square layout). */
+export const hasEmbeddedTransportUI = (shaderFile: string): boolean =>
+  resolveShaderMeta(shaderFile).hitTestProfile !== 'none';
+
+/** WebGL hybrid overlay uses horizontal v0.21 shader builder path. */
+export const usesWebGLOverlayHorizontal = (shaderFile: string): boolean =>
+  resolveShaderMeta(shaderFile).webglOverlayHorizontal;

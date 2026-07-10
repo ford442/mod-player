@@ -17,6 +17,7 @@ import {
   usesStrictPlayheadSustainMode,
   isHorizontalLayoutShader,
   supportsStepsLength,
+  usesWebGLOverlayHorizontal,
 } from '../../../utils/shaderVersion';
 import { detectRuntimeBase } from '../../../src/lib/paths';
 import { CHASSIS_VERTEX, CHASSIS_FRAGMENT } from './shaders/chassis';
@@ -132,7 +133,7 @@ export class WebGL2PatternRenderer {
 
   private initPattern(gl: WebGL2RenderingContext, shaderFile: string): void {
     const useNoteSustainTailMode = usesStrictPlayheadSustainMode(shaderFile);
-    const isV021 = shaderFile === 'patternv0.21.wgsl';
+    const isV021 = usesWebGLOverlayHorizontal(shaderFile);
     const useCircularPaging = usesCircularRowPaging(shaderFile);
     const vsSource = buildVertexShader(useNoteSustainTailMode, isV021, useCircularPaging);
     const fsSource = buildPatternFragmentShader(useNoteSustainTailMode, isV021);

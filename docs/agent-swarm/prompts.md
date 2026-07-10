@@ -99,7 +99,7 @@ Focus areas:
    - Implement waveform display shader
 
 Create enhanced shaders in /mnt/okcomputer/output/shaders-enhanced/
-Create enhanced PatternDisplay at /mnt/okcomputer/output/PatternDisplay.vfx.tsx
+Output: /mnt/okcomputer/output/PatternDisplay.vfx.tsx (promote to `archive/` or branch — never orphan files in `components/`)
 
 Target: Professional-grade visuals while maintaining 60fps.
 ```

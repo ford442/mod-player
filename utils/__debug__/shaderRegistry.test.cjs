@@ -62,6 +62,9 @@ runTsx('Registry + SHADER_GROUPS coverage', `
     getHitTestProfile,
     usesCircularRowPaging,
     isHorizontalLayoutShader,
+    needsChassisControlFields,
+    usesWebGLOverlayHorizontal,
+    hasEmbeddedTransportUI,
   } = await import('${UTILS_DIR}/shaderVersion.ts');
   const { getLayoutModeFromShader, LAYOUT_MODES } = await import('${UTILS_DIR}/geometryConstants.ts');
   const { SHADER_GROUPS, ALL_SHADER_IDS, DEFAULT_SHADER } = await import('${ROOT}/appConfig.ts');
@@ -124,6 +127,12 @@ runTsx('Registry + SHADER_GROUPS coverage', `
       errors.push(\`\${filename}: circularRowPaging mismatch\`);
     if (isHorizontalLayoutShader(filename) !== (meta.layoutMode === 'horizontal_32'))
       errors.push(\`\${filename}: isHorizontal mismatch\`);
+    if (needsChassisControlFields(filename) !== (meta.chassisControlEncoding !== 'none'))
+      errors.push(\`\${filename}: needsChassisControlFields mismatch\`);
+    if (usesWebGLOverlayHorizontal(filename) !== meta.webglOverlayHorizontal)
+      errors.push(\`\${filename}: webglOverlayHorizontal mismatch\`);
+    if (hasEmbeddedTransportUI(filename) !== (meta.hitTestProfile !== 'none'))
+      errors.push(\`\${filename}: hasEmbeddedTransportUI mismatch\`);
     const expectedMode = meta.layoutMode === 'horizontal_32'
       ? LAYOUT_MODES.HORIZONTAL_32 : LAYOUT_MODES.CIRCULAR;
     if (getLayoutModeFromShader(filename) !== expectedMode)
@@ -135,7 +144,7 @@ runTsx('Registry + SHADER_GROUPS coverage', `
   }
 
   const m21 = SHADER_REGISTRY['patternv0.21.wgsl']!;
-  if (!m21.liteRecommended || !m21.webglHybrid || !m21.padTopChannel)
+  if (!m21.liteRecommended || !m21.webglHybrid || !m21.padTopChannel || !m21.webglOverlayHorizontal)
     errors.push('v0.21 parity fields');
   const m30b = SHADER_REGISTRY['patternv0.30b.wgsl']!;
   if (!m30b.strictPlayheadSustain || !m30b.highPrecisionPacking)
@@ -249,4 +258,47 @@ if (errors.length > 0) {
 console.log('computeNoteAges note range: OK');
 `);
 
-console.log('\\nAll shader registry tests passed.');
+console.log('All shader registry tests passed.');
+
+// ---------------------------------------------------------------------------
+// 4. Guard: no new shaderFile.includes('v0.XX') chains in production render path
+// ---------------------------------------------------------------------------
+const FORBIDDEN_SCAN_DIRS = [
+  path.join(ROOT, 'components'),
+  path.join(ROOT, 'hooks'),
+  path.join(ROOT, 'src/renderers'),
+  path.join(ROOT, 'utils/geometryConstants.ts'),
+];
+const FORBIDDEN_RE = /shaderFile\.includes\s*\(\s*['"]v0\./;
+const allowlist = new Set([
+  path.join(ROOT, 'utils/shaderRegistry.ts'), // inferLegacyMeta only
+]);
+const chainErrors = [];
+function scanFile(filePath) {
+  if (allowlist.has(filePath)) return;
+  const rel = path.relative(ROOT, filePath);
+  const text = fs.readFileSync(filePath, 'utf8');
+  for (const line of text.split('\n')) {
+    if (FORBIDDEN_RE.test(line) && !line.trimStart().startsWith('//') && !line.includes('Do **not**')) {
+      chainErrors.push(`${rel}: forbidden includes chain — use shaderRegistry: ${line.trim().slice(0, 80)}`);
+    }
+  }
+}
+function walk(dir) {
+  if (!fs.existsSync(dir)) return;
+  const stat = fs.statSync(dir);
+  if (stat.isFile()) {
+    if (/\.(ts|tsx)$/.test(dir)) scanFile(dir);
+    return;
+  }
+  for (const entry of fs.readdirSync(dir)) {
+    walk(path.join(dir, entry));
+  }
+}
+for (const target of FORBIDDEN_SCAN_DIRS) walk(target);
+if (chainErrors.length > 0) {
+  console.error('FORBIDDEN includes() CHAINS:');
+  chainErrors.forEach((e) => console.error('  ' + e));
+  process.exit(1);
+}
+console.log('No forbidden shaderFile.includes chains in render path: OK');

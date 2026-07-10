@@ -458,10 +458,11 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     const device = gpuDevRef.current;
     const canvas = canvasRef.current;
     if (!device || !canvas || !gpuReady || !useWebGPU) return;
-    if (liteMode) return; // Skip bloom entirely in lite mode
+    if (liteMode) return;
     const context = canvas.getContext('webgpu') as GPUCanvasContext | null;
     if (!context) return;
 
+    let cancelled = false;
     const meta = getShaderMeta(shaderFile);
     const bloomLayers = meta?.bloomProfile
       ? getBloomProfile(meta.bloomProfile)
@@ -471,15 +472,24 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
       : { finalFormat: navigator.gpu.getPreferredCanvasFormat() };
     const bloom = new BloomPostProcessor(device, canvas, context, bloomOptions);
     bloom.setBaseUrl(detectRuntimeBase());
-    bloom.init().then(() => {
+    void bloom.init().then(() => {
+      if (cancelled) {
+        bloom.destroy();
+        return;
+      }
       bloomRef.current = bloom;
     }).catch((err: unknown) => {
-      console.warn('BloomPostProcessor init failed:', err);
+      if (!cancelled) {
+        console.warn('BloomPostProcessor init failed:', err);
+      }
     });
 
     return () => {
-      bloomRef.current?.destroy();
-      bloomRef.current = null;
+      cancelled = true;
+      bloom.destroy();
+      if (bloomRef.current === bloom) {
+        bloomRef.current = null;
+      }
     };
   }, [gpuReady, shaderFile, liteMode, useWebGPU]);
 

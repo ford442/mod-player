@@ -61,6 +61,49 @@ Lint (ESLint, hard CI gate; max 100 warnings budget)
 npm run lint
 ```
 
+### Native C++ audio engine (optional)
+
+Production audio uses the tracked **JS** AudioWorklet at `public/worklets/openmpt-worklet.js`. Do not overwrite it.
+
+The optional native engine is built with a **single** supported path:
+
+```bash
+# Prerequisites: emsdk 3.1.50 (matches CI)
+git clone https://github.com/emscripten-core/emsdk.git && cd emsdk
+./emsdk install 3.1.50 && ./emsdk activate 3.1.50
+source ./emsdk_env.sh
+
+cd /path/to/mod-player
+npm run build:emcc              # release (-O3)
+# npm run build:emcc -- --debug # -O0 -g -sASSERTIONS=2
+```
+
+Outputs (gitignored until built): `public/worklets/openmpt-native.{js,wasm,aw.js}`.
+
+| Command | Notes |
+|---------|--------|
+| `npm run build:emcc` | **Canonical** — runs `scripts/build-wasm.sh` |
+| `npm run build:worklet` | Deprecated alias → same script |
+| `./build-wasm.sh` | Deprecated root wrapper → same script |
+
+Verify exported symbols stay in sync with TypeScript/C++:
+
+```bash
+npm run verify:native-exports
+```
+
+See also: `docs/WASM_BUILD_SOLUTIONS.md`, `public/worklets/README.md`, `AGENTS.md`.
+
+### Visual smoke (browser verification)
+
+```bash
+npm run build && npm run preview -- --port 4173 &
+npm run smoke:visual          # full matrix (webgl2/html/webgpu + lite modes)
+npm run smoke:visual:ci       # CI subset: webgl2 + html, v0.30b/46/50/57
+```
+
+See `docs/VISUAL_SMOKE.md` for the manual WebGPU + mobile checklist.
+
 Usage
 
 - Click "Load" or drag-and-drop a tracker module file (.mod, .it, .s3m, .xm, etc.) to load it.
@@ -85,12 +128,14 @@ Project structure (important files)
 
 Notes and configuration
 
-- libopenmpt: The project loads libopenmpt from an external script (see `index.html`). If you're working offline or need a local copy, host the `libopenmptjs.js` and its WASM assets locally and update `index.html` accordingly.
+- libopenmpt: Self-hosted under `public/libmpt/` (libopenmpt **0.8.4**). Loaded via `index.html` with BASE_URL-aware paths; optional CDN override with `VITE_LIBOPENMPT_CDN_URL`. See `public/libmpt/README.md`.
 - Tailwind: A CDN helper script is present in `index.html` to bring in utility styles quickly in development. For production builds you may want to use the PostCSS/Tailwind config in the repo.
 - **Pattern renderers:** WebGPU → WebGL2 → HTML automatic fallback chain. Use WebGL2 (`?renderer=webgl2`) to iterate on shader/effect logic with GLSL and `window.currentPatternRenderer.readPixels()` for Playwright pixel tests. Alt+D (dev) cycles WebGL2 debug modes (wireframe, UV, playhead heatmap).
 - **WebGPU → WebGL2 porting:** Shared packing lives in `utils/gpuPacking.ts`; WebGL2 GLSL mirrors `hooks/webGLShaders.ts` (three-emitter lens caps). Chassis/night mode/bloom approximations are in `src/renderers/webgl2/shaders/`.
 
 Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) and [docs/REPO_LAYOUT.md](docs/REPO_LAYOUT.md) for first-party vs experimental paths.
 
 Contributions and fixes are welcome. Open an issue or pull request; keep changes small and focused. If you add dependencies, update `package.json` and include a brief rationale in the PR.
 

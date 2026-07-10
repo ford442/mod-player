@@ -1,5 +1,6 @@
 import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
+import { libopenmptHtmlPlugin } from './vite-plugins/libopenmptHtml'
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => {
@@ -13,6 +14,8 @@ export default defineConfig(({ mode }) => {
   // dev default: /
   // deploy build: VITE_APP_BASE_PATH=/xm-player/ npm run build (or .env.production)
   const base = process.env.VITE_APP_BASE_PATH || env.VITE_APP_BASE_PATH || '/'
+  const libopenmptCdnUrl =
+    process.env.VITE_LIBOPENMPT_CDN_URL || env.VITE_LIBOPENMPT_CDN_URL || ''
   const storageApiUrl = process.env.VITE_STORAGE_API_URL || env.VITE_STORAGE_API_URL || 'http://localhost:8000'
   const storageProxyTarget = (() => {
     try {
@@ -24,7 +27,7 @@ export default defineConfig(({ mode }) => {
   
   return {
     base,
-    plugins: [react()],
+    plugins: [react(), libopenmptHtmlPlugin(base, libopenmptCdnUrl)],
     server: {
       // The CodeQL scanner leaves behind a self-referential symlink
       // (_codeql_detected_source_root → .) which causes Vite's chokidar FSWatcher
@@ -38,8 +41,8 @@ export default defineConfig(({ mode }) => {
         // Required for SharedArrayBuffer / Atomics (Emscripten WASM Workers)
         'Cross-Origin-Opener-Policy': 'same-origin',
         // 'credentialless' still unlocks SharedArrayBuffer but lets cross-origin
-        // resources (e.g. the CDN-hosted libopenmpt) load without a
-        // Cross-Origin-Resource-Policy header.  'require-corp' would block them.
+        // resources (e.g. esm.sh importmap) load without CORP headers.
+        // Self-hosted libopenmpt under public/libmpt/ is same-origin.
         'Cross-Origin-Embedder-Policy': 'credentialless',
       },
       proxy: {

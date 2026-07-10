@@ -11,8 +11,7 @@ export default tseslint.config(
       'public/**',
       'vendor/**',
       'node_modules/**',
-      'mod-player-shaders/**',
-      'kimi_agents/**',
+      'archive/**',
       'jules_patch/**',
       'subdir/**',
       // Generated / non-app surfaces

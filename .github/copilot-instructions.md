@@ -16,12 +16,17 @@ npm run preview                # Serve the production build locally for testing
 npm run lint                   # ESLint (currently a no-op: `exit 0`)
 ```
 
-### WASM Audio Worklet Build (Optional)
+### Native C++ WASM Build (Optional)
 ```bash
-npm run build:worklet          # Build via ./build-wasm.sh
-npm run build:emcc             # Build via scripts/build-wasm.sh
+npm run build:emcc             # Canonical — scripts/build-wasm.sh → openmpt-native.*
+# npm run build:worklet        # Deprecated alias (same script)
+# ./build-wasm.sh              # Deprecated root wrapper (forwards to scripts/build-wasm.sh)
 ```
-**Prerequisite:** Emscripten SDK 4.0+ activated in your shell. The scripts auto-clone and build libopenmpt from GitHub if needed.
+**Prerequisite:** Emscripten SDK **3.1.50** (pinned in CI and `scripts/build-wasm.sh`). Never overwrites tracked `public/worklets/openmpt-worklet.js` (production JS processor). libopenmpt 0.8.4 is auto-downloaded into `vendor/` if missing.
+
+```bash
+npm run verify:native-exports  # Audit EXPORTED_FUNCTIONS vs C++/OpenMPTWorkletEngine.ts
+```
 
 ### Deployment
 ```bash
