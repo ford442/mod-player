@@ -41,6 +41,7 @@
  * uiExtraInstances    – extra draw instances (embedded UI quads)
  * nightModeBezel      – v0.35 night-mode bezel color path
  * chassisControlEncoding – frosted f32 vs chassisv0.37 u32 control slots
+ * webglOverlayHorizontal  – v0.21-style horizontal WebGL overlay shader path
  */
 
 export type HitTestProfile = 'none' | 'polar-ui' | 'square-ui';
@@ -89,6 +90,8 @@ export interface ShaderMeta {
   uiExtraInstances: number;
   nightModeBezel: boolean;
   chassisControlEncoding: ChassisControlEncoding;
+  /** WebGL hybrid overlay uses horizontal v0.21 layout path (IS_V021 in webGLShaders). */
+  webglOverlayHorizontal: boolean;
 }
 
 /** Default outer ring factor (matches POLAR_RINGS.OUTER_RADIUS). */
@@ -129,6 +132,7 @@ function circularLed(overrides: Partial<ShaderMeta> = {}): ShaderMeta {
     uiExtraInstances: 0,
     nightModeBezel: false,
     chassisControlEncoding: 'none',
+    webglOverlayHorizontal: false,
     ...overrides,
   };
 }
@@ -163,6 +167,7 @@ function horizontalPanel(overrides: Partial<ShaderMeta> = {}): ShaderMeta {
     uiExtraInstances: 0,
     nightModeBezel: false,
     chassisControlEncoding: 'frosted-f32',
+    webglOverlayHorizontal: false,
     ...overrides,
   };
 }
@@ -177,6 +182,7 @@ export const SHADER_REGISTRY: Readonly<Record<string, ShaderMeta>> = {
     highPrecisionPacking: false,
     bareCanvasChrome: false,
     liteRecommended: true,
+    webglOverlayHorizontal: true,
   }),
   'patternv0.23.wgsl': {
     extendedLayout: true,
@@ -207,6 +213,7 @@ export const SHADER_REGISTRY: Readonly<Record<string, ShaderMeta>> = {
     uiExtraInstances: 0,
     nightModeBezel: false,
     chassisControlEncoding: 'none',
+    webglOverlayHorizontal: false,
   },
   'patternv0.24.wgsl': {
     extendedLayout: true,
@@ -237,6 +244,7 @@ export const SHADER_REGISTRY: Readonly<Record<string, ShaderMeta>> = {
     uiExtraInstances: 0,
     nightModeBezel: false,
     chassisControlEncoding: 'none',
+    webglOverlayHorizontal: false,
   },
   'patternv0.30.wgsl': {
     extendedLayout: true,
@@ -267,6 +275,7 @@ export const SHADER_REGISTRY: Readonly<Record<string, ShaderMeta>> = {
     uiExtraInstances: 0,
     nightModeBezel: false,
     chassisControlEncoding: 'none',
+    webglOverlayHorizontal: false,
   },
   'patternv0.30b.wgsl': {
     extendedLayout: true,
@@ -297,6 +306,7 @@ export const SHADER_REGISTRY: Readonly<Record<string, ShaderMeta>> = {
     uiExtraInstances: 0,
     nightModeBezel: false,
     chassisControlEncoding: 'none',
+    webglOverlayHorizontal: false,
   },
   'patternv0.35_bloom.wgsl': {
     extendedLayout: true,
@@ -327,6 +337,7 @@ export const SHADER_REGISTRY: Readonly<Record<string, ShaderMeta>> = {
     uiExtraInstances: 0,
     nightModeBezel: true,
     chassisControlEncoding: 'none',
+    webglOverlayHorizontal: false,
   },
 
   // ── v0.37 family — circular with v0.37 chassis ───────────────────────────

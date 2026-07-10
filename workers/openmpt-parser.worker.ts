@@ -1,9 +1,12 @@
 import type { LibOpenMPT } from '../types';
+import {
+  createLibOpenMPTLocateFile,
+  getLibOpenMPTJsUrl,
+} from '../utils/libopenmptAssets';
 import { parseModuleWithLib } from '../utils/parseModuleWithLib';
 import { parserLog } from '../utils/parserDebug';
 
-const CDN_JS_URL = 'https://wasm.noahcohn.com/libmpt/libopenmptjs.js';
-const CDN_FETCH_TIMEOUT_MS = 12_000;
+const LIB_FETCH_TIMEOUT_MS = 12_000;
 
 interface ParseRequest {
   type: 'parse';
@@ -25,16 +28,17 @@ interface ParseError {
 type IncomingMessage = ParseRequest;
 
 async function loadLibOpenMPT(): Promise<LibOpenMPT> {
-  parserLog('worker fetching libopenmpt from CDN');
+  const jsUrl = getLibOpenMPTJsUrl();
+  parserLog('worker fetching libopenmpt', jsUrl);
   const abortController = new AbortController();
   const fetchTimeout = self.setTimeout(
-    () => abortController.abort('CDN fetch timeout'),
-    CDN_FETCH_TIMEOUT_MS,
+    () => abortController.abort('libopenmpt fetch timeout'),
+    LIB_FETCH_TIMEOUT_MS,
   );
 
   let response: Response;
   try {
-    response = await fetch(CDN_JS_URL, { signal: abortController.signal });
+    response = await fetch(jsUrl, { signal: abortController.signal });
   } finally {
     self.clearTimeout(fetchTimeout);
   }
@@ -48,6 +52,7 @@ async function loadLibOpenMPT(): Promise<LibOpenMPT> {
 
   (globalThis as Record<string, unknown>).libopenmpt = {
     noInitialRun: true,
+    locateFile: createLibOpenMPTLocateFile(),
   };
 
   const cleanedScript = scriptText.replace(/^\s*export\s+(default\s+)?/gm, '');

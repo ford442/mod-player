@@ -251,6 +251,8 @@ declare global {
       getPlaybackRow: () => number;
       getPlaybackRowFraction: () => number;
       getActiveRenderer: () => string | null;
+      getAudioEngine: () => string;
+      getLiteMode: () => boolean;
       getShaderFile: () => string | null;
       selectShader: (shader: string) => void;
       getCircularOverlayPaging: () => {

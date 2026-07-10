@@ -20,6 +20,7 @@ import {
   usesStepsDrivenVisibleRows,
   getUiExtraInstances,
   usesNightModeBezel,
+  needsChassisControlFields,
   resolveShaderMeta,
   WEBGL_HYBRID_SHADERS,
 } from '../utils/shaderVersion';
@@ -43,9 +44,12 @@ import {
   runNoteDurationCompute,
   canUseComputePath,
   readbackBuffer,
+  disposeNoteDurationCompute,
   type NoteDurationComputeState,
 } from '../utils/computeNoteDuration';
 import type { BloomPostProcessor } from '../utils/bloomPostProcessor';
+import { GpuResourcePool } from '../utils/gpuResourcePool';
+import { GpuLifecycle } from '../utils/gpuLifecycle';
 import { GRID_RECT, getPolarRadii } from '../utils/geometryConstants';
 import { withBase } from '../src/lib/paths';
 import { generateEmptyInstrumentPalette, MAX_INSTRUMENT_PALETTE_SIZE } from '../utils/instrumentPalette';
@@ -141,6 +145,8 @@ export function useWebGPURender(
   enabled = true,
 ) {
   const [gpuReady, setGpuReady] = useState(false);
+  /** True once adapter/device/context are acquired (shader resources may still be loading). */
+  const [deviceAcquired, setDeviceAcquired] = useState(false);
   /** Bumped on unexpected device loss to re-run the init effect (recovery). */
   const [deviceEpoch, setDeviceEpoch] = useState(0);
   const [deviceStatus, setDeviceStatus] = useState<WebGPUDeviceStatus>('initializing');
@@ -171,6 +177,9 @@ export function useWebGPURender(
   const bezelUniformBufferRef = useRef<GPUBuffer | null>(null);
   const instrumentPaletteTextureRef = useRef<GPUTexture | null>(null);
   const instrumentPaletteVersionRef = useRef<Uint8Array | null>(null);
+  const poolRef = useRef<GpuResourcePool | null>(null);
+  const lifecycleRef = useRef(new GpuLifecycle());
+  const renderGenerationRef = useRef(0);
 
   // Persistent typed arrays to avoid GC pressure
   const uniformBufferDataRef = useRef(new ArrayBuffer(144));
@@ -185,7 +194,10 @@ export function useWebGPURender(
   const preferredImageFormat = preferredSampledImageFormat;
 
   const refreshBindGroup = useCallback((device: GPUDevice) => {
+    const pool = poolRef.current;
+    if (!pool || pool.isDisposed) return;
     if (!pipelineRef.current || !cellsBufferRef.current || !uniformBufferRef.current) return;
+    if (!pool.isAlive(cellsBufferRef.current) || !pool.isAlive(uniformBufferRef.current)) return;
     const layout = pipelineRef.current.getBindGroupLayout(0);
     const layoutType = layoutTypeRef.current;
     const entries: GPUBindGroupEntry[] = [
@@ -240,7 +252,10 @@ export function useWebGPURender(
       const ctx = canvas.getContext('2d'); if (ctx) { ctx.fillStyle = 'rgba(0,0,0,0)'; ctx.fillRect(0, 0, 1, 1); }
       bitmap = await createImageBitmap(canvas);
     }
-    const texture = device.createTexture({ size: [bitmap.width, bitmap.height, 1], format: preferredImageFormat(device), usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT });
+    const texture = poolRef.current?.track(
+      device.createTexture({ size: [bitmap.width, bitmap.height, 1], format: preferredImageFormat(device), usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT }),
+      'shader',
+    ) ?? device.createTexture({ size: [bitmap.width, bitmap.height, 1], format: preferredImageFormat(device), usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT });
     device.queue.copyExternalImageToTexture({ source: bitmap, flipY: true }, { texture }, [bitmap.width, bitmap.height, 1]);
     const sampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear' });
     bezelTextureResourcesRef.current = { sampler, view: texture.createView() };
@@ -268,7 +283,10 @@ export function useWebGPURender(
       if (ctx) { ctx.fillStyle = '#222'; ctx.fillRect(0, 0, 128, 128); ctx.strokeStyle = '#444'; ctx.strokeRect(10, 10, 108, 108); }
       bitmap = await createImageBitmap(canvas);
     }
-    const texture = device.createTexture({ size: [bitmap.width, bitmap.height, 1], format: preferredImageFormat(device), usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT });
+    const texture = poolRef.current?.track(
+      device.createTexture({ size: [bitmap.width, bitmap.height, 1], format: preferredImageFormat(device), usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT }),
+      'shader',
+    ) ?? device.createTexture({ size: [bitmap.width, bitmap.height, 1], format: preferredImageFormat(device), usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT });
     device.queue.copyExternalImageToTexture({ source: bitmap, flipY: true }, { texture }, [bitmap.width, bitmap.height, 1]);
     const sampler = device.createSampler({ magFilter: 'nearest', minFilter: 'nearest' });
     textureResourcesRef.current = { sampler, view: texture.createView() };
@@ -277,7 +295,13 @@ export function useWebGPURender(
   const ensureVideoPlaceholder = (device: GPUDevice) => {
     if (videoTextureRef.current) return;
     const fmt = preferredImageFormat(device);
-    const texture = device.createTexture({
+    const texture = poolRef.current?.track(
+      device.createTexture({
+        size: [1, 1, 1], format: fmt,
+        usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT,
+      }),
+      'shader',
+    ) ?? device.createTexture({
       size: [1, 1, 1], format: fmt,
       usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT,
     });
@@ -291,10 +315,47 @@ export function useWebGPURender(
     textureResourcesRef.current = { sampler, view: texture.createView() };
   };
 
-  // Main WebGPU initialization (shared helper: features, limits, power, canvas config)
+  const canvasFormatRef = useRef<GPUTextureFormat>('bgra8unorm');
+
+  const releaseShaderGpuResources = useCallback(() => {
+    renderGenerationRef.current = lifecycleRef.current.bump();
+    bindGroupRef.current = null;
+    pipelineRef.current = null;
+    bezelBindGroupRef.current = null;
+    bezelPipelineRef.current = null;
+    bezelTextureResourcesRef.current = null;
+    textureResourcesRef.current = null;
+    instrumentPaletteVersionRef.current = null;
+
+    const pool = poolRef.current;
+    if (pool && !pool.isDisposed) {
+      if (cellsBufferRef.current) {
+        pool.releaseBuffer('cells', cellsBufferRef.current, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
+      }
+      if (rowFlagsBufferRef.current) {
+        pool.releaseBuffer('rowFlags', rowFlagsBufferRef.current, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
+      }
+      if (channelsBufferRef.current) {
+        pool.releaseBuffer('channels', channelsBufferRef.current, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
+      }
+      pool.disposeScope('shader');
+      pool.disposeScope('matrix');
+    }
+
+    cellsBufferRef.current = null;
+    uniformBufferRef.current = null;
+    rowFlagsBufferRef.current = null;
+    channelsBufferRef.current = null;
+    bezelUniformBufferRef.current = null;
+    videoTextureRef.current = null;
+    instrumentPaletteTextureRef.current = null;
+  }, []);
+
+  // Acquire GPUDevice + canvas context (once per mount / device-lost recovery).
   useEffect(() => {
     if (!enabled) {
       setGpuReady(false);
+      setDeviceAcquired(false);
       setDeviceStatus('unsupported');
       return;
     }
@@ -309,7 +370,7 @@ export function useWebGPURender(
     let cancelled = false;
     setDeviceStatus(deviceEpoch > 0 ? 'lost' : 'initializing');
 
-    const init = async () => {
+    const initDevice = async () => {
       try {
         const { device, preferredCanvasFormat } = await requestWebGPUDevice({
           liteMode: !!liteMode,
@@ -320,12 +381,6 @@ export function useWebGPURender(
           return;
         }
 
-        // Sync canvas to the correct DPR-scaled size *before* configuring the WebGPU
-        // surface.  By this point the browser has completed layout, so
-        // getBoundingClientRect() returns stable non-zero dimensions.  Configuring
-        // the context after this call means the very first GPU frame is drawn at the
-        // correct physical resolution (display size × DPR) instead of the fallback
-        // canvasMetrics dimensions.
         syncCanvasSize(canvas, glCanvasRef.current);
 
         const context = getWebGPUCanvasContext(canvas);
@@ -334,8 +389,8 @@ export function useWebGPURender(
           context,
           format: preferredCanvasFormat,
         });
+        canvasFormatRef.current = format;
 
-        // Device-lost recovery: clear frozen state and re-init via deviceEpoch.
         markLostIntentionalRef.current?.();
         markLostIntentionalRef.current = attachDeviceLostHandler(device, {
           onLost: (info, intentional) => {
@@ -344,7 +399,12 @@ export function useWebGPURender(
               `[WebGPU] device lost (reason=${info.reason}): ${info.message}`,
             );
             setGpuReady(false);
-            // Drop dead refs so the render loop stops using the lost device.
+            setDeviceAcquired(false);
+            lifecycleRef.current.bump();
+            poolRef.current?.disposeAll();
+            poolRef.current = null;
+            disposeNoteDurationCompute(deviceRef.current);
+            computeStateRef.current = null;
             deviceRef.current = null;
             contextRef.current = null;
             pipelineRef.current = null;
@@ -372,11 +432,80 @@ export function useWebGPURender(
                 `DEVICE-LOST: ${info.reason} — recovering (${recoveryAttemptsRef.current}/${MAX_DEVICE_LOST_RECOVERIES})…`,
               ],
             }));
-            // Re-run this effect to recreate adapter/device/pipelines.
             setDeviceEpoch((n) => n + 1);
           },
         });
 
+        poolRef.current?.disposeAll();
+        poolRef.current = new GpuResourcePool(device);
+        deviceRef.current = device;
+        contextRef.current = context;
+        recoveryAttemptsRef.current = 0;
+        setDeviceStatus('ready');
+        setDeviceAcquired(true);
+        setDebugInfo((prev) => ({
+          ...prev,
+          errors: prev.errors.filter((e) => !e.startsWith('DEVICE-LOST')),
+        }));
+      } catch (error) {
+        if (cancelled) return;
+        if (error instanceof WebGPUInitError && error.message.includes('cancelled')) {
+          return;
+        }
+        const reason = error instanceof Error ? error.message : String(error);
+        console.error('[Renderer] WebGPU device init failed:', reason);
+        const status =
+          error instanceof WebGPUInitError ? error.status : 'device-failed';
+        setDeviceStatus(status);
+        setDeviceAcquired(false);
+        setWebgpuAvailable(false);
+        setDebugInfo((prev) => ({
+          ...prev,
+          errors: [
+            ...prev.errors.filter((e) => !e.startsWith('DEVICE-INIT')),
+            `DEVICE-INIT: ${reason}`,
+          ],
+        }));
+      }
+    };
+
+    void initDevice();
+    return () => {
+      cancelled = true;
+      markLostIntentionalRef.current?.();
+      markLostIntentionalRef.current = null;
+      setGpuReady(false);
+      setDeviceAcquired(false);
+      lifecycleRef.current.bump();
+      releaseShaderGpuResources();
+      disposeNoteDurationCompute(deviceRef.current);
+      computeStateRef.current = null;
+      poolRef.current?.disposeAll();
+      poolRef.current = null;
+      if (deviceRef.current) {
+        try { deviceRef.current.destroy(); } catch { /* ignore */ }
+      }
+      deviceRef.current = null;
+      contextRef.current = null;
+      if (import.meta.env.DEV) {
+        console.log('[WebGPU] device disposed on unmount');
+      }
+    };
+  }, [syncCanvasSize, enabled, deviceEpoch, liteMode, releaseShaderGpuResources]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Shader pipelines + initial pattern buffers (rebuilt on shader switch).
+  useEffect(() => {
+    const device = deviceRef.current;
+    const pool = poolRef.current;
+    if (!enabled || !deviceAcquired || !device || !pool || pool.isDisposed) return;
+
+    let cancelled = false;
+    setGpuReady(false);
+    releaseShaderGpuResources();
+
+    const initShader = async () => {
+      try {
+        const format = canvasFormatRef.current;
         textureResourcesRef.current = null;
         bezelTextureResourcesRef.current = null;
 
@@ -388,20 +517,13 @@ export function useWebGPURender(
         }
 
         const shaderSource = await fetchShaderSource(activeShaderFile);
-        if (cancelled) {
-          try { device.destroy(); } catch { /* ignore */ }
-          return;
-        }
+        if (cancelled || pool.isDisposed) return;
         const module = device.createShaderModule({ code: shaderSource });
         if ('getCompilationInfo' in module) module.getCompilationInfo().catch(() => {});
 
         const layoutType = getLayoutType(activeShaderFile);
         layoutTypeRef.current = layoutType;
         useExtendedRef.current = layoutType === 'extended';
-        if (layoutType !== 'extended') {
-          rowFlagsBufferRef.current?.destroy(); rowFlagsBufferRef.current = null;
-          channelsBufferRef.current?.destroy(); channelsBufferRef.current = null;
-        }
 
         let bindGroupLayout: GPUBindGroupLayout;
         if (layoutType === 'texture') {
@@ -428,20 +550,27 @@ export function useWebGPURender(
         }
 
         const uniformSize = layoutType === 'extended' ? 132 : (layoutType === 'texture' ? 64 : 32);
-        const uniformBuffer = device.createBuffer({ size: alignTo(uniformSize, 256), usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+        const uniformBuffer = pool.track(
+          device.createBuffer({ size: alignTo(uniformSize, 256), usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST }),
+          'shader',
+        );
+        uniformBufferRef.current = uniformBuffer;
 
         if (usesInstrumentPalette(activeShaderFile)) {
           const placeholder = generateEmptyInstrumentPalette();
-          const texture = device.createTexture({
-            size: [MAX_INSTRUMENT_PALETTE_SIZE, 1, 1],
-            format: 'rgba8unorm',
-            usage: GPUTextureUsage.COPY_DST | GPUTextureUsage.TEXTURE_BINDING,
-          });
+          const texture = pool.track(
+            device.createTexture({
+              size: [MAX_INSTRUMENT_PALETTE_SIZE, 1, 1],
+              format: 'rgba8unorm',
+              usage: GPUTextureUsage.COPY_DST | GPUTextureUsage.TEXTURE_BINDING,
+            }),
+            'shader',
+          );
           device.queue.writeTexture(
             { texture },
             placeholder.buffer as ArrayBuffer,
             { bytesPerRow: MAX_INSTRUMENT_PALETTE_SIZE * 4 },
-            { width: MAX_INSTRUMENT_PALETTE_SIZE, height: 1, depthOrArrayLayers: 1 }
+            { width: MAX_INSTRUMENT_PALETTE_SIZE, height: 1, depthOrArrayLayers: 1 },
           );
           instrumentPaletteTextureRef.current = texture;
           instrumentPaletteVersionRef.current = placeholder;
@@ -451,24 +580,23 @@ export function useWebGPURender(
           try {
             const backgroundShaderFile = getBackgroundShaderFile(activeShaderFile);
             const backgroundSource = await fetchShaderSource(backgroundShaderFile);
+            if (cancelled || pool.isDisposed) return;
             const bezelModule = device.createShaderModule({ code: backgroundSource });
             const bezelBindLayout = device.createBindGroupLayout({ entries: [{ binding: 0, visibility: GPUShaderStage.FRAGMENT, buffer: { type: 'uniform' } }, { binding: 1, visibility: GPUShaderStage.FRAGMENT, sampler: { type: 'filtering' } }, { binding: 2, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float' } }] });
             bezelPipelineRef.current = device.createRenderPipeline({ layout: device.createPipelineLayout({ bindGroupLayouts: [bezelBindLayout] }), vertex: { module: bezelModule, entryPoint: 'vs' }, fragment: { module: bezelModule, entryPoint: 'fs', targets: [{ format }] }, primitive: { topology: 'triangle-list' } });
-            bezelUniformBufferRef.current = device.createBuffer({ size: alignTo(96, 256), usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+            bezelUniformBufferRef.current = pool.track(
+              device.createBuffer({ size: alignTo(96, 256), usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST }),
+              'shader',
+            );
             await loadBezelTexture(device);
-            bezelBindGroupRef.current = device.createBindGroup({ layout: bezelBindLayout, entries: [{ binding: 0, resource: { buffer: bezelUniformBufferRef.current } }, { binding: 1, resource: bezelTextureResourcesRef.current!.sampler }, { binding: 2, resource: bezelTextureResourcesRef.current!.view }] });
+            if (cancelled || pool.isDisposed) return;
+            bezelBindGroupRef.current = device.createBindGroup({ layout: bezelBindLayout, entries: [{ binding: 0, resource: { buffer: bezelUniformBufferRef.current! } }, { binding: 1, resource: bezelTextureResourcesRef.current!.sampler }, { binding: 2, resource: bezelTextureResourcesRef.current!.view }] });
           } catch (e) { console.warn('Failed to initialize bezel shader', e); }
-        } else {
-          bezelPipelineRef.current = null; bezelBindGroupRef.current = null;
-          if (bezelUniformBufferRef.current) { bezelUniformBufferRef.current.destroy(); bezelUniformBufferRef.current = null; }
         }
-
-        deviceRef.current = device; contextRef.current = context; uniformBufferRef.current = uniformBuffer;
 
         const p = renderParamsRef.current;
         const isHighPrec = usesHighPrecisionPacking(activeShaderFile);
 
-        // DURA-001: initialize compute pipeline for high-precision shaders
         if (isHighPrec && !computeStateRef.current) {
           try {
             computeStateRef.current = await initNoteDurationCompute(device);
@@ -477,24 +605,27 @@ export function useWebGPURender(
           }
         }
 
+        const cellsUsage = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST;
         const useCompute = !liteMode && isHighPrec && computeStateRef.current && canUseComputePath(p.matrix);
         if (useCompute) {
           const rawPacked = packPatternMatrixComputeInput(p.matrix, p.padTopChannel);
-          const rawBuffer = createBufferWithData(device, rawPacked.packedData, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
+          const rawBuffer = pool.track(
+            createBufferWithData(device, rawPacked.packedData, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST),
+            'matrix',
+          );
           const numRows = p.matrix?.numRows ?? DEFAULT_ROWS;
           const rawChannels = p.matrix?.numChannels ?? DEFAULT_CHANNELS;
           const numChannels = p.padTopChannel ? rawChannels + 1 : rawChannels;
-          cellsBufferRef.current = runNoteDurationCompute(
-            device, computeStateRef.current!, rawBuffer,
-            numRows, numChannels, p.padTopChannel
+          cellsBufferRef.current = pool.track(
+            runNoteDurationCompute(device, computeStateRef.current!, rawBuffer, numRows, numChannels, p.padTopChannel),
+            'matrix',
           );
-          rawBuffer.destroy();
+          pool.destroyTracked(rawBuffer);
 
-          // DEV parity check: compare GPU output against CPU fallback
           if (import.meta.env.DEV) {
-            (async () => {
+            void (async () => {
               const buffer = cellsBufferRef.current;
-              if (!buffer) return;
+              if (!buffer || cancelled) return;
               const gpuData = await readbackBuffer(device, buffer, buffer.size);
               if (gpuData) {
                 const parity = verifyDurationParity(gpuData, p.matrix, p.padTopChannel);
@@ -503,6 +634,8 @@ export function useWebGPURender(
                     ...prev,
                     errors: [...prev.errors.filter(e => !e.startsWith('DURA-PARITY')), parity.errorSummary!],
                   }));
+                } else if (parity.ok) {
+                  console.log('[DURA-PARITY] ✓');
                 }
               }
             })();
@@ -510,18 +643,26 @@ export function useWebGPURender(
         } else {
           const packFunc = isHighPrec ? packPatternMatrixHighPrecision : packPatternMatrix;
           const { packedData } = packFunc(p.matrix, p.padTopChannel);
-          cellsBufferRef.current = createBufferWithData(device, packedData, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
+          const byteLength = packedData.byteLength;
+          cellsBufferRef.current = pool.acquireBuffer('cells', byteLength, cellsUsage, (buf) => {
+            device.queue.writeBuffer(buf, 0, packedData.buffer, packedData.byteOffset, packedData.byteLength);
+          }, 'matrix');
         }
 
         if (layoutType === 'extended') {
           const numRows = p.matrix?.numRows ?? DEFAULT_ROWS;
-          rowFlagsBufferRef.current = createBufferWithData(device, buildRowFlags(numRows), GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
+          const flags = buildRowFlags(numRows);
+          rowFlagsBufferRef.current = pool.acquireBuffer('rowFlags', flags.byteLength, cellsUsage, (buf) => {
+            device.queue.writeBuffer(buf, 0, flags.buffer, flags.byteOffset, flags.byteLength);
+          }, 'matrix');
           const channelsCount = Math.max(1, p.matrix?.numChannels ?? DEFAULT_CHANNELS);
           const totalCount = p.padTopChannel ? channelsCount + 1 : channelsCount;
           const requiredSize = totalCount * 32;
           const buffer = new ArrayBuffer(requiredSize);
           fillChannelStates([], channelsCount, new DataView(buffer), p.padTopChannel);
-          channelsBufferRef.current = createBufferWithData(device, buffer, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
+          channelsBufferRef.current = pool.acquireBuffer('channels', requiredSize, cellsUsage, (buf) => {
+            device.queue.writeBuffer(buf, 0, buffer);
+          }, 'matrix');
         }
 
         const needsTexture = layoutType === 'texture' || layoutType === 'extended';
@@ -530,109 +671,77 @@ export function useWebGPURender(
           else await ensureButtonTexture(device);
         }
 
+        if (cancelled || pool.isDisposed) return;
         refreshBindGroup(device);
-
-        recoveryAttemptsRef.current = 0;
-        setDeviceStatus('ready');
+        renderGenerationRef.current = lifecycleRef.current.bump();
         setGpuReady(true);
-        // Clear transient DEVICE-LOST recovery messages once we're healthy again.
-        setDebugInfo((prev) => ({
-          ...prev,
-          errors: prev.errors.filter((e) => !e.startsWith('DEVICE-LOST')),
-        }));
+        if (import.meta.env.DEV) {
+          pool.logStats('WebGPU shader init');
+        }
       } catch (error) {
         if (cancelled) return;
-        if (error instanceof WebGPUInitError && error.message.includes('cancelled')) {
-          return;
-        }
         const reason = error instanceof Error ? error.message : String(error);
-        console.error('[Renderer] WebGPU init failed:', reason);
-        const status =
-          error instanceof WebGPUInitError ? error.status : 'device-failed';
-        setDeviceStatus(status);
-        setWebgpuAvailable(false);
+        console.error('[Renderer] WebGPU shader init failed:', reason);
+        setGpuReady(false);
         setDebugInfo((prev) => ({
           ...prev,
           errors: [
-            ...prev.errors.filter((e) => !e.startsWith('DEVICE-INIT')),
-            `DEVICE-INIT: ${reason}`,
+            ...prev.errors.filter((e) => !e.startsWith('SHADER-INIT')),
+            `SHADER-INIT: ${reason}`,
           ],
         }));
       }
     };
 
-    init();
+    void initShader();
     return () => {
       cancelled = true;
-      // Mark lost handler as intentional before destroy so we don't schedule recovery.
-      markLostIntentionalRef.current?.();
-      markLostIntentionalRef.current = null;
       setGpuReady(false);
-      bindGroupRef.current = null;
-      pipelineRef.current = null;
-      if (bezelUniformBufferRef.current) {
-        try { bezelUniformBufferRef.current.destroy(); } catch { /* ignore */ }
-        bezelUniformBufferRef.current = null;
-      }
-      bezelBindGroupRef.current = null;
-      bezelPipelineRef.current = null;
-      bezelTextureResourcesRef.current = null;
-      cellsBufferRef.current = null;
-      uniformBufferRef.current = null;
-      rowFlagsBufferRef.current = null;
-      channelsBufferRef.current = null;
-      textureResourcesRef.current = null;
-      computeStateRef.current = null;
-      if (videoTextureRef.current) {
-        try { videoTextureRef.current.destroy(); } catch { /* ignore */ }
-        videoTextureRef.current = null;
-      }
-      if (instrumentPaletteTextureRef.current) {
-        try { instrumentPaletteTextureRef.current.destroy(); } catch { /* ignore */ }
-        instrumentPaletteTextureRef.current = null;
-      }
-      instrumentPaletteVersionRef.current = null;
-      if (deviceRef.current) {
-        try { deviceRef.current.destroy(); } catch { /* ignore */ }
-      }
-      deviceRef.current = null;
-      contextRef.current = null;
+      releaseShaderGpuResources();
     };
-  }, [shaderFile, syncCanvasSize, enabled, deviceEpoch, liteMode]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [shaderFile, deviceAcquired, enabled, liteMode, releaseShaderGpuResources, refreshBindGroup]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Update cells buffer when matrix changes.
   // Uses `matrix` and `padTopChannel` as direct React deps (not via renderParamsRef) so React
   // reliably detects new-module loads even if the ref mutation timing is ambiguous.
   useEffect(() => {
     const device = deviceRef.current;
-    if (!device || !gpuReady) return;
+    const pool = poolRef.current;
+    if (!device || !gpuReady || !pool || pool.isDisposed) return;
     const p = renderParamsRef.current;
     const rawChannels = matrix?.numChannels ?? DEFAULT_CHANNELS;
     const numChannels = p.padTopChannel ? rawChannels + 1 : rawChannels;
     if (numChannels <= 0) return;
     const numRows = matrix?.numRows ?? DEFAULT_ROWS;
-    // DEBUG: cells buffer update
+    const cellsUsage = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST;
     bindGroupRef.current = null;
     renderFrameCountRef.current = 0;
-    if (cellsBufferRef.current) cellsBufferRef.current.destroy();
+    renderGenerationRef.current = lifecycleRef.current.bump();
+
+    if (cellsBufferRef.current) {
+      pool.releaseBuffer('cells', cellsBufferRef.current, cellsUsage);
+      cellsBufferRef.current = null;
+    }
     const isHighPrec = usesHighPrecisionPacking(shaderFile);
 
     const useCompute = !liteMode && isHighPrec && computeStateRef.current && canUseComputePath(p.matrix);
     if (useCompute) {
       const rawPacked = packPatternMatrixComputeInput(p.matrix, p.padTopChannel);
-      const rawBuffer = createBufferWithData(device, rawPacked.packedData, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
+      const rawBuffer = pool.track(
+        createBufferWithData(device, rawPacked.packedData, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST),
+        'matrix',
+      );
       const outNumRows = p.matrix?.numRows ?? DEFAULT_ROWS;
       const outRawChannels = p.matrix?.numChannels ?? DEFAULT_CHANNELS;
       const outNumChannels = p.padTopChannel ? outRawChannels + 1 : outRawChannels;
-      cellsBufferRef.current = runNoteDurationCompute(
-        device, computeStateRef.current!, rawBuffer,
-        outNumRows, outNumChannels, p.padTopChannel
+      cellsBufferRef.current = pool.track(
+        runNoteDurationCompute(device, computeStateRef.current!, rawBuffer, outNumRows, outNumChannels, p.padTopChannel),
+        'matrix',
       );
-      rawBuffer.destroy();
+      pool.destroyTracked(rawBuffer);
 
-      // DEV parity check
       if (import.meta.env.DEV) {
-        (async () => {
+        void (async () => {
           const buffer = cellsBufferRef.current;
           if (!buffer) return;
           const gpuData = await readbackBuffer(device, buffer, buffer.size);
@@ -643,6 +752,8 @@ export function useWebGPURender(
                 ...prev,
                 errors: [...prev.errors.filter(e => !e.startsWith('DURA-PARITY')), parity.errorSummary!],
               }));
+            } else if (parity.ok) {
+              console.log('[DURA-PARITY] ✓');
             }
           }
         })();
@@ -650,8 +761,9 @@ export function useWebGPURender(
     } else {
       const packFunc = isHighPrec ? packPatternMatrixHighPrecision : packPatternMatrix;
       const { packedData } = packFunc(p.matrix, p.padTopChannel);
-      // DEBUG: packed data stats
-      cellsBufferRef.current = createBufferWithData(device, packedData, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
+      cellsBufferRef.current = pool.acquireBuffer('cells', packedData.byteLength, cellsUsage, (buf) => {
+        device.queue.writeBuffer(buf, 0, packedData.buffer, packedData.byteOffset, packedData.byteLength);
+      }, 'matrix');
     }
 
     // DEV INVARIANT: GPU buffer size must match expected cell data size
@@ -667,11 +779,15 @@ export function useWebGPURender(
     }
 
     if (layoutTypeRef.current === 'extended') {
-      const numRows = matrix?.numRows ?? DEFAULT_ROWS;
-      const flags = buildRowFlags(numRows);
+      const extNumRows = matrix?.numRows ?? DEFAULT_ROWS;
+      const flags = buildRowFlags(extNumRows);
       if (!rowFlagsBufferRef.current || rowFlagsBufferRef.current.size < flags.byteLength) {
-        rowFlagsBufferRef.current?.destroy();
-        rowFlagsBufferRef.current = createBufferWithData(device, flags, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
+        if (rowFlagsBufferRef.current) {
+          pool.releaseBuffer('rowFlags', rowFlagsBufferRef.current, cellsUsage);
+        }
+        rowFlagsBufferRef.current = pool.acquireBuffer('rowFlags', flags.byteLength, cellsUsage, (buf) => {
+          device.queue.writeBuffer(buf, 0, flags.buffer, flags.byteOffset, flags.byteLength);
+        }, 'matrix');
       } else {
         device.queue.writeBuffer(rowFlagsBufferRef.current, 0, flags.buffer, flags.byteOffset, flags.byteLength);
       }
@@ -687,21 +803,31 @@ export function useWebGPURender(
       }
       fillChannelStates(p.channels, channelsCount, channelDataViewRef.current!, p.padTopChannel);
       if (!channelsBufferRef.current || channelsBufferRef.current.size < requiredSize) {
-        channelsBufferRef.current?.destroy();
-        channelsBufferRef.current = createBufferWithData(device, channelBufferDataRef.current!, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
+        if (channelsBufferRef.current) {
+          pool.releaseBuffer('channels', channelsBufferRef.current, cellsUsage);
+        }
+        channelsBufferRef.current = pool.acquireBuffer('channels', requiredSize, cellsUsage, (buf) => {
+          device.queue.writeBuffer(buf, 0, channelBufferDataRef.current!);
+        }, 'matrix');
       } else {
         device.queue.writeBuffer(channelsBufferRef.current, 0, channelBufferDataRef.current!, 0, requiredSize);
       }
     }
+    renderGenerationRef.current = lifecycleRef.current.bump();
     refreshBindGroup(device);
-  }, [matrix, padTopChannel, gpuReady, shaderFile, refreshBindGroup]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (import.meta.env.DEV) {
+      pool.logStats('WebGPU matrix update');
+    }
+  }, [matrix, padTopChannel, gpuReady, shaderFile, refreshBindGroup, liteMode]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Update channel states buffer
   useEffect(() => {
     const device = deviceRef.current;
-    if (!device || !gpuReady) return;
+    const pool = poolRef.current;
+    if (!device || !gpuReady || !pool || pool.isDisposed) return;
     const p = renderParamsRef.current;
     if (layoutTypeRef.current === 'extended') {
+      const cellsUsage = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST;
       const count = Math.max(1, p.matrix?.numChannels ?? DEFAULT_CHANNELS);
       const totalCount = p.padTopChannel ? count + 1 : count;
       const requiredSize = totalCount * 32;
@@ -709,14 +835,17 @@ export function useWebGPURender(
         channelBufferDataRef.current = new ArrayBuffer(requiredSize);
         channelDataViewRef.current = new DataView(channelBufferDataRef.current);
       } else {
-        // Clear old data before reuse to prevent stale values from previous modules
         new Uint8Array(channelBufferDataRef.current).fill(0, 0, requiredSize);
       }
       fillChannelStates(p.channels, count, channelDataViewRef.current!, p.padTopChannel);
       let recreated = false;
       if (!channelsBufferRef.current || channelsBufferRef.current.size < requiredSize) {
-        channelsBufferRef.current?.destroy();
-        channelsBufferRef.current = createBufferWithData(device, channelBufferDataRef.current!, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
+        if (channelsBufferRef.current) {
+          pool.releaseBuffer('channels', channelsBufferRef.current, cellsUsage);
+        }
+        channelsBufferRef.current = pool.acquireBuffer('channels', requiredSize, cellsUsage, (buf) => {
+          device.queue.writeBuffer(buf, 0, channelBufferDataRef.current!);
+        }, 'matrix');
         recreated = true;
       } else {
         device.queue.writeBuffer(channelsBufferRef.current, 0, channelBufferDataRef.current!, 0, requiredSize);
@@ -727,33 +856,48 @@ export function useWebGPURender(
 
   // Stable render function — reads from renderParamsRef to avoid stale closures
   const render = useCallback(() => {
+    const frameGen = renderGenerationRef.current;
+    if (!lifecycleRef.current.isCurrent(frameGen)) return;
+
     const device = deviceRef.current;
+    const pool = poolRef.current;
     const context = contextRef.current;
     const pipeline = pipelineRef.current;
     const bindGroup = bindGroupRef.current;
     const canvas = canvasRef.current;
-    if (!device || !context || !pipeline || !bindGroup || !uniformBufferRef.current || !cellsBufferRef.current || !canvas) {
+    if (!device || !pool || pool.isDisposed || !context || !pipeline || !bindGroup || !canvas) {
+      return;
+    }
+    if (
+      !uniformBufferRef.current || !cellsBufferRef.current ||
+      !pool.isAlive(uniformBufferRef.current) || !pool.isAlive(cellsBufferRef.current)
+    ) {
       return;
     }
 
     const p = renderParamsRef.current;
 
-    // Upload per-instrument palette texture when the module-derived palette changes.
     if (usesInstrumentPalette(shaderFile) && p.instrumentPalette && p.instrumentPalette !== instrumentPaletteVersionRef.current) {
-      instrumentPaletteTextureRef.current?.destroy();
-      const texture = device.createTexture({
-        size: [MAX_INSTRUMENT_PALETTE_SIZE, 1, 1],
-        format: 'rgba8unorm',
-        usage: GPUTextureUsage.COPY_DST | GPUTextureUsage.TEXTURE_BINDING,
-      });
+      if (instrumentPaletteTextureRef.current) {
+        pool.destroyTracked(instrumentPaletteTextureRef.current);
+      }
+      const texture = pool.track(
+        device.createTexture({
+          size: [MAX_INSTRUMENT_PALETTE_SIZE, 1, 1],
+          format: 'rgba8unorm',
+          usage: GPUTextureUsage.COPY_DST | GPUTextureUsage.TEXTURE_BINDING,
+        }),
+        'shader',
+      );
       device.queue.writeTexture(
         { texture },
         (p.instrumentPalette as Uint8Array).buffer as ArrayBuffer,
         { bytesPerRow: MAX_INSTRUMENT_PALETTE_SIZE * 4 },
-        { width: MAX_INSTRUMENT_PALETTE_SIZE, height: 1, depthOrArrayLayers: 1 }
+        { width: MAX_INSTRUMENT_PALETTE_SIZE, height: 1, depthOrArrayLayers: 1 },
       );
       instrumentPaletteTextureRef.current = texture;
       instrumentPaletteVersionRef.current = p.instrumentPalette;
+      if (!lifecycleRef.current.isCurrent(frameGen)) return;
       refreshBindGroup(device);
     }
 
@@ -856,9 +1000,15 @@ export function useWebGPURender(
       else if (source instanceof HTMLImageElement && source.complete) { sourceWidth = source.naturalWidth; sourceHeight = source.naturalHeight; sourceReady = true; }
       if (sourceReady && sourceWidth > 0 && sourceHeight > 0) {
         if (!videoTextureRef.current || videoTextureRef.current.width !== sourceWidth || videoTextureRef.current.height !== sourceHeight) {
-          videoTextureRef.current?.destroy();
-          videoTextureRef.current = device.createTexture({ size: [sourceWidth, sourceHeight, 1], format: preferredImageFormat(device), usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT });
+          if (videoTextureRef.current) {
+            pool.destroyTracked(videoTextureRef.current);
+          }
+          videoTextureRef.current = pool.track(
+            device.createTexture({ size: [sourceWidth, sourceHeight, 1], format: preferredImageFormat(device), usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT }),
+            'shader',
+          );
           textureResourcesRef.current = { sampler: device.createSampler({ magFilter: 'linear', minFilter: 'linear' }), view: videoTextureRef.current.createView() };
+          if (!lifecycleRef.current.isCurrent(frameGen)) return;
           refreshBindGroup(device);
         }
         try { if (videoTextureRef.current) device.queue.copyExternalImageToTexture({ source, flipY: true }, { texture: videoTextureRef.current }, [sourceWidth, sourceHeight, 1]); } catch { /* ignore */ }
@@ -886,7 +1036,7 @@ export function useWebGPURender(
         const minDim = Math.min(actualCanvasW, actualCanvasH);
         const isCircShader = isCircularLayoutShader(shaderFile);
         const backgroundShader = getBackgroundShaderFile(shaderFile);
-        const needsUIFields = backgroundShader === 'chassis_frosted.wgsl' || backgroundShader === 'chassisv0.37.wgsl';
+        const needsUIFields = needsChassisControlFields(shaderFile);
 
         const bezelData = bezelFloatRef.current;
         bezelData[0] = actualCanvasW;
@@ -964,6 +1114,7 @@ export function useWebGPURender(
     };
 
     const encoder = device.createCommandEncoder();
+    if (!lifecycleRef.current.isCurrent(frameGen)) return;
     if (bloomProcessorRef?.current) {
       bloomProcessorRef.current.render(encoder, renderScene);
     } else {
@@ -979,6 +1130,10 @@ export function useWebGPURender(
       pass.end();
     }
     device.queue.submit([encoder.finish()]);
+
+    if (import.meta.env.DEV && renderFrameCountRef.current % 600 === 0) {
+      poolRef.current?.logStats('WebGPU render');
+    }
 
     // Update debug info - always update regardless of overlay state
     const isOverlayActive = WEBGL_HYBRID_SHADERS.has(shaderFile);

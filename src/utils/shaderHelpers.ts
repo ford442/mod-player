@@ -4,6 +4,7 @@ import {
   shouldUseBackgroundPass,
   resolveShaderMeta,
 } from '../../utils/shaderVersion';
+import { SHADER_GROUPS } from '../../appConfig';
 
 /**
  * Shader debugging utility to help identify which shader/background is loaded
@@ -61,23 +62,10 @@ export function describeShader(shaderFile: string): string {
 }
 
 /**
- * Shader categories for UI grouping
+ * Shader categories for UI grouping — mirrors appConfig SHADER_GROUPS.
  */
 export const SHADER_CATEGORIES = {
-  FROSTED_PANEL: [
-    'patternv0.44.wgsl',
-    'patternv0.43.wgsl',
-    'patternv0.40.wgsl',
-    'patternv0.39.wgsl',
-    'patternv0.21.wgsl',
-  ],
-  CIRCULAR_LED: [
-    'patternv0.50.wgsl',
-    'patternv0.50b.wgsl',
-    'patternv0.51.wgsl',
-    'patternv0.55.wgsl',
-    'patternv0.56.wgsl',
-    'patternv0.57.wgsl',
-  ],
-  VIDEO: ['patternv0.23.wgsl', 'patternv0.24.wgsl'],
+  FROSTED_PANEL: SHADER_GROUPS.SQUARE.map((s) => s.id),
+  CIRCULAR_LED: SHADER_GROUPS.CIRCULAR.map((s) => s.id),
+  VIDEO: SHADER_GROUPS.VIDEO.map((s) => s.id),
 };

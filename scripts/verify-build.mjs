@@ -104,6 +104,33 @@ for (const href of scriptHrefs) {
   }
 }
 
+const libopenmptScript = [
+  ...html.matchAll(/<script[^>]+src=["']([^"']*libopenmptjs\.js)["']/gi),
+].map((m) => m[1]);
+if (libopenmptScript.length === 0) {
+  errors.push('index.html has no libopenmptjs.js script tag');
+} else {
+  for (const href of libopenmptScript) {
+    if (href.includes('wasm.noahcohn.com') && !process.env.VITE_LIBOPENMPT_CDN_URL) {
+      errors.push(
+        `libopenmpt script still points at CDN (${href}); expected self-hosted libmpt/`,
+      );
+    }
+    const rel = resolveAssetHref(href);
+    const filePath = join(BUILD_DIR, rel);
+    if (!href.startsWith('http') && !existsSync(filePath)) {
+      errors.push(`libopenmpt script missing on disk: ${rel}`);
+    }
+  }
+}
+
+for (const wasmRel of ['libmpt/libopenmpt.wasm', 'libmpt/libopenmptjs.js']) {
+  const filePath = join(BUILD_DIR, wasmRel);
+  if (!existsSync(filePath)) {
+    errors.push(`missing self-hosted libopenmpt asset: ${wasmRel}`);
+  }
+}
+
 // Warn when dist/assets contains files not referenced by index.html or JS bundles
 if (existsSync(assetsDir)) {
   const assetNames = readdirSync(assetsDir).filter((f) => statSync(join(assetsDir, f)).isFile());

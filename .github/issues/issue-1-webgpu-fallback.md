@@ -154,4 +154,4 @@ Guard against infinite loops (only fall back once per session).
 ## Related
 
 - Blocks full usability of #TBD (pattern data pipeline) on fallback backends.
-- `components/PatternDisplay.responsive.tsx` has parallel WebGPU init logic — keep in sync or consolidate.
+- Production pattern UI: `components/PatternDisplay.tsx` (archived experiments live under `archive/experimental/components/`).

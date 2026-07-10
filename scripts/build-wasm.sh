@@ -120,6 +120,10 @@ fi
 
 echo "📦 Emscripten version: $(emcc --version | head -1)"
 echo "📌 Documented pin (CI): emsdk ${EMSDK_PIN}"
+EMCC_VERSION_LINE="$(emcc --version 2>/dev/null | head -1 || true)"
+if [[ -n "$EMCC_VERSION_LINE" && "$EMSDK_PIN" != "latest" && ! "$EMCC_VERSION_LINE" == *"$EMSDK_PIN"* ]]; then
+    echo "⚠️  Warning: active emcc does not report ${EMSDK_PIN}. CI uses that pin; mismatch may cause build drift." >&2
+fi
 
 # ── libopenmpt discovery / build ─────────────────────────────────────
 # Installed layout (post `make CONFIG=emscripten`):  include/libopenmpt/libopenmpt.h

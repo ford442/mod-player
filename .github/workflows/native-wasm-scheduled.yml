@@ -1,0 +1,74 @@
+# Full native C++ WASM build — weekly + manual.
+# PR CI only syntax-checks scripts (libopenmpt compile is too slow for every push).
+name: Native WASM Build (scheduled)
+
+on:
+  schedule:
+    # Mondays 06:00 UTC
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+jobs:
+  build-native:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Pin must match scripts/build-wasm.sh EMSDK_PIN and docs
+      - name: Setup Emscripten
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: '3.1.50'
+
+      - name: Verify emcc
+        run: emcc --version
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Snapshot tracked JS worklet
+        run: |
+          test -f public/worklets/openmpt-worklet.js
+          cksum public/worklets/openmpt-worklet.js | tee /tmp/worklet-before.cksum
+          grep -q 'registerProcessor\|AudioWorkletProcessor' public/worklets/openmpt-worklet.js
+
+      - name: Verify native exports (pre-build audit)
+        run: npm run verify:native-exports
+
+      - name: Build native engine
+        run: npm run build:emcc
+
+      - name: Assert tracked JS worklet unchanged
+        run: |
+          cksum public/worklets/openmpt-worklet.js | tee /tmp/worklet-after.cksum
+          diff /tmp/worklet-before.cksum /tmp/worklet-after.cksum
+          grep -q 'registerProcessor\|AudioWorkletProcessor' public/worklets/openmpt-worklet.js
+          echo "✅ Tracked JS worklet intact after native build"
+
+      - name: Verify native artifacts
+        run: |
+          for f in public/worklets/openmpt-native.js public/worklets/openmpt-native.wasm public/worklets/openmpt-native.aw.js; do
+            if [ ! -f "$f" ]; then echo "❌ missing $f"; false; fi
+          done
+          # WASM magic
+          head -c 4 public/worklets/openmpt-native.wasm | od -An -tx1 | grep -q '00 61 73 6d'
+          echo "✅ openmpt-native.* artifacts present"
+
+      - name: Upload native artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: openmpt-native-emsdk-3.1.50
+          path: |
+            public/worklets/openmpt-native.js
+            public/worklets/openmpt-native.wasm
+            public/worklets/openmpt-native.aw.js
+          retention-days: 14

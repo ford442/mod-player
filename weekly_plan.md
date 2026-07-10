@@ -26,13 +26,13 @@ Foundation is solid: last week's New Idea (volume/velocity-reactive LEDs, `patte
 ## Backlog
 <!-- Unfinished items, known bugs, deferred work. -->
 - **GITHUB ISSUE TRACKER NOW EMPTY (0 open issues, 0 open PRs as of 2026-07-03).** Every previously-tracked issue (#252, #269, #270, #272, #280 and the #278 draft PR) has been closed/merged. Remaining backlog below is **runtime-verification debt** (code landed + typecheck/build green, but never confirmed in a live WebGPU browser) plus a UI nit — none are open GitHub issues.
-- [ ] **VERIFY v0.57 volume-reactive LEDs (runtime):** VEL-001 landed + merged, build green. Pending browser smoke-test on a dynamics-rich module — confirm (1) loud steps glow/bloom brighter than quiet, (2) bottom emitter reads as a velocity indicator, (3) sustain tails show the organic sin-pulse, (4) no `[WebGPU]` pipeline errors when `patternv0.57.wgsl` selected. (see `.swarm-state.md` VEL-001)
-- [ ] **VERIFY v0.30b "Note-On Disc" (runtime):** converged over #286→#291 (final: cyan holds until note-off, instant note-on, end fade), merged 07-03. Pending browser smoke-test — confirm trigger pads snap to full brightness instantly, cyan activity LED holds through sustain then fades at note end, no fade-in ramp, muted notes stay subdued, outer indicator ring still tracks the playhead.
-- [ ] **octave-brightness back-port visual verify:** commit `149f3b3` back-ported v0.50 `octaveBrightness()` into v0.46/0.47/0.48 (gated behind NOTE_MAX), extended v0.47 sustain to B-9, static parity test in `utils/__debug__/octaveBrightness.test.cjs`. Issue #280 is now CLOSED — remaining is a browser check: load a low→high-register module on each of v0.46/47/48, confirm octave gradient + dimmed-pitch sustain tails + amber/effect cells unchanged vs v0.50.
+- [ ] **VERIFY v0.57 volume-reactive LEDs (runtime):** VEL-001 landed + merged, build green. **Automated:** `npm run smoke:visual:ci` covers v0.57 webgl2/html canvas + console (CI). **Manual WebGPU:** loud/quiet bloom, velocity emitter, sustain sin-pulse — see `docs/VISUAL_SMOKE.md`.
+- [ ] **VERIFY v0.30b "Note-On Disc" (runtime):** converged over #286→#291, merged 07-03. **Automated:** v0.30b in `smoke:visual:ci`. **Manual:** cyan hold/fade, instant note-on — see `docs/VISUAL_SMOKE.md`.
+- [ ] **octave-brightness back-port visual verify:** commit `149f3b3` back-ported v0.50 `octaveBrightness()` into v0.46/0.47/0.48. **Automated:** v0.46 in `smoke:visual:ci`. **Manual:** v0.47/48 octave gradient on wide-range module — see `docs/VISUAL_SMOKE.md`.
 - [ ] **Worklet-mode playhead prediction (~200–500 ms drift):** was #270 (now closed) — the AudioWorklet path still lags the ScriptProcessor path on playhead position. See `docs/planning/accurate_playback.md`. Real, non-trivial audio-sync work if revisited.
-- [ ] **VERIFY MOBILE-LITE (runtime):** mobile-lite landed (#251), build green. Pending browser smoke-test — (1) `?lite=1` forces lite (v0.21, no bloom, no WebGL overlay, 512×512, DPR=1), (2) `?lite=0` forces full desktop even on mobile UA, (3) desktop default renders byte-identical, (4) no WebGPU console errors. Test on a real phone + a desktop emulated-mobile profile.
-- [ ] **VERIFY DURA-001 (runtime):** GPU compute duration port landed (#239), build green. Pending browser smoke-test — confirm `[DURA-PARITY] ✓` prints in dev console with at least one MOD and one IT module. If parity fails it logs the first mismatching cell index + hex.
-- [ ] **Bug 4: ▶️ Play button scrolls canvas off-screen** — a `utils/scrollContainer.ts` helper now exists (added in `97c4529`, 06-26) which likely already addresses this; **verify whether it's still reproducible before spending effort.** If still live, it's a pure UI/focus fix in the controls/play-button component. NOT this run's Copilot candidate (superseded — see below).
+- [ ] **VERIFY MOBILE-LITE (runtime):** mobile-lite landed (#251), build green. **Automated:** `?lite=1` scenario in full `smoke:visual` profile. **Manual:** real phone + desktop emulated-mobile — see `docs/VISUAL_SMOKE.md`.
+- [ ] **VERIFY DURA-001 (runtime):** GPU compute duration port landed (#239), build green. **Automated:** `npm run test:duration-parity` (unit). **Manual WebGPU dev:** `[DURA-PARITY] ✓` in console with MOD + IT — `npm run dev` + `docs/VISUAL_SMOKE.md`.
+- [ ] **Bug 4: ▶️ Play button scrolls canvas off-screen** — `utils/scrollContainer.ts` helper exists (97c4529). **Manual:** click play, confirm canvas stays visible — `docs/VISUAL_SMOKE.md` checklist.
 - **THIS RUN'S decoupled Copilot candidate → ChannelMeters VU-meter enhancement** (peak-hold + dB scale + smoothing + clip indicator in `components/ChannelMeters.tsx`). Reads the existing `channelStatesRef` data, lives entirely in one component, **zero overlap** with the shader/registry/version-chain/PatternDisplay files the Night-trio kimi-cli run touches.
 
 ## Done
@@ -461,7 +461,7 @@ This would make melodic lines and ambient modules instantly readable at a glance
 
 ### 2. Shader & Graphical Detail Upgrades
 
-The shader folder structure (`shaders/`, `shaders-enhanced/`, `mod-player-shaders/`) is already rich. Let's level it up.
+The shader folder structure (`shaders/`, `shaders-enhanced/`, `archive/`) is already rich. Let's level it up.
 
 **Multi-layer bloom (easy win):** Separate bloom passes for note triggers (bright blue) vs sustains (softer) vs expression (amber). Reuse your existing `bloomPostProcessor.ts`.
 

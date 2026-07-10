@@ -79,6 +79,7 @@ export class BloomPostProcessor {
   private compositeShaderCode?: string | undefined;
 
   private finalFormat: GPUTextureFormat;
+  private disposed = false;
 
   constructor(device: GPUDevice, canvas: HTMLCanvasElement, context: GPUCanvasContext, options: LayeredBloomOptions = {}) {
     this.device = device;
@@ -362,6 +363,7 @@ export class BloomPostProcessor {
   }
 
   public render(commandEncoder: GPUCommandEncoder, renderScene: (pass: GPURenderPassEncoder) => void) {
+    if (this.disposed) return;
     if (this.layers) {
       this.renderLayered(commandEncoder, renderScene);
     } else {
@@ -612,6 +614,7 @@ export class BloomPostProcessor {
   // Call once per frame before bloomPostProcessor.render().
   // intensity=0.0 → no effect (bit-identical to pre-CRT output).
   public updateCRT(intensity: number, scanlineDark: number = 0.15, vignetteStrength: number = 0.4) {
+    if (this.disposed) return;
     this.device.queue.writeBuffer(
       this.crtUniformBuffer, 0,
       new Float32Array([intensity, scanlineDark, vignetteStrength, 0.0])
@@ -619,7 +622,7 @@ export class BloomPostProcessor {
   }
 
   public resize(width: number, height: number) {
-    if (!this.sceneTexture) return;
+    if (this.disposed || !this.sceneTexture) return;
 
     const blurSize = { width: Math.floor(width / 2), height: Math.floor(height / 2) };
 
@@ -684,6 +687,8 @@ export class BloomPostProcessor {
   }
 
   public destroy() {
+    if (this.disposed) return;
+    this.disposed = true;
     this.sceneTexture?.destroy();
     this.thresholdTexture?.destroy();
     this.blurTextures.forEach(t => t.destroy());
