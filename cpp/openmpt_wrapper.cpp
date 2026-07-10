@@ -107,15 +107,35 @@ void OpenMPTModule::fillPositionInfo(PositionInfo& out) const {
     std::memset(&out, 0, sizeof(out));
     if (!mod_) return;
 
-    out.positionMs      = openmpt_module_get_position_seconds(mod_) * 1000.0;
+    const double posSec = openmpt_module_get_position_seconds(mod_);
+    out.positionMs      = posSec * 1000.0;
     out.currentRow      = openmpt_module_get_current_row(mod_);
     out.currentOrder    = openmpt_module_get_current_order(mod_);
     out.bpm             = openmpt_module_get_current_estimated_bpm(mod_);
     out.numChannels     = openmpt_module_get_num_channels(mod_);
+    out.speed           = openmpt_module_get_current_speed(mod_);
+    out.sampleRate      = 0; // filled by caller when known
+    out.audioFramesRendered = 0; // filled by caller when known
+    out.rowFraction     = static_cast<float>(out.currentRow);
 
     // Resolve order → pattern
     if (out.currentOrder >= 0) {
         out.currentPattern = openmpt_module_get_order_pattern(mod_, out.currentOrder);
+    }
+
+    // Fractional row via time-at-position markers (same approach as JS worklet)
+    if (out.currentRow >= 0 && out.currentOrder >= 0) {
+        const double t0 = openmpt_module_get_time_at_position(mod_, out.currentOrder, out.currentRow);
+        double t1 = openmpt_module_get_time_at_position(mod_, out.currentOrder, out.currentRow + 1);
+        if (!(t1 > t0)) {
+            t1 = openmpt_module_get_time_at_position(mod_, out.currentOrder + 1, 0);
+        }
+        if (t1 > t0) {
+            const double frac = (posSec - t0) / (t1 - t0);
+            if (frac >= 0.0 && frac < 1.0) {
+                out.rowFraction = static_cast<float>(out.currentRow) + static_cast<float>(frac);
+            }
+        }
     }
 
     // Per-channel VU

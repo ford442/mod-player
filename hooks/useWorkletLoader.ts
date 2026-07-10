@@ -47,7 +47,8 @@ export interface UseWorkletLoaderOptions {
 export const getWorkletUrl = (): string => {
   const base = detectRuntimeBase();
   // BUMP this version whenever openmpt-worklet.js changes to bust browser caches
-  const WORKLET_VERSION = '2';
+  // v4: pre-render position + rowFraction for ≤1-row A/V lag
+  const WORKLET_VERSION = '4';
   const url = `${base}worklets/openmpt-worklet.js?v=${WORKLET_VERSION}`;
 
   return url;

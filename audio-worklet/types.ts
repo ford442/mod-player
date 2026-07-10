@@ -31,13 +31,19 @@ export interface WorkletPatternData {
 
 export interface WorkletPositionData {
     positionMs: number;
-  workletTime?: number;
+    workletTime?: number;
     currentRow: number;
     currentPattern: number;
     currentOrder: number;
     bpm: number;
     /** Module speed factor (MOD/XM), when available from the engine */
     speed?: number;
+    /** Fractional row (currentRow + in-row progress), when provided by engine */
+    rowFraction?: number;
+    /** Cumulative frames rendered since load/play (sample-accurate clock) */
+    audioFramesRendered?: number;
+    /** Render sample rate for frame clock */
+    sampleRate?: number;
     numChannels: number;
     /** Per-channel mono VU values, indices [0..numChannels-1] */
     channelVU: Float32Array;

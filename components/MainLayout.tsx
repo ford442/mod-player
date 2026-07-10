@@ -17,6 +17,7 @@ import { Panel } from './Panel';
 import { ShaderSelectorPanel } from './ShaderSelectorPanel';
 import { cn } from '../utils/cn';
 import { setLiteOverride } from '../utils/deviceCapabilities';
+import { usesInstrumentPalette } from '../utils/shaderVersion';
 import { IS_PUBLIC_MODE, AVAILABLE_SHADERS, THEME_OPTIONS } from '../appConfig';
 import type { AppTheme } from '../appConfig';
 import type { PatternMatrix, ChannelShadowState, PlaybackState, MediaItem } from '../types';
@@ -407,11 +408,11 @@ export function MainLayout({
                     </select>
                     <button
                       onClick={() => setPaletteMode(paletteMode === 0 ? 1 : 0)}
-                      disabled={!shaderFile.includes('v0.56')}
-                      title={shaderFile.includes('v0.56') ? 'Toggle pitch hue vs per-instrument color' : 'Per-instrument palette only available on v0.56'}
+                      disabled={!usesInstrumentPalette(shaderFile)}
+                      title={usesInstrumentPalette(shaderFile) ? 'Toggle pitch hue vs per-instrument color' : 'Per-instrument palette not available on this shader'}
                       className={cn(
                         'text-[10px] font-mono px-2 py-1 rounded border transition-colors',
-                        shaderFile.includes('v0.56')
+                        usesInstrumentPalette(shaderFile)
                           ? paletteMode === 1
                             ? 'bg-cyan-700 text-white border-cyan-500 hover:bg-cyan-600'
                             : isDarkMode

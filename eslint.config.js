@@ -5,7 +5,22 @@ import reactRefresh from 'eslint-plugin-react-refresh';
 import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
-  { ignores: ['dist', 'public', 'vendor', 'node_modules', 'mod-player-shaders', 'kimi_agents', 'jules_patch', 'subdir'] },
+  {
+    ignores: [
+      'dist/**',
+      'public/**',
+      'vendor/**',
+      'node_modules/**',
+      'mod-player-shaders/**',
+      'kimi_agents/**',
+      'jules_patch/**',
+      'subdir/**',
+      // Generated / non-app surfaces
+      '**/*.cjs',
+      'scripts/**',
+      'cpp/**',
+    ],
+  },
   {
     extends: [js.configs.recommended, ...tseslint.configs.recommended],
     files: ['**/*.{ts,tsx}'],
@@ -23,8 +38,16 @@ export default tseslint.config(
         'warn',
         { allowConstantExport: true },
       ],
+      // Warn-only for now; ratchet toward error once legacy call sites shrink.
       '@typescript-eslint/no-explicit-any': 'warn',
-      '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
+      '@typescript-eslint/no-unused-vars': [
+        'warn',
+        {
+          argsIgnorePattern: '^_',
+          varsIgnorePattern: '^_',
+          caughtErrorsIgnorePattern: '^_',
+        },
+      ],
     },
-  }
+  },
 );

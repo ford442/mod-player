@@ -6,6 +6,7 @@
  *   node scripts/verify-build.mjs
  *   BUILD_DIR=dist node scripts/verify-build.mjs
  */
+import { spawnSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -130,6 +131,29 @@ if (existsSync(assetsDir)) {
       `unreferenced assets in dist/assets (stale build?): ${orphans.join(', ')}`,
     );
   }
+}
+
+// Reject HTML-masquerading or tiny .wasm under dist/ (and public/ for source tree).
+// See scripts/verify-wasm-assets.mjs — production JS worklet is wasm2js and does
+// not need a sibling libopenmpt.wasm.
+try {
+  const wasmCheck = spawnSync(
+    process.execPath,
+    [join('scripts', 'verify-wasm-assets.mjs')],
+    {
+      env: { ...process.env, WASM_SCAN_ROOTS: `${BUILD_DIR},public` },
+      encoding: 'utf8',
+    },
+  );
+  if (wasmCheck.stdout) process.stdout.write(wasmCheck.stdout);
+  if (wasmCheck.stderr) process.stderr.write(wasmCheck.stderr);
+  if (wasmCheck.status !== 0) {
+    errors.push('verify-wasm-assets failed (corrupt or HTML .wasm artifact)');
+  }
+} catch (e) {
+  errors.push(
+    `verify-wasm-assets could not run: ${e instanceof Error ? e.message : e}`,
+  );
 }
 
 if (errors.length > 0) {

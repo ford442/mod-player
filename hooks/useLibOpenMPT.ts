@@ -48,8 +48,9 @@ console.log('[AudioWorklet] Configuration:', {
 
 // TIMING FIX: Maximum allowed drift before correction (in seconds)
 const MAX_DRIFT_SECONDS = 0.1;
-// Worklet prediction: light smoothing only (heavy smoothing caused visible lag)
-const WORKLET_ROW_SMOOTHING = 0.88;
+// Worklet: prediction already tracks audio clock — only light EMA to hide
+// postMessage jitter (α→1 = less lag). Was 0.88; still a small lag source.
+const WORKLET_ROW_SMOOTHING = 0.94;
 // ScriptProcessor / direct lib query: near-instant follow
 const DIRECT_ROW_SMOOTHING = 0.96;
 
@@ -505,11 +506,16 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
       currentBpm = workletBpmRef.current;
 
       if (sample) {
+        // Predictive playhead: last worklet sample (fractional row + audioTime)
+        // extrapolated to speaker-heard audio clock.
         const heardTime = getAudioHeardTime(audioCtx);
-        const rowsPerSec = workletRowsPerSecRef.current || rowsPerSecondFromBpm(currentBpm);
+        const rowsPerSec =
+          workletRowsPerSecRef.current || rowsPerSecondFromBpm(sample.bpm || currentBpm);
         const predicted = predictPlayheadFromSample(sample, heardTime, rowsPerSec);
         row = predicted.playheadRow;
         time = predicted.positionSeconds;
+        order = sample.order;
+        if (sample.bpm > 0) currentBpm = sample.bpm;
       }
 
       // Drift telemetry: compare predicted song time to hardware clock baseline
@@ -526,7 +532,8 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
         lastCorrectedTimeRef.current = audioCtx.currentTime;
       }
     } else if (scriptProcessorRef.current && lib && modPtr !== 0) {
-      // ScriptProcessor: position queried on audio callback thread — read lib directly
+      // ScriptProcessor: position queried on audio callback path — leave unchanged.
+      // Direct lib query is already sample-aligned with the SP render callback.
       order = lib._openmpt_module_get_current_order(modPtr);
       row = lib._openmpt_module_get_current_row(modPtr);
       time = lib._openmpt_module_get_position_seconds(modPtr);
@@ -556,8 +563,10 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
       if (newMatrix) setSequencerMatrix(newMatrix);
     }
 
-    setModuleInfo((prev: ModuleInfo) => ({ ...prev, order, row, bpm: currentBpm }));
-    setSequencerCurrentRow(row);
+    // moduleInfo / sequencer UI use integer row; shaders use fractional playhead
+    const rowIntUi = Math.floor(row);
+    setModuleInfo((prev: ModuleInfo) => ({ ...prev, order, row: rowIntUi, bpm: currentBpm }));
+    setSequencerCurrentRow(rowIntUi);
     setPlaybackSeconds(time);
 
     // Update global row (approximate)
@@ -565,17 +574,19 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
     for (let i = 0; i < order; i++) {
       globalRow += patternMatricesRef.current[i]?.numRows || 64;
     }
-    setSequencerGlobalRow(globalRow + row);
+    setSequencerGlobalRow(globalRow + rowIntUi);
 
     // TIMING FIX: Smooth row for visual display (light smoothing on worklet path only)
     const targetPlayhead = row;
     const prevPlayhead = playbackStateRef.current.playheadRow;
     let smoothedPlayhead = prevPlayhead + (targetPlayhead - prevPlayhead) * rowSmoothing;
 
-    // Snap on seek / pattern change / stale sample
-    if (Math.abs(targetPlayhead - prevPlayhead) > 2.0) {
+    // Snap on seek / pattern change / large jumps (do not lag across page boundaries)
+    if (Math.abs(targetPlayhead - prevPlayhead) > 1.0) {
       smoothedPlayhead = targetPlayhead;
     }
+    // Never push a negative playhead after latency back-extrapolation
+    if (smoothedPlayhead < 0) smoothedPlayhead = 0;
     setPlaybackRowFraction(smoothedPlayhead);
 
     // Compute note ages for hardware choke / shaders

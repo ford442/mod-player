@@ -72,23 +72,34 @@ const MAX_VU_CHANNELS = 32;
 
 // Byte offsets within the PositionInfo struct (must match C++ layout)
 // struct PositionInfo {
-//   double positionMs;      // offset 0, 8 bytes
-//   int    currentRow;      // offset 8, 4 bytes
-//   int    currentPattern;  // offset 12, 4 bytes
-//   int    currentOrder;    // offset 16, 4 bytes
-//   double bpm;             // offset 24, 8 bytes (aligned to 8)
-//   int    numChannels;     // offset 32, 4 bytes
-//   float  channelVU[32];   // offset 36, 128 bytes
+//   double positionMs;           // offset 0, 8
+//   int    currentRow;           // offset 8, 4
+//   int    currentPattern;       // offset 12, 4
+//   int    currentOrder;         // offset 16, 4
+//   (pad 4 for double align)
+//   double bpm;                  // offset 24, 8
+//   int    numChannels;          // offset 32, 4
+//   float  channelVU[32];        // offset 36, 128 → ends 164
+//   (pad 4 for double align)
+//   double audioFramesRendered;  // offset 168, 8
+//   float  rowFraction;          // offset 176, 4
+//   int    speed;                // offset 180, 4
+//   int    sampleRate;           // offset 184, 4
 // };
-// Total: 164 bytes (with alignment padding)
 
-const POS_OFFSET_POSITION_MS    = 0;
-const POS_OFFSET_CURRENT_ROW    = 8;
+const POS_OFFSET_POSITION_MS     = 0;
+const POS_OFFSET_CURRENT_ROW     = 8;
 const POS_OFFSET_CURRENT_PATTERN = 12;
-const POS_OFFSET_CURRENT_ORDER  = 16;
-const POS_OFFSET_BPM            = 24;
-const POS_OFFSET_NUM_CHANNELS   = 32;
-const POS_OFFSET_CHANNEL_VU     = 36;
+const POS_OFFSET_CURRENT_ORDER   = 16;
+const POS_OFFSET_BPM             = 24;
+const POS_OFFSET_NUM_CHANNELS    = 32;
+const POS_OFFSET_CHANNEL_VU      = 36;
+const POS_OFFSET_AUDIO_FRAMES    = 168;
+const POS_OFFSET_ROW_FRACTION    = 176;
+const POS_OFFSET_SPEED           = 180;
+const POS_OFFSET_SAMPLE_RATE     = 184;
+/** Minimum byte length for extended PositionInfo fields. */
+const POS_INFO_EXTENDED_BYTES    = 188;
 
 // ── EventEmitter ─────────────────────────────────────────────────────
 
@@ -171,11 +182,10 @@ export class OpenMPTWorkletEngine extends MiniEventEmitter<EngineEventMap> {
             // ⚠️  NEVER import() an AudioWorklet processor script (e.g. openmpt-worklet.js)
             //     on the main thread — it references AudioWorkletProcessor which only exists
             //     inside AudioWorkletGlobalScope. See docs/WORKLET_AUDIO_BUG.md.
-            let glueModule: Record<string, unknown>;
             // The JS worklet processor (openmpt-worklet.js) references AudioWorkletProcessor
             // and cannot be imported on the main thread. Only try the native Emscripten glue.
             const nativeUrl = withBase('worklets/openmpt-native.js');
-            glueModule = await import(/* @vite-ignore */ nativeUrl) as Record<string, unknown>;
+            const glueModule = await import(/* @vite-ignore */ nativeUrl) as Record<string, unknown>;
             const createModule = (glueModule.default || glueModule['createOpenMPTModule']) as CreateOpenMPTModule;
 
             if (typeof createModule !== 'function') {
@@ -662,7 +672,20 @@ export class OpenMPTWorkletEngine extends MiniEventEmitter<EngineEventMap> {
             channelVU[i] = view.getFloat32(ptr + POS_OFFSET_CHANNEL_VU + i * 4, true);
         }
 
-        return {
+        // Extended fields (present after native rebuild with updated PositionInfo)
+        let rowFraction: number | undefined;
+        let speed: number | undefined;
+        let audioFramesRendered: number | undefined;
+        let sampleRate: number | undefined;
+        const bytesAvailable = this.module.HEAPU8.byteLength - ptr;
+        if (bytesAvailable >= POS_INFO_EXTENDED_BYTES) {
+            audioFramesRendered = view.getFloat64(ptr + POS_OFFSET_AUDIO_FRAMES, true);
+            rowFraction = view.getFloat32(ptr + POS_OFFSET_ROW_FRACTION, true);
+            speed = view.getInt32(ptr + POS_OFFSET_SPEED, true);
+            sampleRate = view.getInt32(ptr + POS_OFFSET_SAMPLE_RATE, true);
+        }
+
+        const result: WorkletPositionData = {
             positionMs,
             currentRow,
             currentPattern,
@@ -671,5 +694,18 @@ export class OpenMPTWorkletEngine extends MiniEventEmitter<EngineEventMap> {
             numChannels,
             channelVU,
         };
+        if (rowFraction != null && Number.isFinite(rowFraction)) {
+            result.rowFraction = rowFraction;
+        }
+        if (speed != null && speed > 0) {
+            result.speed = speed;
+        }
+        if (audioFramesRendered != null && Number.isFinite(audioFramesRendered)) {
+            result.audioFramesRendered = audioFramesRendered;
+        }
+        if (sampleRate != null && sampleRate > 0) {
+            result.sampleRate = sampleRate;
+        }
+        return result;
     }
 }

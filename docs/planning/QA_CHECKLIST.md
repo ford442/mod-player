@@ -7,7 +7,7 @@ This checklist ensures the MOD player meets quality standards before each releas
 - [ ] `npm run build` completes without errors
 - [ ] `npm run typecheck` passes with strict settings
 - [ ] No TypeScript `any` types in new code
-- [ ] WASM build script (`build-wasm.sh`) is executable and works
+- [ ] Native WASM path: `npm run build:emcc` / `scripts/build-wasm.sh` (never clobbers `openmpt-worklet.js`)
 
 ## ✅ Code Quality
 
@@ -72,14 +72,18 @@ This checklist ensures the MOD player meets quality standards before each releas
 ## Quick Smoke Test Commands
 
 ```bash
-# Full build check
+# Full build check (npm ci requires committed package-lock.json)
 npm ci
+npm run verify:wasm   # reject HTML-as-.wasm / missing \0asm magic
+npm run lint
 npm run typecheck
 npm run build
+npm run verify:build  # post-build CSS + wasm checks
 
-# WASM build (requires Emscripten)
+# Native C++ worklet (requires emsdk 3.1.50)
 source /opt/emsdk/emsdk_env.sh
-./build-wasm.sh
+npm run build:emcc
+npm run verify:native-exports
 
 # Dev server test
 npm run dev

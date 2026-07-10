@@ -22,7 +22,22 @@ Prerequisites
 Install dependencies
 
 ```bash
+npm ci
+```
+
+Prefer `npm ci` for a clean install that matches the committed `package-lock.json`. Use `npm install` only when adding/updating dependencies (and commit the updated lockfile).
+
+### Regenerating `package-lock.json`
+
+```bash
+# After editing package.json dependencies:
 npm install
+git add package.json package-lock.json
+
+# Full regenerate (rare — e.g. lockfile corruption):
+rm -rf node_modules package-lock.json
+npm install
+git add package-lock.json
 ```
 
 Run the development server
@@ -38,6 +53,12 @@ Build for production
 ```bash
 npm run build
 npm run preview
+```
+
+Lint (ESLint, hard CI gate; max 100 warnings budget)
+
+```bash
+npm run lint
 ```
 
 Usage

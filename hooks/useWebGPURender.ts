@@ -14,6 +14,14 @@ import {
   supportsStepsLength,
   usesHighPrecisionPacking,
   usesPlayheadRowAsFloat,
+  usesOscilloscope,
+  usesInstrumentPalette,
+  usesVideoPatternTexture,
+  usesStepsDrivenVisibleRows,
+  getUiExtraInstances,
+  usesNightModeBezel,
+  resolveShaderMeta,
+  WEBGL_HYBRID_SHADERS,
 } from '../utils/shaderVersion';
 import { getShaderMeta, getLiteRecommendedShader } from '../utils/shaderRegistry';
 import {
@@ -41,12 +49,24 @@ import type { BloomPostProcessor } from '../utils/bloomPostProcessor';
 import { GRID_RECT, getPolarRadii } from '../utils/geometryConstants';
 import { withBase } from '../src/lib/paths';
 import { generateEmptyInstrumentPalette, MAX_INSTRUMENT_PALETTE_SIZE } from '../utils/instrumentPalette';
+import {
+  requestWebGPUDevice,
+  configureCanvasContext,
+  getWebGPUCanvasContext,
+  attachDeviceLostHandler,
+  preferredSampledImageFormat,
+  WebGPUInitError,
+  type WebGPUDeviceStatus,
+} from '../utils/webgpuDevice';
 
 export type DebugInfo = {
   layoutMode: string;
   errors: string[];
   uniforms: Record<string, number | string>;
 };
+
+/** Lifecycle status for the shared WebGPU device (surfaced to UI). */
+export type { WebGPUDeviceStatus };
 
 async function fetchShaderSource(shaderName: string): Promise<string> {
   const response = await fetch(withBase(`shaders/${shaderName}`));
@@ -121,6 +141,13 @@ export function useWebGPURender(
   enabled = true,
 ) {
   const [gpuReady, setGpuReady] = useState(false);
+  /** Bumped on unexpected device loss to re-run the init effect (recovery). */
+  const [deviceEpoch, setDeviceEpoch] = useState(0);
+  const [deviceStatus, setDeviceStatus] = useState<WebGPUDeviceStatus>('initializing');
+  const markLostIntentionalRef = useRef<(() => void) | null>(null);
+  /** Caps automatic device-lost recovery to avoid infinite re-init loops. */
+  const recoveryAttemptsRef = useRef(0);
+  const MAX_DEVICE_LOST_RECOVERIES = 3;
 
   // GPU resource refs
   const deviceRef = useRef<GPUDevice | null>(null);
@@ -155,8 +182,7 @@ export function useWebGPURender(
   const channelBufferDataRef = useRef<ArrayBuffer | null>(null);
   const channelDataViewRef = useRef<DataView | null>(null);
 
-  const preferredImageFormat = (device: GPUDevice): GPUTextureFormat =>
-    device.features.has('float32-filterable') ? 'rgba32float' : 'rgba8unorm';
+  const preferredImageFormat = preferredSampledImageFormat;
 
   const refreshBindGroup = useCallback((device: GPUDevice) => {
     if (!pipelineRef.current || !cellsBufferRef.current || !uniformBufferRef.current) return;
@@ -177,10 +203,10 @@ export function useWebGPURender(
         { binding: 4, resource: textureResourcesRef.current.sampler },
         { binding: 5, resource: textureResourcesRef.current.view },
       );
-      if (shaderFile.includes('v0.55') && oscTextureRef?.current) {
+      if (usesOscilloscope(shaderFile) && oscTextureRef?.current) {
         entries.push({ binding: 6, resource: oscTextureRef.current.createView() });
       }
-      if (shaderFile.includes('v0.56') && instrumentPaletteTextureRef.current) {
+      if (usesInstrumentPalette(shaderFile) && instrumentPaletteTextureRef.current) {
         entries.push({ binding: 7, resource: instrumentPaletteTextureRef.current.createView() });
       }
     } else if (layoutType === 'texture') {
@@ -198,7 +224,10 @@ export function useWebGPURender(
 
   const loadBezelTexture = async (device: GPUDevice) => {
     if (bezelTextureResourcesRef.current) return;
-    const textureName = (shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44')) ? `./bezel-square.png` : `./bezel.png`;
+    const textureName =
+      resolveShaderMeta(shaderFile).bezelTexture === 'square'
+        ? `./bezel-square.png`
+        : `./bezel.png`;
     let bitmap: ImageBitmap;
     try {
       const img = new Image();
@@ -219,9 +248,10 @@ export function useWebGPURender(
 
   const ensureButtonTexture = async (device: GPUDevice) => {
     if (textureResourcesRef.current) return;
-    const textureUrl = shaderFile.includes('v0.30')
-      ? withBase('unlit-button-2.png')
-      : withBase('unlit-button.png');
+    const textureUrl =
+      resolveShaderMeta(shaderFile).patternTexture === 'button-v30'
+        ? withBase('unlit-button-2.png')
+        : withBase('unlit-button.png');
     console.log('[WebGPU] Loading button texture:', textureUrl);
     let bitmap: ImageBitmap;
     try {
@@ -261,10 +291,11 @@ export function useWebGPURender(
     textureResourcesRef.current = { sampler, view: texture.createView() };
   };
 
-  // Main WebGPU initialization
+  // Main WebGPU initialization (shared helper: features, limits, power, canvas config)
   useEffect(() => {
     if (!enabled) {
       setGpuReady(false);
+      setDeviceStatus('unsupported');
       return;
     }
     const canvas = canvasRef.current;
@@ -272,40 +303,22 @@ export function useWebGPURender(
     if (!('gpu' in navigator)) {
       console.log('[Renderer] WebGPU API not available');
       setWebgpuAvailable(false);
+      setDeviceStatus('unsupported');
       return;
     }
     let cancelled = false;
+    setDeviceStatus(deviceEpoch > 0 ? 'lost' : 'initializing');
 
     const init = async () => {
       try {
-        const adapter = await navigator.gpu.requestAdapter();
-        if (!adapter) {
-          if (!cancelled) {
-            console.warn('[Renderer] WebGPU init failed: requestAdapter returned null');
-            setWebgpuAvailable(false);
-          }
+        const { device, preferredCanvasFormat } = await requestWebGPUDevice({
+          liteMode: !!liteMode,
+          isCancelled: () => cancelled,
+        });
+        if (cancelled) {
+          try { device.destroy(); } catch { /* ignore */ }
           return;
         }
-        if (cancelled) return;
-        const requiredFeatures: GPUFeatureName[] = [];
-        if (adapter.features.has('float32-filterable')) requiredFeatures.push('float32-filterable');
-        if (adapter.features.has('float32-blendable')) requiredFeatures.push('float32-blendable');
-        if (adapter.features.has('clip-distances')) requiredFeatures.push('clip-distances');
-        if (adapter.features.has('depth32float-stencil8')) requiredFeatures.push('depth32float-stencil8');
-        if (adapter.features.has('dual-source-blending')) requiredFeatures.push('dual-source-blending');
-        if (adapter.features.has('subgroups')) requiredFeatures.push('subgroups');
-        if (adapter.features.has('texture-component-swizzle')) requiredFeatures.push('texture-component-swizzle');
-        if (adapter.features.has('shader-f16')) requiredFeatures.push('shader-f16');
-
-        const device = await adapter.requestDevice({ requiredFeatures });
-        if (!device) {
-          if (!cancelled) {
-            console.warn('[Renderer] WebGPU init failed: requestDevice returned null');
-            setWebgpuAvailable(false);
-          }
-          return;
-        }
-        if (cancelled) return;
 
         // Sync canvas to the correct DPR-scaled size *before* configuring the WebGPU
         // surface.  By this point the browser has completed layout, so
@@ -315,9 +328,54 @@ export function useWebGPURender(
         // canvasMetrics dimensions.
         syncCanvasSize(canvas, glCanvasRef.current);
 
-        const context = canvas.getContext('webgpu') as GPUCanvasContext;
-        const format = navigator.gpu.getPreferredCanvasFormat();
-        context.configure({ device, format, alphaMode: 'premultiplied' });
+        const context = getWebGPUCanvasContext(canvas);
+        const format = configureCanvasContext({
+          device,
+          context,
+          format: preferredCanvasFormat,
+        });
+
+        // Device-lost recovery: clear frozen state and re-init via deviceEpoch.
+        markLostIntentionalRef.current?.();
+        markLostIntentionalRef.current = attachDeviceLostHandler(device, {
+          onLost: (info, intentional) => {
+            if (cancelled || intentional) return;
+            console.error(
+              `[WebGPU] device lost (reason=${info.reason}): ${info.message}`,
+            );
+            setGpuReady(false);
+            // Drop dead refs so the render loop stops using the lost device.
+            deviceRef.current = null;
+            contextRef.current = null;
+            pipelineRef.current = null;
+            bindGroupRef.current = null;
+
+            if (recoveryAttemptsRef.current >= MAX_DEVICE_LOST_RECOVERIES) {
+              setDeviceStatus('device-failed');
+              setWebgpuAvailable(false);
+              setDebugInfo((prev) => ({
+                ...prev,
+                errors: [
+                  ...prev.errors.filter((e) => !e.startsWith('DEVICE-LOST')),
+                  `DEVICE-LOST: ${info.reason} — recovery exhausted after ${MAX_DEVICE_LOST_RECOVERIES} attempts`,
+                ],
+              }));
+              return;
+            }
+
+            recoveryAttemptsRef.current += 1;
+            setDeviceStatus('lost');
+            setDebugInfo((prev) => ({
+              ...prev,
+              errors: [
+                ...prev.errors.filter((e) => !e.startsWith('DEVICE-LOST')),
+                `DEVICE-LOST: ${info.reason} — recovering (${recoveryAttemptsRef.current}/${MAX_DEVICE_LOST_RECOVERIES})…`,
+              ],
+            }));
+            // Re-run this effect to recreate adapter/device/pipelines.
+            setDeviceEpoch((n) => n + 1);
+          },
+        });
 
         textureResourcesRef.current = null;
         bezelTextureResourcesRef.current = null;
@@ -330,7 +388,10 @@ export function useWebGPURender(
         }
 
         const shaderSource = await fetchShaderSource(activeShaderFile);
-        if (cancelled) return;
+        if (cancelled) {
+          try { device.destroy(); } catch { /* ignore */ }
+          return;
+        }
         const module = device.createShaderModule({ code: shaderSource });
         if ('getCompilationInfo' in module) module.getCompilationInfo().catch(() => {});
 
@@ -347,10 +408,10 @@ export function useWebGPURender(
           bindGroupLayout = device.createBindGroupLayout({ entries: [{ binding: 0, visibility: GPUShaderStage.FRAGMENT | GPUShaderStage.VERTEX, buffer: { type: 'read-only-storage' } }, { binding: 1, visibility: GPUShaderStage.FRAGMENT | GPUShaderStage.VERTEX, buffer: { type: 'uniform' } }, { binding: 2, visibility: GPUShaderStage.FRAGMENT, sampler: { type: 'filtering' } }, { binding: 3, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float' } }] });
         } else if (layoutType === 'extended') {
           const extendedEntries: GPUBindGroupLayoutEntry[] = [{ binding: 0, visibility: GPUShaderStage.FRAGMENT | GPUShaderStage.VERTEX, buffer: { type: 'read-only-storage' } }, { binding: 1, visibility: GPUShaderStage.FRAGMENT | GPUShaderStage.VERTEX, buffer: { type: 'uniform' } }, { binding: 2, visibility: GPUShaderStage.FRAGMENT, buffer: { type: 'read-only-storage' } }, { binding: 3, visibility: GPUShaderStage.FRAGMENT, buffer: { type: 'read-only-storage' } }, { binding: 4, visibility: GPUShaderStage.FRAGMENT, sampler: { type: 'filtering' } }, { binding: 5, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float' } }];
-          if (shaderFile.includes('v0.55')) {
+          if (usesOscilloscope(activeShaderFile)) {
             extendedEntries.push({ binding: 6, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'unfilterable-float' } });
           }
-          if (shaderFile.includes('v0.52') || shaderFile.includes('v0.53') || shaderFile.includes('v0.54') || shaderFile.includes('v0.56')) {
+          if (usesInstrumentPalette(activeShaderFile)) {
             extendedEntries.push({ binding: 7, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float' } });
           }
           bindGroupLayout = device.createBindGroupLayout({ entries: extendedEntries });
@@ -369,7 +430,7 @@ export function useWebGPURender(
         const uniformSize = layoutType === 'extended' ? 132 : (layoutType === 'texture' ? 64 : 32);
         const uniformBuffer = device.createBuffer({ size: alignTo(uniformSize, 256), usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
 
-        if (shaderFile.includes('v0.52') || shaderFile.includes('v0.53') || shaderFile.includes('v0.54') || shaderFile.includes('v0.56')) {
+        if (usesInstrumentPalette(activeShaderFile)) {
           const placeholder = generateEmptyInstrumentPalette();
           const texture = device.createTexture({
             size: [MAX_INSTRUMENT_PALETTE_SIZE, 1, 1],
@@ -403,13 +464,6 @@ export function useWebGPURender(
         }
 
         deviceRef.current = device; contextRef.current = context; uniformBufferRef.current = uniformBuffer;
-
-        device.lost.then((info) => {
-          if (!cancelled) {
-            console.error('WebGPU device lost:', info);
-            setGpuReady(false);
-          }
-        });
 
         const p = renderParamsRef.current;
         const isHighPrec = usesHighPrecisionPacking(activeShaderFile);
@@ -472,23 +526,47 @@ export function useWebGPURender(
 
         const needsTexture = layoutType === 'texture' || layoutType === 'extended';
         if (needsTexture) {
-          const isVideoShader = activeShaderFile.includes('v0.20') || activeShaderFile.includes('v0.23') || activeShaderFile.includes('v0.24') || activeShaderFile.includes('v0.25');
-          if (isVideoShader) ensureVideoPlaceholder(device); else await ensureButtonTexture(device);
+          if (usesVideoPatternTexture(activeShaderFile)) ensureVideoPlaceholder(device);
+          else await ensureButtonTexture(device);
         }
 
         refreshBindGroup(device);
 
+        recoveryAttemptsRef.current = 0;
+        setDeviceStatus('ready');
         setGpuReady(true);
+        // Clear transient DEVICE-LOST recovery messages once we're healthy again.
+        setDebugInfo((prev) => ({
+          ...prev,
+          errors: prev.errors.filter((e) => !e.startsWith('DEVICE-LOST')),
+        }));
       } catch (error) {
+        if (cancelled) return;
+        if (error instanceof WebGPUInitError && error.message.includes('cancelled')) {
+          return;
+        }
         const reason = error instanceof Error ? error.message : String(error);
         console.error('[Renderer] WebGPU init failed:', reason);
-        if (!cancelled) setWebgpuAvailable(false);
+        const status =
+          error instanceof WebGPUInitError ? error.status : 'device-failed';
+        setDeviceStatus(status);
+        setWebgpuAvailable(false);
+        setDebugInfo((prev) => ({
+          ...prev,
+          errors: [
+            ...prev.errors.filter((e) => !e.startsWith('DEVICE-INIT')),
+            `DEVICE-INIT: ${reason}`,
+          ],
+        }));
       }
     };
 
     init();
     return () => {
       cancelled = true;
+      // Mark lost handler as intentional before destroy so we don't schedule recovery.
+      markLostIntentionalRef.current?.();
+      markLostIntentionalRef.current = null;
       setGpuReady(false);
       bindGroupRef.current = null;
       pipelineRef.current = null;
@@ -520,7 +598,7 @@ export function useWebGPURender(
       deviceRef.current = null;
       contextRef.current = null;
     };
-  }, [shaderFile, syncCanvasSize, enabled]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [shaderFile, syncCanvasSize, enabled, deviceEpoch, liteMode]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Update cells buffer when matrix changes.
   // Uses `matrix` and `padTopChannel` as direct React deps (not via renderParamsRef) so React
@@ -661,7 +739,7 @@ export function useWebGPURender(
     const p = renderParamsRef.current;
 
     // Upload per-instrument palette texture when the module-derived palette changes.
-    if ((shaderFile.includes('v0.52') || shaderFile.includes('v0.53') || shaderFile.includes('v0.54') || shaderFile.includes('v0.56')) && p.instrumentPalette && p.instrumentPalette !== instrumentPaletteVersionRef.current) {
+    if (usesInstrumentPalette(shaderFile) && p.instrumentPalette && p.instrumentPalette !== instrumentPaletteVersionRef.current) {
       instrumentPaletteTextureRef.current?.destroy();
       const texture = device.createTexture({
         size: [MAX_INSTRUMENT_PALETTE_SIZE, 1, 1],
@@ -685,7 +763,7 @@ export function useWebGPURender(
       const numChannels = p.padTopChannel ? rawChannels + 1 : rawChannels;
       if (numChannels <= 0) return;
       const stepsCount = p.stepsLength ?? 32;
-      const visibleRows = (stepsCount > 0 && shaderFile.includes('v0.50'))
+      const visibleRows = (stepsCount > 0 && usesStepsDrivenVisibleRows(shaderFile))
         ? Math.min(stepsCount, numRows)
         : numRows;
       const rowLimit = Math.max(1, visibleRows);
@@ -719,10 +797,11 @@ export function useWebGPURender(
 
       let effectiveCellW = p.cellWidth;
       let effectiveCellH = p.cellHeight;
-      if (shaderFile.includes('v0.21') || shaderFile.includes('v0.40') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.47') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49') || shaderFile.includes('v0.50') || shaderFile.includes('v0.51') || shaderFile.includes('v0.52') || shaderFile.includes('v0.53') || shaderFile.includes('v0.54') || shaderFile.includes('v0.55') || shaderFile.includes('v0.56') || shaderFile.includes('v0.57')) {
+      const cellMode = resolveShaderMeta(shaderFile).cellSizeMode;
+      if (cellMode === 'gridRect') {
         effectiveCellW = (GRID_RECT.w * actualCanvasW) / stepsCount;
         effectiveCellH = (GRID_RECT.h * actualCanvasH) / numChannels;
-      } else if (shaderFile.includes('v0.39')) {
+      } else if (cellMode === 'fullCanvas') {
         effectiveCellW = actualCanvasW / stepsCount;
         effectiveCellH = actualCanvasH / numChannels;
       }
@@ -768,7 +847,7 @@ export function useWebGPURender(
     }
 
     // Handle video texture source
-    const isVideoShader = shaderFile.includes('v0.20') || shaderFile.includes('v0.23') || shaderFile.includes('v0.24') || shaderFile.includes('v0.25');
+    const isVideoShader = usesVideoPatternTexture(shaderFile);
     const source = p.externalVideoSource;
     if (isVideoShader && source) {
       videoRef.current = source;
@@ -789,14 +868,13 @@ export function useWebGPURender(
     // Pre-calculate channel/instance counts for debug info
     const numRows = p.matrix?.numRows ?? DEFAULT_ROWS;
     const stepsCount = p.stepsLength ?? 32;
-    const visibleRows = (stepsCount > 0 && shaderFile.includes('v0.50'))
+    const visibleRows = (stepsCount > 0 && usesStepsDrivenVisibleRows(shaderFile))
       ? Math.min(stepsCount, numRows)
       : numRows;
     const rawChannels = p.matrix?.numChannels ?? DEFAULT_CHANNELS;
     const numChannels = p.padTopChannel ? rawChannels + 1 : rawChannels;
     let totalInstances = visibleRows * numChannels;
-    const isUIShader = shaderFile.includes('v0.45');
-    if (isUIShader) totalInstances += 3; // UI_BUTTON_COUNT in shader
+    totalInstances += getUiExtraInstances(shaderFile);
 
     // Scene render helper — reused by both direct and bloom-wrapped paths
     const renderScene = (pass: GPURenderPassEncoder) => {
@@ -825,14 +903,14 @@ export function useWebGPURender(
           bezelData[9] = 0.015;
         }
 
-        if (shaderFile.includes('v0.35')) {
+        if (usesNightModeBezel(shaderFile)) {
           bezelData[10] = 0.0; bezelData[11] = 0.95; bezelData[12] = 0.32;
         } else {
           bezelData[10] = isCircShader ? 0.0 : 1.0;
           bezelData[11] = isCircShader ? 0.95 : 1.25;
           bezelData[12] = isCircShader ? 0.32 : 0.0;
         }
-        bezelData[13] = shaderFile.includes('v0.35') ? 0.10 : (isCircShader ? 0.0 : 0.02);
+        bezelData[13] = usesNightModeBezel(shaderFile) ? 0.10 : (isCircShader ? 0.0 : 0.02);
         bezelData[14] = p.dimFactor ?? 1.0;
         bezelData[15] = p.isPlaying ? 1.0 : 0.0;
 
@@ -842,7 +920,8 @@ export function useWebGPURender(
           bezelData[17] = p.pan;
           bezelData[18] = p.bpm ?? 120.0;
 
-          if (backgroundShader === 'chassis_frosted.wgsl') {
+          const chassisEnc = resolveShaderMeta(shaderFile).chassisControlEncoding;
+          if (chassisEnc === 'frosted-f32' || backgroundShader === 'chassis_frosted.wgsl') {
             // chassis_frosted.wgsl uses f32 for all fields
             bezelData[19] = p.isLooping ? 1.0 : 0.0;
             bezelData[20] = 0.0; // currentOrder
@@ -871,7 +950,8 @@ export function useWebGPURender(
 
       if (totalInstances > 0) {
         if (isSinglePassCompositeShader(shaderFile)) {
-          if (shaderFile.includes('v0.45')) {
+          // Shaders with embedded UI quads (uiExtraInstances) draw all instances in one call
+          if (getUiExtraInstances(shaderFile) > 0) {
             pass.draw(6, totalInstances, 0, 0);
           } else {
             pass.draw(6, 1, 0, totalInstances);
@@ -901,7 +981,7 @@ export function useWebGPURender(
     device.queue.submit([encoder.finish()]);
 
     // Update debug info - always update regardless of overlay state
-    const isOverlayActive = shaderFile.includes('v0.21') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.47') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49') || shaderFile.includes('v0.50') || shaderFile.includes('v0.51') || shaderFile.includes('v0.52') || shaderFile.includes('v0.53') || shaderFile.includes('v0.54') || shaderFile.includes('v0.55') || shaderFile.includes('v0.56') || shaderFile.includes('v0.57');
+    const isOverlayActive = WEBGL_HYBRID_SHADERS.has(shaderFile);
     const layoutModeName = isCircularLayoutShader(shaderFile) ? 'CIRCULAR (WebGPU)' :
       p.isHorizontal ? 'HORIZONTAL (WebGPU)' : 'STANDARD (WebGPU)';
     setDebugInfo((prev: DebugInfo) => ({
@@ -915,9 +995,12 @@ export function useWebGPURender(
         totalInstances,
         playheadRow: (p.playbackStateRef?.current?.playheadRow ?? p.playheadRow).toFixed(2),
       },
-      errors: [],
+      // Preserve device lifecycle messages (lost / init) — do not wipe every frame.
+      errors: prev.errors.filter(
+        (e) => e.startsWith('DEVICE-LOST') || e.startsWith('DEVICE-INIT'),
+      ),
     }));
   }, [shaderFile, setDebugInfo, refreshBindGroup]); // reads renderParamsRef; shaderFile is stable per init cycle
 
-  return { gpuReady, render, deviceRef };
+  return { gpuReady, render, deviceRef, deviceStatus, contextRef };
 }

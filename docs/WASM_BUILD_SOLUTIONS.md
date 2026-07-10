@@ -1,181 +1,72 @@
-# OpenMPT WASM Build Solutions
+# OpenMPT Native WASM Build
 
-## Problem
-Building libopenmpt WASM takes 5-10 minutes and requires significant resources. The build fails in resource-constrained environments.
+## Single supported path
 
-## Current Status
-- ✅ Emscripten 5.0.2-git detected
-- ✅ Build script updated
-- ❌ Build times out due to compilation time
-- ✅ Stub files created for development
+| Command | Output | Notes |
+|---------|--------|--------|
+| **`npm run build:emcc`** | `public/worklets/openmpt-native.{js,wasm,aw.js}` | **Canonical** |
+| `npm run build:worklet` | same | Deprecated alias name → same script |
+| `./build-wasm.sh` | same | Deprecated root wrapper → `scripts/build-wasm.sh` |
 
-## Solutions (Pick One)
+**Never** writes `public/worklets/openmpt-worklet.js` — that file is the tracked **JS** AudioWorklet processor (production audio path).
 
-### Option 1: Build Locally (Recommended)
-Build on your local machine with sufficient resources:
+## Emscripten pin
+
+CI and docs use **emsdk 3.1.50**:
 
 ```bash
-# On your local machine (not in codespace)
-git clone https://github.com/ford442/mod-player.git
-cd mod-player
-./build-wasm.sh
+git clone https://github.com/emscripten-core/emsdk.git
+cd emsdk
+./emsdk install 3.1.50
+./emsdk activate 3.1.50
+source ./emsdk_env.sh
 ```
 
-Then upload the built files:
+Override for experiments only: `EMSDK_PIN=latest npm run build:emcc`.
+
+## Flags (scripts/build-wasm.sh)
+
+| Mode | Flags |
+|------|--------|
+| Release (default) | `-O3 -DNDEBUG` |
+| `--debug` | `-O0 -g -DDEBUG -sASSERTIONS=2` |
+| `--safe-heap` | `-sSAFE_HEAP=1` (slow) |
+| Always | `AUDIO_WORKLET`, `WASM_WORKERS`, `ALLOW_MEMORY_GROWTH`, `MAXIMUM_MEMORY=512MB`, `INITIAL_MEMORY=32MB`, `STACK_SIZE=128KB`, `MODULARIZE`, `EXPORT_NAME=createOpenMPTModule` |
+
+## Local build
+
 ```bash
-# After successful build
-scp public/worklets/openmpt-worklet.* user@server:/path/to/project/
+source ~/emsdk/emsdk_env.sh   # or /opt/emsdk/emsdk_env.sh
+cd /path/to/mod-player
+npm run build:emcc
+# optional: npm run build:emcc -- --debug
+ls -lh public/worklets/openmpt-native.*
 ```
 
-### Option 2: Use Docker
-Create a `Dockerfile.build`:
+libopenmpt **0.8.4** is downloaded into `vendor/` automatically if missing.
+
+## Verify exports stay in sync
+
+```bash
+npm run verify:native-exports
+```
+
+Checks `EXPORTED_FUNCTIONS` in `scripts/build-wasm.sh` against:
+
+- `EMSCRIPTEN_KEEPALIVE` in `cpp/worklet_processor.cpp`
+- Required symbols used by `audio-worklet/OpenMPTWorkletEngine.ts`
+
+## Docker (optional)
 
 ```dockerfile
-FROM emscripten/emsdk:latest
-
+FROM emscripten/emsdk:3.1.50
 WORKDIR /build
 COPY . .
-
-RUN ./build-wasm.sh
-
-# Output will be in public/worklets/
+RUN bash scripts/build-wasm.sh
 ```
 
-Build:
-```bash
-docker build -f Dockerfile.build -t mod-player-build .
-docker create --name extract mod-player-build
-docker cp extract:/build/public/worklets/openmpt-worklet.js public/worklets/
-docker cp extract:/build/public/worklets/openmpt-worklet.wasm public/worklets/
-docker rm extract
-```
+Copy only `public/worklets/openmpt-native.*` out of the image — never replace `openmpt-worklet.js`.
 
-### Option 3: GitHub Actions CI
-Add to `.github/workflows/build.yml`:
+## Historical footgun (fixed)
 
-```yaml
-name: Build WASM
-on: [push]
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      
-      - name: Setup Emscripten
-        uses: mymindstorm/setup-emsdk@v11
-        with:
-          version: latest
-          
-      - name: Build libopenmpt
-        run: ./build-wasm.sh
-        
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v3
-        with:
-          name: wasm-files
-          path: |
-            public/worklets/openmpt-worklet.js
-            public/worklets/openmpt-worklet.wasm
-```
-
-### Option 4: Development Mode (Current)
-Use stub files for UI development:
-
-```bash
-npm run dev
-# Audio won't work, but UI is functional
-```
-
-## Build Script Changes Made
-
-Updated `build-wasm.sh`:
-1. ✅ Uses local emsdk from `/workspaces/codepit/emsdk` (v5.0.2-git)
-2. ✅ Sets `EM_CACHE` to user-writable directory
-3. ✅ Uses libopenmpt 0.7.12 (stable release)
-4. ✅ Recursive clone for submodules
-
-## Manual Build Instructions
-
-If you want to try building manually:
-
-```bash
-cd projects/mod-player
-
-# 1. Clean up
-rm -rf vendor public/worklets
-
-# 2. Source Emscripten
-export EM_CACHE="$HOME/.emscripten_cache"
-source /workspaces/codepit/emsdk/emsdk_env.sh
-
-# 3. Clone with submodules
-git clone --recursive --branch libopenmpt-0.7.12 \
-  https://github.com/OpenMPT/openmpt.git vendor/libopenmpt
-
-# 4. Build libopenmpt
-cd vendor/libopenmpt
-make CONFIG=emscripten -j4
-
-# 5. Build AudioWorklet
-cd ../..
-emcc -O3 -std=c++17 \
-  -s AUDIO_WORKLET=1 -s WASM_WORKERS=1 \
-  -I vendor/libopenmpt/include \
-  -L vendor/libopenmpt/bin -lopenmpt \
-  cpp/openmpt_wrapper.cpp cpp/worklet_processor.cpp \
-  -o public/worklets/openmpt-worklet.js
-```
-
-## Expected Output
-
-After successful build:
-```
-public/worklets/
-├── openmpt-worklet.js       (Emscripten glue)
-├── openmpt-worklet.wasm     (WASM binary)
-└── openmpt-worklet.aw.js    (AudioWorklet bootstrap)
-```
-
-## Troubleshooting
-
-### Worklet runtime crashes or OOM errors
-If you plan to run the Emscripten‑compiled engine *inside the audio worklet thread* (i.e. keep the
-WASM completely contained in the worklet) there are two gotchas:
-
-1. **`setTimeout` is not defined in the worklet scope** – the generated glue tries to use it and the
-   worklet will crash.  We now inject a small polyfill via `cpp/pre.js` before the glue code which
-   schedules callbacks as microtasks.
-
-2. **Memory allocation failures ("Array buffer allocation failed")** – the default Emscripten
-   initializer allocates its own `WebAssembly.Memory`, which is not allowed inside the worklet.
-   Instead the main thread must create the memory and pass it in through `processorOptions`.  A
-   wrapper added in `cpp/pre.js` reads `options.processorOptions.memory` and stashes it on
-   `Module.wasmMemory` before the module is instantiated.  The React hook (`useLibOpenMPT.ts`) now
-   allocates a shared `WebAssembly.Memory` and includes it when constructing the `AudioWorkletNode`.
-
-These changes are required for stable operation when using the JS worklet engine; if you are only
-using the native C++ engine (`openmpt-native.js`) they are harmless but unused.
-
-
-## Troubleshooting
-
-### "Emscripten >= 3.1.51 is required"
-- Use libopenmpt 0.7.x or older for Emscripten 3.1.50
-- Or upgrade Emscripten to latest
-
-### Missing headers
-- Ensure `--recursive` clone for submodules
-- Check that `src/` directory exists in vendor/libopenmpt
-
-### Build timeout
-- Use Option 1 (local build) or Option 2 (Docker)
-- Or use Option 3 (CI/CD)
-
-## Current Stub
-
-Stub files are currently in place for development:
-- `public/worklets/openmpt-worklet.js` - JavaScript stub
-- `public/worklets/openmpt-worklet.wasm` - Placeholder
-
-Replace these with real built files when available.
+Older root `build-wasm.sh` used `-o public/worklets/openmpt-worklet.js` and even `rm -rf public/worklets`, destroying the production JS processor. That path is retired; see `public/worklets/README.md` and `AGENTS.md`.

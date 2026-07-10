@@ -51,7 +51,7 @@ async function loadLibOpenMPT(): Promise<LibOpenMPT> {
   };
 
   const cleanedScript = scriptText.replace(/^\s*export\s+(default\s+)?/gm, '');
-  const fn = new Function(cleanedScript); // eslint-disable-line no-new-func
+  const fn = new Function(cleanedScript);  
   fn.call(globalThis);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

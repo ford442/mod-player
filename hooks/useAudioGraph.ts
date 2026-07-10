@@ -254,12 +254,17 @@ export async function startAudioPlayback(
             + 'or that emscriptenGetAudioObject is available.');
         }
 
-        // Listen for position updates from the native engine
+        // Listen for position updates from the native engine.
+        // Shared-memory PositionInfo is refreshed every quantum (with
+        // audioFramesRendered / rowFraction after rebuild). Polling tags
+        // workletTime with AudioContext.currentTime; prediction + latency
+        // back-extrapolation keep visuals within ~1 row of audio.
         engine.on('position', (data: WorkletPositionData) => {
-          const heardAnchor = ctx.currentTime;
+          const workletTime = data.workletTime ?? ctx.currentTime;
           const positionPayload: {
             order: number;
             row: number;
+            rowFraction?: number;
             positionSeconds: number;
             workletTime: number;
             bpm?: number;
@@ -268,9 +273,12 @@ export async function startAudioPlayback(
             order: data.currentOrder,
             row: data.currentRow,
             positionSeconds: data.positionMs / 1000,
-            workletTime: data.workletTime ?? heardAnchor,
+            workletTime,
             bpm: data.bpm,
           };
+          if (data.rowFraction != null && Number.isFinite(data.rowFraction)) {
+            positionPayload.rowFraction = data.rowFraction;
+          }
           if (data.speed != null && data.speed > 0) {
             positionPayload.speed = data.speed;
           }
@@ -466,25 +474,74 @@ export async function startAudioPlayback(
         
         console.log('[PLAY] AudioWorkletNode created:', node);
 
-        // Fetch libopenmpt JS + WASM on the main thread and forward to the worklet.
+        // Fetch libopenmpt glue on the main thread and forward to the worklet.
         // AudioWorklet classic scripts cannot use import() or importScripts(), so we
         // do the fetch here where fetch() is always available.
+        //
+        // Production glue (`libopenmpt-audioworklet.js`) is a wasm2js build: the
+        // entire runtime is embedded in the ~5 MB JS file. A sibling
+        // `libopenmpt.wasm` is NOT required and must NOT be seeded as wasmBinary
+        // (that overwrites wasm2js's empty binary and can break init).
+        // Optional real `.wasm` is only fetched when the glue is a classic
+        // Emscripten binary build (no isWasm2js marker).
         console.log('[PLAY] Fetching libopenmpt assets for worklet...');
         const workletBaseUrl = withBase('worklets/');
         let libJsText: string;
-        let libWasmBuffer: ArrayBuffer;
+        let libWasmBuffer: ArrayBuffer | null = null;
         try {
-          [libJsText, libWasmBuffer] = await Promise.all([
-            fetch(workletBaseUrl + 'libopenmpt-audioworklet.js').then(r => {
-              if (!r.ok) throw new Error(`HTTP ${r.status} for libopenmpt-audioworklet.js`);
-              return r.text();
-            }),
-            fetch(workletBaseUrl + 'libopenmpt.wasm').then(r => {
-              if (!r.ok) throw new Error(`HTTP ${r.status} for libopenmpt.wasm`);
-              return r.arrayBuffer();
-            }),
-          ]);
-          console.log('[PLAY] libopenmpt assets fetched — JS:', libJsText.length, 'bytes, WASM:', libWasmBuffer.byteLength, 'bytes');
+          const jsResp = await fetch(workletBaseUrl + 'libopenmpt-audioworklet.js');
+          if (!jsResp.ok) {
+            throw new Error(`HTTP ${jsResp.status} for libopenmpt-audioworklet.js`);
+          }
+          libJsText = await jsResp.text();
+          if (!libJsText.trim()) {
+            throw new Error('libopenmpt-audioworklet.js is empty');
+          }
+
+          // Emscripten wasm2js emits `isWasm2js:!0` (minified) or `isWasm2js: true`.
+          const isWasm2js =
+            /isWasm2js\s*:\s*!\s*0/.test(libJsText) ||
+            /isWasm2js\s*:\s*true/.test(libJsText);
+
+          if (isWasm2js) {
+            console.log(
+              '[PLAY] libopenmpt-audioworklet.js is wasm2js — JS only,',
+              libJsText.length,
+              'chars; skipping sibling .wasm fetch',
+            );
+          } else {
+            const wasmResp = await fetch(workletBaseUrl + 'libopenmpt.wasm');
+            if (!wasmResp.ok) {
+              throw new Error(`HTTP ${wasmResp.status} for libopenmpt.wasm`);
+            }
+            libWasmBuffer = await wasmResp.arrayBuffer();
+            const head = new Uint8Array(libWasmBuffer, 0, Math.min(8, libWasmBuffer.byteLength));
+            // WebAssembly binary magic: \0asm (0x00 0x61 0x73 0x6d)
+            const isWasmMagic =
+              head.length >= 4 &&
+              head[0] === 0x00 &&
+              head[1] === 0x61 &&
+              head[2] === 0x73 &&
+              head[3] === 0x6d;
+            if (!isWasmMagic) {
+              const preview = new TextDecoder('utf-8', { fatal: false })
+                .decode(head)
+                .replace(/\s+/g, ' ')
+                .slice(0, 40);
+              throw new Error(
+                `libopenmpt.wasm is not a valid WebAssembly binary ` +
+                  `(missing \\0asm magic; starts with ${JSON.stringify(preview)}). ` +
+                  `Refusing to seed corrupt HTML/text as wasmBinary.`,
+              );
+            }
+            console.log(
+              '[PLAY] libopenmpt assets fetched — JS:',
+              libJsText.length,
+              'chars, WASM:',
+              libWasmBuffer.byteLength,
+              'bytes',
+            );
+          }
         } catch (fetchErr) {
           console.error('[PLAY] Failed to fetch libopenmpt assets:', fetchErr);
           throw fetchErr;
@@ -494,10 +551,15 @@ export async function startAudioPlayback(
           const { type, order, row, positionSeconds, message, bpm, channelVU } = e.data;
 
           if (type === 'position') {
-            const workletAudioTime = e.data.workletTime ?? ctx.currentTime;
+            // Prefer worklet-authored audioTime (pre-render quantum tag).
+            const workletAudioTime =
+              (typeof e.data.audioTime === 'number' ? e.data.audioTime : null) ??
+              (typeof e.data.workletTime === 'number' ? e.data.workletTime : null) ??
+              ctx.currentTime;
             const positionPayload: {
               order: number;
               row: number;
+              rowFraction?: number;
               positionSeconds: number;
               workletTime: number;
               bpm?: number;
@@ -508,6 +570,9 @@ export async function startAudioPlayback(
               positionSeconds,
               workletTime: workletAudioTime,
             };
+            if (typeof e.data.rowFraction === 'number' && Number.isFinite(e.data.rowFraction)) {
+              positionPayload.rowFraction = e.data.rowFraction;
+            }
             if (bpm && bpm > 0) {
               positionPayload.bpm = bpm;
               callbacks.setModuleInfo((prev: ModuleInfo) => ({ ...prev, bpm }));
@@ -666,11 +731,16 @@ export async function startAudioPlayback(
           }
         };
 
-        // Send WASM assets to worklet first (must arrive before 'load')
-        node.port.postMessage(
-          { type: 'initLib', scriptText: libJsText, wasmBytes: libWasmBuffer },
-          [libWasmBuffer],
-        );
+        // Send glue (+ optional real WASM) to worklet first (must arrive before 'load').
+        // Transfer wasm buffer only when present; wasm2js path sends JS alone.
+        if (libWasmBuffer) {
+          node.port.postMessage(
+            { type: 'initLib', scriptText: libJsText, wasmBytes: libWasmBuffer },
+            [libWasmBuffer],
+          );
+        } else {
+          node.port.postMessage({ type: 'initLib', scriptText: libJsText });
+        }
 
         // Send module data (cloned, not transferred, so fileDataRef remains valid)
         const buf = refs.fileDataRef.current?.buffer;

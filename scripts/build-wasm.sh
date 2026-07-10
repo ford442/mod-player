@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
 # ──────────────────────────────────────────────────────────────────────
-# build-wasm.sh – Build the C++ AudioWorklet module with Emscripten
+# scripts/build-wasm.sh – SINGLE supported C++/Emscripten native worklet build
+#
+# ⚠️  NEVER write public/worklets/openmpt-worklet.js — that file is the tracked
+#     JS AudioWorklet processor (production path). Native glue is openmpt-native.*.
 #
 # Prerequisites:
-#   1. Install Emscripten SDK (emsdk) 4.0+:
+#   1. Emscripten SDK — **pinned to 3.1.50** (matches CI `.github/workflows/ci.yml`):
 #        git clone https://github.com/emscripten-core/emsdk.git
-#        cd emsdk && ./emsdk install latest && ./emsdk activate latest
+#        cd emsdk && ./emsdk install 3.1.50 && ./emsdk activate 3.1.50
 #        source ./emsdk_env.sh
+#      Newer emsdk often works; CI and docs treat 3.1.50 as the verified pin.
 #
 #   2. libopenmpt source (auto-downloaded if missing):
 #        vendor/libopenmpt-0.8.4+release  (from lib.openmpt.org tarball)
@@ -16,17 +20,25 @@
 #      bin/libopenmpt.a for linking with emcc.
 #
 # Usage:
-#   ./scripts/build-wasm.sh [--debug]
+#   ./scripts/build-wasm.sh              # release (-O3)
+#   ./scripts/build-wasm.sh --debug      # -O0 -g -sASSERTIONS=2
+#   ./scripts/build-wasm.sh --safe-heap  # + SAFE_HEAP (slow; debug memory)
+#   npm run build:emcc                   # preferred package.json entry
+#   npm run build:worklet                # deprecated alias → this script
 #
-# Output:
-#   public/worklets/openmpt-native.js   (Emscripten glue + AudioWorklet)
-#   public/worklets/openmpt-native.wasm (WebAssembly binary)
-#   public/worklets/openmpt-native.aw.js (AudioWorklet thread bootstrap)
+# Output (gitignored until built):
+#   public/worklets/openmpt-native.js
+#   public/worklets/openmpt-native.wasm
+#   public/worklets/openmpt-native.aw.js
 # ──────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# ── Pinned emsdk version (must match CI) ─────────────────────────────
+# Override only for local experiments: EMSDK_PIN=latest ./scripts/build-wasm.sh
+EMSDK_PIN="${EMSDK_PIN:-3.1.50}"
 
 # Source Emscripten
 CANDIDATES=(
@@ -43,6 +55,9 @@ done
 
 CPP_DIR="$PROJECT_ROOT/cpp"
 OUTPUT_DIR="$PROJECT_ROOT/public/worklets"
+# Hard-coded basename — never openmpt-worklet (tracked JS processor).
+OUTPUT_BASENAME="openmpt-native"
+TRACKED_JS_WORKLET="$OUTPUT_DIR/openmpt-worklet.js"
 VENDOR_ROOT="$PROJECT_ROOT/vendor"
 LIBOPENMPT_VERSION="0.8.4"
 LIBOPENMPT_TARBALL="libopenmpt-${LIBOPENMPT_VERSION}+release.makefile.tar.gz"
@@ -61,23 +76,50 @@ LIBOPENMPT_MAKE_FLAGS=(
     OPENMPT123=0
 )
 
-# Debug mode
+# ── Flags from argv ──────────────────────────────────────────────────
+DEBUG_MODE=0
+SAFE_HEAP=0
+for arg in "$@"; do
+    case "$arg" in
+        --debug) DEBUG_MODE=1 ;;
+        --safe-heap) SAFE_HEAP=1 ;;
+        -h|--help)
+            sed -n '2,35p' "$0" | sed 's/^# \?//'
+            exit 0
+            ;;
+        *)
+            echo "Unknown option: $arg (use --debug and/or --safe-heap)" >&2
+            exit 1
+            ;;
+    esac
+done
+
 DEBUG_FLAGS="-O3 -DNDEBUG"
-if [[ "${1:-}" == "--debug" ]]; then
+if [[ "$DEBUG_MODE" -eq 1 ]]; then
+    # ASSERTIONS=2: expensive runtime checks — CI/debug builds only
     DEBUG_FLAGS="-O0 -g -DDEBUG -sASSERTIONS=2"
-    echo "🔧 Building in DEBUG mode"
+    echo "🔧 Building in DEBUG mode (ASSERTIONS=2)"
 else
     echo "🔧 Building in RELEASE mode"
 fi
 
+EXTRA_SANITIZER_FLAGS=()
+if [[ "$SAFE_HEAP" -eq 1 ]]; then
+    EXTRA_SANITIZER_FLAGS+=(-sSAFE_HEAP=1)
+    echo "🔧 SAFE_HEAP=1 enabled (slow; debug memory corruption)"
+fi
+
 # Verify emcc is available
 if ! command -v emcc &> /dev/null; then
-    echo "❌ emcc not found. Please activate emsdk:"
-    echo "   source /path/to/emsdk/emsdk_env.sh"
+    echo "❌ emcc not found. Please activate emsdk ${EMSDK_PIN}:"
+    echo "   git clone https://github.com/emscripten-core/emsdk.git && cd emsdk"
+    echo "   ./emsdk install ${EMSDK_PIN} && ./emsdk activate ${EMSDK_PIN}"
+    echo "   source ./emsdk_env.sh"
     exit 1
 fi
 
 echo "📦 Emscripten version: $(emcc --version | head -1)"
+echo "📌 Documented pin (CI): emsdk ${EMSDK_PIN}"
 
 # ── libopenmpt discovery / build ─────────────────────────────────────
 # Installed layout (post `make CONFIG=emscripten`):  include/libopenmpt/libopenmpt.h
@@ -231,17 +273,63 @@ ensure_libopenmpt() {
 ensure_libopenmpt
 
 echo "📁 Source:     $CPP_DIR"
-echo "📁 Output:     $OUTPUT_DIR"
+echo "📁 Output:     $OUTPUT_DIR/${OUTPUT_BASENAME}.*"
 echo "📁 libopenmpt: include=$LIBOPENMPT_INCLUDE  lib=$LIBOPENMPT_LIB"
 echo ""
 
+# Safety: never use the production JS worklet basename
+if [[ "$OUTPUT_BASENAME" == "openmpt-worklet" ]]; then
+    echo "❌ Refusing to write openmpt-worklet.* — that basename is the tracked JS processor." >&2
+    exit 1
+fi
+
+# Snapshot tracked JS worklet so we can detect accidental clobber
+TRACKED_BEFORE_HASH=""
+if [[ -f "$TRACKED_JS_WORKLET" ]]; then
+    TRACKED_BEFORE_HASH="$(cksum "$TRACKED_JS_WORKLET" | awk '{print $1" "$2}')"
+fi
+
 mkdir -p "$OUTPUT_DIR"
 
+# ── EXPORTED_FUNCTIONS ───────────────────────────────────────────────
+# Must match EMSCRIPTEN_KEEPALIVE in cpp/worklet_processor.cpp and
+# usage in audio-worklet/OpenMPTWorkletEngine.ts (+ types.ts).
+# Keep in sync; CI runs scripts/verify-native-exports.mjs.
+EXPORTED_FUNCTIONS=$(cat <<'EOF'
+[
+  '_init_audio',
+  '_init_audio_with_context',
+  '_load_module',
+  '_resume_audio',
+  '_suspend_audio',
+  '_seek_order_row',
+  '_set_loop',
+  '_set_volume',
+  '_poll_position',
+  '_get_audio_context',
+  '_get_worklet_node',
+  '_cleanup_audio',
+  '_set_ring_buffer',
+  '_get_ring_write_head',
+  '_get_num_channels',
+  '_get_num_orders',
+  '_get_order_pattern',
+  '_get_pattern_num_rows',
+  '_get_pattern_row_channel_command',
+  '_malloc',
+  '_free'
+]
+EOF
+)
+# Collapse to single line for emcc
+EXPORTED_FUNCTIONS_FLAT="$(echo "$EXPORTED_FUNCTIONS" | tr -d '\n' | sed 's/  */ /g')"
+
 # ── Compile ──────────────────────────────────────────────────────────
-echo "🔨 Compiling C++ → WebAssembly..."
+echo "🔨 Compiling C++ → WebAssembly (openmpt-native)..."
 
 emcc \
     $DEBUG_FLAGS \
+    "${EXTRA_SANITIZER_FLAGS[@]+"${EXTRA_SANITIZER_FLAGS[@]}"}" \
     -std=c++17 \
     \
     -I"$LIBOPENMPT_INCLUDE" \
@@ -255,24 +343,54 @@ emcc \
     -sWASM_WORKERS=1 \
     -sSINGLE_FILE=0 \
     -sALLOW_MEMORY_GROWTH=1 \
+    -sMAXIMUM_MEMORY=536870912 \
     -sENVIRONMENT=web,worker \
     -sEXPORTED_RUNTIME_METHODS="['ccall','cwrap','UTF8ToString','getValue','setValue']" \
-    -sEXPORTED_FUNCTIONS="['_init_audio','_load_module','_resume_audio','_suspend_audio','_seek_order_row','_set_loop','_set_volume','_poll_position','_get_audio_context','_get_worklet_node','_cleanup_audio','_malloc','_free']" \
+    -sEXPORTED_FUNCTIONS="$EXPORTED_FUNCTIONS_FLAT" \
     -sMODULARIZE=1 \
     -sEXPORT_NAME="createOpenMPTModule" \
     -sINITIAL_MEMORY=33554432 \
     -sSTACK_SIZE=131072 \
     --pre-js "$CPP_DIR/pre.js" \
     \
-    -o "$OUTPUT_DIR/openmpt-native.js"
+    -o "$OUTPUT_DIR/${OUTPUT_BASENAME}.js"
+
+# ── Post-build safety checks ─────────────────────────────────────────
+if [[ ! -f "$OUTPUT_DIR/${OUTPUT_BASENAME}.js" ]]; then
+    echo "❌ Expected $OUTPUT_DIR/${OUTPUT_BASENAME}.js was not produced" >&2
+    exit 1
+fi
+
+# Refuse if anything wrote the tracked JS processor path as Emscripten glue
+if [[ -f "$TRACKED_JS_WORKLET" ]]; then
+    TRACKED_AFTER_HASH="$(cksum "$TRACKED_JS_WORKLET" | awk '{print $1" "$2}')"
+    if [[ -n "$TRACKED_BEFORE_HASH" && "$TRACKED_BEFORE_HASH" != "$TRACKED_AFTER_HASH" ]]; then
+        echo "❌ FATAL: public/worklets/openmpt-worklet.js changed during native build." >&2
+        echo "   The tracked JS AudioWorklet processor must never be overwritten." >&2
+        exit 1
+    fi
+    # Content sniff: modularized Emscripten glue is not an AudioWorkletProcessor
+    if ! grep -q 'AudioWorkletProcessor\|registerProcessor' "$TRACKED_JS_WORKLET"; then
+        echo "❌ FATAL: openmpt-worklet.js no longer looks like the JS processor." >&2
+        exit 1
+    fi
+else
+    echo "⚠️  Warning: tracked JS worklet missing at $TRACKED_JS_WORKLET" >&2
+fi
+
+# Never leave a stray openmpt-worklet.wasm from older scripts
+if [[ -f "$OUTPUT_DIR/openmpt-worklet.wasm" ]]; then
+    echo "⚠️  Removing obsolete $OUTPUT_DIR/openmpt-worklet.wasm (native output is openmpt-native.wasm)"
+    rm -f "$OUTPUT_DIR/openmpt-worklet.wasm" "$OUTPUT_DIR/openmpt-worklet.aw.js"
+fi
 
 echo ""
 echo "✅ Build complete!"
 echo ""
 echo "Generated files:"
-ls -lh "$OUTPUT_DIR/openmpt-native"* 2>/dev/null || echo "   (check output directory)"
+ls -lh "$OUTPUT_DIR/${OUTPUT_BASENAME}"* 2>/dev/null || echo "   (check output directory)"
 echo ""
 echo "📋 Next steps:"
-echo "   1. Copy public/worklets/openmpt-native.* to your deployment"
-echo "   2. The TypeScript engine (audio-worklet/OpenMPTWorkletEngine.ts)"
-echo "      will load these files automatically"
+echo "   1. Deploy public/worklets/openmpt-native.* alongside the tracked JS worklet"
+echo "   2. OpenMPTWorkletEngine.ts loads openmpt-native.js automatically when present"
+echo "   3. Production JS path remains public/worklets/openmpt-worklet.js (untouched)"

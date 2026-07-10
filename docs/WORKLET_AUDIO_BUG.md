@@ -67,6 +67,29 @@ Before modifying the worklet or AudioWorklet-related code:
 - [ ] **Never add a `setTimeout` polyfill** that ignores the `delay` argument. Chrome 116+ has native `setTimeout` in AudioWorklet; for older browsers, use `currentTime`-based timing in `process()` instead.
 - [ ] **Never `import()` an AudioWorklet processor file on the main thread.** Use `audioContext.audioWorklet.addModule()` for JS processors, or Emscripten's native API for `AUDIO_WORKLET` builds.
 - [ ] **Verify line numbers in browser console.** After deploy, a hard refresh (`Ctrl+Shift+R` / `Cmd+Shift+R`) should show line numbers matching the current source (e.g., ~250), not the old stub (~130).
+- [ ] **Never commit HTML/404 bodies as `*.wasm`.** Production glue is wasm2js (`libopenmpt-audioworklet.js`); a sibling `libopenmpt.wasm` is not required. Run `npm run verify:wasm` before commit/deploy.
+
+---
+
+## Worklet asset path (wasm2js) — 2026-07 fix
+
+### Problem
+
+`public/worklets/libopenmpt.wasm` was a **236-byte HTML 404 document** (`<!DOCTYPE HTML…>`), not a WebAssembly binary (magic `\0asm`). The main thread still fetched it and passed it as `wasmBinary` into the worklet.
+
+Production `libopenmpt-audioworklet.js` is a **wasm2js** build (`isWasm2js:!0`, ~5 MB). The runtime is embedded in the JS; `findWasmBinary` is a no-op. Seeding a fake `Module.wasmBinary` overwrites the empty binary wasm2js expects and risks silent init failure / ScriptProcessor fallback.
+
+### Fix
+
+| Change | Detail |
+|--------|--------|
+| Remove stub | Deleted corrupt `public/worklets/libopenmpt.wasm` |
+| `useAudioGraph.ts` | Fetch JS only when glue is wasm2js; optional real `.wasm` only for classic builds, with `\0asm` validation |
+| `openmpt-worklet.js` | `wasmBytes` optional; do not set `wasmBinary` for wasm2js |
+| `WORKLET_VERSION` | Bumped to `3` (cache bust) |
+| CI | `npm run verify:wasm` rejects any `*.wasm` under `public/`/`dist/` that is tiny, HTML, or missing `\0asm` |
+
+See also `public/worklets/README.md`.
 
 ---
 

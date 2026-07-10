@@ -1,5 +1,9 @@
 // Shared geometry constants for shader layouts
-import { getShaderMeta } from './shaderRegistry';
+import {
+  resolveShaderMeta,
+  DEFAULT_POLAR_OUTER,
+  POLAR_OUTER_V045,
+} from './shaderRegistry';
 
 /** Maximum visible rows in lite/mobile mode. */
 export const LITE_MAX_VISIBLE_ROWS = 32;
@@ -15,9 +19,9 @@ export const GRID_RECT = {
 // Polar ring dimensions for circular layouts (normalized 0–1 factors of minDim)
 export const POLAR_RINGS = {
   INNER_RADIUS: 0.15,
-  OUTER_RADIUS: 0.45,
+  OUTER_RADIUS: DEFAULT_POLAR_OUTER,
   /** v0.45 (non-b) shrinks outer ring to make room for embedded UI controls */
-  OUTER_RADIUS_V045: 0.40,
+  OUTER_RADIUS_V045: POLAR_OUTER_V045,
 };
 
 /** Pixel inner/outer radii for circular shaders — keep WebGPU + WebGL overlay in sync. */
@@ -27,17 +31,14 @@ export function getPolarRadii(
   shaderFile: string,
 ): { innerRadius: number; outerRadius: number } {
   const minDim = Math.min(canvasWidth, canvasHeight);
+  const meta = resolveShaderMeta(shaderFile);
   const innerRadius = minDim * POLAR_RINGS.INNER_RADIUS;
-  const outerFactor =
-    shaderFile.includes('v0.45') && !shaderFile.includes('v0.45b')
-      ? POLAR_RINGS.OUTER_RADIUS_V045
-      : POLAR_RINGS.OUTER_RADIUS;
-  return { innerRadius, outerRadius: minDim * outerFactor };
+  return { innerRadius, outerRadius: minDim * meta.polarOuterRadiusFactor };
 }
 
 /** Circular shaders that page rows by numRows (e.g. v0.46) — WebGL overlay must match. */
 export function usesCircularRowPaging(shaderFile: string): boolean {
-  return shaderFile.includes('v0.46');
+  return resolveShaderMeta(shaderFile).circularRowPaging;
 }
 
 // Cap/button configuration
@@ -96,13 +97,10 @@ export function calculateCapScale(cellW: number, cellH: number, pixelRatio: numb
   return Math.min(cellW, cellH) * CAP_CONFIG.CAP_SCALE_FACTOR * pixelRatio;
 }
 
-// Determine layout mode from shader filename
+// Determine layout mode from shader filename (registry)
 export function getLayoutModeFromShader(shaderFile: string): LayoutMode {
-  const meta = getShaderMeta(shaderFile);
-  if (meta) {
-    return meta.layoutMode === 'horizontal_32'
-      ? LAYOUT_MODES.HORIZONTAL_32
-      : LAYOUT_MODES.CIRCULAR;
-  }
-  return LAYOUT_MODES.CIRCULAR;
+  const meta = resolveShaderMeta(shaderFile);
+  return meta.layoutMode === 'horizontal_32'
+    ? LAYOUT_MODES.HORIZONTAL_32
+    : LAYOUT_MODES.CIRCULAR;
 }

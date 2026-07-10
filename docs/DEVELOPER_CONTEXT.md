@@ -17,7 +17,7 @@
 *   **React Hook-Based State:** Logic is centralized in custom hooks (e.g., `useLibOpenMPT`).
 *   **Data-Driven Rendering:** The UI is a direct reflection of the audio engine's state (playhead, channel data, pattern matrix).
 *   **Hybrid Shader UI:** In advanced modes (`v0.37+`), the UI controls (Play/Stop/Seek) are physically rendered by the shader and interactions are calculated via polar coordinate hit-testing on the canvas, blurring the line between "app" and "visualization".
-*   **Strategy Pattern (Implicit):** `PatternDisplay.tsx` switches between different rendering strategies (Simple, Texture, Extended, High-Precision) based on the filename of the selected shader.
+*   **Strategy Pattern (Registry):** `PatternDisplay.tsx` and render hooks select layout/packing/UI behavior from `utils/shaderRegistry.ts` (`ShaderMeta`), not ad-hoc filename parsing.
 
 ---
 
@@ -27,7 +27,7 @@
 | :--- | :--- | :--- |
 | **Audio Playback** | `hooks/useLibOpenMPT.ts` | Handles WASM initialization, audio context. Tries `AudioWorkletNode` first, falls back to `ScriptProcessorNode`. |
 | **Pattern Visualization** | `components/PatternDisplay.tsx` | The core visual component. Manages the WebGPU context, buffers, render loop, and shader hot-swapping. |
-| **Shader Management** | `components/PatternDisplay.tsx` | Dynamically loads `.wgsl` files. Parses filenames to determine capabilities (e.g., `v0.37` implies circular layout + UI controls). |
+| **Shader Management** | `utils/shaderRegistry.ts` + `appConfig.ts` | Registry is the single source of truth for capabilities; PatternDisplay loads WGSL and reads meta via `resolveShaderMeta`. |
 | **User Controls** | `components/Controls.tsx` | Standard HTML UI for volume, play/pause, and file loading (fallback/auxiliary controls). |
 | **Media Overlay** | `components/MediaOverlay.tsx` | Displays images/videos synced to playback (managed via `App.tsx`). |
 | **HTML Fallback** | `components/PatternSequencer.tsx` | A DOM-based grid view used when WebGPU is unavailable. |
@@ -36,14 +36,16 @@
 
 ## 3. Complexity Hotspots ("Here be Dragons")
 
-### A. The "Shader Versioning" Logic (`PatternDisplay.tsx`)
-**Why it's complex:** The application supports dozens of historical and experimental shader variations. The `PatternDisplay` component parses the shader **filename string** (e.g., `patternv0.37.wgsl`) to determine:
-*   **Layout Type:** `simple`, `texture`, or `extended`.
-*   **Buffer Packing Strategy:** Standard vs. High Precision (splitting data into `PackedA`/`PackedB`).
-*   **Canvas Dimensions:** Specific versions force specific resolutions (e.g., `v0.37` -> 1024x1024, `v0.26` -> 2048x2016) to align with background "chassis" textures.
-*   **Input Handling:** `v0.37` intercepts canvas clicks to trigger UI actions based on hardcoded polar coordinates.
+### A. Shader Registry (`utils/shaderRegistry.ts`)
+**Why it exists:** Dozens of historical and experimental shaders need different layout, packing, canvas size, hit-testing, bloom, and texture bindings. Capabilities are declared once per file on `ShaderMeta` and consumed via `utils/shaderVersion.ts` helpers.
 
-**Agent Warning:** **DO NOT** indiscriminately refactor the `if (shaderFile.includes('v0.XX'))` chains. They are load-bearing. Adding a new shader often requires manually updating these checks to ensure the correct uniforms and buffers are sent.
+**When adding a shader:**
+1. Add the WGSL under `shaders/` (sync to `public/shaders/`)
+2. One block in `SHADER_REGISTRY`
+3. Picker entry in `appConfig.ts` `SHADER_GROUPS`
+4. `npm run test:shader-registry`
+
+**Agent Warning:** Do **not** reintroduce `shaderFile.includes('v0.XX')` chains in PatternDisplay/hooks. Extend `ShaderMeta` instead. Unregistered filenames fall through `inferLegacyMeta` only as a safety net.
 
 ### B. High-Precision Data Packing
 **Why it's complex:** To pass rich tracker data (Note, Instrument, VolCmd, VolVal, EffCmd, EffVal) to the GPU efficiently, we use bit-packing.

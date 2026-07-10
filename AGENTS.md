@@ -10,7 +10,7 @@
 - **3D Graphics:** `@react-three/fiber` + `@react-three/drei` + `three`
 - **Visualization:** WebGPU (WGSL shaders) primary; **WebGL2** GLSL reference renderer (`src/renderers/webgl2/`) and **HTML** fallback
 - **Audio Backend:** `libopenmpt` (WASM) inside a customized AudioWorklet
-- **Native Audio Engine:** C++17 → Emscripten (`build-wasm.sh` or `scripts/build-wasm.sh`)
+- **Native Audio Engine:** C++17 → Emscripten (`scripts/build-wasm.sh` / `npm run build:emcc` only; outputs `openmpt-native.*`)
 - **Module System:** ES modules (`"type": "module"` in `package.json`)
 
 ## Key Configuration Files
@@ -20,7 +20,8 @@
 - **`vite.config.ts`** — Base path from `VITE_APP_BASE_PATH`; React plugin; COOP/COEP headers (`same-origin` / `credentialless`); `watch.followSymlinks: false` (guards against CodeQL self-referential symlink); `optimizeDeps.exclude: ['openmpt-native']`; `assetsInclude: ['**/*.wasm']`.
 - **`tailwind.config.js`** — Explicit `content` paths only (no broad globs) to prevent build OOM. Custom theme extensions for `panel`, `edge`, `accent`, `glow`, `borderColor`, and `boxShadow`.
 - **`postcss.config.js`** — TailwindCSS + Autoprefixer.
-- **`eslint.config.js`** — Uses `@eslint/js`, `typescript-eslint`, `eslint-plugin-react-hooks`, `eslint-plugin-react-refresh`. Ignores `dist`, `public`, `vendor`, `node_modules`, `mod-player-shaders`, `kimi_agents`, `jules_patch`, `subdir`. Note: `npm run lint` currently exits 0, so the config is not enforced in CI.
+- **`eslint.config.js`** — Uses `@eslint/js`, `typescript-eslint`, `eslint-plugin-react-hooks`, `eslint-plugin-react-refresh`. Ignores `dist`, `public`, `vendor`, `node_modules`, `mod-player-shaders`, `kimi_agents`, `jules_patch`, `subdir`, `scripts`, `cpp`. Enforced via `npm run lint` (`eslint . --max-warnings 100`) as a hard CI gate.
+- **`package-lock.json`** — Committed for reproducible installs. CI uses `npm ci`.
 
 ## Audio Architecture (Three Tiers + Fallback)
 The audio logic is split across the **Main Thread** and the **Audio Worklet Thread**, with an optional high-performance native C++ worklet.
@@ -34,11 +35,13 @@ Managed by `hooks/useLibOpenMPT.ts`. Responsibilities:
 - Read high-frequency playback data via a mutable ref (`playbackStateRef`) to avoid 60 Hz re-renders
 
 ### 2. JS AudioWorklet Engine
-File: `public/worklets/openmpt-worklet.js` (tracked in git)
-- This is an `AudioWorkletProcessor` that dynamically `import()`s `./libopenmpt-audioworklet.js` inside the worklet thread.
-- Dynamic import is used instead of static import to maintain compatibility with Chrome 113–116 (the WebGPU baseline) without requiring `addModule({ type: 'module' })`.
+Files: `public/worklets/openmpt-worklet.js` + `libopenmpt-audioworklet.js` (tracked in git)
+- Processor is an `AudioWorkletProcessor` loaded via `audioWorklet.addModule()` (cache-busted `?v=` from `useWorkletLoader.ts`).
+- Main thread fetches `libopenmpt-audioworklet.js` and posts `{ type: 'initLib', scriptText }` into the worklet; the worklet evaluates it with `new Function` (classic scripts cannot `import()` / `importScripts()`).
+- **`libopenmpt-audioworklet.js` is wasm2js** (~5 MB): the runtime is embedded in JS. There is **no** sibling `libopenmpt.wasm` on this path. Do not re-add a fake/HTML `.wasm`.
 - Runs the `libopenmpt` render loop, reports position (~60 Hz) back to the main thread, and handles seek/load messages.
 - **Rule:** You cannot use React state or DOM APIs inside the worklet. Communication is strictly via `port.postMessage()`.
+- **Hygiene:** `npm run verify:wasm` fails CI if any `public/**/*.wasm` or `dist/**/*.wasm` is HTML/tiny/missing `\0asm` magic. See `public/worklets/README.md`.
 
 ### 3. Native C++/Wasm AudioWorklet Engine (Optional)
 Files: `audio-worklet/OpenMPTWorkletEngine.ts`, `cpp/openmpt_wrapper.cpp`, `cpp/worklet_processor.cpp`
@@ -104,7 +107,8 @@ Tracker cells are bit-packed into `Uint32Array` before upload to the GPU:
 
 ### Development
 ```bash
-npm install
+npm ci             # preferred: clean install from package-lock.json
+# or: npm install  # updates lockfile when package.json changes
 npm run dev        # Vite dev server (needs WebGPU-enabled browser, e.g., Chrome/Edge/Arc)
 ```
 
@@ -112,26 +116,45 @@ npm run dev        # Vite dev server (needs WebGPU-enabled browser, e.g., Chrome
 ```bash
 npm run build           # tsc && vite build (uses 4GB max-old-space-size)
 npm run typecheck       # tsc --noEmit
-npm run lint            # Currently exits 0 (no active linting rules configured)
+npm run lint            # eslint . --max-warnings 100 (hard CI gate)
 npm run preview         # Preview the production build locally
 ```
 
-### Native Audio Engine Build
-Two separate build scripts exist; both require the Emscripten SDK (emsdk) 4.0+ activated in your shell.
+### package-lock.json (reproducible installs)
+`package-lock.json` is **committed** and used by CI via `npm ci`.
 
-**Option A — Root build script (outputs `openmpt-worklet.*`):**
-```bash
-npm run build:worklet   # bash ./build-wasm.sh
-```
-- Outputs to `public/worklets/openmpt-worklet.js`, `.wasm`, `.aw.js`
-- Auto-downloads and builds `libopenmpt` 0.8.4 from upstream if missing
+| Task | Command |
+|------|---------|
+| Clean install (CI / local parity) | `npm ci` |
+| After changing `package.json` deps | `npm install` (rewrites lockfile) then commit both |
+| Force regenerate lockfile | `rm -rf node_modules package-lock.json && npm install` then commit `package-lock.json` |
 
-**Option B — Scripts directory build (outputs `openmpt-native.*`):**
+Do **not** add `package-lock.json` to `.gitignore`.
+
+### Native Audio Engine Build (single supported path)
+Requires Emscripten **emsdk 3.1.50** (CI pin; override with `EMSDK_PIN` only for experiments):
+
 ```bash
-npm run build:emcc      # bash scripts/build-wasm.sh
+# Install pin (once)
+git clone https://github.com/emscripten-core/emsdk.git && cd emsdk
+./emsdk install 3.1.50 && ./emsdk activate 3.1.50
+source ./emsdk_env.sh
+
+# From repo root — only supported native build:
+npm run build:emcc
+# equivalent: bash scripts/build-wasm.sh [--debug] [--safe-heap]
+# npm run build:worklet  → same script (deprecated alias name)
 ```
-- Outputs to `public/worklets/openmpt-native.js`, `.wasm`, `.aw.js`
-- Auto-clones and builds `libopenmpt` from GitHub (OpenMPT-1.31 branch) if headers are missing
+
+| Output (gitignored) | Role |
+|---------------------|------|
+| `public/worklets/openmpt-native.js` | Emscripten modular glue (`createOpenMPTModule`) |
+| `public/worklets/openmpt-native.wasm` | WASM binary |
+| `public/worklets/openmpt-native.aw.js` | AudioWorklet bootstrap |
+
+**Never** overwrites tracked `public/worklets/openmpt-worklet.js` (JS processor).  
+Root `./build-wasm.sh` is a deprecated alias that only forwards to `scripts/build-wasm.sh`.  
+Export audit: `npm run verify:native-exports`.
 
 ### Deployment
 ```bash
@@ -148,7 +171,7 @@ python3 deploy.py
 - **Fix comments:** The codebase prefixes engineering fixes with identifiers like `AUDIO-001 FIX` and `TIMING FIX`.
 - **Base URL awareness:** Almost all asset URLs are constructed with `import.meta.env.BASE_URL` so the app works when deployed under a subdirectory.
 - **React patterns:** Functional components with hooks only; no class components. State for UI logic; mutable refs for high-frequency audio data. Props are preferred over context except for deeply nested state.
-- **ESLint:** ESLint is installed and configured in `eslint.config.js`, but `npm run lint` is currently a no-op (`exit 0`).
+- **ESLint:** Configured in `eslint.config.js` (typescript-eslint + react-hooks + react-refresh). `npm run lint` runs `eslint . --max-warnings 100` and is a **hard CI gate**. Remaining warnings are tracked for a follow-up cleanup PR (ratchet the budget down over time).
 
 ## Testing
 - **No formal unit-test framework** is currently installed (no Jest/Vitest/Playwright tests in `package.json`).
@@ -160,8 +183,8 @@ python3 deploy.py
   ```
   Outputs are written to `/mnt/ramdisk/mod-player-screenshots` by default, including `report.json` and `SCREENSHOT_REPORT.md`.
 - **GitHub Actions** (`.github/workflows/ci.yml`) runs two jobs:
-  1. `lint-and-build` – `npm install` → `npm run lint` (soft fail) → `tsc --noEmit` → `npm run build` → verifies `dist/index.html` and `dist/assets` exist.
-  2. `wasm-smoke-test` – Installs Emscripten 3.1.50, verifies `build-wasm.sh` exists, and runs `shellcheck` (or `bash -n`) for syntax validation.
+  1. `lint-and-build` – `npm ci` → `npm run lint` (hard fail) → `npm run typecheck` → `npm run build` → verifies `dist/index.html` and `dist/assets` exist.
+  2. `wasm-smoke-test` – Installs Emscripten **3.1.50**, verifies safe native build scripts, `verify:native-exports`, `bash -n`, and that tracked `openmpt-worklet.js` still looks like the JS processor.
 
 ## Security & CORS Considerations
 - **COOP/COEP headers:** `vite.config.ts` sets:
@@ -176,8 +199,8 @@ python3 deploy.py
 1. **Worklet Caching:** Browsers cache AudioWorklet files aggressively. If you edit `openmpt-worklet.js` or any worklet asset, hard-refresh or disable cache in DevTools.
 2. **Shader Imports:** If you rename a shader file in `/shaders`, you **must** update the reference in `App.tsx` (the `SHADER_GROUPS` constant) and in any component that fetches the file by name (e.g., `PatternDisplay.tsx`). WGSL files must also be kept in sync between `/shaders` (source) and `/public/shaders` (served).
 3. **Base Path Mismatch:** Deploying to a subdirectory without setting `VITE_APP_BASE_PATH` will break shader fetches, worklet loads, and the default module fetch. Use `deploy.py` or set the env var manually before building.
-4. **Missing Native Engine:** `openmpt-native.js` does not exist in the repo by default. If you want the native C++ worklet option, run `npm run build:emcc` after installing the Emscripten SDK.
+4. **Missing Native Engine:** `openmpt-native.js` does not exist in the repo by default. Run `npm run build:emcc` after activating emsdk **3.1.50**.
 5. **Node OOM during build:** The Tailwind config was intentionally narrowed to explicit paths. Do not broaden the `content` glob to `"./**/*.{js,ts,jsx,tsx}"` or production builds may run out of heap memory.
-6. **Dual build scripts:** Running `npm run build:worklet` (root script) will overwrite the tracked `public/worklets/openmpt-worklet.js` with Emscripten-generated glue. The JS worklet source is preserved in git, but the generated C++ output uses the same filename. Prefer `npm run build:emcc` if you want the C++ engine without overwriting the tracked JS worklet file.
+6. **Native vs JS worklet names:** Native glue is always `openmpt-native.*`. The tracked production processor is `openmpt-worklet.js`. Both `npm run build:emcc` and `npm run build:worklet` call `scripts/build-wasm.sh` and refuse to clobber the JS processor.
 7. **Shader-Uniform coupling:** Shaders are tightly coupled to TypeScript host code. Changing a shader's `struct Uniforms` requires a matching change to `createUniformPayload()` in `PatternDisplay.tsx`. Adding a new shader often requires manually updating version checks in `PatternDisplay.tsx` for layout, packing, canvas size, and input handling.
 8. **Symlink watcher infinite loop:** The CodeQL scanner leaves a self-referential symlink (`_codeql_detected_source_root` → `.`). The Vite config mitigates this with `watch.followSymlinks: false`. Do not remove this setting.

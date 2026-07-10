@@ -60,7 +60,7 @@ export const MediaPanel: React.FC<MediaPanelProps> = ({ media, activeMediaId, on
         const candidates = deriveMediaCandidates(moduleFileName, moduleHintText);
         for (const url of candidates) {
           if (controller.signal.aborted) return;
-          // eslint-disable-next-line no-await-in-loop
+           
           const ok = await checkMediaAvailability(url);
           if (controller.signal.aborted) return;
           if (ok) {

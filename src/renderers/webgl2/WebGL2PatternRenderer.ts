@@ -13,6 +13,11 @@ import {
   usesCircularRowPaging,
 } from '../../../utils/geometryConstants';
 import { getShaderMeta } from '../../../utils/shaderRegistry';
+import {
+  usesStrictPlayheadSustainMode,
+  isHorizontalLayoutShader,
+  supportsStepsLength,
+} from '../../../utils/shaderVersion';
 import { detectRuntimeBase } from '../../../src/lib/paths';
 import { CHASSIS_VERTEX, CHASSIS_FRAGMENT } from './shaders/chassis';
 import { buildVertexShader, buildPatternFragmentShader } from './shaders/pattern';
@@ -126,8 +131,8 @@ export class WebGL2PatternRenderer {
   }
 
   private initPattern(gl: WebGL2RenderingContext, shaderFile: string): void {
-    const useNoteSustainTailMode = shaderFile.includes('v0.45b'); // TRIG-001: strict playhead sustain (v0.45b only)
-    const isV021 = shaderFile.includes('v0.21');
+    const useNoteSustainTailMode = usesStrictPlayheadSustainMode(shaderFile);
+    const isV021 = shaderFile === 'patternv0.21.wgsl';
     const useCircularPaging = usesCircularRowPaging(shaderFile);
     const vsSource = buildVertexShader(useNoteSustainTailMode, isV021, useCircularPaging);
     const fsSource = buildPatternFragmentShader(useNoteSustainTailMode, isV021);
@@ -248,7 +253,7 @@ export class WebGL2PatternRenderer {
   private resolveLayoutMode(params: WebGPURenderParams): number {
     const shaderFile = this.shaderFile;
     let layoutMode = getLayoutModeFromShader(shaderFile);
-    if (shaderFile.includes('v0.21') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40')) {
+    if (isHorizontalLayoutShader(shaderFile) && supportsStepsLength(shaderFile)) {
       layoutMode = params.stepsLength === 64 ? LAYOUT_MODES.HORIZONTAL_64 : LAYOUT_MODES.HORIZONTAL_32;
     }
     return layoutMode;

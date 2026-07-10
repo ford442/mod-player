@@ -16,10 +16,21 @@ import {
 import { setCurrentPatternRenderer } from '../src/renderers/global';
 import type { PatternRendererBackend } from '../src/renderers/types';
 import { BloomPostProcessor } from '../utils/bloomPostProcessor';
-import { WEBGL_HYBRID_SHADERS, supportsStepsLength } from '../utils/shaderVersion';
+import {
+  WEBGL_HYBRID_SHADERS,
+  supportsStepsLength,
+  usesPadTopChannel,
+  isHorizontalLayoutShader,
+  getShaderCanvasSize,
+  getHitTestProfile,
+  usesOscilloscope,
+  usesBareCanvasChrome,
+  showsChannelInvertButton,
+} from '../utils/shaderVersion';
 import { getShaderMeta } from '../utils/shaderRegistry';
 import { detectRuntimeBase } from '../src/lib/paths';
 import { getBloomProfile } from '../utils/bloomProfiles';
+import { configureCanvasContext } from '../utils/webgpuDevice';
 
 const DEFAULT_CHANNELS = 4;
 
@@ -211,16 +222,17 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   const useHTML = activeBackend === 'html';
   const isOverlayActive = useWebGPU && !liteMode && WEBGL_HYBRID_SHADERS.has(shaderFile);
 
-  const padTopChannel = shaderFile.includes('v0.16') || shaderFile.includes('v0.17') || shaderFile.includes('v0.21') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.47') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49') || shaderFile.includes('v0.50') || shaderFile.includes('v0.51') || shaderFile.includes('v0.52') || shaderFile.includes('v0.53') || shaderFile.includes('v0.54') || shaderFile.includes('v0.55') || shaderFile.includes('v0.56') || shaderFile.includes('v0.57');
-
-  const isHorizontal = shaderFile.includes('v0.13') || shaderFile.includes('v0.14') || shaderFile.includes('v0.16') || shaderFile.includes('v0.17') || shaderFile.includes('v0.21') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40');
+  const padTopChannel = usesPadTopChannel(shaderFile);
+  const isHorizontal = isHorizontalLayoutShader(shaderFile);
 
   const canvasMetrics = useMemo(() => {
     if (liteMode) return { width: 512, height: 512 };
-    if (shaderFile.includes('v0.27') || shaderFile.includes('v0.28')) return { width: 1024, height: 1008 };
-    if (shaderFile.includes('v0.21') || shaderFile.includes('v0.37') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.42') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46') || shaderFile.includes('v0.47') || shaderFile.includes('v0.48') || shaderFile.includes('v0.49') || shaderFile.includes('v0.50') || shaderFile.includes('v0.51') || shaderFile.includes('v0.52') || shaderFile.includes('v0.53') || shaderFile.includes('v0.54') || shaderFile.includes('v0.55') || shaderFile.includes('v0.56') || shaderFile.includes('v0.57')) return { width: 1024, height: 1024 };
+    // Registry is authoritative for all production shaders in SHADER_GROUPS.
+    if (getShaderMeta(shaderFile)) {
+      return getShaderCanvasSize(shaderFile);
+    }
+    // Unregistered / experimental: horizontal → square; else channel-scaled
     if (isHorizontal) return { width: 1024, height: 1024 };
-    if (shaderFile.includes('v0.25') || shaderFile.includes('v0.30') || shaderFile.includes('v0.35')) return { width: 1024, height: 1024 };
     return { width: Math.max(800, numChannels * cellWidth), height: 600 };
   }, [shaderFile, isHorizontal, numChannels, cellWidth, liteMode]);
 
@@ -280,10 +292,9 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
       syncCanvasSize(canvas, glCanvas);
       if (gpuContextRef.current && gpuDeviceRef.current) {
         try {
-          gpuContextRef.current.configure({
+          configureCanvasContext({
             device: gpuDeviceRef.current,
-            format: navigator.gpu.getPreferredCanvasFormat(),
-            alphaMode: 'premultiplied'
+            context: gpuContextRef.current,
           });
         } catch (e) {
           console.error('❌ WebGPU context reconfiguration failed:', e);
@@ -377,7 +388,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   // explicit deps, guaranteeing the cells buffer is rebuilt when a new module is loaded.
   const oscTextureRef = useRef<GPUTexture | null>(null);
 
-  const { gpuReady, render: renderWebGPU, deviceRef: gpuDevRef } = useWebGPURender(
+  const { gpuReady, render: renderWebGPU, deviceRef: gpuDevRef, deviceStatus } = useWebGPURender(
     canvasRef, glCanvasRef, shaderFile,
     syncCanvasSize, renderParamsRef, matrix, padTopChannel, setDebugInfo, setWebgpuAvailable,
     bloomRef,
@@ -425,10 +436,10 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     return () => setCurrentPatternRenderer(null);
   }, [useWebGPU, gpuReady, handleResize]);
 
-  // Create oscilloscope 1D texture when GPU is ready and v0.55 is active
+  // Create oscilloscope 1D texture when GPU is ready and registry marks oscilloscope
   useEffect(() => {
     const device = gpuDevRef.current;
-    if (!device || !gpuReady || !shaderFile.includes('v0.55')) return;
+    if (!device || !gpuReady || !usesOscilloscope(shaderFile)) return;
     if (!oscTextureRef.current) {
       oscTextureRef.current = device.createTexture({
         size: [2048, 1, 1],
@@ -493,16 +504,17 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     return () => window.removeEventListener('keydown', handler);
   }, []);
 
-  // Canvas click handler for shader-embedded UI interaction
+  // Canvas click handler for shader-embedded UI interaction (registry hitTestProfile)
   const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!shaderFile.includes('v0.37') && !shaderFile.includes('v0.38') && !shaderFile.includes('v0.39') && !shaderFile.includes('v0.40') && !shaderFile.includes('v0.42') && !shaderFile.includes('v0.43') && !shaderFile.includes('v0.44') && !shaderFile.includes('v0.45') && !shaderFile.includes('v0.46')) return;
+    const hitProfile = getHitTestProfile(shaderFile);
+    if (hitProfile === 'none') return;
     const rect = e.currentTarget.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
     const pX = (x / rect.width) - 0.5;
     const pY = 0.5 - (y / rect.height);
 
-    const isV40 = shaderFile.includes('v0.40') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44') || shaderFile.includes('v0.45') || shaderFile.includes('v0.46');
+    const isV40 = hitProfile === 'square-ui';
 
     const flashButton = (buttonId: number) => {
       if (clickTimeoutRef.current !== null) window.clearTimeout(clickTimeoutRef.current);
@@ -612,7 +624,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   return (
     <div
       ref={containerRef}
-      className={`pattern-display relative ${padTopChannel && !shaderFile.includes('v0.40') && !shaderFile.includes('v0.43') && !shaderFile.includes('v0.44') ? 'p-8 rounded-xl bg-[#18181a] shadow-2xl border border-[#333]' : ''}`}
+      className={`pattern-display relative ${padTopChannel && !usesBareCanvasChrome(shaderFile) ? 'p-8 rounded-xl bg-[#18181a] shadow-2xl border border-[#333]' : ''}`}
       style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}
     >
       <input type="file" ref={fileInputRef} onChange={handleFileChange} className="hidden" accept=".mod,.xm,.it,.s3m,.mptm" />
@@ -633,7 +645,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
         </>
       )}
 
-      {(shaderFile.includes('v0.35') || shaderFile.includes('v0.37') || shaderFile.includes('v0.38') || shaderFile.includes('v0.39') || shaderFile.includes('v0.40') || shaderFile.includes('v0.43') || shaderFile.includes('v0.44')) && (
+      {showsChannelInvertButton(shaderFile) && (
         <button
           onClick={() => setInvertChannels(p => !p)}
           className="absolute top-2 left-12 px-2 py-1 bg-[#222] text-xs font-mono text-gray-400 border border-[#444] rounded hover:bg-[#333] hover:text-white transition-colors"
@@ -677,7 +689,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
             width={canvasMetrics.width}
             height={canvasMetrics.height}
             onClick={handleCanvasClick}
-            className={`${padTopChannel && !shaderFile.includes('v0.40') && !shaderFile.includes('v0.43') && !shaderFile.includes('v0.44') ? 'rounded bg-black shadow-inner border border-black/50' : ''} cursor-pointer block`}
+            className={`${padTopChannel && !usesBareCanvasChrome(shaderFile) ? 'rounded bg-black shadow-inner border border-black/50' : ''} cursor-pointer block`}
             style={{ width: 'auto', height: 'auto', maxWidth: '100%', maxHeight: '100%', aspectRatio: `${canvasMetrics.width} / ${canvasMetrics.height}`, objectFit: 'contain' }}
           />
           <canvas
@@ -694,6 +706,26 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
       {!useHTML && useWebGL2 && !webgl2Available && (
         <div className="error absolute inset-0 flex items-center justify-center bg-black/80 text-red-400 text-sm font-mono p-4">
           WebGL2 not available — use <code className="mx-1">?renderer=html</code>
+        </div>
+      )}
+
+      {useWebGPU && deviceStatus === 'lost' && (
+        <div
+          className="absolute inset-0 z-10 flex items-center justify-center bg-black/75 text-amber-300 text-sm font-mono p-4 pointer-events-none"
+          role="status"
+          aria-live="polite"
+        >
+          GPU device lost — recovering…
+        </div>
+      )}
+
+      {useWebGPU && deviceStatus === 'device-failed' && !webgpuAvailable && (
+        <div
+          className="absolute inset-0 z-10 flex items-center justify-center bg-black/80 text-red-400 text-sm font-mono p-4 text-center"
+          role="alert"
+        >
+          WebGPU device unavailable — falling back or use{' '}
+          <code className="mx-1">?renderer=webgl2</code>
         </div>
       )}
 

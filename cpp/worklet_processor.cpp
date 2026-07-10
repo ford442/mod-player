@@ -52,6 +52,10 @@ static std::atomic<int> g_positionReady{0}; // 1 = new data available
 static EMSCRIPTEN_WEBAUDIO_T g_audioCtx = 0;
 static EMSCRIPTEN_AUDIO_WORKLET_NODE_T g_workletNode = 0;
 
+// Cumulative frames rendered since last load/play (sample-accurate clock)
+static double g_audioFramesRendered = 0.0;
+static int    g_renderSampleRate    = 48000;
+
 // Track last reported row to detect row changes
 static int g_lastReportedRow = -1;
 static double g_lastReportTimeS = 0.0;
@@ -143,8 +147,10 @@ EM_BOOL audio_process_cb(
 
     // Render interleaved stereo into a temp buffer
     float interleaved[128 * 2]; // Stack allocation for 128 frames
+    // Prefer context sample rate when available (Emscripten sets 48000 typically)
+    const int sr = g_renderSampleRate > 0 ? g_renderSampleRate : 48000;
     int rendered = g_module.readInterleavedStereo(
-        48000,
+        sr,
         frames,
         interleaved
     );
@@ -155,9 +161,13 @@ EM_BOOL audio_process_cb(
         // Signal end to main thread
         PositionInfo& pi = g_positionInfo;
         pi.currentRow = -1; // Special sentinel for "ended"
+        pi.audioFramesRendered = g_audioFramesRendered;
+        pi.sampleRate = sr;
         g_positionReady.store(1, std::memory_order_release);
         return EM_TRUE;
     }
+
+    g_audioFramesRendered += static_cast<double>(rendered);
 
     // De-interleave into planar output
     // Emscripten AudioWorklet outputs are planar: [L0,L1,...,L127, R0,R1,...,R127]
@@ -184,22 +194,26 @@ EM_BOOL audio_process_cb(
         __atomic_store_n(g_ringBufHeader, (head + rendered) % g_ringCapacity, __ATOMIC_RELEASE);
     }
 
-    // ── Report position (throttled: every ~16ms OR on row change) ──
+    // ── Report position every quantum (sample-accurate frame clock) ──
+    // Main thread polls shared memory; writing every process() keeps
+    // audioFramesRendered / rowFraction fresh for prediction between polls.
     int currentRow = g_module.getCurrentRow();
-    // Accumulate elapsed time based on sample count
-    double elapsed = (double)frames / 48000.0;
+    double elapsed = (double)rendered / (double)sr;
     static double timeSinceLastReport = 0.0;
     timeSinceLastReport += elapsed;
     g_lastReportTimeS += elapsed;
 
     bool rowChanged = (currentRow != g_lastReportedRow);
-    // ~16ms = ~768 samples at 48kHz ≈ 6 process() calls
-    bool timeThreshold = (timeSinceLastReport >= 0.016);
+    // Still coalesce ready-flag polls lightly, but always refresh struct
+    bool timeThreshold = (timeSinceLastReport >= 0.008); // ~8 ms
+
+    g_module.fillPositionInfo(g_positionInfo);
+    g_positionInfo.audioFramesRendered = g_audioFramesRendered;
+    g_positionInfo.sampleRate = sr;
 
     if (rowChanged || timeThreshold) {
         g_lastReportedRow = currentRow;
         timeSinceLastReport = 0.0;
-        g_module.fillPositionInfo(g_positionInfo);
         g_positionReady.store(1, std::memory_order_release);
     }
 

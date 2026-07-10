@@ -32,8 +32,11 @@ enum class MsgType : int {
 };
 
 /**
- * Lightweight POD struct posted to the main thread every ~16 ms
- * (or when the current row changes).
+ * Lightweight POD struct written to shared memory for main-thread polling.
+ * Layout must stay in sync with audio-worklet/OpenMPTWorkletEngine.ts offsets.
+ *
+ * Extended fields (audioFramesRendered, rowFraction, speed, sampleRate) enable
+ * sample-accurate playhead prediction without waiting for the next ~16 ms poll.
  */
 struct PositionInfo {
     double positionMs;
@@ -43,6 +46,11 @@ struct PositionInfo {
     double bpm;
     int    numChannels;
     float  channelVU[MAX_VU_CHANNELS]; // per-channel mono VU
+    // ── Extended (ABI append-only) ──────────────────────────────────
+    double audioFramesRendered; // cumulative frames rendered since load/play
+    float  rowFraction;         // fractional row (currentRow + in-row progress)
+    int    speed;               // ticks per row
+    int    sampleRate;          // render sample rate used for frame clock
 };
 
 /**

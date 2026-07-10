@@ -96,7 +96,7 @@ export const ChannelMeters: React.FC<ChannelMetersProps> = ({
     const gap = Math.max(1, Math.round(dpr));
     const barW = Math.max(1, colW - gap);
 
-    for (let tickDb of DB_TICK_MARKS) {
+    for (const tickDb of DB_TICK_MARKS) {
       const y = barH - dbToNormalized(tickDb) * barH;
       ctx.strokeStyle = TICK_COLOR;
       ctx.lineWidth = dpr;

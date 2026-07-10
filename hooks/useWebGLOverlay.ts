@@ -11,6 +11,9 @@ import { packPatternMatrixHighPrecision } from '../utils/gpuPacking';
 import {
   WEBGL_HYBRID_SHADERS,
   getLayoutType,
+  usesStrictPlayheadSustainMode,
+  isHorizontalLayoutShader,
+  supportsStepsLength,
 } from '../utils/shaderVersion';
 import {
   GRID_RECT,
@@ -80,8 +83,9 @@ export function useWebGLOverlay(
       console.log('🔧 Overlay inactive, skipping WebGL init');
       return;
     }
-    const useNoteSustainTailMode = shaderFile.includes('v0.45b');
-    const isV021 = shaderFile.includes('v0.21');
+    const useNoteSustainTailMode = usesStrictPlayheadSustainMode(shaderFile);
+    // v0.21 uses a special horizontal overlay path in the WebGL shader builder
+    const isV021 = shaderFile === 'patternv0.21.wgsl';
     const useCircularPaging = usesCircularRowPaging(shaderFile);
     console.group('🔧 initWebGL');
 
@@ -467,9 +471,9 @@ export function useWebGLOverlay(
       let offsetY = 0;
       let layoutModeName = 'CIRCULAR';
 
-      // Override layout for v0.21 (it's horizontal but not in getLayoutModeFromShader)
+      // Horizontal shaders with stepsLength can toggle 32/64 page modes
       let layoutMode = getLayoutModeFromShader(p.shaderFile);
-      if (p.shaderFile.includes('v0.21') || p.shaderFile.includes('v0.39') || p.shaderFile.includes('v0.40')) {
+      if (isHorizontalLayoutShader(p.shaderFile) && supportsStepsLength(p.shaderFile)) {
         layoutMode = p.stepsLength === 64 ? LAYOUT_MODES.HORIZONTAL_64 : LAYOUT_MODES.HORIZONTAL_32;
       }
       const channelCount = cols;

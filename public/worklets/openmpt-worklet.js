@@ -28,8 +28,12 @@ if (typeof self !== 'undefined' && (!self.crypto || !self.crypto.getRandomValues
  *
  * WASM loading strategy: AudioWorklet classic scripts cannot use import() or
  * importScripts(). Instead, the main thread fetches libopenmpt-audioworklet.js
- * and libopenmpt.wasm and sends them via postMessage({ type:'initLib', ... }).
- * The worklet evaluates the JS via new Function() with wasmBinary pre-seeded.
+ * (and, only for classic Emscripten binary builds, libopenmpt.wasm) and sends
+ * them via postMessage({ type:'initLib', scriptText, wasmBytes? }).
+ *
+ * Production glue is **wasm2js** (~5 MB JS with the runtime embedded). In that
+ * mode wasmBytes is omitted — do NOT seed a fake/empty sibling .wasm. For a
+ * future real-WASM glue, main thread validates \0asm magic before transfer.
  *
  * NOTE: Chrome 116+ provides setTimeout in AudioWorkletGlobalScope. Older
  * browsers don't, so we polyfill it below using process()-driven ticks.
@@ -72,6 +76,8 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
 
     this.positionReportInterval = 1 / 60;
     this.lastPositionReportTime = 0;
+    /** Last integer row — used only for diagnostics / wrap detection. */
+    this._lastReportedRowInt = -1;
 
     // ── Project-M PCM accumulation ─────────────────────────────────
     // Accumulate audio-clock-accurate stereo PCM blocks and emit them
@@ -145,20 +151,36 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
     }
   }
 
-  // ── WASM bootstrap via main-thread-fetched assets ──────────────────
+  // ── libopenmpt bootstrap via main-thread-fetched assets ────────────
   // AudioWorklet classic scripts cannot use import() or importScripts().
-  // The main thread fetches libopenmpt-audioworklet.js + libopenmpt.wasm
-  // and sends them here. We evaluate the JS via new Function() with
-  // wasmBinary pre-seeded so Emscripten skips its own network fetch.
+  // Main thread fetches libopenmpt-audioworklet.js (+ optional real .wasm)
+  // and posts them here. We evaluate the JS via new Function().
+  //
+  // wasm2js: do NOT set Module.wasmBinary — the glue clears wasmBinary to []
+  // and embeds the runtime in JS. Seeding HTML/garbage overwrites that and
+  // can break init. Classic binary builds: seed wasmBinary so Emscripten
+  // skips its own network fetch of the sibling .wasm.
   async _handleInitLib({ scriptText, wasmBytes }) {
     try {
       clearTimeout(this._libInitTimeout);
 
-      if (!scriptText || !wasmBytes) {
-        throw new Error('initLib missing scriptText or wasmBytes');
+      if (!scriptText) {
+        throw new Error('initLib missing scriptText');
       }
 
-      log('Evaluating libopenmpt-audioworklet.js (', scriptText.length, ' chars)…');
+      const hasWasmBytes =
+        wasmBytes &&
+        (wasmBytes instanceof ArrayBuffer
+          ? wasmBytes.byteLength > 0
+          : wasmBytes.byteLength > 0);
+
+      log(
+        'Evaluating libopenmpt-audioworklet.js (',
+        scriptText.length,
+        ' chars, wasmBytes:',
+        hasWasmBytes ? (wasmBytes.byteLength || 0) : 0,
+        ')…',
+      );
 
       // Emscripten calls performance.now() internally (_emscripten_get_now).
       // AudioWorkletGlobalScope may not expose `performance` as a global, so
@@ -182,10 +204,13 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
 
       // Pre-configure the Emscripten Module object. Emscripten checks
       // "typeof libopenmpt !== 'undefined'" and merges with this object.
+      // Only attach wasmBinary when we have a real binary payload.
       globalThis.libopenmpt = {
-        wasmBinary: wasmBytes,  // avoids a second network fetch for the .wasm
         noInitialRun: true,
       };
+      if (hasWasmBytes) {
+        globalThis.libopenmpt.wasmBinary = wasmBytes;
+      }
 
       // Strip ES module export statements — new Function() is a classic-script
       // context and will throw SyntaxError on any top-level `export` keyword.
@@ -318,8 +343,38 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
     const numSamples = outL.length;
     const framesToRead = Math.min(numSamples, this.maxFrames);
 
-    const samplesWritten = this.lib._openmpt_module_read_float_stereo(
-      this.modulePtr,
+    // ── Pre-render position snapshot ─────────────────────────────────
+    // Capture state *before* read_float_stereo so the row matches the first
+    // sample of this quantum. Tag with AudioWorklet currentTime (audio
+    // timeline of that first sample). Main thread predicts to
+    // currentTime − outputLatency for speaker-aligned visuals.
+    const lib = this.lib;
+    const mod = this.modulePtr;
+    const audioTime = currentTime;
+    const order = lib._openmpt_module_get_current_order(mod);
+    const rowInt = lib._openmpt_module_get_current_row(mod);
+    const posSec = lib._openmpt_module_get_position_seconds(mod);
+    const bpm = lib._openmpt_module_get_current_estimated_bpm(mod);
+    const speed = lib._openmpt_module_get_current_speed(mod);
+
+    let rowFraction = rowInt;
+    if (typeof lib._openmpt_module_get_time_at_position === 'function') {
+      const t0 = lib._openmpt_module_get_time_at_position(mod, order, rowInt);
+      let t1 = lib._openmpt_module_get_time_at_position(mod, order, rowInt + 1);
+      // End of pattern: try first row of next order
+      if (!(t1 > t0) && typeof lib._openmpt_module_get_time_at_position === 'function') {
+        t1 = lib._openmpt_module_get_time_at_position(mod, order + 1, 0);
+      }
+      if (t1 > t0 && Number.isFinite(t0) && Number.isFinite(t1) && Number.isFinite(posSec)) {
+        const frac = (posSec - t0) / (t1 - t0);
+        if (Number.isFinite(frac)) {
+          rowFraction = rowInt + Math.min(0.999, Math.max(0, frac));
+        }
+      }
+    }
+
+    const samplesWritten = lib._openmpt_module_read_float_stereo(
+      mod,
       sampleRate,
       framesToRead,
       this.leftBufPtr,
@@ -338,8 +393,8 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
     this.hasEnded = false;
 
     // Zero-copy view into WASM heap
-    outL.set(new Float32Array(this.lib.HEAPF32.buffer, this.leftBufPtr, samplesWritten));
-    outR.set(new Float32Array(this.lib.HEAPF32.buffer, this.rightBufPtr, samplesWritten));
+    outL.set(new Float32Array(lib.HEAPF32.buffer, this.leftBufPtr, samplesWritten));
+    outR.set(new Float32Array(lib.HEAPF32.buffer, this.rightBufPtr, samplesWritten));
 
     // Copy first 128 samples into oscilloscope ring buffer
     if (this.oscView && outL) {
@@ -395,27 +450,30 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
       }
     }
 
-    // Position reporting every audio block — main thread extrapolates with audio clock
+    // Position every quantum — main thread interpolates with audio clock.
+    // VU is sampled post-render (reflects the quantum just produced).
     {
-      const order = this.lib._openmpt_module_get_current_order(this.modulePtr);
-      const row = this.lib._openmpt_module_get_current_row(this.modulePtr);
-      const posSec = this.lib._openmpt_module_get_position_seconds(this.modulePtr);
-      const bpm = this.lib._openmpt_module_get_current_estimated_bpm(this.modulePtr);
-      const speed = this.lib._openmpt_module_get_current_speed(this.modulePtr);
-      const numCh = this.lib._openmpt_module_get_num_channels(this.modulePtr);
+      const numCh = lib._openmpt_module_get_num_channels(mod);
       const channelVU = [];
       for (let i = 0; i < Math.min(numCh, 32); i++) {
-        channelVU.push(this.lib._openmpt_module_get_current_channel_vu_mono(this.modulePtr, i));
+        channelVU.push(lib._openmpt_module_get_current_channel_vu_mono(mod, i));
       }
 
+      this._lastReportedRowInt = rowInt;
       this.port.postMessage({
         type: 'position',
         order,
-        row,
+        row: rowInt,
+        rowFraction,
         positionSeconds: posSec,
         bpm,
         speed,
-        workletTime: currentTime,
+        /** Preferred name — audio timeline of pre-render snapshot. */
+        audioTime,
+        /** Alias kept for older main-thread handlers. */
+        workletTime: audioTime,
+        samplesWritten,
+        sampleRate,
         channelVU,
       });
     }

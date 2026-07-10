@@ -13,7 +13,13 @@ import { useRateShader } from './hooks/useRateShader';
 import { startProjectMBridge } from './utils/projectMBridge';
 import { fetchRemoteModule, inferFileNameFromUrl } from './utils/remoteMedia';
 import { SchemaMismatchError, type RemoteSong, type SongSaveRequest } from './utils/storageApi';
-import { supportsStepsLength, isLiteRecommendedShader } from './utils/shaderVersion';
+import {
+  supportsStepsLength,
+  isLiteRecommendedShader,
+  usesCircularRowPaging,
+  usesInstrumentPalette,
+  usesNightModeBezel,
+} from './utils/shaderVersion';
 import { getLiteRecommendedShader } from './utils/shaderRegistry';
 import { DEVICE_CAPABILITIES } from './utils/deviceCapabilities';
 import type { MediaItem } from './types';
@@ -254,8 +260,8 @@ function App() {
         const matrix = sequencerMatrix;
         if (!matrix) return { ok: false, reason: 'no matrix' };
         const shader = localStorage.getItem('xasm1_last_shader') ?? '';
-        if (!shader.includes('v0.46')) {
-          return { ok: true, skipped: true, reason: 'not v0.46' };
+        if (!usesCircularRowPaging(shader)) {
+          return { ok: true, skipped: true, reason: 'not circular-paging shader' };
         }
         const playhead = playbackStateRef.current.playheadRow;
         const numRows = matrix.numRows;
@@ -360,7 +366,7 @@ function App() {
     setShaderRecents(previousRecents => [shader, ...previousRecents.filter(s => s !== shader)].slice(0, 5));
     // Per-instrument palette only makes sense for shaders that read it; switch back to pitch-hue
     // on shaders that do not use the paletteMode uniform to avoid silent no-ops in the UI.
-    if (!shader.includes('v0.56')) setPaletteMode(0);
+    if (!usesInstrumentPalette(shader)) setPaletteMode(0);
     if (moduleHash) {
       try {
         localStorage.setItem(`xasm1_module_shader_${moduleHash}`, shader);
@@ -699,8 +705,8 @@ function App() {
     return parts.join('\n');
   }, [moduleComments, instrumentNames]);
 
-  // Calculate Dim Factor — Night Mode overrides when on v0.35_bloom
-  const isNightShader = shaderFile.includes('v0.35_bloom');
+  // Calculate Dim Factor — Night Mode overrides when registry marks nightModeBezel
+  const isNightShader = usesNightModeBezel(shaderFile);
   const nightConfig = NIGHT_PRESETS[nightModePreset];
   const effectiveDimFactor = (isNightShader && nightModeEnabled)
     ? nightConfig.dimFactor

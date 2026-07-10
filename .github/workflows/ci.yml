@@ -18,16 +18,19 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+          cache: 'npm'
       
       - name: Install dependencies
-        run: npm install
+        run: npm ci
+      
+      - name: Verify WASM assets (reject HTML-as-.wasm stubs)
+        run: npm run verify:wasm
       
       - name: Lint
         run: npm run lint
-        continue-on-error: true
       
       - name: Type check
-        run: npx tsc --noEmit
+        run: npm run typecheck
       
       - name: Build
         run: npm run build
@@ -37,6 +40,9 @@ jobs:
           if [ ! -f dist/index.html ]; then echo "❌ dist/index.html missing"; false; fi
           if [ ! -d dist/assets ]; then echo "❌ dist/assets missing"; false; fi
           echo "✅ Build artifacts verified"
+      
+      - name: Post-build verify (CSS + WASM magic)
+        run: npm run verify:build
 
   wasm-smoke-test:
     runs-on: ubuntu-latest
@@ -45,6 +51,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
       
+      # Pin must match scripts/build-wasm.sh EMSDK_PIN and docs
       - name: Setup Emscripten
         uses: mymindstorm/setup-emsdk@v14
         with:
@@ -53,26 +60,48 @@ jobs:
       - name: Verify emcc
         run: emcc --version
       
-      - name: Check WASM build script exists
+      - name: Check native build script (canonical path)
         run: |
-          if [ ! -f build-wasm.sh ]; then echo "❌ build-wasm.sh missing"; false; fi
-          echo "✅ WASM build script exists"
+          if [ ! -f scripts/build-wasm.sh ]; then echo "❌ scripts/build-wasm.sh missing"; false; fi
+          if [ ! -f build-wasm.sh ]; then echo "❌ build-wasm.sh (deprecated alias) missing"; false; fi
+          # Must not clobber tracked JS worklet
+          if grep -E -- '-o[[:space:]]+public/worklets/openmpt-worklet' scripts/build-wasm.sh; then
+            echo "❌ scripts/build-wasm.sh must not write openmpt-worklet.*"; false
+          fi
+          if grep -E -- '-o[[:space:]]+public/worklets/openmpt-worklet' build-wasm.sh; then
+            echo "❌ root build-wasm.sh must not write openmpt-worklet.*"; false
+          fi
+          if grep -E 'rm[[:space:]]+-rf[[:space:]]+public/worklets' build-wasm.sh scripts/build-wasm.sh; then
+            echo "❌ build scripts must not rm -rf public/worklets"; false
+          fi
+          echo "✅ Native build scripts present and safe"
       
       - name: Setup Node.js (for dependencies)
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+          cache: 'npm'
       
       - name: Install dependencies
-        run: npm install
+        run: npm ci
       
-      # Note: Full WASM build is skipped in CI due to time/libopenmpt download
-      # This job verifies the build script is present and syntactically valid
-      - name: Shellcheck build script
+      - name: Verify native EXPORTED_FUNCTIONS vs TS/C++
+        run: npm run verify:native-exports
+      
+      # Note: Full native WASM build is skipped in PR CI (libopenmpt compile time).
+      # Syntax + export audit run every PR; optional scheduled full build can be added later.
+      - name: Shellcheck / syntax-check build scripts
         run: |
-          if command -v shellcheck &> /dev/null; then
-            shellcheck build-wasm.sh || true
-          else
-            bash -n build-wasm.sh
-          fi
-          echo "✅ Build script syntax OK"
+          for f in scripts/build-wasm.sh build-wasm.sh; do
+            if command -v shellcheck &> /dev/null; then
+              shellcheck "$f" || true
+            fi
+            bash -n "$f"
+            echo "✅ $f syntax OK"
+          done
+      
+      - name: Guard tracked JS worklet still present
+        run: |
+          test -f public/worklets/openmpt-worklet.js
+          grep -q 'registerProcessor\|AudioWorkletProcessor' public/worklets/openmpt-worklet.js
+          echo "✅ Tracked JS worklet intact"

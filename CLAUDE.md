@@ -84,9 +84,9 @@ npm run dev          # Start Vite dev server at http://localhost:5173
 npm run build        # tsc + Vite production build → dist/ (uses 4 GB heap)
 npm run preview      # Preview production build locally
 npm run typecheck    # TypeScript type-check only (no emit)
-npm run lint         # ESLint (max 50 warnings tolerance)
-npm run build:worklet # Build WASM audio worklet via Emscripten (build-wasm.sh)
-npm run build:emcc   # Alternative Emscripten build (scripts/build-wasm.sh)
+npm run lint         # ESLint (max 100 warnings budget; hard CI gate)
+npm run build:emcc   # Native C++ worklet → openmpt-native.* (scripts/build-wasm.sh, emsdk 3.1.50)
+npm run build:worklet # Alias of build:emcc (never overwrites openmpt-worklet.js)
 python3 deploy.py    # Build + SFTP upload to production server
 ```
 
@@ -130,12 +130,12 @@ Audio logic is split strictly between two contexts that **cannot share state dir
 ### `PatternDisplay.tsx` — The Rendering Engine
 This is the largest and most complex file. It:
 1. Initializes a WebGPU context on a `<canvas>` element
-2. Parses the **shader filename** to determine rendering strategy (see Shader Versioning below)
+2. Resolves **shader capabilities** from `utils/shaderRegistry.ts` (not filename `includes()` chains)
 3. Allocates GPU buffers for pattern data and channel states
 4. Runs a render loop with up to two passes:
    - **Pass 1 (Chassis/Background):** Renders the bezel/device chassis texture
    - **Pass 2 (Pattern):** Renders tracker data as a grid, spectrum, or circular display
-5. Handles canvas mouse events via polar coordinate hit-testing (for shader-embedded UI)
+5. Handles canvas mouse events via polar hit-testing when `hitTestProfile` is set
 
 ### Data Packing for GPU
 Tracker cell data is bit-packed into `Uint32Array` buffers before upload:
@@ -149,27 +149,19 @@ Tracker cell data is bit-packed into `Uint32Array` buffers before upload:
 
 ---
 
-## Critical: Shader Versioning Logic
+## Critical: Shader Registry (single source of truth)
 
-> **DO NOT** refactor the `if (shaderFile.includes('v0.XX'))` chains in `PatternDisplay.tsx`. They are load-bearing.
+> **Edit `utils/shaderRegistry.ts` + `appConfig.ts` + the WGSL file.**  
+> Do **not** add new `shaderFile.includes('v0.XX')` chains in PatternDisplay / hooks.
 
-Shaders are named `patternv0.XX.wgsl` and `chassisv0.XX.wgsl`. The version number controls multiple behaviors detected at runtime by parsing the filename string:
-
-| Version Range | Layout Type | Buffer Strategy | Canvas Size | Notes |
-|---|---|---|---|---|
-| `< v0.13` | `simple` | Standard 1×u32 | Default | Legacy |
-| `v0.13+` | `extended` | 2×u32 per cell | Default | Extended layout |
-| `v0.25`, `v0.26` | Circular | Extended | 2048×2016 | Large circular |
-| `v0.35`, `v0.37`, `v0.38` | Circular | High-precision | 1024×1024 | Hybrid shader UI |
-| `v0.37` | Circular | High-precision | 1024×1024 | Embedded UI controls + polar hit-testing |
-| `v0.39`, `v0.40`, `v0.42–v0.44` | Horizontal | High-precision | — | |
-| `v0.45–v0.49` | Circular | High-precision | — | Alpha blending enabled |
+Capabilities (layout, packing, canvas size, hit-test, oscilloscope, palette, bloom, etc.) live on `ShaderMeta` in `SHADER_REGISTRY`. Helpers in `utils/shaderVersion.ts` and geometry helpers read the registry via `resolveShaderMeta()`.
 
 **When adding a new shader:**
-1. Choose a version number that doesn't conflict with existing ones
-2. Add the appropriate `if (shaderFile.includes('vX.XX'))` checks in `PatternDisplay.tsx`
-3. Ensure uniform structs in WGSL match exactly what `createUniformPayload` sends
-4. Update `utils/geometryConstants.ts` `getLayoutModeFromShader()` if it uses a new layout
+1. Add `shaders/patternvX.YY.wgsl` (sync to `public/shaders/`)
+2. Register one `ShaderMeta` block in `utils/shaderRegistry.ts`
+3. Add a picker entry in `appConfig.ts` `SHADER_GROUPS`
+4. Ensure WGSL uniforms match `fillUniformPayload` / `createUniformPayload`
+5. Run `npm run test:shader-registry`
 
 ---
 
@@ -279,14 +271,14 @@ All shared canvas layout values live here:
 - Production build requires `node --max-old-space-size=4096` (set in `package.json`)
 - WASM `.wasm` files are included as Vite assets (`assetsInclude: ['**/*.wasm']`)
 - `openmpt-native` is excluded from Vite's pre-bundling optimization
-- Emscripten build for native WASM worklet: `bash build-wasm.sh` or `bash scripts/build-wasm.sh`
+- Emscripten native worklet: `npm run build:emcc` → `public/worklets/openmpt-native.*` only (emsdk **3.1.50**)
 
 ---
 
 ## What NOT To Do
 
 - **Do not** push to `master` directly — use feature branches
-- **Do not** refactor the shader version `if`-chains without understanding every downstream effect
+- **Do not** reintroduce `shaderFile.includes('v0.XX')` chains — extend `ShaderMeta` instead
 - **Do not** replace `channelStatesRef` with React state
 - **Do not** use DOM APIs inside the AudioWorklet processor
 - **Do not** add broad glob patterns to `tailwind.config.js`

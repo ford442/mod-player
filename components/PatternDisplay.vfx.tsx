@@ -4,6 +4,14 @@
 import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react';
 import { ChannelShadowState, PatternMatrix } from '../types';
 import { withBase } from '../src/lib/paths';
+import {
+  requestWebGPUDevice,
+  configureCanvasContext,
+  getWebGPUCanvasContext,
+  attachDeviceLostHandler,
+  WebGPUInitError,
+} from '../utils/webgpuDevice';
+import { DEVICE_CAPABILITIES } from '../utils/deviceCapabilities';
 
 // VFX Settings interface
 interface VFXSettings {
@@ -181,52 +189,92 @@ export const PatternDisplayVFX: React.FC<{
     activeParticleCountRef.current = activeCount;
   }, [kickTrigger, settings.animationSpeed]);
   
-  // Initialize WebGPU
+  // Initialize WebGPU via shared helper (feature policy, power, canvas config)
   useEffect(() => {
+    let cancelled = false;
+    let markLostIntentional: (() => void) | null = null;
+
     const init = async () => {
       if (!canvasRef.current) return;
-      
-      const adapter = await navigator.gpu?.requestAdapter();
-      if (!adapter) return;
-      
-      const device = await adapter.requestDevice();
-      const context = canvasRef.current.getContext('webgpu');
-      if (!context) return;
-      
-      const format = navigator.gpu.getPreferredCanvasFormat();
-      context.configure({ device, format, alphaMode: 'premultiplied' });
-      
-      // Load enhanced shader
-      const response = await fetch(withBase(`shaders-enhanced/${shaderFile}`));
-      const shaderCode = await response.text();
-      
-      const shaderModule = device.createShaderModule({ code: shaderCode });
-      
-      // Create pipeline with PBR settings
-      const pipeline = device.createRenderPipeline({
-        layout: 'auto',
-        vertex: { module: shaderModule, entryPoint: 'vs' },
-        fragment: {
-          module: shaderModule,
-          entryPoint: 'fs',
-          targets: [{
-            format,
-            blend: {
-              color: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha' },
-              alpha: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha' },
-            },
-          }],
-        },
-        primitive: { topology: 'triangle-list' },
-      });
-      
-      deviceRef.current = device;
-      contextRef.current = context;
-      pipelineRef.current = pipeline;
-      setGpuReady(true);
+
+      try {
+        const { device, preferredCanvasFormat } = await requestWebGPUDevice({
+          liteMode: DEVICE_CAPABILITIES.isLite,
+          isCancelled: () => cancelled,
+        });
+        if (cancelled) {
+          try { device.destroy(); } catch { /* ignore */ }
+          return;
+        }
+
+        const context = getWebGPUCanvasContext(canvasRef.current);
+        const format = configureCanvasContext({
+          device,
+          context,
+          format: preferredCanvasFormat,
+        });
+
+        // Load enhanced shader
+        const response = await fetch(withBase(`shaders-enhanced/${shaderFile}`));
+        const shaderCode = await response.text();
+        if (cancelled) {
+          try { device.destroy(); } catch { /* ignore */ }
+          return;
+        }
+
+        const shaderModule = device.createShaderModule({ code: shaderCode });
+
+        // Create pipeline with PBR settings
+        const pipeline = device.createRenderPipeline({
+          layout: 'auto',
+          vertex: { module: shaderModule, entryPoint: 'vs' },
+          fragment: {
+            module: shaderModule,
+            entryPoint: 'fs',
+            targets: [{
+              format,
+              blend: {
+                color: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha' },
+                alpha: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha' },
+              },
+            }],
+          },
+          primitive: { topology: 'triangle-list' },
+        });
+
+        markLostIntentional = attachDeviceLostHandler(device, {
+          onLost: (info, intentional) => {
+            if (cancelled || intentional) return;
+            console.error('[VFX] WebGPU device lost:', info.reason, info.message);
+            setGpuReady(false);
+            deviceRef.current = null;
+            contextRef.current = null;
+            pipelineRef.current = null;
+          },
+        });
+
+        deviceRef.current = device;
+        contextRef.current = context;
+        pipelineRef.current = pipeline;
+        setGpuReady(true);
+      } catch (err) {
+        if (err instanceof WebGPUInitError && err.message.includes('cancelled')) return;
+        console.error('[VFX] WebGPU init failed:', err);
+      }
     };
-    
+
     init();
+    return () => {
+      cancelled = true;
+      markLostIntentional?.();
+      if (deviceRef.current) {
+        try { deviceRef.current.destroy(); } catch { /* ignore */ }
+        deviceRef.current = null;
+      }
+      contextRef.current = null;
+      pipelineRef.current = null;
+      setGpuReady(false);
+    };
   }, [shaderFile]);
   
   // Render loop

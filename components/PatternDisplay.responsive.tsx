@@ -4,6 +4,14 @@
 
 import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react';
 import { ChannelShadowState, PatternMatrix } from '../types';
+import {
+  requestWebGPUDevice,
+  configureCanvasContext,
+  getWebGPUCanvasContext,
+  attachDeviceLostHandler,
+  WebGPUInitError,
+} from '../utils/webgpuDevice';
+import { DEVICE_CAPABILITIES } from '../utils/deviceCapabilities';
 
 // Breakpoint definitions
 const BREAKPOINTS = {
@@ -241,29 +249,48 @@ export const PatternDisplayResponsive: React.FC<PatternDisplayResponsiveProps> =
 
     let cancelled = false;
 
+    let markLostIntentional: (() => void) | null = null;
+
     const init = async () => {
       try {
-        // Try WebGPU first
+        // Shared WebGPU init (feature policy, soft limits, power preference).
         if ('gpu' in navigator) {
-          const adapter = await navigator.gpu.requestAdapter();
-          if (adapter && !cancelled) {
-            const device = await adapter.requestDevice();
-            const context = canvasRef.current!.getContext('webgpu');
-
-            if (context && !cancelled) {
-              const format = navigator.gpu.getPreferredCanvasFormat();
-              context.configure({
-                device,
-                format,
-                alphaMode: 'premultiplied'
-              });
-
-              deviceRef.current = device;
-              contextRef.current = context;
-              setGpuReady(true);
-              setWebgpuAvailable(true);
+          try {
+            const { device, preferredCanvasFormat } = await requestWebGPUDevice({
+              liteMode: DEVICE_CAPABILITIES.isLite || deviceCaps.isLowPower,
+              isCancelled: () => cancelled,
+            });
+            if (cancelled) {
+              try { device.destroy(); } catch { /* ignore */ }
               return;
             }
+            const context = getWebGPUCanvasContext(canvasRef.current!);
+            configureCanvasContext({
+              device,
+              context,
+              format: preferredCanvasFormat,
+            });
+
+            markLostIntentional = attachDeviceLostHandler(device, {
+              onLost: (info, intentional) => {
+                if (cancelled || intentional) return;
+                console.error('[Responsive] WebGPU device lost:', info.reason, info.message);
+                setGpuReady(false);
+                deviceRef.current = null;
+                contextRef.current = null;
+              },
+            });
+
+            deviceRef.current = device;
+            contextRef.current = context;
+            setGpuReady(true);
+            setWebgpuAvailable(true);
+            return;
+          } catch (gpuErr) {
+            if (gpuErr instanceof WebGPUInitError && gpuErr.message.includes('cancelled')) {
+              return;
+            }
+            console.warn('[Responsive] WebGPU init failed, trying WebGL2:', gpuErr);
           }
         }
 
@@ -290,10 +317,11 @@ export const PatternDisplayResponsive: React.FC<PatternDisplayResponsiveProps> =
 
     return () => {
       cancelled = true;
+      markLostIntentional?.();
       cleanupWebGL();
       cleanupWebGPU();
     };
-  }, [cleanupWebGL, cleanupWebGPU]);
+  }, [cleanupWebGL, cleanupWebGPU, deviceCaps.isLowPower]);
 
   // Handle resize
   useEffect(() => {
@@ -310,13 +338,12 @@ export const PatternDisplayResponsive: React.FC<PatternDisplayResponsiveProps> =
     canvas.style.width = `${width}px`;
     canvas.style.height = `${height}px`;
 
-    // Reconfigure WebGPU context if needed
+    // Reconfigure WebGPU context if needed (shared helper: usage + alphaMode)
     if (contextRef.current && deviceRef.current) {
       try {
-        contextRef.current.configure({
+        configureCanvasContext({
           device: deviceRef.current,
-          format: navigator.gpu.getPreferredCanvasFormat(),
-          alphaMode: 'premultiplied'
+          context: contextRef.current,
         });
       } catch (e) {
         console.error('[Responsive] Context reconfigure failed:', e);
