@@ -168,7 +168,6 @@ fn sdEllipse(p: vec2<f32>, ab: vec2<f32>) -> f32 {
 }
 
 // ACES Filmic Tone Mapping (approximation by Narkowicz 2015).
-// Maps HDR values to [0,1] while preserving hue far better than a simple clamp.
 fn acesToneMap(color: vec3<f32>) -> vec3<f32> {
   let a = 2.51;
   let b = 0.03;
@@ -181,8 +180,6 @@ fn acesToneMap(color: vec3<f32>) -> vec3<f32> {
   );
 }
 
-// Scale factor for hue-preservation in litTint mixing.
-// Higher value → more of the note's pitch color bleeds through the glass tint.
 const COLOR_PRESERVE_SCALE: f32 = 0.8;
 const COLOR_PRESERVE_MAX: f32   = 0.85;
 
@@ -220,56 +217,35 @@ fn neonPalette(t: f32) -> vec3<f32> {
 
 // DURA: Structure to hold unpacked note duration info
 struct NoteDurationInfo {
-  duration: u32,      // Total note duration in rows
-  rowOffset: u32,     // How many rows from note start (0 = note-on)
-  isNoteOff: bool,    // Whether this cell is the note-off row
-  isTrigger: bool,    // TRIG-001: explicit note-on trigger row
+  duration: u32,
+  rowOffset: u32,
+  isNoteOff: bool,
+  isTrigger: bool,
 }
 
-// DURA: Unpack duration info from packed cell data
 fn unpackDurationInfo(packedA: u32, packedB: u32) -> NoteDurationInfo {
   var info: NoteDurationInfo;
-  
-  // Duration is in bits 8-15 of packedA (where volCmd used to be)
   info.duration = (packedA >> 8) & 0xFFu;
   if (info.duration == 0u) { info.duration = 1u; }
-  
-  // rowOffset and isNoteOff are packed into bits 8-14 of packedB
   let durationFlags = (packedB >> 8) & 0x7Fu;
   info.rowOffset = durationFlags >> 1u;
   info.isNoteOff = (durationFlags & 1u) != 0u;
   info.isTrigger = ((packedB & 0x8000u) != 0u) || (info.rowOffset == 0u && !info.isNoteOff);
-  
   return info;
 }
 
-// DURA: Calculate sustain brightness based on position in note
 fn calculateSustainBrightness(info: NoteDurationInfo, baseIntensity: f32) -> f32 {
-  if (info.duration <= 1u) {
-    // Short note - full brightness
-    return baseIntensity;
-  }
-  
+  if (info.duration <= 1u) { return baseIntensity; }
   let progress = f32(info.rowOffset) / f32(info.duration);
-  
-  // Note-on row: full brightness
-  if (info.rowOffset == 0u) {
-    return baseIntensity;
-  }
-  
-  // Last 2-3 rows: fade out
+  if (info.rowOffset == 0u) { return baseIntensity; }
   let remaining = info.duration - info.rowOffset;
   if (remaining <= 3u) {
-    // Fade from 60% to 30% over last 3 rows
     let fadeFactor = f32(remaining) / 3.0;
     return baseIntensity * (0.3 + 0.3 * fadeFactor);
   }
-  
-  // Middle of sustain: 40-60% brightness
   return baseIntensity * (0.4 + 0.2 * (1.0 - progress));
 }
 
-// AMBER-BLUE: Calculate top-emitter intensity for note-on / expression-only / sustain
 fn calculateTopIntensity(
   isNoteOn: bool,
   isExprOnly: bool,
@@ -282,9 +258,7 @@ fn calculateTopIntensity(
   var intensity = 0.0;
   if (isNoteOn) {
     intensity = 1.0 + bloom * 2.0;
-    if (trigger > 0u) {
-      intensity += beat * 0.3;
-    }
+    if (trigger > 0u) { intensity += beat * 0.3; }
   } else if (isExprOnly) {
     intensity = 1.0 + bloom * 2.0;
   } else if (isSustain) {

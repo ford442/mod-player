@@ -57,6 +57,7 @@ If the JS AudioWorklet fails to initialize WASM, `hooks/useAudioGraph.ts` falls 
 ## WebGPU & Shaders
 - **Language:** WGSL (WebGPU Shading Language).
 - **Location:** Source shaders live in `/shaders`. There are 50+ versioned files (e.g., `patternv0.50.wgsl`, `chassisv0.40.wgsl`). Served copies must also exist in `/public/shaders`.
+- **Includes:** Source shaders can compose shared logic via `//#include "lib/<fragment>.wgsl"` directives (tolerated as WGSL comments). `npm run sync:shaders` expands these recursively into flat, self-contained output in `/public/shaders`. Shared fragments live in `/shaders/lib/` and are excluded from the public copy. Never hand-edit `/public/shaders/`.
 - **Shader Groups (in `App.tsx`):**
   - **Square:** v0.44, v0.43, v0.40, v0.39, v0.21
   - **Circular:** v0.50, v0.49, v0.48, v0.47, v0.46, v0.45, v0.45b, v0.42, v0.38, v0.35_bloom, v0.30

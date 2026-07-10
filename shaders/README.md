@@ -95,12 +95,35 @@ Shaders follow semantic versioning in their filenames:
 When introducing a new shader version:
 
 1. **Create the WGSL file** in the root `shaders/` directory with a sequential version number (e.g., `patternv0.52.wgsl`)
-2. **Sync to public/**: Copy the shader to `public/shaders/` for serving to browsers
-3. **Update App.tsx**: Add the shader to the appropriate `SHADER_GROUPS` array (SQUARE, CIRCULAR, or VIDEO)
-4. **Update version checks** in:
+2. **Reuse shared logic** from `shaders/lib/` via `//#include "lib/<fragment>.wgsl"` where possible. This keeps common code (e.g. `octaveBrightness`, DURA duration unpacking, three-emitter lens cap) in one place.
+3. **Sync to public/**: Run `npm run sync:shaders`. The script resolves includes and writes flat, self-contained WGSL to `public/shaders/`. Do not hand-edit `public/shaders/`.
+4. **Update App.tsx**: Add the shader to the appropriate `SHADER_GROUPS` array (SQUARE, CIRCULAR, or VIDEO)
+5. **Update version checks** in:
    - `utils/shaderVersion.ts` — Add version to layout type, background selection, and alpha blending checks
    - `components/PatternDisplay.tsx` — Update canvas size and buffer packing logic
-5. **Test**: Verify shader loads, renders, and synchronizes correctly with audio playback
+6. **Test**: Verify shader loads, renders, and synchronizes correctly with audio playback
+
+### Shader Include System
+
+Shared WGSL fragments live in `shaders/lib/`:
+
+- `lib/notes.wgsl` — note range constants (`NOTE_MIN`, `NOTE_MAX`, `NOTE_OFF_MIN`).
+- `lib/pitch.wgsl` — pitch helpers including `octaveBrightness`.
+- `lib/dura.wgsl` — `NoteDurationInfo` and duration unpacking helpers.
+- `lib/palette.wgsl` — `selectPalette` color functions.
+- `lib/sdf.wgsl` — signed-distance functions (`sdRoundedBox`, `sdCircle`, `sdEllipse`).
+- `lib/tonemap.wgsl` — `acesToneMap`.
+- `lib/color_preserve.wgsl` / `lib/top_emitter.wgsl` — emitter intensity helpers.
+- `lib/lens_cap.wgsl` — `FragmentConstants`, `getFragmentConstants`, `drawEmitterDiode`, `drawUnifiedLensCap`.
+- `lib/theme_*.wgsl` — per-variant theme constants.
+
+Include directives look like WGSL comments so source files remain valid if loaded directly:
+
+```wgsl
+//#include "lib/pitch.wgsl"
+```
+
+`scripts/sync-shaders.mjs` resolves includes recursively, guards against double-inclusion and cycles, and emits flat output. The `lib/` directory is not copied to `public/shaders/`.
 
 ### GPU Data Packing
 

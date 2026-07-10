@@ -1,0 +1,2 @@
+const COLOR_PRESERVE_SCALE: f32 = 0.8;
+const COLOR_PRESERVE_MAX: f32   = 0.85;

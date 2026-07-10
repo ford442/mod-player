@@ -142,14 +142,19 @@ fn selectPalette(id: u32, t: f32) -> vec3<f32> {
   let b = vec3<f32>(0.5, 0.5, 0.5);
   let c = vec3<f32>(1.0, 1.0, 1.0);
   if (id == 1u) {
+    // Warm: reds, oranges, yellows
     return a + b * cos(6.28318 * (c * t + vec3<f32>(0.0, 0.1, 0.2)));
   } else if (id == 2u) {
+    // Cool: blues, cyans, purples
     return a + b * cos(6.28318 * (c * t + vec3<f32>(0.5, 0.7, 0.9)));
   } else if (id == 3u) {
+    // Neon: pink, cyan, green
     return a + b * cos(6.28318 * (c * t + vec3<f32>(0.0, 0.5, 1.0)));
   } else if (id == 4u) {
+    // Acid: green, yellow, chartreuse
     return a + b * cos(6.28318 * (c * t + vec3<f32>(0.3, 0.0, 0.7)));
   } else if (id == 5u) {
+    // Circle of Fifths: fully-saturated HSV wheel — t is used directly as hue.
     let h6  = t * 6.0;
     let hi  = u32(h6) % 6u;
     let f   = h6 - floor(h6);
@@ -161,6 +166,7 @@ fn selectPalette(id: u32, t: f32) -> vec3<f32> {
     else if (hi == 4u) { return vec3<f32>(f,   0.0, 1.0); }
     else               { return vec3<f32>(1.0, 0.0, q  ); }
   }
+  // Default palette 0: Rainbow
   return a + b * cos(6.28318 * (c * t + vec3<f32>(0.0, 0.33, 0.67)));
 }
 
@@ -178,6 +184,7 @@ fn sdEllipse(p: vec2<f32>, ab: vec2<f32>) -> f32 {
   return (k - 1.0) * min(ab.x, ab.y);
 }
 
+// ACES Filmic Tone Mapping (approximation by Narkowicz 2015).
 fn acesToneMap(color: vec3<f32>) -> vec3<f32> {
   let a = 2.51;
   let b = 0.03;
@@ -225,6 +232,7 @@ fn neonPalette(t: f32) -> vec3<f32> {
   return a + b * cos(6.28318 * (c * t + d));
 }
 
+// DURA: Structure to hold unpacked note duration info
 struct NoteDurationInfo {
   duration: u32,
   rowOffset: u32,
