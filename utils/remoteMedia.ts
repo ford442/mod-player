@@ -1,5 +1,6 @@
 import type { MediaItem } from '../types';
 import { withBase } from '../src/lib/paths';
+import { assertAllowedModuleUrl } from './remoteModuleSecurity';
 
 // Adjust this path to match where you drop your files on the FTP
 const REMOTE_MEDIA_BASE_URL = withBase('media/');
@@ -185,7 +186,8 @@ export function inferFileNameFromUrl(downloadUrl: string): string {
 }
 
 export async function fetchRemoteModule(downloadUrl: string): Promise<Uint8Array> {
-  const cached = moduleFetchCache.get(downloadUrl);
+  const safeUrl = assertAllowedModuleUrl(downloadUrl);
+  const cached = moduleFetchCache.get(safeUrl);
   if (cached) {
     return cached;
   }
@@ -197,17 +199,17 @@ export async function fetchRemoteModule(downloadUrl: string): Promise<Uint8Array
     }
   }
 
-  const pending = fetch(downloadUrl).then(async response => {
+  const pending = fetch(safeUrl).then(async response => {
     if (!response.ok) {
       throw new Error(`failed to download remote module (${response.status})`);
     }
     const data = await response.arrayBuffer();
     return new Uint8Array(data);
   }).catch(error => {
-    moduleFetchCache.delete(downloadUrl);
+    moduleFetchCache.delete(safeUrl);
     throw error;
   });
 
-  moduleFetchCache.set(downloadUrl, pending);
+  moduleFetchCache.set(safeUrl, pending);
   return pending;
 }

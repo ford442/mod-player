@@ -15,6 +15,8 @@ import { LibraryPanel } from './LibraryPanel';
 import { SeekBar } from './SeekBar';
 import { Panel } from './Panel';
 import { ShaderSelectorPanel } from './ShaderSelectorPanel';
+import { PatternEditor } from './PatternEditor';
+import { MidiControlsPanel } from './MidiControlsPanel';
 import { cn } from '../utils/cn';
 import { setLiteOverride } from '../utils/deviceCapabilities';
 import { usesInstrumentPalette } from '../utils/shaderVersion';
@@ -24,6 +26,8 @@ import type { PatternMatrix, ChannelShadowState, PlaybackState, MediaItem } from
 import type { BloomPreset, ColorScheme, NightPreset } from '../types/bloomPresets';
 import type { RemoteSong, SongSaveRequest, ShaderMeta } from '../utils/storageApi';
 import type { LibraryEntry, LibraryImportProgress, LibraryRoot } from '../types/localLibrary';
+import type { PatternCellPatch, PatternEditField } from '../utils/patternEdit';
+import type { useMidiControls } from '../hooks/useMidiControls';
 
 interface MainLayoutProps {
   isDarkMode: boolean;
@@ -164,6 +168,19 @@ interface MainLayoutProps {
   cheatsheetOpen: boolean;
   setCheatsheetOpen: (v: boolean) => void;
   status: string;
+  onCopyShareLink?: () => void;
+  editMode?: boolean;
+  onToggleEditMode?: () => void;
+  patternEditDirty?: boolean;
+  canPatternUndo?: boolean;
+  canPatternRedo?: boolean;
+  onPatternUndo?: () => void;
+  onPatternRedo?: () => void;
+  onPatternCellEdit?: (row: number, channel: number, field: PatternEditField) => void;
+  onPatternCellPatch?: (row: number, channel: number, patch: PatternCellPatch) => void;
+  onPatternCellClear?: (row: number, channel: number) => void;
+  onSequencerCellEdit?: (row: number, channel: number) => void;
+  midiControls?: ReturnType<typeof useMidiControls>;
 }
 
 export function MainLayout({
@@ -305,6 +322,19 @@ export function MainLayout({
   cheatsheetOpen,
   setCheatsheetOpen,
   status,
+  onCopyShareLink,
+  editMode = false,
+  onToggleEditMode,
+  patternEditDirty = false,
+  canPatternUndo = false,
+  canPatternRedo = false,
+  onPatternUndo,
+  onPatternRedo,
+  onPatternCellEdit,
+  onPatternCellPatch,
+  onPatternCellClear,
+  onSequencerCellEdit,
+  midiControls,
 }: MainLayoutProps) {
   return (
     <div className="min-h-screen bg-panel-base text-[var(--text-primary)] p-4 flex flex-col items-center transition-colors duration-300">
@@ -368,6 +398,72 @@ export function MainLayout({
                 >
                   {liteMode ? '⚡ Lite' : '🖥️ Full'}
                 </button>
+                {onCopyShareLink && (
+                  <button
+                    type="button"
+                    onClick={onCopyShareLink}
+                    disabled={!isModuleLoaded}
+                    className={cn(
+                      'px-4 py-2 text-sm font-mono rounded-lg shadow-lg transition-colors border',
+                      isModuleLoaded
+                        ? 'bg-cyan-700 text-white border-cyan-500 hover:bg-cyan-600'
+                        : 'bg-gray-700 text-gray-500 border-gray-600 cursor-not-allowed opacity-60',
+                    )}
+                    title="Copy a link that restores this module, shader, and playback position"
+                  >
+                    🔗 Share
+                  </button>
+                )}
+                {onToggleEditMode && (
+                  <button
+                    type="button"
+                    onClick={onToggleEditMode}
+                    disabled={!isModuleLoaded}
+                    className={cn(
+                      'px-4 py-2 text-sm font-mono rounded-lg shadow-lg transition-colors border',
+                      editMode
+                        ? 'bg-amber-600 text-white border-amber-500 hover:bg-amber-700'
+                        : isModuleLoaded
+                          ? 'bg-gray-700 text-gray-200 border-gray-600 hover:bg-gray-600'
+                          : 'bg-gray-700 text-gray-500 border-gray-600 cursor-not-allowed opacity-60',
+                    )}
+                    title="Toggle pattern edit mode (session-only)"
+                  >
+                    ✏️ Edit{patternEditDirty ? ' *' : ''}
+                  </button>
+                )}
+                {editMode && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={onPatternUndo}
+                      disabled={!canPatternUndo}
+                      className={cn(
+                        'px-3 py-2 text-sm font-mono rounded-lg border transition-colors',
+                        canPatternUndo
+                          ? 'bg-gray-700 text-gray-200 border-gray-600 hover:bg-gray-600'
+                          : 'bg-gray-800 text-gray-600 border-gray-700 cursor-not-allowed',
+                      )}
+                      title="Undo (Ctrl+Z)"
+                    >
+                      ↶ Undo
+                    </button>
+                    <button
+                      type="button"
+                      onClick={onPatternRedo}
+                      disabled={!canPatternRedo}
+                      className={cn(
+                        'px-3 py-2 text-sm font-mono rounded-lg border transition-colors',
+                        canPatternRedo
+                          ? 'bg-gray-700 text-gray-200 border-gray-600 hover:bg-gray-600'
+                          : 'bg-gray-800 text-gray-600 border-gray-700 cursor-not-allowed',
+                      )}
+                      title="Redo (Ctrl+Shift+Z)"
+                    >
+                      ↷ Redo
+                    </button>
+                  </>
+                )}
             </div>
 
             <div className={cn('flex flex-wrap gap-2 p-2 rounded-xl border', isDarkMode ? 'bg-black border-gray-800' : 'bg-gray-200 border-gray-300')}>
@@ -500,6 +596,8 @@ export function MainLayout({
              crtEnabled={crtEnabled}
              // Lite mode
              liteMode={liteMode}
+             editMode={editMode}
+             {...(onSequencerCellEdit ? { onSequencerCellEdit } : {})}
            />
 
            <MediaOverlay
@@ -620,8 +718,36 @@ export function MainLayout({
                 />
               </Panel>
             )}
+            {midiControls && (
+              <Panel variant="bezel" title="MIDI / Hardware" titleAccent>
+                <MidiControlsPanel midi={midiControls} isDarkMode={isDarkMode} />
+              </Panel>
+            )}
           </div>
         </div>
+
+        {/* Pattern editor (edit mode) */}
+        {editMode && onPatternCellEdit && onPatternCellPatch && onPatternCellClear && (
+          <div className="mt-4">
+            <Panel
+              variant="raised"
+              title={patternEditDirty ? 'Pattern Editor (unsaved)' : 'Pattern Editor'}
+              titleAccent
+            >
+              <PatternEditor
+                matrix={sequencerMatrix}
+                currentRow={Math.floor(playbackRowFraction)}
+                numChannels={sequencerMatrix?.numChannels ?? 4}
+                isPlaying={isPlaying}
+                editMode={editMode}
+                onCellEdit={onPatternCellEdit}
+                onCellPatch={onPatternCellPatch}
+                onCellClear={onPatternCellClear}
+                onSeek={(row) => seekToStep(row)}
+              />
+            </Panel>
+          </div>
+        )}
 
         {/* Playlist */}
         {showPlaylist && (

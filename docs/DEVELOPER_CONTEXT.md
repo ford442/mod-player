@@ -105,7 +105,25 @@
 
 ---
 
-## 6. Production, COEP, and External Dependencies
+## 6. Testing
+
+Unit tests run via **Vitest** (`npm test`). Suites live under `tests/*.test.ts` and import production modules directly (no `tsx` spawn wrappers).
+
+| Command | Scope |
+| :--- | :--- |
+| `npm test` | All `*.test.ts` files |
+| `npm run test:watch` | Vitest watch mode |
+| `npm run test:duration-parity` | DURA-001 CPU packing oracle |
+| `npm run test:trigger-tail` | TRIG-001 trigger + sustain tail flags |
+| `npm run test:octave-brightness` | WGSL octave brightness curve parity |
+
+**PackedA/PackedB bit-layout changes** must update `tests/gpuPacking.test.ts` (pack→unpack round-trip) and the duration parity assertions in `tests/durationParity.test.ts`. These are the invariants that #318 (WGSL includes) and #307 (GPU lifecycle) must not break.
+
+Ad-hoc Node scripts under `utils/__debug__/*.test.cjs` and `components/__debug__/*.test.cjs` are being migrated incrementally; unported scripts are excluded from `npm test` via `vitest.config.ts`.
+
+---
+
+## 7. Production, COEP, and External Dependencies
 
 ### Cross-Origin Isolation (COOP / COEP)
 

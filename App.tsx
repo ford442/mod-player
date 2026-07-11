@@ -6,6 +6,8 @@ import type { ModuleMetadata } from './components/MetadataPanel';
 import { useLibOpenMPT } from './hooks/useLibOpenMPT';
 import { usePlaylist } from './hooks/usePlaylist';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
+import { useRegisterPlayerCommands } from './hooks/useRegisterPlayerCommands';
+import { useMidiControls } from './hooks/useMidiControls';
 import { useLocalStorage } from './hooks/useLocalStorage';
 import { useLibrary, useSaveSong, useSyncLibrary } from './hooks/useLibrary';
 import { useLocalLibrary } from './hooks/useLocalLibrary';
@@ -51,6 +53,13 @@ import {
 import { generateInstrumentPalette, generateEmptyInstrumentPalette } from './utils/instrumentPalette';
 import { circularPageStart, overlayActualRow } from './utils/playheadPrediction';
 import { preserveWindowScroll } from './utils/scrollContainer';
+import { useToast } from './hooks/useToast';
+import { usePlayerShare } from './hooks/usePlayerShare';
+import { useOpenGraph } from './hooks/useOpenGraph';
+import { usePatternEdit } from './hooks/usePatternEdit';
+import { ToastStack } from './components/ToastStack';
+import { buildShareUrl } from './utils/shareState';
+import { patchFromFieldCycle, type PatternEditField } from './utils/patternEdit';
 
 function App() {
   // Tier 1: global last-used shader — persisted across page reloads
@@ -117,6 +126,7 @@ function App() {
     totalPatternRows,
     sequencerMatrix,
     channelStates,
+    moduleInfo,
     instrumentNames,
     moduleComments,
     beatPhase,
@@ -129,6 +139,7 @@ function App() {
     setIsLooping,
     seekToStep,
     setPanValue: setLibPan,
+    replacePatternMatrix,
     activeEngine,
     isWorkletSupported,
     toggleAudioEngine,
@@ -314,6 +325,8 @@ function App() {
   const [mediaVisible, setMediaVisible] = useState<boolean>(false);
   const [mediaItem, setMediaItem] = useState<MediaItem | null>(null);
   const [currentModuleFileName, setCurrentModuleFileName] = useState<string>('');
+  const [moduleSourceUrl, setModuleSourceUrl] = useState<string | null>(null);
+  const skipModuleShaderRestoreRef = useRef(false);
   // Track object URLs created from local files so we can revoke them on replacement/unmount
   const mediaObjectUrlRef = useRef<string | null>(null);
   const [mediaFades, setMediaFades] = useLocalStorage<{ in: number; out: number }>('xasm1_media_fades', { in: 500, out: 500 });
@@ -452,6 +465,10 @@ function App() {
   // Tier 2: restore per-module shader whenever the loaded module changes
   useEffect(() => {
     if (!moduleHash) return;
+    if (skipModuleShaderRestoreRef.current) {
+      skipModuleShaderRestoreRef.current = false;
+      return;
+    }
     try {
       const saved = localStorage.getItem(`xasm1_module_shader_${moduleHash}`);
       if (saved !== null && ALL_SHADER_IDS.has(saved)) {
@@ -509,6 +526,7 @@ function App() {
   const handleLibrarySongLoad = useCallback(async (song: RemoteSong) => {
     const fileData = await fetchRemoteModule(song.downloadUrl);
     const fileName = song.fileName || inferFileNameFromUrl(song.downloadUrl);
+    setModuleSourceUrl(song.downloadUrl);
     const remotePlaylistId = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
       ? `remote-${crypto.randomUUID()}`
       : `remote-${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -584,28 +602,38 @@ function App() {
   const onKbdToggleCheatsheet = useCallback(() => setCheatsheetOpen(open => !open), []);
   const onKbdCloseCheatsheet = useCallback(() => setCheatsheetOpen(false), []);
 
-  useKeyboardShortcuts({
+  const onKbdVolumeSet = useCallback((value: number) => setVolume(Math.max(0, Math.min(1, value))), []);
+  const onKbdPanSet = useCallback((value: number) => setPan(Math.max(-1, Math.min(1, value))), []);
+  const onKbdShaderSelectByIndex = useCallback((index: number) => {
+    const pick = AVAILABLE_SHADERS[index % AVAILABLE_SHADERS.length];
+    if (pick) setShaderFile(pick.id);
+  }, [setShaderFile]);
+
+  useRegisterPlayerCommands({
     onPlayPause: onKbdPlayPause,
     onPlay: onKbdPlay,
     onPause: onKbdPause,
-    // Issue #135 binding table: ArrowLeft/Right seek one row
     onSeekForward: onKbdSeekForward,
     onSeekBackward: onKbdSeekBackward,
     onSeekNextOrder: onKbdSeekNextOrder,
     onSeekPrevOrder: onKbdSeekPrevOrder,
-    onPreviousOrder: onKbdSeekPrevOrder,
-    onNextOrder: onKbdSeekNextOrder,
     onJumpToOrder: jumpToOrder,
     onVolumeUp: onKbdVolumeUp,
     onVolumeDown: onKbdVolumeDown,
+    onVolumeSet: onKbdVolumeSet,
+    onPanSet: onKbdPanSet,
     onToggleMute: onKbdToggleMute,
     onToggleLoop: onKbdToggleLoop,
     onToggleFullscreen: onKbdToggleFullscreen,
     onToggleDebugPanel: onKbdToggleDebugPanel,
     onToggleCheatsheet: onKbdToggleCheatsheet,
     onCloseCheatsheet: onKbdCloseCheatsheet,
-    cheatsheetOpen,
+    onShaderSelectByIndex: onKbdShaderSelectByIndex,
   });
+
+  useKeyboardShortcuts({ cheatsheetOpen });
+
+  const midiControls = useMidiControls();
 
   // Register PWA service worker
   useEffect(() => {
@@ -663,6 +691,7 @@ function App() {
   const handleFileSelected = async (file: File) => {
     const arrayBuffer = await file.arrayBuffer();
     const data = new Uint8Array(arrayBuffer);
+    setModuleSourceUrl(null);
     loadFileWithHash(data, file.name);
   };
 
@@ -729,6 +758,101 @@ function App() {
     if (!instrumentNames || instrumentNames.length === 0) return generateEmptyInstrumentPalette();
     return generateInstrumentPalette(instrumentNames.length, instrumentNames);
   }, [instrumentNames]);
+
+  const { toasts, showToast, dismissToast } = useToast();
+
+  const patternEdit = usePatternEdit({
+    matrix: sequencerMatrix,
+    onMatrixChange: replacePatternMatrix,
+  });
+
+  const handlePatternCellEdit = useCallback((row: number, channel: number, field: PatternEditField) => {
+    if (!sequencerMatrix) return;
+    const cell = sequencerMatrix.rows[row]?.[channel] ?? { type: 'empty', text: '' };
+    patternEdit.editCell(row, channel, patchFromFieldCycle(field, cell));
+  }, [sequencerMatrix, patternEdit]);
+
+  const handleSequencerCellEdit = useCallback((row: number, channel: number) => {
+    handlePatternCellEdit(row, channel, 'note');
+  }, [handlePatternCellEdit]);
+
+  const { copyShareLink } = usePlayerShare({
+    isReady,
+    isModuleLoaded,
+    sequencerMatrix,
+    shaderFile,
+    paletteMode,
+    liteMode,
+    colorPalette,
+    moduleSourceUrl,
+    moduleOrder: moduleInfo.order,
+    moduleRow: moduleInfo.row,
+    mediaItem,
+    setShaderFile,
+    setPaletteMode,
+    setColorPalette,
+    setLiteMode,
+    setModuleSourceUrl,
+    loadFileWithHash,
+    seekToStep,
+    setMediaItem,
+    setMediaVisible,
+    showToast,
+    skipModuleShaderRestoreRef,
+  });
+
+  const sharePageUrl = useMemo(() => {
+    if (!isModuleLoaded) return window.location.href;
+    const shareState: Parameters<typeof buildShareUrl>[0] = {
+      shader: shaderFile,
+      order: moduleInfo.order,
+      row: moduleInfo.row,
+      palette: paletteMode === 1 ? 'instrument' : 'pitch',
+      lite: liteMode ? 1 : 0,
+      colorPalette,
+    };
+    if (moduleSourceUrl) shareState.mod = moduleSourceUrl;
+    if (mediaItem && !mediaItem.isObjectUrl) shareState.media = mediaItem.url;
+    return buildShareUrl(shareState);
+  }, [
+    isModuleLoaded,
+    moduleSourceUrl,
+    shaderFile,
+    moduleInfo.order,
+    moduleInfo.row,
+    paletteMode,
+    liteMode,
+    colorPalette,
+    mediaItem,
+  ]);
+
+  useOpenGraph({
+    ...(moduleMetadata?.title
+      ? { title: `${moduleMetadata.title} · MOD Player` }
+      : {}),
+    ...(moduleMetadata
+      ? { description: `Listen to "${moduleMetadata.title}" with shader ${shaderFile}` }
+      : {}),
+    url: sharePageUrl,
+  });
+
+  // Edit-mode undo/redo shortcuts
+  useEffect(() => {
+    if (!patternEdit.editMode) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      const mod = event.metaKey || event.ctrlKey;
+      if (!mod) return;
+      if (event.key === 'z' && !event.shiftKey) {
+        event.preventDefault();
+        patternEdit.undo();
+      } else if ((event.key === 'z' && event.shiftKey) || event.key === 'y') {
+        event.preventDefault();
+        patternEdit.redo();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [patternEdit.editMode, patternEdit.undo, patternEdit.redo]);
 
   // Project-M embed / audio-only mode: render a compact transport-only UI and
   // skip MainLayout / App3DView entirely so the heavy WebGPU pattern display
@@ -811,6 +935,7 @@ function App() {
   }
 
   return (
+    <>
     <MainLayout
       isDarkMode={isDarkMode}
       theme={theme}
@@ -950,7 +1075,22 @@ function App() {
       cheatsheetOpen={cheatsheetOpen}
       setCheatsheetOpen={setCheatsheetOpen}
       status={status}
+      onCopyShareLink={() => void copyShareLink()}
+      editMode={patternEdit.editMode}
+      onToggleEditMode={patternEdit.toggleEditMode}
+      patternEditDirty={patternEdit.isDirty}
+      canPatternUndo={patternEdit.canUndo}
+      canPatternRedo={patternEdit.canRedo}
+      onPatternUndo={patternEdit.undo}
+      onPatternRedo={patternEdit.redo}
+      onPatternCellEdit={handlePatternCellEdit}
+      onPatternCellPatch={patternEdit.editCell}
+      onPatternCellClear={patternEdit.clearCell}
+      onSequencerCellEdit={handleSequencerCellEdit}
+      midiControls={midiControls}
     />
+    <ToastStack toasts={toasts} onDismiss={dismissToast} />
+    </>
   );
 }
 

@@ -1,140 +1,114 @@
-import { useEffect, useLayoutEffect, useRef } from 'react';
+import { useEffect, useLayoutEffect } from 'react';
+import { playerCommands, trackInputFocusForCommands } from '../utils/playerCommands';
 
-interface KeyboardShortcutActions {
-  onPlayPause: () => void;
-  onPlay: () => void;
-  onPause: () => void;
-  onSeekForward: () => void;
-  onSeekBackward: () => void;
-  onSeekNextOrder: () => void;
-  onSeekPrevOrder: () => void;
-  onPreviousOrder: () => void;
-  onNextOrder: () => void;
-  onJumpToOrder: (orderIndex: number) => void;
-  onVolumeUp: () => void;
-  onVolumeDown: () => void;
-  onToggleLoop: () => void;
-  onToggleMute: () => void;
-  onToggleFullscreen: () => void;
-  onToggleDebugPanel: () => void;
-  onToggleCheatsheet: () => void;
-  onCloseCheatsheet: () => void;
+interface KeyboardShortcutOptions {
   cheatsheetOpen: boolean;
 }
 
-export function useKeyboardShortcuts(callbacks: KeyboardShortcutActions) {
-  const callbacksRef = useRef(callbacks);
-  useLayoutEffect(() => { callbacksRef.current = callbacks; });
+export function useKeyboardShortcuts({ cheatsheetOpen }: KeyboardShortcutOptions) {
+  useLayoutEffect(() => {
+    playerCommands.setState({ cheatsheetOpen });
+  }, [cheatsheetOpen]);
+
+  useEffect(() => trackInputFocusForCommands(), []);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Focus guard
       if (e.isComposing || e.keyCode === 229) return;
       const target = e.target as HTMLElement | null;
       const tag = target?.tagName ?? '';
-      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
-      if (target?.isContentEditable) return;
       if ((e.key === ' ' || e.key === 'Enter') && tag === 'BUTTON') return;
       if ((e.ctrlKey || e.metaKey) && e.key !== 'Escape') return;
 
-      const a = callbacksRef.current;
-      if (a.cheatsheetOpen && e.key !== 'Escape') {
+      if (cheatsheetOpen && e.key !== 'Escape') {
         e.preventDefault();
         return;
       }
 
-      // Space — use event.code for layout independence
+      const dispatch = (id: Parameters<typeof playerCommands.dispatch>[0], payload?: never) => {
+        const result = playerCommands.dispatch(id, 'keyboard', payload);
+        if (result.handled || result.blocked) {
+          e.preventDefault();
+        }
+      };
+
       if (e.code === 'Space') {
-        e.preventDefault();
-        a.onPlayPause();
+        dispatch('transport.playPause');
         return;
       }
 
-      // Digit 1–9 → jump to order 0–8
       const digitMatch = e.code.match(/^Digit([1-9])$/);
       if (digitMatch) {
-        e.preventDefault();
-        a.onJumpToOrder(Number(digitMatch[1]) - 1);
+        dispatch('seek.jumpToOrder', { order: Number(digitMatch[1]) - 1 } as never);
         return;
       }
 
       switch (e.key) {
         case 'ArrowRight':
-          e.preventDefault();
-          if (e.shiftKey) {
-            a.onSeekNextOrder();
-          } else {
-            a.onSeekForward();
-          }
+          if (e.shiftKey) dispatch('seek.nextOrder');
+          else dispatch('seek.forwardRow');
           break;
         case 'ArrowLeft':
-          e.preventDefault();
-          if (e.shiftKey) {
-            a.onSeekPrevOrder();
-          } else {
-            a.onSeekBackward();
-          }
+          if (e.shiftKey) dispatch('seek.prevOrder');
+          else dispatch('seek.backwardRow');
           break;
         case 'ArrowUp':
-          e.preventDefault();
-          if (e.shiftKey) {
-            a.onVolumeUp();
-          } else {
-            a.onPreviousOrder();
-          }
+          if (e.shiftKey) dispatch('volume.up');
+          else dispatch('seek.prevOrder');
           break;
         case 'ArrowDown':
-          e.preventDefault();
-          if (e.shiftKey) {
-            a.onVolumeDown();
-          } else {
-            a.onNextOrder();
-          }
+          if (e.shiftKey) dispatch('volume.down');
+          else dispatch('seek.nextOrder');
           break;
         case 'l':
         case 'L':
-          a.onToggleLoop();
+          dispatch('loop.toggle');
           break;
         case 'm':
         case 'M':
-          a.onToggleMute();
+          dispatch('mute.toggle');
           break;
         case 'f':
         case 'F':
-          a.onToggleFullscreen();
+          dispatch('fullscreen.toggle');
           break;
         case 'd':
         case 'D':
-          e.preventDefault();
-          a.onToggleDebugPanel();
+          dispatch('debug.toggle');
           break;
         case '?':
-          e.preventDefault();
-          a.onToggleCheatsheet();
+          dispatch('cheatsheet.toggle');
           break;
         case '/':
           if (e.shiftKey && e.code === 'Slash') {
-            e.preventDefault();
-            a.onToggleCheatsheet();
+            dispatch('cheatsheet.toggle');
           }
           break;
         case 'Escape':
-          if (a.cheatsheetOpen) {
-            e.preventDefault();
-            a.onCloseCheatsheet();
+          if (cheatsheetOpen) {
+            dispatch('cheatsheet.close');
           }
+          break;
+        default:
           break;
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
 
-    // Media Session API — lets OS media keys / lock-screen controls work
     if ('mediaSession' in navigator) {
-      navigator.mediaSession.setActionHandler('play', () => callbacksRef.current.onPlay());
-      navigator.mediaSession.setActionHandler('pause', () => callbacksRef.current.onPause());
-      navigator.mediaSession.setActionHandler('seekforward', () => callbacksRef.current.onSeekForward());
-      navigator.mediaSession.setActionHandler('seekbackward', () => callbacksRef.current.onSeekBackward());
+      navigator.mediaSession.setActionHandler('play', () => {
+        playerCommands.dispatch('transport.play', 'mediaSession');
+      });
+      navigator.mediaSession.setActionHandler('pause', () => {
+        playerCommands.dispatch('transport.pause', 'mediaSession');
+      });
+      navigator.mediaSession.setActionHandler('seekforward', () => {
+        playerCommands.dispatch('seek.forwardRow', 'mediaSession');
+      });
+      navigator.mediaSession.setActionHandler('seekbackward', () => {
+        playerCommands.dispatch('seek.backwardRow', 'mediaSession');
+      });
     }
 
     return () => {
@@ -146,5 +120,5 @@ export function useKeyboardShortcuts(callbacks: KeyboardShortcutActions) {
         navigator.mediaSession.setActionHandler('seekbackward', null);
       }
     };
-  }, []);
+  }, [cheatsheetOpen]);
 }

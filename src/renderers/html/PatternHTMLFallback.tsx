@@ -10,6 +10,8 @@ interface PatternHTMLFallbackProps {
   totalRows?: number;
   bpm?: number;
   onSeek?: (row: number) => void;
+  editMode?: boolean;
+  onSequencerCellEdit?: (row: number, channel: number) => void;
 }
 
 /**
@@ -22,6 +24,8 @@ export const PatternHTMLFallback: React.FC<PatternHTMLFallbackProps> = ({
   totalRows = 0,
   bpm = 120,
   onSeek,
+  editMode = false,
+  onSequencerCellEdit,
 }) => {
   useEffect(() => {
     const handle: CurrentPatternRenderer = {
@@ -46,6 +50,8 @@ export const PatternHTMLFallback: React.FC<PatternHTMLFallbackProps> = ({
         globalRow={Math.floor(playheadRow)}
         totalRows={totalRows}
         bpm={bpm}
+        editMode={editMode}
+        {...(onSequencerCellEdit ? { onCellEdit: onSequencerCellEdit } : {})}
         {...(onSeek ? { onSeek } : {})}
       />
     </div>

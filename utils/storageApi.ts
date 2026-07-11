@@ -108,7 +108,7 @@ export interface SyncLibraryResult {
 }
 
 /** Resolve API path with subdirectory base (e.g. /xm-player/api/songs). */
-function toApiUrl(path: string): string {
+export function toApiUrl(path: string): string {
   const normalized = path.startsWith('/') ? path : `/${path}`;
   if (storageBaseUrl) {
     return `${storageBaseUrl}${normalized}`;

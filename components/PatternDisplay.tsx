@@ -90,6 +90,8 @@ interface PatternDisplayProps {
   crtEnabled?: boolean;
   // Lite mode
   liteMode?: boolean;
+  editMode?: boolean;
+  onSequencerCellEdit?: (row: number, channel: number) => void;
 }
 
 export const PatternDisplay: React.FC<PatternDisplayProps> = ({
@@ -142,6 +144,8 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   invertMix = 0.0,
   crtEnabled = false,
   liteMode = false,
+  editMode = false,
+  onSequencerCellEdit,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const glCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -685,6 +689,8 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
           playheadRow={playheadRow}
           totalRows={totalRows ?? matrix?.numRows ?? 64}
           bpm={bpm}
+          editMode={editMode}
+          {...(onSequencerCellEdit ? { onSequencerCellEdit } : {})}
           {...(onSeek ? { onSeek } : {})}
         />
       ) : (

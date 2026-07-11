@@ -26,6 +26,7 @@ import {
   rowsPerSecondFromBpm,
   type WorkletPositionSample,
 } from '../utils/playheadPrediction';
+import { hasShareModuleIntent } from '../utils/shareState';
 
 
 // Use Vite BASE_URL for correct resolution under subdirectory deployment
@@ -1109,9 +1110,19 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
     }
   }, [volume]);
 
-  // Load default module (only if user hasn't loaded one)
+  const replacePatternMatrix = useCallback((matrix: PatternMatrix) => {
+    const order = matrix.order;
+    if (order >= 0 && order < patternMatricesRef.current.length) {
+      const nextMatrices = [...patternMatricesRef.current];
+      nextMatrices[order] = matrix;
+      patternMatricesRef.current = nextMatrices;
+    }
+    setSequencerMatrix(matrix);
+  }, []);
+
+  // Load default module (only if user hasn't loaded one and no share URL)
   useEffect(() => {
-    if (isReady && !userModuleLoadedRef.current) {
+    if (isReady && !userModuleLoadedRef.current && !hasShareModuleIntent()) {
       const loadDefault = async () => {
         const fileName = DEFAULT_MODULE_URL.split('/').pop() || 'default.mod';
         setStatus(`Fetching "${fileName}"...`);
@@ -1139,6 +1150,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
     isLooping, setIsLooping, seekToStep: seekToStepWrapper, panValue, setPanValue,
     activeEngine, isWorkletSupported, toggleAudioEngine, syncDebug,
     analyserNode: analyserRef.current,
+    replacePatternMatrix,
     // PERFORMANCE OPTIMIZATION: Export ref for high-frequency updates
     // PatternDisplay reads directly from this to this ref - avoids React re-renders
     playbackStateRef,

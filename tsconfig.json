@@ -23,6 +23,6 @@
     "exactOptionalPropertyTypes": true
   },
   "include": ["."],
-  "exclude": ["node_modules", "dist", "vite.config.ts", "archive", "jules_patch"],
+  "exclude": ["node_modules", "dist", "vite.config.ts", "vitest.config.ts", "archive", "jules_patch"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }

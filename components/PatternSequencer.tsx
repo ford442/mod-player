@@ -9,9 +9,14 @@ interface PatternSequencerProps {
   totalRows?: number;
   onSeek?: (stepIndex: number) => void;
   bpm?: number;
+  editMode?: boolean;
+  onCellEdit?: (row: number, channel: number) => void;
 }
 
-export const PatternSequencer: React.FC<PatternSequencerProps> = ({ matrix, currentRow, globalRow = 0, totalRows: _totalRows = 0, onSeek, bpm: _bpm = 120 }) => {
+export const PatternSequencer: React.FC<PatternSequencerProps> = ({
+  matrix, currentRow, globalRow = 0, totalRows: _totalRows = 0, onSeek, bpm: _bpm = 120,
+  editMode = false, onCellEdit,
+}) => {
   // 1. Defined all hooks unconditionally at the top
   const [cellSize] = useState<number>(14); // px
   const [visibleRows] = useState<number>(16);
@@ -144,7 +149,9 @@ export const PatternSequencer: React.FC<PatternSequencerProps> = ({ matrix, curr
         <div className="mb-4 flex flex-col gap-3 relative">
           <div className="text-xs text-gray-400 flex items-center justify-between">
             <span>Multi-Channel Pattern Sequencer — {columns} Channels × {patternLen} Steps</span>
-            <span className="text-gray-500">Row {currentRow + 1}/{patternLen}</span>
+            <span className="text-gray-500">
+              {editMode ? 'Edit: click cells to cycle notes' : `Row ${currentRow + 1}/${patternLen}`}
+            </span>
           </div>
 
           {/* Per-channel sequencer strips */}
@@ -208,11 +215,17 @@ export const PatternSequencer: React.FC<PatternSequencerProps> = ({ matrix, curr
                           data-row={stepIdx}
                           data-channel={chIdx}
                           onClick={() => {
+                            if (editMode && onCellEdit) {
+                              onCellEdit(stepIdx, chIdx);
+                              return;
+                            }
                             const baseGlobal = (globalRow ?? 0) - currentRow;
                             const targetGlobal = baseGlobal + stepIdx;
                             onSeek?.(targetGlobal);
                           }}
-                          className="flex-1 h-5 rounded transition-all duration-75 hover:opacity-90"
+                          className={`flex-1 h-5 rounded transition-all duration-75 hover:opacity-90 ${
+                            editMode ? 'cursor-cell ring-1 ring-amber-500/20' : ''
+                          }`}
                           style={{
                             background: cellColor,
                             ...cellGlow,

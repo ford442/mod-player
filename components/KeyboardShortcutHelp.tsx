@@ -21,6 +21,7 @@ const SHORTCUTS: Array<[string, string]> = [
   ['D', 'Toggle debug panel'],
   ['?', 'Toggle this help overlay'],
   ['Escape', 'Close this help overlay'],
+  ['MIDI', 'See MIDI / Hardware panel — works when keyboard is blocked'],
 ];
 
 export const KeyboardShortcutHelp: React.FC<KeyboardShortcutHelpProps> = ({ onClose }) => {
