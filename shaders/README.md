@@ -31,7 +31,11 @@ The root directory contains **30 actively-used shaders** that are production-rea
 - `patternv0.49.wgsl` — Trap Frosted Glass (advanced circular)
 - `patternv0.50.wgsl` — Trap Frosted Lens (latest mainstream)
 - `patternv0.51.wgsl` — Playhead Arc (experimental arc visualization)
+- `patternv0.52.wgsl` — Night (theme-only entry → `lib/circular_night_body.wgsl`)
+- `patternv0.53.wgsl` — Midnight (theme-only night variant)
+- `patternv0.54.wgsl` — Neon Night (theme-only night variant)
 - `patternv0.55.wgsl` — Oscilloscope mode (1D waveform visualization)
+- `patternv0.56.wgsl` / `patternv0.57.wgsl` — still full-file forks (candidates for future lib migration)
 
 **Video Overlay Shaders:**
 - `patternv0.23.wgsl` — Clouds (video texture mode)
@@ -105,17 +109,35 @@ When introducing a new shader version:
 
 ### Shader Include System
 
-Shared WGSL fragments live in `shaders/lib/`:
+Shared WGSL fragments live in `shaders/lib/`. **Canonical composition libs** (prefer these in new circular work):
 
-- `lib/notes.wgsl` — note range constants (`NOTE_MIN`, `NOTE_MAX`, `NOTE_OFF_MIN`).
-- `lib/pitch.wgsl` — pitch helpers including `octaveBrightness`.
-- `lib/dura.wgsl` — `NoteDurationInfo` and duration unpacking helpers.
-- `lib/palette.wgsl` — `selectPalette` color functions.
-- `lib/sdf.wgsl` — signed-distance functions (`sdRoundedBox`, `sdCircle`, `sdEllipse`).
-- `lib/tonemap.wgsl` — `acesToneMap`.
-- `lib/color_preserve.wgsl` / `lib/top_emitter.wgsl` — emitter intensity helpers.
-- `lib/lens_cap.wgsl` — `FragmentConstants`, `getFragmentConstants`, `drawEmitterDiode`, `drawUnifiedLensCap`.
-- `lib/theme_*.wgsl` — per-variant theme constants.
+| Lib | Role |
+|-----|------|
+| `lib/packing.wgsl` | PackedA/B field unpack, TRIG-001 `classifyCell`, pulls `notes` + `dura` |
+| `lib/emitters.wgsl` | Three-emitter surface (pulls `lens_cap`, `top_emitter`, SDF, tonemap) |
+| `lib/polar_layout.wgsl` | Circular ring geometry helpers for VS/FS |
+| `lib/night_theme.wgsl` | Default night palette (v0.52 dusky) |
+| `lib/circular_night_body.wgsl` | Shared uniforms + VS + FS for night family |
+
+Supporting fragments:
+
+- `lib/notes.wgsl` — `NOTE_MIN` / `NOTE_MAX` / `NOTE_OFF_MIN`
+- `lib/pitch.wgsl` — pitch helpers including `octaveBrightness`
+- `lib/dura.wgsl` — `NoteDurationInfo`, `unpackDurationInfo` (TRIG-001)
+- `lib/palette.wgsl` — `selectPalette`
+- `lib/sdf.wgsl` / `lib/tonemap.wgsl` / `lib/color_preserve.wgsl`
+- `lib/top_emitter.wgsl` / `lib/lens_cap.wgsl`
+- `lib/theme_night_53.wgsl` / `lib/theme_night_54.wgsl` — night variant palettes
+
+**Night circular family (theme-only entries):**
+
+```wgsl
+// patternv0.52.wgsl — only theme differs
+//#include "lib/night_theme.wgsl"
+//#include "lib/circular_night_body.wgsl"
+```
+
+v0.53 / v0.54 swap in `theme_night_53` / `theme_night_54`. A packing or polar fix in `lib/` updates all three after sync.
 
 Include directives look like WGSL comments so source files remain valid if loaded directly:
 
@@ -123,7 +145,7 @@ Include directives look like WGSL comments so source files remain valid if loade
 //#include "lib/pitch.wgsl"
 ```
 
-`scripts/sync-shaders.mjs` resolves includes recursively, guards against double-inclusion and cycles, and emits flat output. The `lib/` directory is not copied to `public/shaders/`.
+**Publish path (single):** `npm run sync:shaders` (`scripts/sync-shaders.mjs`) expands includes recursively, guards against double-inclusion and cycles, rejects residual `//#include` in output, and writes flat WGSL to `public/shaders/`. Wired as `predev` / `prebuild`. Never hand-edit `public/shaders/`. The `lib/` directory is not copied to public (WebGPU has no includes).
 
 ### GPU Data Packing
 

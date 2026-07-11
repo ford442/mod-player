@@ -25,6 +25,7 @@
     "test:duration-parity": "vitest run tests/durationParity.test.ts",
     "test:trigger-tail": "vitest run tests/triggerTailPacking.test.ts",
     "test:octave-brightness": "vitest run tests/octaveBrightness.test.ts",
+    "test:shader-includes": "vitest run tests/shaderIncludes.test.ts",
     "test:shader-registry": "node utils/__debug__/shaderRegistry.test.cjs",
     "test:circular-paging": "node utils/__debug__/circularPaging.test.cjs",
     "test:playhead": "node utils/__debug__/playheadPrediction.test.cjs",

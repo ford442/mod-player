@@ -1,7 +1,21 @@
 // patternv0.52.wgsl
 // "Night" — dim dusky circular three-emitter LED (v0.50 family).
-// Combines v0.51's animated playhead-arc scan line with v0.56's
-// per-instrument palette texture sampling.
+// Theme-only entry; shared body lives in lib/circular_night_body.wgsl.
+
+// night_theme.wgsl — default "Night" palette (v0.52 dusky)
+// Other night variants override via theme_night_53 / theme_night_54 instead of this file.
+
+const THEME_BG: vec3<f32> = vec3<f32>(0.025, 0.027, 0.032);
+const THEME_LED_OFF: vec3<f32> = vec3<f32>(0.035, 0.037, 0.045);
+const THEME_LED_ON: vec3<f32> = vec3<f32>(0.95, 0.50, 0.08);
+const THEME_LIT_TINT: vec3<f32> = vec3<f32>(0.80, 0.82, 0.88);
+const THEME_RIM: vec3<f32> = vec3<f32>(0.20, 0.30, 0.45);
+const THEME_ARC: vec3<f32> = vec3<f32>(0.85, 0.75, 0.30);
+const THEME_KICK: vec3<f32> = vec3<f32>(0.75, 0.15, 0.35);
+const THEME_BLOOM_MULT: f32 = 0.90;
+// circular_night_body.wgsl — shared uniforms / VS / FS for night circular variants.
+// Entry shaders only select a theme include, then this body.
+// Requires THEME_* constants already defined (night_theme / theme_night_53 / theme_night_54).
 
 struct Uniforms {
   numRows: u32,
@@ -39,103 +53,212 @@ struct Uniforms {
   paletteMode: u32,
 };
 
+// polar_layout.wgsl — shared circular / ring geometry for night-family pattern shaders
+// Matches v0.51+ trap-lens polar placement (min 15% / max 45% of min canvas dim).
+
+const POLAR_TAU: f32 = 6.2831853;
+const POLAR_NEG_HALF_PI: f32 = -1.5707963;
+const POLAR_MIN_RADIUS_FRAC: f32 = 0.15;
+const POLAR_MAX_RADIUS_FRAC: f32 = 0.45;
+const POLAR_BTN_FILL: f32 = 0.95;
+const POLAR_UI_Y_CUTOFF: f32 = 0.88;
+
+struct PolarRingGeom {
+  center: vec2<f32>,
+  minDim: f32,
+  minRadius: f32,
+  maxRadius: f32,
+  ringDepth: f32,
+  radius: f32,
+  theta: f32,
+  btnW: f32,
+  btnH: f32,
+}
+
+fn polarRingIndex(channel: u32, numChannels: u32, invertChannels: u32) -> u32 {
+  let inverted = numChannels - 1u - channel;
+  return select(inverted, channel, invertChannels == 1u);
+}
+
+fn polarComputeRing(
+  canvasW: f32,
+  canvasH: f32,
+  row: u32,
+  ringIndex: u32,
+  numChannels: u32,
+  numRows: u32
+) -> PolarRingGeom {
+  var g: PolarRingGeom;
+  g.center = vec2<f32>(canvasW * 0.5, canvasH * 0.5);
+  g.minDim = min(canvasW, canvasH);
+  g.maxRadius = g.minDim * POLAR_MAX_RADIUS_FRAC;
+  g.minRadius = g.minDim * POLAR_MIN_RADIUS_FRAC;
+  g.ringDepth = (g.maxRadius - g.minRadius) / f32(numChannels);
+  g.radius = g.minRadius + f32(ringIndex) * g.ringDepth;
+  let totalSteps = f32(numRows);
+  let anglePerStep = POLAR_TAU / totalSteps;
+  g.theta = POLAR_NEG_HALF_PI + f32(row % numRows) * anglePerStep;
+  let circumference = POLAR_TAU * g.radius;
+  let arcLength = circumference / totalSteps;
+  g.btnW = arcLength * POLAR_BTN_FILL;
+  g.btnH = g.ringDepth * POLAR_BTN_FILL;
+  return g;
+}
+
+/** Map unit-quad UV (0..1) through ring orientation into canvas pixel space. */
+fn polarLocalToWorld(lp: vec2<f32>, g: PolarRingGeom) -> vec2<f32> {
+  let localPos = (lp - 0.5) * vec2<f32>(g.btnW, g.btnH);
+  let rotAng = g.theta + 1.5707963;
+  let cA = cos(rotAng);
+  let sA = sin(rotAng);
+  let rotX = localPos.x * cA - localPos.y * sA;
+  let rotY = localPos.x * sA + localPos.y * cA;
+  return vec2<f32>(
+    g.center.x + cos(g.theta) * g.radius + rotX,
+    g.center.y + sin(g.theta) * g.radius + rotY
+  );
+}
+
+fn polarWorldToClip(world: vec2<f32>, canvasW: f32, canvasH: f32) -> vec2<f32> {
+  let clipX = (world.x / canvasW) * 2.0 - 1.0;
+  let clipY = 1.0 - (world.y / canvasH) * 2.0;
+  return vec2<f32>(clipX, clipY);
+}
+
+fn polarPlayheadAngle(playheadRow: f32, numRows: f32) -> f32 {
+  return POLAR_NEG_HALF_PI + (playheadRow / numRows) * POLAR_TAU;
+}
+
+fn polarRingRadii(minDim: f32) -> vec2<f32> {
+  return vec2<f32>(minDim * POLAR_MIN_RADIUS_FRAC, minDim * POLAR_MAX_RADIUS_FRAC);
+}
+// packing.wgsl — bit-field unpack + TRIG-001 / DURA cell classification
+// Single source of truth for PackedA/PackedB decode used by circular night family.
 // DURA: Note duration constants
 const NOTE_MIN: u32 = 1u;
 const NOTE_MAX: u32 = 119u;
 const NOTE_OFF_MIN: u32 = 120u;
-
-// NIGHT-52 THEME — dim dusky night
-const THEME_BG: vec3<f32> = vec3<f32>(0.025, 0.027, 0.032);
-const THEME_LED_OFF: vec3<f32> = vec3<f32>(0.035, 0.037, 0.045);
-const THEME_LED_ON: vec3<f32> = vec3<f32>(0.95, 0.50, 0.08);
-const THEME_LIT_TINT: vec3<f32> = vec3<f32>(0.80, 0.82, 0.88);
-const THEME_RIM: vec3<f32> = vec3<f32>(0.20, 0.30, 0.45);
-const THEME_ARC: vec3<f32> = vec3<f32>(0.85, 0.75, 0.30);
-const THEME_KICK: vec3<f32> = vec3<f32>(0.75, 0.15, 0.35);
-const THEME_BLOOM_MULT: f32 = 0.90;
-
-@group(0) @binding(0) var<storage, read> cells: array<u32>;
-@group(0) @binding(1) var<uniform> uniforms: Uniforms;
-@group(0) @binding(2) var<storage, read> rowFlags: array<u32>;
-
-struct ChannelState { volume: f32, pan: f32, freq: f32, trigger: u32, noteAge: f32, activeEffect: u32, effectValue: f32, isMuted: u32 };
-@group(0) @binding(3) var<storage, read> channels: array<ChannelState>;
-@group(0) @binding(4) var buttonsSampler: sampler;
-@group(0) @binding(5) var buttonsTexture: texture_2d<f32>;
-@group(0) @binding(7) var instrumentPalette: texture_1d<f32>;
-
-struct VertexOut {
-  @builtin(position) position: vec4<f32>,
-  @location(0) @interpolate(flat) row: u32,
-  @location(1) @interpolate(flat) channel: u32,
-  @location(2) @interpolate(linear) uv: vec2<f32>,
-  @location(3) @interpolate(flat) packedA: u32,
-  @location(4) @interpolate(flat) packedB: u32,
-};
-
-@vertex
-fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instanceIndex: u32) -> VertexOut {
-  var quad = array<vec2<f32>, 6>(
-    vec2<f32>(0.0, 0.0), vec2<f32>(1.0, 0.0), vec2<f32>(0.0, 1.0),
-    vec2<f32>(0.0, 1.0), vec2<f32>(1.0, 0.0), vec2<f32>(1.0, 1.0)
-  );
-
-  let numChannels = uniforms.numChannels;
-  let row = instanceIndex / numChannels;
-  let channel = instanceIndex % numChannels;
-
-  let invertedChannel = numChannels - 1u - channel;
-  let ringIndex = select(invertedChannel, channel, (uniforms.invertChannels == 1u));
-
-  let center = vec2<f32>(uniforms.canvasW * 0.5, uniforms.canvasH * 0.5);
-  let minDim = min(uniforms.canvasW, uniforms.canvasH);
-
-  let maxRadius = minDim * 0.45;
-  let minRadius = minDim * 0.15;
-  let ringDepth = (maxRadius - minRadius) / f32(numChannels);
-
-  let radius = minRadius + f32(ringIndex) * ringDepth;
-
-  let totalSteps = f32(uniforms.numRows);
-  let anglePerStep = 6.2831853 / totalSteps;
-  let theta = -1.570796 + f32(row % uniforms.numRows) * anglePerStep;
-
-  let circumference = 2.0 * 3.14159265 * radius;
-  let arcLength = circumference / totalSteps;
-
-  let btnW = arcLength * 0.95;
-  let btnH = ringDepth * 0.95;
-
-  let lp = quad[vertexIndex];
-  let localPos = (lp - 0.5) * vec2<f32>(btnW, btnH);
-
-  let rotAng = theta + 1.570796;
-  let cA = cos(rotAng);
-  let sA = sin(rotAng);
-
-  let rotX = localPos.x * cA - localPos.y * sA;
-  let rotY = localPos.x * sA + localPos.y * cA;
-
-  let worldX = center.x + cos(theta) * radius + rotX;
-  let worldY = center.y + sin(theta) * radius + rotY;
-
-  let clipX = (worldX / uniforms.canvasW) * 2.0 - 1.0;
-  let clipY = 1.0 - (worldY / uniforms.canvasH) * 2.0;
-
-  let idx = instanceIndex * 2u;
-  let a = cells[idx];
-  let b = cells[idx + 1u];
-
-  var out: VertexOut;
-  out.position = vec4<f32>(clipX, clipY, 0.0, 1.0);
-  out.row = row;
-  out.channel = channel;
-  out.uv = lp;
-  out.packedA = a;
-  out.packedB = b;
-  return out;
+// DURA: Structure to hold unpacked note duration info
+struct NoteDurationInfo {
+  duration: u32,
+  rowOffset: u32,
+  isNoteOff: bool,
+  isTrigger: bool,
 }
 
+fn unpackDurationInfo(packedA: u32, packedB: u32) -> NoteDurationInfo {
+  var info: NoteDurationInfo;
+  info.duration = (packedA >> 8) & 0xFFu;
+  if (info.duration == 0u) { info.duration = 1u; }
+  let durationFlags = (packedB >> 8) & 0x7Fu;
+  info.rowOffset = durationFlags >> 1u;
+  info.isNoteOff = (durationFlags & 1u) != 0u;
+  info.isTrigger = ((packedB & 0x8000u) != 0u) || (info.rowOffset == 0u && !info.isNoteOff);
+  return info;
+}
+
+fn calculateSustainBrightness(info: NoteDurationInfo, baseIntensity: f32) -> f32 {
+  if (info.duration <= 1u) { return baseIntensity; }
+  let progress = f32(info.rowOffset) / f32(info.duration);
+  if (info.rowOffset == 0u) { return baseIntensity; }
+  let remaining = info.duration - info.rowOffset;
+  if (remaining <= 3u) {
+    let fadeFactor = f32(remaining) / 3.0;
+    return baseIntensity * (0.3 + 0.3 * fadeFactor);
+  }
+  return baseIntensity * (0.4 + 0.2 * (1.0 - progress));
+}
+
+// Raw fields extracted from high-precision GPU packing
+//   PackedA: [Note(8) | Instr(8) | Duration(8) | VolNibble(8)]
+//   PackedB: [EffCmd(8) | EffVal(8) | DurFlags(7)+pad | VolCmdFull(8)]  (+ trigger bit)
+struct PackedCellFields {
+  note: u32,
+  instRaw: u32,
+  durationRaw: u32,
+  volPacked: u32,
+  effCmd: u32,
+  effVal: u32,
+  durationFlags: u32,
+  volCmdFull: u32,
+  isExpressionOnly: bool,
+  inst: u32,
+  volCmd: u32,
+  volVal: u32,
+}
+
+fn unpackCellFields(packedA: u32, packedB: u32) -> PackedCellFields {
+  var f: PackedCellFields;
+  f.note = (packedA >> 24u) & 255u;
+  f.instRaw = (packedA >> 16u) & 255u;
+  f.durationRaw = (packedA >> 8u) & 255u;
+  f.volPacked = packedA & 255u;
+  f.effCmd = (packedB >> 24u) & 255u;
+  f.effVal = (packedB >> 16u) & 255u;
+  f.durationFlags = (packedB >> 8u) & 0x7Fu;
+  f.volCmdFull = packedB & 255u;
+  f.isExpressionOnly = (f.instRaw & 128u) != 0u;
+  f.inst = f.instRaw & 127u;
+  f.volCmd = (f.volPacked >> 4u) << 4u;
+  f.volVal = (f.volPacked & 0x0Fu) << 4u;
+  return f;
+}
+
+// TRIG-001 cell-type flags derived from note range + duration metadata
+struct CellClass {
+  isNoteOn: bool,
+  isNoteOff: bool,
+  isExprOnly: bool,
+  isSustain: bool,
+  isDead: bool,
+}
+
+fn classifyCell(note: u32, isExpressionOnly: bool, dInfo: NoteDurationInfo) -> CellClass {
+  var c: CellClass;
+  c.isNoteOn = (note > 0u && note < NOTE_OFF_MIN && dInfo.isTrigger);
+  c.isNoteOff = (note >= NOTE_OFF_MIN);
+  c.isExprOnly = (!c.isNoteOn && !c.isNoteOff && isExpressionOnly);
+  c.isSustain = (
+    note > 0u && note < NOTE_OFF_MIN &&
+    !dInfo.isTrigger &&
+    dInfo.duration > 0u &&
+    dInfo.rowOffset > 0u &&
+    !dInfo.isNoteOff
+  );
+  c.isDead = (!c.isNoteOn && !c.isExprOnly && !c.isSustain && !c.isNoteOff);
+  return c;
+}
+fn pitchClassFromIndex(note: u32) -> f32 {
+  if (note == 0u || note > NOTE_MAX) { return 0.0; }
+  let semi = (note - 1u) % 12u;
+  return f32(semi) / 12.0;
+}
+
+fn fifthsHue(note: u32) -> f32 {
+  if (note == 0u || note > NOTE_MAX) { return 0.0; }
+  let semi = (note - 1u) % 12u;
+  let cof  = (semi * 7u) % 12u;
+  return f32(cof) / 12.0;
+}
+
+fn octaveBrightness(note: u32) -> f32 {
+  if (note == 0u || note > NOTE_MAX) { return 1.0; }
+  let oct = (note - 1u) / 12u;
+  return 0.65 + 0.35 * f32(oct) / 9.0;
+}
+
+fn pitchHueForPalette(note: u32, paletteId: u32) -> f32 {
+  if (paletteId == 5u) { return fifthsHue(note); }
+  return pitchClassFromIndex(note);
+}
+
+fn neonPalette(t: f32) -> vec3<f32> {
+  let a = vec3<f32>(0.5, 0.5, 0.5);
+  let b = vec3<f32>(0.5, 0.5, 0.5);
+  let c = vec3<f32>(1.0, 1.0, 1.0);
+  let d = vec3<f32>(0.0, 0.33, 0.67);
+  return a + b * cos(6.28318 * (c * t + d));
+}
 fn selectPalette(id: u32, t: f32) -> vec3<f32> {
   let a = vec3<f32>(0.5, 0.5, 0.5);
   let b = vec3<f32>(0.5, 0.5, 0.5);
@@ -168,7 +291,8 @@ fn selectPalette(id: u32, t: f32) -> vec3<f32> {
   // Default palette 0: Rainbow
   return a + b * cos(6.28318 * (c * t + vec3<f32>(0.0, 0.33, 0.67)));
 }
-
+// emitters.wgsl — three-emitter LED surface (top / mid / bot + unified lens cap)
+// Requires THEME_* constants to be defined before this include (see night_theme.wgsl).
 fn sdRoundedBox(p: vec2<f32>, b: vec2<f32>, r: f32) -> f32 {
   let q = abs(p) - b + r;
   return length(max(q, vec2<f32>(0.0))) + min(max(q.x, q.y), 0.0) - r;
@@ -182,7 +306,6 @@ fn sdEllipse(p: vec2<f32>, ab: vec2<f32>) -> f32 {
   let k = length(p / ab);
   return (k - 1.0) * min(ab.x, ab.y);
 }
-
 // ACES Filmic Tone Mapping (approximation by Narkowicz 2015).
 fn acesToneMap(color: vec3<f32>) -> vec3<f32> {
   let a = 2.51;
@@ -195,73 +318,8 @@ fn acesToneMap(color: vec3<f32>) -> vec3<f32> {
     vec3<f32>(0.0), vec3<f32>(1.0)
   );
 }
-
 const COLOR_PRESERVE_SCALE: f32 = 0.8;
 const COLOR_PRESERVE_MAX: f32   = 0.85;
-
-fn pitchClassFromIndex(note: u32) -> f32 {
-  if (note == 0u || note > NOTE_MAX) { return 0.0; }
-  let semi = (note - 1u) % 12u;
-  return f32(semi) / 12.0;
-}
-
-fn fifthsHue(note: u32) -> f32 {
-  if (note == 0u || note > NOTE_MAX) { return 0.0; }
-  let semi = (note - 1u) % 12u;
-  let cof  = (semi * 7u) % 12u;
-  return f32(cof) / 12.0;
-}
-
-fn octaveBrightness(note: u32) -> f32 {
-  if (note == 0u || note > NOTE_MAX) { return 1.0; }
-  let oct = (note - 1u) / 12u;
-  return 0.65 + 0.35 * f32(oct) / 9.0;
-}
-
-fn pitchHueForPalette(note: u32, paletteId: u32) -> f32 {
-  if (paletteId == 5u) { return fifthsHue(note); }
-  return pitchClassFromIndex(note);
-}
-
-fn neonPalette(t: f32) -> vec3<f32> {
-  let a = vec3<f32>(0.5, 0.5, 0.5);
-  let b = vec3<f32>(0.5, 0.5, 0.5);
-  let c = vec3<f32>(1.0, 1.0, 1.0);
-  let d = vec3<f32>(0.0, 0.33, 0.67);
-  return a + b * cos(6.28318 * (c * t + d));
-}
-
-// DURA: Structure to hold unpacked note duration info
-struct NoteDurationInfo {
-  duration: u32,
-  rowOffset: u32,
-  isNoteOff: bool,
-  isTrigger: bool,
-}
-
-fn unpackDurationInfo(packedA: u32, packedB: u32) -> NoteDurationInfo {
-  var info: NoteDurationInfo;
-  info.duration = (packedA >> 8) & 0xFFu;
-  if (info.duration == 0u) { info.duration = 1u; }
-  let durationFlags = (packedB >> 8) & 0x7Fu;
-  info.rowOffset = durationFlags >> 1u;
-  info.isNoteOff = (durationFlags & 1u) != 0u;
-  info.isTrigger = ((packedB & 0x8000u) != 0u) || (info.rowOffset == 0u && !info.isNoteOff);
-  return info;
-}
-
-fn calculateSustainBrightness(info: NoteDurationInfo, baseIntensity: f32) -> f32 {
-  if (info.duration <= 1u) { return baseIntensity; }
-  let progress = f32(info.rowOffset) / f32(info.duration);
-  if (info.rowOffset == 0u) { return baseIntensity; }
-  let remaining = info.duration - info.rowOffset;
-  if (remaining <= 3u) {
-    let fadeFactor = f32(remaining) / 3.0;
-    return baseIntensity * (0.3 + 0.3 * fadeFactor);
-  }
-  return baseIntensity * (0.4 + 0.2 * (1.0 - progress));
-}
-
 fn calculateTopIntensity(
   isNoteOn: bool,
   isExprOnly: bool,
@@ -283,7 +341,6 @@ fn calculateTopIntensity(
   if (isMuted) { intensity *= 0.2; }
   return intensity;
 }
-
 struct FragmentConstants {
   bgColor: vec3<f32>,
   ledOnColor: vec3<f32>,
@@ -427,6 +484,67 @@ fn drawUnifiedLensCap(
     return vec4<f32>(acesToneMap(finalColor), edgeAlpha);
 }
 
+@group(0) @binding(0) var<storage, read> cells: array<u32>;
+@group(0) @binding(1) var<uniform> uniforms: Uniforms;
+@group(0) @binding(2) var<storage, read> rowFlags: array<u32>;
+
+struct ChannelState {
+  volume: f32,
+  pan: f32,
+  freq: f32,
+  trigger: u32,
+  noteAge: f32,
+  activeEffect: u32,
+  effectValue: f32,
+  isMuted: u32,
+};
+@group(0) @binding(3) var<storage, read> channels: array<ChannelState>;
+@group(0) @binding(4) var buttonsSampler: sampler;
+@group(0) @binding(5) var buttonsTexture: texture_2d<f32>;
+@group(0) @binding(7) var instrumentPalette: texture_1d<f32>;
+
+struct VertexOut {
+  @builtin(position) position: vec4<f32>,
+  @location(0) @interpolate(flat) row: u32,
+  @location(1) @interpolate(flat) channel: u32,
+  @location(2) @interpolate(linear) uv: vec2<f32>,
+  @location(3) @interpolate(flat) packedA: u32,
+  @location(4) @interpolate(flat) packedB: u32,
+};
+
+@vertex
+fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instanceIndex: u32) -> VertexOut {
+  var quad = array<vec2<f32>, 6>(
+    vec2<f32>(0.0, 0.0), vec2<f32>(1.0, 0.0), vec2<f32>(0.0, 1.0),
+    vec2<f32>(0.0, 1.0), vec2<f32>(1.0, 0.0), vec2<f32>(1.0, 1.0)
+  );
+
+  let numChannels = uniforms.numChannels;
+  let row = instanceIndex / numChannels;
+  let channel = instanceIndex % numChannels;
+  let ringIndex = polarRingIndex(channel, numChannels, uniforms.invertChannels);
+  let g = polarComputeRing(
+    uniforms.canvasW, uniforms.canvasH,
+    row, ringIndex, numChannels, uniforms.numRows
+  );
+  let lp = quad[vertexIndex];
+  let world = polarLocalToWorld(lp, g);
+  let clip = polarWorldToClip(world, uniforms.canvasW, uniforms.canvasH);
+
+  let idx = instanceIndex * 2u;
+  let a = cells[idx];
+  let b = cells[idx + 1u];
+
+  var out: VertexOut;
+  out.position = vec4<f32>(clip.x, clip.y, 0.0, 1.0);
+  out.row = row;
+  out.channel = channel;
+  out.uv = lp;
+  out.packedA = a;
+  out.packedB = b;
+  return out;
+}
+
 @fragment
 fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   let uv = in.uv;
@@ -434,18 +552,19 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   let aa = fwidth(p.y) * 0.33;
 
   if (in.channel >= uniforms.numChannels) { return vec4<f32>(1.0, 0.0, 0.0, 1.0); }
-  let fs = getFragmentConstants();
+  let fc = getFragmentConstants();
   let bloom = uniforms.bloomIntensity * THEME_BLOOM_MULT;
   let kick = uniforms.kickTrigger;
   let beat = uniforms.beatPhase;
 
-  // Hardware Layering: Discard pixels over UI
-  if (in.position.y > uniforms.canvasH * 0.88) { discard; }
+  // Hardware layering: discard pixels over bottom UI chrome
+  if (in.position.y > uniforms.canvasH * POLAR_UI_Y_CUTOFF) { discard; }
 
   // --- PLAYHEAD ARC OVERLAY (ARC-001) ---
   let minDim = min(uniforms.canvasW, uniforms.canvasH);
-  let rInner = minDim * 0.15;
-  let rOuter = minDim * 0.45;
+  let radii = polarRingRadii(minDim);
+  let rInner = radii.x;
+  let rOuter = radii.y;
 
   let pixelPos = in.position.xy;
   let center = vec2<f32>(uniforms.canvasW * 0.5, uniforms.canvasH * 0.5);
@@ -454,7 +573,7 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   let fragRadius = length(delta);
 
   let totalSteps = f32(uniforms.numRows);
-  let rowAngle = -1.5707963 + (uniforms.playheadRow / totalSteps) * 6.2831853;
+  let rowAngle = polarPlayheadAngle(uniforms.playheadRow, totalSteps);
 
   var angleDelta = fragAngle - rowAngle;
   angleDelta = atan2(sin(angleDelta), cos(angleDelta));
@@ -467,30 +586,28 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   let arcIntensity = 0.7 * pulse;
   let arcContrib = THEME_ARC * angularMask * radialMask * arcIntensity;
 
-  // Smooth playhead position
   let maxRows = f32(uniforms.numRows);
   let playheadStep = uniforms.playheadRow - floor(uniforms.playheadRow / maxRows) * maxRows;
   let rowDistRaw = abs(f32(in.row % uniforms.numRows) - playheadStep);
   let rowDist = min(rowDistRaw, maxRows - rowDistRaw);
   let playheadActivation = 1.0 - smoothstep(0.0, 1.5, rowDist);
 
-  // CHANNEL 0 is the Indicator Ring
+  // CHANNEL 0 — indicator ring
   if (in.channel == 0u) {
-    let onPlayhead = playheadActivation > 0.5;
     let indSize = vec2<f32>(0.3, 0.3);
-    let indColor = mix(vec3<f32>(0.15), fs.ledOnColor * 1.3, playheadActivation);
+    let indColor = mix(vec3<f32>(0.15), fc.ledOnColor * 1.3, playheadActivation);
     let indLed = drawUnifiedLensCap(
-        p, indSize,
-        vec4<f32>(indColor, playheadActivation),
-        vec4<f32>(indColor, playheadActivation),
-        vec4<f32>(indColor, playheadActivation),
-        aa
+      p, indSize,
+      vec4<f32>(indColor, playheadActivation),
+      vec4<f32>(indColor, playheadActivation),
+      vec4<f32>(indColor, playheadActivation),
+      aa
     );
     var col = indLed.rgb;
     var alpha = indLed.a;
     if (playheadActivation > 0.0) {
       let beatPulse = 1.0 + kick * 0.6 + (0.5 + 0.5 * sin(beat * 6.2832)) * 0.2;
-      let glow = fs.ledOnColor * (bloom * 5.0) * exp(-length(p) * 3.5) * playheadActivation * beatPulse;
+      let glow = fc.ledOnColor * (bloom * 5.0) * exp(-length(p) * 3.5) * playheadActivation * beatPulse;
       col += glow;
       alpha = max(alpha, smoothstep(0.0, 0.25, length(glow)));
     }
@@ -498,11 +615,11 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     return vec4<f32>(col, clamp(alpha, 0.0, 1.0));
   }
 
-  // --- MUSIC CHANNELS (1-32) with THREE-EMITTER LED SYSTEM ---
-  let dHousing = sdRoundedBox(p, fs.housingSize * 0.5, 0.06);
+  // --- MUSIC CHANNELS — three-emitter LED ---
+  let dHousing = sdRoundedBox(p, fc.housingSize * 0.5, 0.06);
   let housingMask = 1.0 - smoothstep(0.0, aa * 1.5, dHousing);
 
-  var finalColor = fs.bgColor;
+  var finalColor = fc.bgColor;
 
   let btnScale = 1.05;
   let btnUV = (uv - 0.5) * btnScale + 0.5;
@@ -512,40 +629,21 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   }
 
   if (inButton > 0.5) {
-    let note = (in.packedA >> 24) & 255u;
-    let instRaw = (in.packedA >> 16) & 255u;
-    let durationRaw = (in.packedA >> 8) & 255u;
-    let volPacked = in.packedA & 255u;
+    let fields = unpackCellFields(in.packedA, in.packedB);
+    let dInfo = unpackDurationInfo(in.packedA, in.packedB);
+    let cls = classifyCell(fields.note, fields.isExpressionOnly, dInfo);
 
-    let effCmd = (in.packedB >> 24) & 255u;
-    let effVal = (in.packedB >> 16) & 255u;
-    let durationFlags = (in.packedB >> 8) & 0x7Fu;
-    let volCmdFull = in.packedB & 255u;
-
-    let isExpressionOnly = (instRaw & 128u) != 0u;
-    let inst = instRaw & 127u;
-
-    let volCmd = (volPacked >> 4) << 4;
-    let volVal = (volPacked & 0x0Fu) << 4;
-
-    var dInfo: NoteDurationInfo;
-    dInfo.duration = durationRaw;
-    if (dInfo.duration == 0u) { dInfo.duration = 1u; }
-    dInfo.rowOffset = durationFlags >> 1u;
-    dInfo.isNoteOff = (durationFlags & 1u) != 0u;
-
-    let isNoteOn   = (note > 0u && note < NOTE_OFF_MIN && dInfo.isTrigger);
-    let isNoteOff  = (note >= NOTE_OFF_MIN);
-    let isExprOnly = (!isNoteOn && !isNoteOff && isExpressionOnly);
-    let isSustain  = (note > 0u && note < NOTE_OFF_MIN && !dInfo.isTrigger && dInfo.duration > 0u && dInfo.rowOffset > 0u && !dInfo.isNoteOff);
-    let isDead     = (!isNoteOn && !isExprOnly && !isSustain && !isNoteOff);
+    let isNoteOn = cls.isNoteOn;
+    let isNoteOff = cls.isNoteOff;
+    let isExprOnly = cls.isExprOnly;
+    let isSustain = cls.isSustain;
+    let isDead = cls.isDead;
 
     let ch = channels[in.channel];
     let isMuted = (ch.isMuted == 1u);
-    let hasExpression = (volCmd > 0u) || (effCmd > 0u) || (volCmdFull > 0u);
+    let hasExpression = (fields.volCmd > 0u) || (fields.effCmd > 0u) || (fields.volCmdFull > 0u);
 
-    // EMITTER 1 (TOP): Blue note-on, amber expression-only
-    let blueColor  = vec3<f32>(0.05, 0.45, 1.0);
+    let blueColor = vec3<f32>(0.05, 0.45, 1.0);
     let amberColor = vec3<f32>(1.0, 0.55, 0.0);
     var topColor = vec3<f32>(0.0);
     var topIntensity = calculateTopIntensity(isNoteOn, isExprOnly, isSustain, isMuted, ch.trigger, bloom, beat);
@@ -553,7 +651,6 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     else if (isExprOnly) { topColor = amberColor; }
     else if (isSustain) { topColor = blueColor; }
 
-    // EMITTER 2 (MIDDLE): Note color (pitch-class or per-instrument palette)
     var noteColor = THEME_LED_OFF * 1.2;
     var midIntensity = 0.02;
 
@@ -561,15 +658,15 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
       var baseColor = vec3<f32>(0.0);
       var instBright = 1.0;
       if (uniforms.paletteMode == 1u) {
-        let idx = inst % 64u;
+        let idx = fields.inst % 64u;
         baseColor = textureLoad(instrumentPalette, i32(idx), 0).rgb;
       } else {
-        let pitchHue = pitchHueForPalette(note, uniforms.colorPalette);
+        let pitchHue = pitchHueForPalette(fields.note, uniforms.colorPalette);
         baseColor = selectPalette(uniforms.colorPalette, pitchHue);
-        let instBand = inst & 15u;
+        let instBand = fields.inst & 15u;
         instBright = 0.85 + (select(0.0, f32(instBand) / 15.0, instBand > 0u)) * 0.15;
       }
-      let octBright = octaveBrightness(note);
+      let octBright = octaveBrightness(fields.note);
       noteColor = baseColor * instBright * octBright;
 
       if (isNoteOn) {
@@ -590,7 +687,6 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     }
     let midColor = noteColor;
 
-    // EMITTER 3 (BOTTOM): Amber control indicator
     var botIntensity = 0.0;
     var botColor = vec3<f32>(0.0);
     if (!isMuted && !isExprOnly) {
@@ -609,11 +705,11 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     let lensSize = select(sustainLens, triggerLens, isNoteOn);
 
     let unifiedLens = drawUnifiedLensCap(
-        lensUV, lensSize,
-        vec4<f32>(topColor, topIntensity),
-        vec4<f32>(midColor, midIntensity),
-        vec4<f32>(botColor, botIntensity),
-        aa
+      lensUV, lensSize,
+      vec4<f32>(topColor, topIntensity),
+      vec4<f32>(midColor, midIntensity),
+      vec4<f32>(botColor, botIntensity),
+      aa
     );
 
     finalColor = mix(finalColor, unifiedLens.rgb, unifiedLens.a);
@@ -625,23 +721,18 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     }
   }
 
-  // Kick reactive glow
   let kickPulse = uniforms.kickTrigger * exp(-length(p) * 3.0) * 0.3;
   finalColor += THEME_KICK * kickPulse * uniforms.bloomIntensity;
-
-  // Add playhead arc overlay
   finalColor += arcContrib;
 
-  // Dithering for night mode
   let noise = fract(sin(dot(in.uv * uniforms.timeSec, vec2<f32>(12.9898, 78.233))) * 43758.5453);
   finalColor += (noise - 0.5) * 0.01;
 
-  // Idle cells: thin outer stroke instead of invisible
   if (housingMask < 0.5) {
     if (dHousing < 0.02) {
-      return vec4<f32>(fs.ledOffColor, 1.0);
+      return vec4<f32>(fc.ledOffColor, 1.0);
     }
-    return vec4<f32>(fs.borderColor, 0.0);
+    return vec4<f32>(fc.borderColor, 0.0);
   }
   return vec4<f32>(finalColor, 1.0);
 }
