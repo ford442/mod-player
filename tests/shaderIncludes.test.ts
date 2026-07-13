@@ -5,10 +5,11 @@
  */
 import { readFileSync, existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it, beforeAll } from 'vitest';
 import { expandShader, resolveIncludes } from '../scripts/sync-shaders.mjs';
 
-const ROOT = resolve(import.meta.dirname, '..');
+const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const SRC = join(ROOT, 'shaders');
 const DEST = join(ROOT, 'public/shaders');
 
@@ -27,7 +28,7 @@ describe('shader include expansion (night circular family)', () => {
   it('entry files are thin theme shells', () => {
     for (const name of NIGHT_VARIANTS) {
       const src = readFileSync(join(SRC, name), 'utf8');
-      const lines = src.split('\n').filter((l) => l.trim().length > 0);
+      const lines = src.split('\n').filter((l: string) => l.trim().length > 0);
       // Header comments + two includes
       expect(lines.length).toBeLessThan(12);
       expect(src).toMatch(/\/\/#include\s+"lib\/circular_night_body\.wgsl"/);
@@ -39,10 +40,10 @@ describe('shader include expansion (night circular family)', () => {
     for (const name of NIGHT_VARIANTS) {
       const { flat, includes } = expandShader(join(SRC, name));
       expect(flat).not.toMatch(/^\s*\/\/\s*#include\s+"/m);
-      expect(includes.some((p) => p.includes('packing.wgsl'))).toBe(true);
-      expect(includes.some((p) => p.includes('emitters.wgsl') || p.includes('lens_cap.wgsl'))).toBe(true);
-      expect(includes.some((p) => p.includes('polar_layout.wgsl'))).toBe(true);
-      expect(includes.some((p) => p.includes('circular_night_body.wgsl'))).toBe(true);
+      expect(includes.some((p: string) => p.includes('packing.wgsl'))).toBe(true);
+      expect(includes.some((p: string) => p.includes('emitters.wgsl') || p.includes('lens_cap.wgsl'))).toBe(true);
+      expect(includes.some((p: string) => p.includes('polar_layout.wgsl'))).toBe(true);
+      expect(includes.some((p: string) => p.includes('circular_night_body.wgsl'))).toBe(true);
       // TRIG-001 / DURA path present once expanded
       expect(flat).toContain('fn unpackDurationInfo');
       expect(flat).toContain('fn unpackCellFields');

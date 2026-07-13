@@ -20,6 +20,7 @@
     "preview": "vite preview",
     "lint": "eslint . --max-warnings 100",
     "typecheck": "tsc --noEmit",
+    "typecheck:tests": "tsc --noEmit -p tsconfig.test.json",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:duration-parity": "vitest run tests/durationParity.test.ts",
@@ -52,6 +53,7 @@
   "devDependencies": {
     "@eslint/js": "^9.19.0",
     "@tailwindcss/typography": "^0.5.10",
+    "@types/node": "^20.19.0",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.0",
