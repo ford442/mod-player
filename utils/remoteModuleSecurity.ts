@@ -33,9 +33,18 @@ export function getModuleHostAllowlist(): ReadonlySet<string> {
   return cachedAllowlist;
 }
 
+function stripControlChars(value: string): string {
+  let out = '';
+  for (const ch of value) {
+    const code = ch.charCodeAt(0);
+    if (code >= 0x20 && code !== 0x7f) out += ch;
+  }
+  return out;
+}
+
 /** Strip control chars and reject dangerous URL schemes. */
 export function sanitizeRemoteUrl(raw: string): string | null {
-  const trimmed = raw.trim().replace(/[\u0000-\u001f\u007f]/g, '');
+  const trimmed = stripControlChars(raw.trim());
   if (!trimmed) return null;
   if (BLOCKED_PROTOCOLS.test(trimmed)) return null;
 

@@ -14,7 +14,7 @@ interface MIDIAccess extends EventTarget {
   readonly sysexEnabled: boolean;
 }
 
-interface MIDIInputMap extends ReadonlyMap<string, MIDIInput> {}
+type MIDIInputMap = ReadonlyMap<string, MIDIInput>;
 
 interface MIDIInput extends MIDIPort {
   onmidimessage: ((this: MIDIInput, ev: MIDIMessageEvent) => void) | null;
