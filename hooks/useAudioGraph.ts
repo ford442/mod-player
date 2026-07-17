@@ -77,6 +77,13 @@ export interface AudioGraphConfig {
 // AUDIO-001 FIX COMPLETE: Centralized worklet URL from useWorkletLoader
 const WORKLET_URL = getWorkletUrl();
 
+/** Exact module bytes for worklet load — safe when Uint8Array is a subarray. */
+function moduleBytesFromFileData(fileData: Uint8Array | null): ArrayBuffer | null {
+  if (!fileData || fileData.byteLength === 0) return null;
+  // slice() copies into a fresh ArrayBuffer when the view is a subarray or SAB-backed.
+  return fileData.slice().buffer;
+}
+
 export async function startAudioPlayback(
   refs: AudioGraphRefs,
   callbacks: AudioGraphCallbacks,
@@ -152,10 +159,14 @@ export async function startAudioPlayback(
       refs.analyserRef.current.smoothingTimeConstant = 0.8;
     }
 
-    // Disconnect previous source. Pause the old processor and detach its handler
-    // first so a late position report from the previous module cannot corrupt the
-    // new module's playhead state.
-    if (refs.audioWorkletNodeRef.current) {
+    // Disconnect previous source unless we can hot-reload module data into the
+    // existing JS worklet node (avoids re-init of shared-scope libopenmpt WASM).
+    const canReuseWorkletNode =
+      config.activeEngine === 'worklet' &&
+      refs.workletLoadedRef.current &&
+      refs.audioWorkletNodeRef.current != null;
+
+    if (refs.audioWorkletNodeRef.current && !canReuseWorkletNode) {
       console.log('[PLAY] Disconnecting previous AudioWorkletNode...');
       const oldNode = refs.audioWorkletNodeRef.current;
       try { oldNode.port.postMessage({ type: 'pause' }); } catch { /* ignore */ }
@@ -173,10 +184,10 @@ export async function startAudioPlayback(
         const engine = refs.nativeEngineRef.current!;
 
         // Load module data into the native engine
-        const buf = refs.fileDataRef.current?.buffer;
+        const buf = moduleBytesFromFileData(refs.fileDataRef.current);
         if (buf) {
           console.log('[PLAY] Sending module data to native engine:', buf.byteLength, 'bytes');
-          await engine.load(buf as ArrayBuffer);
+          await engine.load(buf);
         }
 
         // Set engine parameters
@@ -436,6 +447,14 @@ export async function startAudioPlayback(
           console.log('[PLAY] Worklet module already loaded (skipping addModule)');
         }
 
+        let node: AudioWorkletNode;
+        let libJsText: string | undefined;
+        let libWasmBuffer: ArrayBuffer | null = null;
+
+        if (canReuseWorkletNode && refs.audioWorkletNodeRef.current) {
+          node = refs.audioWorkletNodeRef.current;
+          console.log('[PLAY] Reusing existing AudioWorkletNode (hot module reload)');
+        } else {
         console.log('[PLAY] Creating AudioWorkletNode...');
         // Shared WASM memory requires cross-origin isolation (COOP/COEP headers).
         // In production without those headers SharedArrayBuffer is unavailable and
@@ -458,7 +477,6 @@ export async function startAudioPlayback(
         processorOptions.baseUrl = detectRuntimeBase();
         
         // AUDIO-001 FIX COMPLETE: Wrap node creation in try-catch for better diagnostics
-        let node: AudioWorkletNode;
         try {
           node = new AudioWorkletNode(ctx, 'openmpt-processor', {
             numberOfInputs: 0,
@@ -486,8 +504,6 @@ export async function startAudioPlayback(
         // Emscripten binary build (no isWasm2js marker).
         console.log('[PLAY] Fetching libopenmpt assets for worklet...');
         const workletBaseUrl = withBase('worklets/');
-        let libJsText: string;
-        let libWasmBuffer: ArrayBuffer | null = null;
         try {
           const jsResp = await fetch(workletBaseUrl + 'libopenmpt-audioworklet.js');
           if (!jsResp.ok) {
@@ -546,6 +562,7 @@ export async function startAudioPlayback(
           console.error('[PLAY] Failed to fetch libopenmpt assets:', fetchErr);
           throw fetchErr;
         }
+        } // end first-time node + lib fetch
 
         node.port.onmessage = async (e) => {
           const { type, order, row, positionSeconds, message, bpm, channelVU } = e.data;
@@ -733,25 +750,28 @@ export async function startAudioPlayback(
 
         // Send glue (+ optional real WASM) to worklet first (must arrive before 'load').
         // Transfer wasm buffer only when present; wasm2js path sends JS alone.
-        if (libWasmBuffer) {
-          node.port.postMessage(
-            { type: 'initLib', scriptText: libJsText, wasmBytes: libWasmBuffer },
-            [libWasmBuffer],
-          );
-        } else {
-          node.port.postMessage({ type: 'initLib', scriptText: libJsText });
+        if (!canReuseWorkletNode && libJsText) {
+          if (libWasmBuffer) {
+            node.port.postMessage(
+              { type: 'initLib', scriptText: libJsText, wasmBytes: libWasmBuffer },
+              [libWasmBuffer],
+            );
+          } else {
+            node.port.postMessage({ type: 'initLib', scriptText: libJsText });
+          }
         }
 
         // Send module data (cloned, not transferred, so fileDataRef remains valid)
-        const buf = refs.fileDataRef.current?.buffer;
-        if (buf) {
-          console.log('[PLAY] Sending module data to worklet:', buf.byteLength, 'bytes');
-          node.port.postMessage({ type: 'load', moduleData: buf });
+        const moduleBuf = moduleBytesFromFileData(refs.fileDataRef.current);
+        if (moduleBuf) {
+          console.log('[PLAY] Sending module data to worklet:', moduleBuf.byteLength, 'bytes');
+          node.port.postMessage({ type: 'load', moduleData: moduleBuf });
         } else {
           console.error("[PLAY] No buffer to send to worklet!");
         }
 
         console.log('[PLAY] Connecting audio graph: worklet -> analyser -> panner -> gain -> destination');
+        try { node.disconnect(); } catch { /* ignore stale edges */ }
         node.connect(refs.analyserRef.current!);
         refs.analyserRef.current!.connect(refs.stereoPannerRef.current!);
         refs.stereoPannerRef.current!.connect(refs.gainNodeRef.current!);

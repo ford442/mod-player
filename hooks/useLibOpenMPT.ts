@@ -720,12 +720,16 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
     // Gracefully stop the old worklet before disconnecting: pause it so it stops
     // rendering/posting, and detach the message handler so any late position
     // reports from the previous module cannot overwrite the new module's state.
+    // Keep the node alive on normal stop/module reload — recreating it re-inits
+    // libopenmpt in the shared AudioWorklet global scope and breaks XM playback.
     if (audioWorkletNodeRef.current) {
       const oldNode = audioWorkletNodeRef.current;
       try { oldNode.port.postMessage({ type: 'pause' }); } catch { /* ignore */ }
       try { oldNode.port.onmessage = null; } catch { /* ignore */ }
-      try { oldNode.disconnect(); } catch { /* ignore */ }
-      audioWorkletNodeRef.current = null;
+      if (destroy) {
+        try { oldNode.disconnect(); } catch { /* ignore */ }
+        audioWorkletNodeRef.current = null;
+      }
     }
 
     // Cleanup ScriptProcessorNode fallback

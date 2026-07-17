@@ -61,6 +61,108 @@ const DEBUG = true;
 function log(...args) { if (DEBUG) console.log('[Worklet]', ...args); }
 function error(...args) { console.error('[Worklet]', ...args); }
 
+/** Normalize postMessage payload to a tight Uint8Array view. */
+function moduleBytesFromPayload(moduleData) {
+  if (moduleData instanceof Uint8Array) {
+    if (moduleData.byteOffset === 0 && moduleData.byteLength === moduleData.buffer.byteLength) {
+      return moduleData;
+    }
+    return moduleData.slice();
+  }
+  return new Uint8Array(moduleData);
+}
+
+/**
+ * Initialise libopenmpt once per AudioWorkletGlobalScope.
+ * Every AudioWorkletNode shares this scope — re-evaluating the ~5 MB glue on
+ * each node creation resets WASM heap state and breaks module reload (XM/MOD).
+ */
+async function ensureSharedLibOpenMPT(scriptText, wasmBytes) {
+  const existing = globalThis.__openmptWorkletLib;
+  if (existing && typeof existing._openmpt_module_create_from_memory2 === 'function') {
+    log('Reusing shared libopenmpt instance');
+    return existing;
+  }
+
+  if (!globalThis.__openmptWorkletLibInitPromise) {
+    globalThis.__openmptWorkletLibInitPromise = (async () => {
+      if (!scriptText) {
+        throw new Error('initLib missing scriptText');
+      }
+
+      const hasWasmBytes =
+        wasmBytes &&
+        (wasmBytes instanceof ArrayBuffer
+          ? wasmBytes.byteLength > 0
+          : wasmBytes.byteLength > 0);
+
+      log(
+        'Evaluating libopenmpt-audioworklet.js (',
+        scriptText.length,
+        ' chars, wasmBytes:',
+        hasWasmBytes ? (wasmBytes.byteLength || 0) : 0,
+        ')…',
+      );
+
+      if (typeof globalThis.performance === 'undefined') {
+        globalThis.performance = { now: () => currentTime * 1000 };
+      }
+
+      if (!globalThis.crypto || !globalThis.crypto.getRandomValues) {
+        globalThis.crypto = {
+          getRandomValues: function (array) {
+            for (let i = 0; i < array.length; i++) {
+              array[i] = Math.floor(Math.random() * 256);
+            }
+            return array;
+          },
+        };
+      }
+
+      globalThis.libopenmpt = { noInitialRun: true };
+      if (hasWasmBytes) {
+        globalThis.libopenmpt.wasmBinary = wasmBytes;
+      }
+
+      const cleanedScript = scriptText.replace(/^\s*export\s+(default\s+)?/gm, '');
+      const fn = new Function(cleanedScript); // eslint-disable-line no-new-func
+      fn.call(globalThis);
+
+      const lib = globalThis.libopenmpt;
+      if (!lib || typeof lib !== 'object') {
+        throw new Error('globalThis.libopenmpt not set after script evaluation');
+      }
+
+      if (!lib._openmpt_module_create_from_memory2) {
+        log('Waiting for WASM onRuntimeInitialized…');
+        await new Promise((resolve, reject) => {
+          const timeout = setTimeout(
+            () => reject(new Error('WASM onRuntimeInitialized timeout')), 25000,
+          );
+          if (lib.calledRun) {
+            clearTimeout(timeout);
+            resolve();
+          } else {
+            const prev = lib.onRuntimeInitialized;
+            lib.onRuntimeInitialized = () => {
+              clearTimeout(timeout);
+              if (typeof prev === 'function') prev();
+              resolve();
+            };
+          }
+        });
+      } else {
+        log('WASM already initialised (functions present)');
+      }
+
+      globalThis.__openmptWorkletLib = lib;
+      return lib;
+    })();
+  }
+
+  return globalThis.__openmptWorkletLibInitPromise;
+}
+
 class XMPlayerProcessor extends AudioWorkletProcessor {
   constructor(options) {
     super(options);
@@ -92,16 +194,27 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
 
     log('Constructor called, sampleRate:', sampleRate);
 
-    // _libInitPromise resolves once the main thread sends 'initLib'
-    // and WASM finishes initialising. loadModule() awaits this.
-    this._libInitPromise = new Promise((resolve, reject) => {
-      this._resolveLib = resolve;
-      this._rejectLib = reject;
-    });
-    this._libInitTimeout = setTimeout(() => {
-      this._rejectLib(new Error('WASM init timeout: initLib message never received'));
-      this.port.postMessage({ type: 'error', message: 'WASM library init timeout' });
-    }, 30000);
+    const sharedLib = globalThis.__openmptWorkletLib;
+    if (sharedLib && typeof sharedLib._openmpt_module_create_from_memory2 === 'function') {
+      this.lib = sharedLib;
+      this.isLibReady = true;
+      this._libInitPromise = Promise.resolve();
+      this._resolveLib = () => {};
+      this._rejectLib = () => {};
+      this._libInitTimeout = null;
+      log('Attached to pre-initialised shared libopenmpt');
+    } else {
+      // _libInitPromise resolves once the main thread sends 'initLib'
+      // and WASM finishes initialising. loadModule() awaits this.
+      this._libInitPromise = new Promise((resolve, reject) => {
+        this._resolveLib = resolve;
+        this._rejectLib = reject;
+      });
+      this._libInitTimeout = setTimeout(() => {
+        this._rejectLib(new Error('WASM init timeout: initLib message never received'));
+        this.port.postMessage({ type: 'error', message: 'WASM library init timeout' });
+      }, 30000);
+    }
 
     this.port.onmessage = async (e) => {
       const { type, moduleData } = e.data;
@@ -162,93 +275,9 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
   // skips its own network fetch of the sibling .wasm.
   async _handleInitLib({ scriptText, wasmBytes }) {
     try {
-      clearTimeout(this._libInitTimeout);
+      if (this._libInitTimeout) clearTimeout(this._libInitTimeout);
 
-      if (!scriptText) {
-        throw new Error('initLib missing scriptText');
-      }
-
-      const hasWasmBytes =
-        wasmBytes &&
-        (wasmBytes instanceof ArrayBuffer
-          ? wasmBytes.byteLength > 0
-          : wasmBytes.byteLength > 0);
-
-      log(
-        'Evaluating libopenmpt-audioworklet.js (',
-        scriptText.length,
-        ' chars, wasmBytes:',
-        hasWasmBytes ? (wasmBytes.byteLength || 0) : 0,
-        ')…',
-      );
-
-      // Emscripten calls performance.now() internally (_emscripten_get_now).
-      // AudioWorkletGlobalScope may not expose `performance` as a global, so
-      // polyfill it using currentTime (the high-resolution audio clock).
-      if (typeof globalThis.performance === 'undefined') {
-        globalThis.performance = { now: () => currentTime * 1000 };
-      }
-
-      // Ensure crypto.getRandomValues is available for Emscripten's random initialization
-      // This must be set BEFORE evaluating the Emscripten script.
-      if (!globalThis.crypto || !globalThis.crypto.getRandomValues) {
-        globalThis.crypto = {
-          getRandomValues: function(array) {
-            for (let i = 0; i < array.length; i++) {
-              array[i] = Math.floor(Math.random() * 256);
-            }
-            return array;
-          }
-        };
-      }
-
-      // Pre-configure the Emscripten Module object. Emscripten checks
-      // "typeof libopenmpt !== 'undefined'" and merges with this object.
-      // Only attach wasmBinary when we have a real binary payload.
-      globalThis.libopenmpt = {
-        noInitialRun: true,
-      };
-      if (hasWasmBytes) {
-        globalThis.libopenmpt.wasmBinary = wasmBytes;
-      }
-
-      // Strip ES module export statements — new Function() is a classic-script
-      // context and will throw SyntaxError on any top-level `export` keyword.
-      const cleanedScript = scriptText.replace(/^\s*export\s+(default\s+)?/gm, '');
-
-      // Evaluate the Emscripten-generated script in the global scope.
-      // new Function() runs with globalThis as its outer scope, so the script
-      // sees (and modifies) globalThis.libopenmpt via normal variable lookup.
-      const fn = new Function(cleanedScript); // eslint-disable-line no-new-func
-      fn.call(globalThis);
-
-      let lib = globalThis.libopenmpt;
-      if (!lib || typeof lib !== 'object') {
-        throw new Error('globalThis.libopenmpt not set after script evaluation');
-      }
-
-      if (!lib._openmpt_module_create_from_memory) {
-        log('Waiting for WASM onRuntimeInitialized…');
-        await new Promise((resolve, reject) => {
-          const timeout = setTimeout(
-            () => reject(new Error('WASM onRuntimeInitialized timeout')), 25000
-          );
-          if (lib.calledRun) {
-            clearTimeout(timeout);
-            resolve();
-          } else {
-            const prev = lib.onRuntimeInitialized;
-            lib.onRuntimeInitialized = () => {
-              clearTimeout(timeout);
-              if (typeof prev === 'function') prev();
-              resolve();
-            };
-          }
-        });
-      } else {
-        log('WASM already initialised (functions present)');
-      }
-
+      const lib = await ensureSharedLibOpenMPT(scriptText, wasmBytes);
       this.lib = lib;
       this.isLibReady = true;
       this._resolveLib();
@@ -274,7 +303,8 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
 
     try {
       const lib = this.lib;
-      log('Loading MOD into libopenmpt:', moduleData.byteLength, 'bytes');
+      const bytes = moduleBytesFromPayload(moduleData);
+      log('Loading module into libopenmpt:', bytes.byteLength, 'bytes');
 
       // Tear down previous module
       if (this.modulePtr) {
@@ -285,12 +315,16 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
       if (this.rightBufPtr) { lib._free(this.rightBufPtr); this.rightBufPtr = 0; }
 
       // Copy file data into WASM heap
-      const filePtr = lib._malloc(moduleData.byteLength);
+      const filePtr = lib._malloc(bytes.byteLength);
       if (!filePtr) throw new Error('_malloc returned 0 – out of WASM heap memory');
 
-      lib.HEAPU8.set(new Uint8Array(moduleData), filePtr);
-      this.modulePtr = lib._openmpt_module_create_from_memory(
-        filePtr, moduleData.byteLength, 0, 0, 0
+      lib.HEAPU8.set(bytes, filePtr);
+      const create =
+        typeof lib._openmpt_module_create_from_memory2 === 'function'
+          ? lib._openmpt_module_create_from_memory2.bind(lib)
+          : lib._openmpt_module_create_from_memory.bind(lib);
+      this.modulePtr = create(
+        filePtr, bytes.byteLength, 0, 0, 0, 0, 0, 0, 0,
       );
       lib._free(filePtr);
 
