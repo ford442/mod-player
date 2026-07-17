@@ -100,6 +100,11 @@ export async function startAudioPlayback(
     return;
   }
 
+  if (refs.isPlayingRef.current && refs.audioWorkletNodeRef.current) {
+    console.log('[PLAY] Already playing — ignoring duplicate play request');
+    return;
+  }
+
   console.log('[PLAY] Starting playback...', {
     engine: config.activeEngine,
     isWorkletSupported: config.isWorkletSupported,

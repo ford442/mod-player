@@ -47,8 +47,8 @@ export interface UseWorkletLoaderOptions {
 export const getWorkletUrl = (): string => {
   const base = detectRuntimeBase();
   // BUMP this version whenever openmpt-worklet.js changes to bust browser caches
-  // v5: singleton libopenmpt init in shared worklet scope + hot module reload
-  const WORKLET_VERSION = '5';
+  // v6: keep AudioContext running across module reload (no suspend on stop)
+  const WORKLET_VERSION = '6';
   const url = `${base}worklets/openmpt-worklet.js?v=${WORKLET_VERSION}`;
 
   return url;
@@ -80,7 +80,13 @@ export async function isNativeGlueAvailable(url: string): Promise<boolean> {
     const isWorkletProcessorScript =
       /extends\s+AudioWorkletProcessor/.test(text) ||
       /registerProcessor\s*\(/.test(text);
-    return hasFactory && !isWorkletProcessorScript;
+    if (!hasFactory || isWorkletProcessorScript) return false;
+
+    // Require the Emscripten .wasm sibling — stale/misnamed JS-only uploads must
+    // not flip the app into native-worklet mode (breaks playback on xm-player).
+    const wasmUrl = url.replace(/\.js(?:\?.*)?$/, '.wasm');
+    const wasmHead = await fetch(wasmUrl, { method: 'HEAD', cache: 'no-cache' });
+    return wasmHead.ok;
   } catch {
     return false;
   }

@@ -3,7 +3,7 @@
 // Service Worker for MOD Player
 // This SW is scope-aware and works under any base path (e.g., /xm-player/)
 
-const CACHE_NAME = 'mod-player-v3';
+const CACHE_NAME = 'mod-player-v4';
 
 // Get the scope (base path) from the service worker's registration
 const getScope = () => self.registration.scope || '/';
