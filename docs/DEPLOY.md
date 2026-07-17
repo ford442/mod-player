@@ -3,8 +3,10 @@
 ## Quick start
 
 ```bash
+npm run deploy                   # build (xm-player profile), validate, upload zip
+# or step by step:
 npm run build:xm-player:verify   # build + validate dist/
-python deploy.py --build         # build, validate, upload zip
+python deploy.py --no-build      # upload an already-validated dist/
 ```
 
 Deploy target: `https://test.1ink.us/xm-player/` via `storage.noahcohn.com` bundle API.
