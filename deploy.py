@@ -6,11 +6,8 @@ Deployment now goes through storage.noahcohn.com (Contabo VPS).
 No SFTP passwords are stored in this repo.
 
 Usage:
-  1. npm run build:xm-player:verify
-  2. python deploy.py
-
-Or build + deploy in one step:
-  python deploy.py --build
+  python deploy.py              # build (xm-player profile) + validate + upload
+  python deploy.py --no-build   # upload existing dist/ only (must already be xm-player build)
 
 This script contacts https://storage.noahcohn.com to upload the dist/ folder
 as a single zip archive. The server extracts it and pushes files over a
@@ -156,7 +153,7 @@ def validate_build_base_path(build_path: Path) -> None:
         print(
             f"ERROR: {index_html} was built with base '/' but deploy target is '{expected_prefix}'.\n"
             f"       CSS and layout will break on test.1ink.us/xm-player/.\n"
-            f"       Rebuild with:  npm run build:xm-player"
+            f"       Rebuild with:  npm run build:xm-player  (or: npm run deploy)"
         )
         sys.exit(1)
 
@@ -325,9 +322,9 @@ def run_build() -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Deploy dist/ to test.1ink.us/xm-player")
     parser.add_argument(
-        "--build",
+        "--no-build",
         action="store_true",
-        help="Run npm run build:xm-player:verify before uploading",
+        help="Skip npm run build:xm-player:verify (upload existing dist/ only)",
     )
     prune_group = parser.add_mutually_exclusive_group()
     prune_group.add_argument(
@@ -344,7 +341,7 @@ def main() -> None:
 
     print(f"\n=== Deploying '{PROJECT_NAME}' via Contabo -> test.1ink.us/xm-player ===\n")
 
-    if args.build:
+    if not args.no_build:
         run_build()
 
     build_path = Path(BUILD_DIR)

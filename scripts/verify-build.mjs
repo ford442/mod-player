@@ -12,6 +12,8 @@ import { join } from 'node:path';
 
 const BUILD_DIR = process.env.BUILD_DIR || 'dist';
 const PROJECT_NAME = process.env.PROJECT_NAME || 'xm-player';
+const EXPECTED_BASE =
+  process.env.EXPECTED_BASE || (PROJECT_NAME ? `/${PROJECT_NAME}/` : '');
 const MIN_CSS_BYTES = Number(process.env.MIN_CSS_BYTES || 10000);
 
 const errors = [];
@@ -52,6 +54,19 @@ if (!existsSync(indexPath)) {
 }
 
 const html = readFileSync(indexPath, 'utf8');
+
+if (EXPECTED_BASE) {
+  const looksLikeRootBase =
+    html.includes('src="/assets/') ||
+    html.includes('href="/assets/') ||
+    /(?:src|href)=["'](?:\.\/)?assets\/[^"']+\.(?:js|css)/.test(html);
+  if (!html.includes(EXPECTED_BASE) && looksLikeRootBase) {
+    errors.push(
+      `index.html was built with base '/' but expected '${EXPECTED_BASE}' (run npm run build:xm-player)`,
+    );
+  }
+}
+
 const stylesheetHrefs = [
   ...html.matchAll(/<link[^>]+rel=["']stylesheet["'][^>]*href=["']([^"']+)["']/gi),
 ].map((m) => m[1]);

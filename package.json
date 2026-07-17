@@ -17,6 +17,8 @@
     "verify:wasm": "node scripts/verify-wasm-assets.mjs",
     "verify:build": "node scripts/verify-build.mjs",
     "build:xm-player:verify": "npm run build:xm-player && npm run verify:build",
+    "deploy": "python3 deploy.py",
+    "deploy:upload-only": "python3 deploy.py --no-build",
     "preview": "vite preview",
     "lint": "eslint . --max-warnings 100",
     "typecheck": "tsc --noEmit",
