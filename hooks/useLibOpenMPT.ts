@@ -328,9 +328,9 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
     console.log('[processModuleData] Processing module:', fileName, 'size:', fileData.byteLength);
 
     // Perform a complete engine stop before loading the next module. This resets
-    // all timing/worklet refs, pauses any active native engine, disconnects the
-    // current AudioWorkletNode and clears its message handler so a stray late
-    // position report from the old module cannot corrupt the new module's state.
+    // all timing/worklet refs, pauses any active native engine, and clears the
+    // worklet message handler so a stray late position report from the old module
+    // cannot corrupt the new module's state. The AudioWorkletNode is kept alive.
     stopMusic(false);
 
     // Mark UI as loading and clear stale playhead/fraction state so the display
@@ -713,9 +713,9 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
       nativeEngineRef.current.pause();
     }
 
-    if (audioContextRef.current) {
-      audioContextRef.current.suspend();
-    }
+    // Do not suspend the AudioContext on normal stop/module reload. resume() after
+    // suspend() requires a fresh user gesture — auto-play at the end of async
+    // processModuleData() then fails silently (UI shows Playing, no audio).
 
     // Gracefully stop the old worklet before disconnecting: pause it so it stops
     // rendering/posting, and detach the message handler so any late position
