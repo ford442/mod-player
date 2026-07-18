@@ -50,6 +50,7 @@ export function describeShader(shaderFile: string): string {
   const meta = resolveShaderMeta(shaderFile);
   if (meta.patternTexture === 'video') return 'Video/cloud tunnel';
   if (meta.strictPlayheadSustain) return 'Note-on sustain tail mode';
+  if (meta.audioReactive) return 'Audio-reactive chassis (v0.58)';
   if (meta.oscilloscope) return 'Three-emitter LED + oscilloscope';
   if (meta.instrumentPalette) return 'Three-emitter LED + instrument palette';
   if (meta.bloomProfile === 'three-emitter') return 'Trapcode-style frosted lens';

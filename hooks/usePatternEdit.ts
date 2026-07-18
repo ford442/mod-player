@@ -11,15 +11,18 @@ import {
 export interface UsePatternEditOptions {
   matrix: PatternMatrix | null;
   onMatrixChange: (matrix: PatternMatrix) => void;
+  /** Changes on new module load — forces baseline/history reset even when dirty. */
+  moduleKey?: string | null;
   onReset?: () => void;
 }
 
-export function usePatternEdit({ matrix, onMatrixChange, onReset }: UsePatternEditOptions) {
+export function usePatternEdit({ matrix, onMatrixChange, moduleKey, onReset }: UsePatternEditOptions) {
   const [editMode, setEditMode] = useState(false);
   const [isDirty, setIsDirty] = useState(false);
   const pastRef = useRef<PatternMatrix[]>([]);
   const futureRef = useRef<PatternMatrix[]>([]);
   const baselineRef = useRef<PatternMatrix | null>(null);
+  const moduleKeyRef = useRef<string | null | undefined>(undefined);
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
 
@@ -36,6 +39,19 @@ export function usePatternEdit({ matrix, onMatrixChange, onReset }: UsePatternEd
     syncHistoryFlags();
     onReset?.();
   }, [onReset, syncHistoryFlags]);
+
+  // Force clean baseline when a different module is loaded.
+  useEffect(() => {
+    if (moduleKey === undefined) return;
+    if (moduleKeyRef.current === moduleKey) return;
+    moduleKeyRef.current = moduleKey;
+    if (matrix) {
+      resetHistory(matrix);
+    } else {
+      resetHistory(null);
+    }
+    setEditMode(false);
+  }, [moduleKey, matrix, resetHistory]);
 
   useEffect(() => {
     if (!matrix) {
@@ -98,6 +114,12 @@ export function usePatternEdit({ matrix, onMatrixChange, onReset }: UsePatternEd
     setEditMode((prev) => !prev);
   }, []);
 
+  const revertToBaseline = useCallback(() => {
+    if (!baselineRef.current) return;
+    onMatrixChange(clonePatternMatrix(baselineRef.current));
+    resetHistory(baselineRef.current);
+  }, [onMatrixChange, resetHistory]);
+
   return {
     editMode,
     setEditMode,
@@ -110,6 +132,7 @@ export function usePatternEdit({ matrix, onMatrixChange, onReset }: UsePatternEd
     clearCell,
     undo,
     redo,
+    revertToBaseline,
     resetHistory,
   };
 }

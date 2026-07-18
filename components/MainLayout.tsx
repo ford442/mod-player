@@ -36,6 +36,8 @@ interface MainLayoutProps {
   setIs3DMode: (v: boolean) => void;
   liteMode: boolean;
   setLiteMode: (v: boolean) => void;
+  reactiveMode: boolean;
+  setReactiveMode: (v: boolean) => void;
   isWorkletSupported: boolean;
   workletLoadError: string | null | undefined;
   toggleAudioEngine: () => void;
@@ -87,6 +89,7 @@ interface MainLayoutProps {
   setDebugPanelOpen: (v: boolean | ((prev: boolean) => boolean)) => void;
   playbackStateRef: React.MutableRefObject<PlaybackState>;
   oscBufferRef: React.MutableRefObject<Float32Array | null>;
+  audioReactiveRef: React.MutableRefObject<Float32Array | null>;
   bloomPreset: BloomPreset;
   setBloomPreset: (v: BloomPreset) => void;
   colorScheme: ColorScheme;
@@ -176,6 +179,7 @@ interface MainLayoutProps {
   canPatternRedo?: boolean;
   onPatternUndo?: () => void;
   onPatternRedo?: () => void;
+  onPatternRevert?: () => void;
   onPatternCellEdit?: (row: number, channel: number, field: PatternEditField) => void;
   onPatternCellPatch?: (row: number, channel: number, patch: PatternCellPatch) => void;
   onPatternCellClear?: (row: number, channel: number) => void;
@@ -190,6 +194,8 @@ export function MainLayout({
   setIs3DMode,
   liteMode,
   setLiteMode,
+  reactiveMode,
+  setReactiveMode,
   isWorkletSupported,
   workletLoadError,
   toggleAudioEngine,
@@ -241,6 +247,7 @@ export function MainLayout({
   setDebugPanelOpen,
   playbackStateRef,
   oscBufferRef,
+  audioReactiveRef,
   bloomPreset,
   setBloomPreset,
   colorScheme,
@@ -330,6 +337,7 @@ export function MainLayout({
   canPatternRedo = false,
   onPatternUndo,
   onPatternRedo,
+  onPatternRevert,
   onPatternCellEdit,
   onPatternCellPatch,
   onPatternCellClear,
@@ -398,6 +406,18 @@ export function MainLayout({
                 >
                   {liteMode ? '⚡ Lite' : '🖥️ Full'}
                 </button>
+                <button
+                  onClick={() => setReactiveMode(!reactiveMode)}
+                  className={cn(
+                    'px-4 py-2 text-sm font-mono rounded-lg shadow-lg transition-colors border',
+                    reactiveMode
+                      ? 'bg-fuchsia-700 text-white border-fuchsia-500 hover:bg-fuchsia-600'
+                      : 'bg-gray-700 text-gray-200 border-gray-600 hover:bg-gray-600',
+                  )}
+                  title={reactiveMode ? 'Audio-reactive chassis on (v0.58+)' : 'Static chassis — no SAB band drive'}
+                >
+                  {reactiveMode ? '🎛️ Reactive' : '🎛️ Static'}
+                </button>
                 {onCopyShareLink && (
                   <button
                     type="button"
@@ -462,6 +482,16 @@ export function MainLayout({
                     >
                       ↷ Redo
                     </button>
+                    {patternEditDirty && onPatternRevert && (
+                      <button
+                        type="button"
+                        onClick={onPatternRevert}
+                        className="px-3 py-2 text-sm font-mono rounded-lg border transition-colors bg-amber-900/60 text-amber-100 border-amber-700 hover:bg-amber-800/70"
+                        title="Discard edits and restore loaded pattern (session-only)"
+                      >
+                        ↩ Revert
+                      </button>
+                    )}
                   </>
                 )}
             </div>
@@ -577,6 +607,8 @@ export function MainLayout({
               // PERFORMANCE OPTIMIZATION: Pass ref for high-frequency updates
               playbackStateRef={playbackStateRef}
               oscBufferRef={oscBufferRef}
+              audioReactiveRef={audioReactiveRef}
+              reactiveMode={reactiveMode}
              // Bloom settings from preset
              bloomIntensity={(isNightShader && nightModeEnabled) ? nightConfig.bloomIntensity : bloomPreset.intensity}
              bloomThreshold={bloomPreset.threshold}

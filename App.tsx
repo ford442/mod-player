@@ -87,6 +87,9 @@ function App() {
   // Lite mode — auto-detected from device capabilities, overridable via toggle
   const [liteMode, setLiteMode] = useState<boolean>(DEVICE_CAPABILITIES.isLite);
 
+  // Audio-reactive chassis (SAB bands → GPU) — persisted, shader must support it
+  const [reactiveMode, setReactiveMode] = useLocalStorage<boolean>('xasm1_reactive_mode', true);
+
   // Apply data-theme attribute to <html> so CSS variables cascade globally
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
@@ -149,7 +152,8 @@ function App() {
     playbackStateRef,
     workletLoadError,
     oscBufferRef,
-  } = useLibOpenMPT(volume);
+    audioReactiveRef,
+  } = useLibOpenMPT(volume, liteMode);
 
   // Prevent incidental document scroll when playback starts (row-follow, layout shifts, etc.).
   const playGuarded = useCallback(() => {
@@ -761,9 +765,14 @@ function App() {
 
   const { toasts, showToast, dismissToast } = useToast();
 
+  const patternModuleKey = isModuleLoaded
+    ? `${moduleSourceUrl ?? ''}|${moduleInfo.title}`
+    : null;
+
   const patternEdit = usePatternEdit({
     matrix: sequencerMatrix,
     onMatrixChange: replacePatternMatrix,
+    moduleKey: patternModuleKey,
   });
 
   const handlePatternCellEdit = useCallback((row: number, channel: number, field: PatternEditField) => {
@@ -943,6 +952,8 @@ function App() {
       setIs3DMode={setIs3DMode}
       liteMode={liteMode}
       setLiteMode={setLiteMode}
+      reactiveMode={reactiveMode}
+      setReactiveMode={setReactiveMode}
       isWorkletSupported={isWorkletSupported}
       workletLoadError={workletLoadError}
       toggleAudioEngine={toggleAudioEngine}
@@ -994,6 +1005,7 @@ function App() {
       setDebugPanelOpen={setDebugPanelOpen}
       playbackStateRef={playbackStateRef}
       oscBufferRef={oscBufferRef}
+      audioReactiveRef={audioReactiveRef}
       bloomPreset={bloomPreset}
       setBloomPreset={setBloomPreset}
       colorScheme={colorScheme}
@@ -1083,6 +1095,7 @@ function App() {
       canPatternRedo={patternEdit.canRedo}
       onPatternUndo={patternEdit.undo}
       onPatternRedo={patternEdit.redo}
+      onPatternRevert={patternEdit.revertToBaseline}
       onPatternCellEdit={handlePatternCellEdit}
       onPatternCellPatch={patternEdit.editCell}
       onPatternCellClear={patternEdit.clearCell}

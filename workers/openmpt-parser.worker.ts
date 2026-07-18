@@ -4,7 +4,9 @@ import {
   getLibOpenMPTJsUrl,
 } from '../utils/libopenmptAssets';
 import { parseModuleWithLib } from '../utils/parseModuleWithLib';
+import { extractInstrumentTable, mergeLibInstrumentNames } from '../utils/sampleExtract';
 import { parserLog } from '../utils/parserDebug';
+import type { InstrumentTable } from '../types/instruments';
 
 const LIB_FETCH_TIMEOUT_MS = 12_000;
 
@@ -18,6 +20,7 @@ interface ParseResponse {
   type: 'parsed';
   patternMatrices: ReturnType<typeof parseModuleWithLib>['patternMatrices'];
   metadata: ReturnType<typeof parseModuleWithLib>['metadata'];
+  instrumentTable: InstrumentTable;
 }
 
 interface ParseError {
@@ -135,12 +138,26 @@ async function handleMessage(data: IncomingMessage): Promise<void> {
     const lib = await loadLibOpenMPT();
     self.postMessage({ type: 'progress', stage: 'patterns' } satisfies { type: 'progress'; stage: 'patterns' });
     const { patternMatrices, metadata } = parseModuleWithLib(lib, fileData, fileName);
-    parserLog('worker parse done', metadata.numOrders, 'orders', patternMatrices.length, 'matrices');
+    self.postMessage({ type: 'progress', stage: 'instruments' } satisfies { type: 'progress'; stage: 'instruments' });
+    const instrumentTable = mergeLibInstrumentNames(
+      extractInstrumentTable(fileData, fileName),
+      metadata.instruments,
+    );
+    parserLog(
+      'worker parse done',
+      metadata.numOrders,
+      'orders',
+      patternMatrices.length,
+      'matrices',
+      instrumentTable.samples.length,
+      'samples',
+    );
 
     const response: ParseResponse = {
       type: 'parsed',
       patternMatrices,
       metadata,
+      instrumentTable,
     };
     self.postMessage(response);
   } catch (err) {

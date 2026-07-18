@@ -163,6 +163,26 @@ async function ensureSharedLibOpenMPT(scriptText, wasmBytes) {
   return globalThis.__openmptWorkletLibInitPromise;
 }
 
+// ── Audio-reactive SAB layout (must match utils/audioReactive.ts) ───────────
+const OSC_SAMPLE_COUNT = 2048;
+const AUDIO_REACTIVE_FLOATS = 16;
+const AUDIO_SAB_BYTES = (OSC_SAMPLE_COUNT + AUDIO_REACTIVE_FLOATS) * 4;
+const AR_BASS = 0;
+const AR_MID = 1;
+const AR_HIGH = 2;
+const AR_AMPLITUDE = 3;
+const AR_BEAT = 4;
+const AR_PEAK_L = 5;
+const AR_PEAK_R = 6;
+const AR_RMS_L = 7;
+const AR_RMS_R = 8;
+const AR_FLAGS = 9;
+const AR_FLAG_LITE = 1;
+
+function onePoleAlpha(cutoffHz, sr) {
+  return 1 - Math.exp((-2 * Math.PI * cutoffHz) / sr);
+}
+
 class XMPlayerProcessor extends AudioWorkletProcessor {
   constructor(options) {
     super(options);
@@ -247,21 +267,128 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
         if (this.oscBuffer) {
           this.port.postMessage({ type: 'oscBuffer', buffer: this.oscBuffer });
         }
+      } else if (type === 'setAudioLite') {
+        this._audioLite = !!e.data.lite;
       } else if (!type && moduleData) {
         await this.loadModule(moduleData);
       }
     };
 
     try {
-      this.oscBuffer = new SharedArrayBuffer(2048 * 4);
+      this.oscBuffer = new SharedArrayBuffer(AUDIO_SAB_BYTES);
     } catch (e) {
       this.oscBuffer = null;
     }
-    this.oscView = this.oscBuffer ? new Float32Array(this.oscBuffer) : null;
+    this.oscView = this.oscBuffer ? new Float32Array(this.oscBuffer, 0, OSC_SAMPLE_COUNT) : null;
+    this.audioMetaView = this.oscBuffer
+      ? new Float32Array(this.oscBuffer, OSC_SAMPLE_COUNT * 4, AUDIO_REACTIVE_FLOATS)
+      : null;
     this.oscWritePtr = 0;
+    this._audioLite = false;
+    this._lpBass = 0;
+    this._lpMid = 0;
+    this._prevBass = 0;
+    this._beatDecay = 0;
+    this._smoothBass = 0;
+    this._smoothMid = 0;
+    this._smoothHigh = 0;
+    this._alphaBass = onePoleAlpha(180, sampleRate);
+    this._alphaMid = onePoleAlpha(1200, sampleRate);
     if (this.oscBuffer) {
       this.port.postMessage({ type: 'oscBuffer', buffer: this.oscBuffer });
     }
+  }
+
+  /** Cheap 3-band energy + peak/RMS into audioMetaView (no main-thread AnalyserNode). */
+  _updateAudioReactive(outL, outR, count, channelVU) {
+    const meta = this.audioMetaView;
+    if (!meta) return;
+
+    if (this._audioLite) {
+      let vuMax = 0;
+      for (let i = 0; i < channelVU.length; i++) {
+        if (channelVU[i] > vuMax) vuMax = channelVU[i];
+      }
+      const coarse = Math.min(1, vuMax * 1.2);
+      const smooth = 0.82;
+      this._smoothBass = this._smoothBass * smooth + coarse * (1 - smooth);
+      this._smoothMid = this._smoothMid * smooth + coarse * 0.55 * (1 - smooth);
+      this._smoothHigh = this._smoothHigh * smooth + coarse * 0.3 * (1 - smooth);
+      meta[AR_BASS] = this._smoothBass;
+      meta[AR_MID] = this._smoothMid;
+      meta[AR_HIGH] = this._smoothHigh;
+      meta[AR_AMPLITUDE] = coarse;
+      const beat = coarse > this._prevBass * 1.25 && coarse > 0.12 ? 1 : this._beatDecay * 0.86;
+      this._beatDecay = beat;
+      this._prevBass = coarse;
+      meta[AR_BEAT] = beat;
+      meta[AR_PEAK_L] = coarse;
+      meta[AR_PEAK_R] = coarse;
+      meta[AR_RMS_L] = coarse * 0.7;
+      meta[AR_RMS_R] = coarse * 0.7;
+      meta[AR_FLAGS] = AR_FLAG_LITE;
+      return;
+    }
+
+    let peakL = 0;
+    let peakR = 0;
+    let sumSqL = 0;
+    let sumSqR = 0;
+    let bassAcc = 0;
+    let midAcc = 0;
+    let highAcc = 0;
+
+    for (let i = 0; i < count; i++) {
+      const l = outL[i];
+      const r = outR[i];
+      const al = Math.abs(l);
+      const ar = Math.abs(r);
+      if (al > peakL) peakL = al;
+      if (ar > peakR) peakR = ar;
+      sumSqL += l * l;
+      sumSqR += r * r;
+
+      const mono = (l + r) * 0.5;
+      this._lpBass += this._alphaBass * (mono - this._lpBass);
+      const midBand = mono - this._lpBass;
+      this._lpMid += this._alphaMid * (midBand - this._lpMid);
+      const highBand = midBand - this._lpMid;
+
+      bassAcc += this._lpBass * this._lpBass;
+      midAcc += this._lpMid * this._lpMid;
+      highAcc += highBand * highBand;
+    }
+
+    const inv = 1 / Math.max(1, count);
+    const bass = Math.sqrt(bassAcc * inv);
+    const mid = Math.sqrt(midAcc * inv);
+    const high = Math.sqrt(highAcc * inv);
+    const amplitude = Math.min(1, (bass + mid + high) * 0.55);
+    const rmsL = Math.sqrt(sumSqL * inv);
+    const rmsR = Math.sqrt(sumSqR * inv);
+
+    const smooth = 0.78;
+    this._smoothBass = this._smoothBass * smooth + bass * (1 - smooth);
+    this._smoothMid = this._smoothMid * smooth + mid * (1 - smooth);
+    this._smoothHigh = this._smoothHigh * smooth + high * (1 - smooth);
+
+    meta[AR_BASS] = Math.min(1, this._smoothBass * 2.8);
+    meta[AR_MID] = Math.min(1, this._smoothMid * 3.2);
+    meta[AR_HIGH] = Math.min(1, this._smoothHigh * 4.0);
+    meta[AR_AMPLITUDE] = amplitude;
+    meta[AR_PEAK_L] = peakL;
+    meta[AR_PEAK_R] = peakR;
+    meta[AR_RMS_L] = rmsL;
+    meta[AR_RMS_R] = rmsR;
+    meta[AR_FLAGS] = 0;
+
+    const bassNorm = meta[AR_BASS];
+    const beat = bassNorm > this._prevBass * 1.28 && bassNorm > 0.14
+      ? 1.0
+      : this._beatDecay * 0.87;
+    this._beatDecay = beat;
+    this._prevBass = bassNorm;
+    meta[AR_BEAT] = beat;
   }
 
   // ── libopenmpt bootstrap via main-thread-fetched assets ────────────
@@ -435,7 +562,7 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
       const framesToCopy = Math.min(128, outL.length);
       for (let i = 0; i < framesToCopy; i++) {
         this.oscView[this.oscWritePtr] = outL[i];
-        this.oscWritePtr = (this.oscWritePtr + 1) & 2047; // fast modulo 2048
+        this.oscWritePtr = (this.oscWritePtr + 1) & (OSC_SAMPLE_COUNT - 1);
       }
     }
 
@@ -492,6 +619,8 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
       for (let i = 0; i < Math.min(numCh, 32); i++) {
         channelVU.push(lib._openmpt_module_get_current_channel_vu_mono(mod, i));
       }
+
+      this._updateAudioReactive(outL, outR, samplesWritten, channelVU);
 
       this._lastReportedRowInt = rowInt;
       this.port.postMessage({

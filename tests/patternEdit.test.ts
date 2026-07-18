@@ -3,9 +3,11 @@ import {
   applyCellPatch,
   clonePatternMatrix,
   cycleNoteValue,
+  MAX_UNDO_STEPS,
   normalizePatternCell,
   noteToText,
 } from '../utils/patternEdit';
+import { packPatternMatrixHighPrecision } from '../utils/gpuPacking';
 import type { PatternMatrix } from '../types';
 
 function makeMatrix(): PatternMatrix {
@@ -51,5 +53,26 @@ describe('patternEdit', () => {
     const cell = normalizePatternCell({ type: 'empty', text: '', note: 49 });
     expect(cell.type).toBe('note');
     expect(cell.text).toBe('C-4');
+  });
+
+  it('caps undo snapshot stack at MAX_UNDO_STEPS', () => {
+    let stack: PatternMatrix[] = [];
+    let matrix = makeMatrix();
+    for (let i = 0; i < 55; i++) {
+      stack = [...stack, clonePatternMatrix(matrix)].slice(-MAX_UNDO_STEPS);
+      matrix = applyCellPatch(matrix, 0, 0, { note: 49 + i });
+    }
+    expect(stack.length).toBe(MAX_UNDO_STEPS);
+    expect(stack[0]?.rows[0]?.[0]?.note).toBe(49 + (55 - MAX_UNDO_STEPS - 1));
+    expect(stack[MAX_UNDO_STEPS - 1]?.rows[0]?.[0]?.note).toBe(49 + 53);
+  });
+
+  it('edited matrix repacks differently for GPU upload', () => {
+    const matrix = makeMatrix();
+    const edited = applyCellPatch(matrix, 0, 0, { note: 60 });
+    const { packedData: before } = packPatternMatrixHighPrecision(matrix, false);
+    const { packedData: after } = packPatternMatrixHighPrecision(edited, false);
+    expect(after).not.toEqual(before);
+    expect(after[0]).not.toBe(before[0]);
   });
 });

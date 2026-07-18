@@ -31,6 +31,7 @@ import { getShaderMeta } from '../utils/shaderRegistry';
 import { detectRuntimeBase } from '../src/lib/paths';
 import { getBloomProfile } from '../utils/bloomProfiles';
 import { configureCanvasContext } from '../utils/webgpuDevice';
+import { OSC_SAMPLE_COUNT } from '../utils/audioReactive';
 
 const DEFAULT_CHANNELS = 4;
 
@@ -68,6 +69,8 @@ interface PatternDisplayProps {
   analyserNode?: AnalyserNode | null;
   playbackStateRef?: React.MutableRefObject<PlaybackState>;
   oscBufferRef?: React.MutableRefObject<Float32Array | null>;
+  audioReactiveRef?: React.MutableRefObject<Float32Array | null>;
+  reactiveMode?: boolean;
   debugPanelOpen?: boolean;
   onCloseDebug?: () => void;
   onOpenDebug?: () => void;
@@ -128,6 +131,8 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   analyserNode,
   playbackStateRef,
   oscBufferRef,
+  audioReactiveRef,
+  reactiveMode = true,
   debugPanelOpen = false,
   onCloseDebug,
   onOpenDebug,
@@ -359,6 +364,8 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     chassisDark,
     vignetteStrength, filmGrain, invertMix, nightPreset,
     themeBlend: themeBlendRef.current,
+    reactiveMode,
+    ...(audioReactiveRef ? { audioReactiveRef } : {}),
     ...(totalRows !== undefined ? { totalRows } : {}),
     ...(playbackStateRef ? { playbackStateRef } : {}),
   });
@@ -376,6 +383,8 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     chassisDark,
     vignetteStrength, filmGrain, invertMix, nightPreset,
     themeBlend: themeBlendRef.current,
+    reactiveMode,
+    ...(audioReactiveRef ? { audioReactiveRef } : {}),
     ...(totalRows !== undefined ? { totalRows } : {}),
     ...(playbackStateRef ? { playbackStateRef } : {}),
   };
@@ -446,7 +455,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     if (!device || !gpuReady || !usesOscilloscope(shaderFile)) return;
     if (!oscTextureRef.current) {
       oscTextureRef.current = device.createTexture({
-        size: [2048, 1, 1],
+        size: [OSC_SAMPLE_COUNT, 1, 1],
         format: 'r32float',
         usage: GPUTextureUsage.COPY_DST | GPUTextureUsage.TEXTURE_BINDING,
       });
@@ -610,11 +619,12 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
         analyserNode.getByteFrequencyData(freqDataRef.current);
       }
       if (oscTextureRef.current && oscBufferRef?.current && gpuDevRef.current) {
+        const osc = oscBufferRef.current;
         gpuDevRef.current.queue.writeTexture(
           { texture: oscTextureRef.current },
-          oscBufferRef.current.buffer as ArrayBuffer,
-          { bytesPerRow: 2048 * 4 },
-          { width: 2048, height: 1, depthOrArrayLayers: 1 }
+          osc.buffer as ArrayBuffer,
+          { offset: osc.byteOffset, bytesPerRow: OSC_SAMPLE_COUNT * 4 },
+          { width: OSC_SAMPLE_COUNT, height: 1, depthOrArrayLayers: 1 }
         );
       }
       if (gpuReadyEffective && !useHTML) {

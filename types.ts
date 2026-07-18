@@ -1,5 +1,7 @@
 // Core type definitions for MOD Player
 
+import type { InstrumentTable } from './types/instruments';
+
 export interface PatternCell {
   type: 'note' | 'instrument' | 'effect' | 'empty';
   text: string;
@@ -144,6 +146,7 @@ export interface WorkerParseResponse {
   type: 'parsed';
   patternMatrices: PatternMatrix[];
   metadata: WorkerParseMetadata;
+  instrumentTable?: InstrumentTable;
 }
 
 export interface WorkerParseError {
@@ -153,7 +156,7 @@ export interface WorkerParseError {
 
 export interface WorkerParseProgress {
   type: 'progress';
-  stage: 'fetch' | 'wasm' | 'patterns';
+  stage: 'fetch' | 'wasm' | 'patterns' | 'instruments';
 }
 
 export type WorkerParseMessage = WorkerParseRequest;

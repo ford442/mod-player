@@ -27,6 +27,7 @@
  * hitTestProfile      – embedded transport hit-testing layout
  * oscilloscope        – binding 6 oscilloscope texture (v0.55)
  * instrumentPalette   – binding 7 palette texture (v0.52–54, v0.56)
+ * audioReactive       – binding 8 AudioReactive uniform + bezel_audio background (v0.58+)
  * highPrecisionPacking– PackedA/PackedB + DURA/TRIG packing
  * playheadRowAsFloat  – uniform slot [2] is f32 (not u32)
  * strictPlayheadSustain – playhead-scrolled sustain (v0.45b / v0.30b)
@@ -76,6 +77,8 @@ export interface ShaderMeta {
   hitTestProfile: HitTestProfile;
   oscilloscope: boolean;
   instrumentPalette: boolean;
+  /** Multi-band chassis reactivity — binding 8 uniform + bezel_audio.wgsl. */
+  audioReactive: boolean;
   highPrecisionPacking: boolean;
   playheadRowAsFloat: boolean;
   strictPlayheadSustain: boolean;
@@ -118,6 +121,7 @@ function circularLed(overrides: Partial<ShaderMeta> = {}): ShaderMeta {
     hitTestProfile: 'none',
     oscilloscope: false,
     instrumentPalette: false,
+    audioReactive: false,
     highPrecisionPacking: true,
     playheadRowAsFloat: true,
     strictPlayheadSustain: false,
@@ -153,6 +157,7 @@ function horizontalPanel(overrides: Partial<ShaderMeta> = {}): ShaderMeta {
     hitTestProfile: 'none',
     oscilloscope: false,
     instrumentPalette: false,
+    audioReactive: false,
     highPrecisionPacking: true,
     playheadRowAsFloat: true,
     strictPlayheadSustain: false,
@@ -199,6 +204,7 @@ export const SHADER_REGISTRY: Readonly<Record<string, ShaderMeta>> = {
     hitTestProfile: 'none',
     oscilloscope: false,
     instrumentPalette: false,
+    audioReactive: false,
     highPrecisionPacking: false,
     playheadRowAsFloat: true,
     strictPlayheadSustain: false,
@@ -230,6 +236,7 @@ export const SHADER_REGISTRY: Readonly<Record<string, ShaderMeta>> = {
     hitTestProfile: 'none',
     oscilloscope: false,
     instrumentPalette: false,
+    audioReactive: false,
     highPrecisionPacking: false,
     playheadRowAsFloat: true,
     strictPlayheadSustain: false,
@@ -261,6 +268,7 @@ export const SHADER_REGISTRY: Readonly<Record<string, ShaderMeta>> = {
     hitTestProfile: 'none',
     oscilloscope: false,
     instrumentPalette: false,
+    audioReactive: false,
     highPrecisionPacking: false,
     playheadRowAsFloat: true,
     strictPlayheadSustain: false,
@@ -292,6 +300,7 @@ export const SHADER_REGISTRY: Readonly<Record<string, ShaderMeta>> = {
     hitTestProfile: 'none',
     oscilloscope: false,
     instrumentPalette: false,
+    audioReactive: false,
     highPrecisionPacking: true,
     playheadRowAsFloat: true,
     strictPlayheadSustain: true,
@@ -323,6 +332,7 @@ export const SHADER_REGISTRY: Readonly<Record<string, ShaderMeta>> = {
     hitTestProfile: 'none',
     oscilloscope: false,
     instrumentPalette: false,
+    audioReactive: false,
     highPrecisionPacking: false,
     playheadRowAsFloat: true,
     strictPlayheadSustain: false,
@@ -469,6 +479,14 @@ export const SHADER_REGISTRY: Readonly<Record<string, ShaderMeta>> = {
   'patternv0.57.wgsl': circularLed({
     bloomProfile: 'three-emitter',
     stepsDrivenVisibleRows: true,
+  }),
+
+  // ── v0.58 — audio-reactive chassis (SAB bands → bezel + bloom) ────────────
+  'patternv0.58.wgsl': circularLed({
+    bloomProfile: 'three-emitter',
+    stepsDrivenVisibleRows: true,
+    audioReactive: true,
+    background: 'bezel_audio.wgsl',
   }),
 };
 

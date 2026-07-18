@@ -16,6 +16,8 @@ import {
   usesPlayheadRowAsFloat,
   usesOscilloscope,
   usesInstrumentPalette,
+  usesAudioReactive,
+  usesAudioReactiveBezel,
   usesVideoPatternTexture,
   usesStepsDrivenVisibleRows,
   getUiExtraInstances,
@@ -62,6 +64,11 @@ import {
   WebGPUInitError,
   type WebGPUDeviceStatus,
 } from '../utils/webgpuDevice';
+import {
+  AUDIO_REACTIVE_UNIFORM_BYTES,
+  packAudioReactiveUniform,
+  readAudioBands,
+} from '../utils/audioReactive';
 
 export type DebugInfo = {
   layoutMode: string;
@@ -127,6 +134,10 @@ export interface WebGPURenderParams {
   // Per-instrument palette mode
   paletteMode?: number;
   instrumentPalette?: Uint8Array | undefined;
+  /** SAB metadata view (band energy + meters) from worklet. */
+  audioReactiveRef?: React.MutableRefObject<Float32Array | null>;
+  /** User toggle — when false, AudioReactive.enabled is 0. */
+  reactiveMode?: boolean;
 }
 
 export function useWebGPURender(
@@ -177,6 +188,8 @@ export function useWebGPURender(
   const bezelUniformBufferRef = useRef<GPUBuffer | null>(null);
   const instrumentPaletteTextureRef = useRef<GPUTexture | null>(null);
   const instrumentPaletteVersionRef = useRef<Uint8Array | null>(null);
+  const audioReactiveUniformBufferRef = useRef<GPUBuffer | null>(null);
+  const audioReactiveUniformDataRef = useRef(new Float32Array(16));
   const poolRef = useRef<GpuResourcePool | null>(null);
   const lifecycleRef = useRef(new GpuLifecycle());
   const renderGenerationRef = useRef(0);
@@ -220,6 +233,9 @@ export function useWebGPURender(
       }
       if (usesInstrumentPalette(shaderFile) && instrumentPaletteTextureRef.current) {
         entries.push({ binding: 7, resource: instrumentPaletteTextureRef.current.createView() });
+      }
+      if (usesAudioReactive(shaderFile) && audioReactiveUniformBufferRef.current) {
+        entries.push({ binding: 8, resource: { buffer: audioReactiveUniformBufferRef.current } });
       }
     } else if (layoutType === 'texture') {
       if (!textureResourcesRef.current) {
@@ -349,6 +365,7 @@ export function useWebGPURender(
     bezelUniformBufferRef.current = null;
     videoTextureRef.current = null;
     instrumentPaletteTextureRef.current = null;
+    audioReactiveUniformBufferRef.current = null;
   }, []);
 
   // Acquire GPUDevice + canvas context (once per mount / device-lost recovery).
@@ -536,6 +553,9 @@ export function useWebGPURender(
           if (usesInstrumentPalette(activeShaderFile)) {
             extendedEntries.push({ binding: 7, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float' } });
           }
+          if (usesAudioReactive(activeShaderFile)) {
+            extendedEntries.push({ binding: 8, visibility: GPUShaderStage.FRAGMENT, buffer: { type: 'uniform' } });
+          }
           bindGroupLayout = device.createBindGroupLayout({ entries: extendedEntries });
         } else {
           bindGroupLayout = device.createBindGroupLayout({ entries: [{ binding: 0, visibility: GPUShaderStage.FRAGMENT | GPUShaderStage.VERTEX, buffer: { type: 'read-only-storage' } }, { binding: 1, visibility: GPUShaderStage.FRAGMENT | GPUShaderStage.VERTEX, buffer: { type: 'uniform' } }] });
@@ -576,13 +596,32 @@ export function useWebGPURender(
           instrumentPaletteVersionRef.current = placeholder;
         }
 
+        if (usesAudioReactive(activeShaderFile) || usesAudioReactiveBezel(activeShaderFile)) {
+          audioReactiveUniformBufferRef.current = pool.track(
+            device.createBuffer({
+              size: alignTo(AUDIO_REACTIVE_UNIFORM_BYTES, 256),
+              usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+            }),
+            'shader',
+          );
+        }
+
         if (shouldUseBackgroundPass(activeShaderFile)) {
           try {
             const backgroundShaderFile = getBackgroundShaderFile(activeShaderFile);
             const backgroundSource = await fetchShaderSource(backgroundShaderFile);
             if (cancelled || pool.isDisposed) return;
             const bezelModule = device.createShaderModule({ code: backgroundSource });
-            const bezelBindLayout = device.createBindGroupLayout({ entries: [{ binding: 0, visibility: GPUShaderStage.FRAGMENT, buffer: { type: 'uniform' } }, { binding: 1, visibility: GPUShaderStage.FRAGMENT, sampler: { type: 'filtering' } }, { binding: 2, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float' } }] });
+            const audioBezel = usesAudioReactiveBezel(activeShaderFile);
+            const bezelBindEntries: GPUBindGroupLayoutEntry[] = [
+              { binding: 0, visibility: GPUShaderStage.FRAGMENT, buffer: { type: 'uniform' } },
+              { binding: 1, visibility: GPUShaderStage.FRAGMENT, sampler: { type: 'filtering' } },
+              { binding: 2, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float' } },
+            ];
+            if (audioBezel) {
+              bezelBindEntries.push({ binding: 3, visibility: GPUShaderStage.FRAGMENT, buffer: { type: 'uniform' } });
+            }
+            const bezelBindLayout = device.createBindGroupLayout({ entries: bezelBindEntries });
             bezelPipelineRef.current = device.createRenderPipeline({ layout: device.createPipelineLayout({ bindGroupLayouts: [bezelBindLayout] }), vertex: { module: bezelModule, entryPoint: 'vs' }, fragment: { module: bezelModule, entryPoint: 'fs', targets: [{ format }] }, primitive: { topology: 'triangle-list' } });
             bezelUniformBufferRef.current = pool.track(
               device.createBuffer({ size: alignTo(96, 256), usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST }),
@@ -590,7 +629,15 @@ export function useWebGPURender(
             );
             await loadBezelTexture(device);
             if (cancelled || pool.isDisposed) return;
-            bezelBindGroupRef.current = device.createBindGroup({ layout: bezelBindLayout, entries: [{ binding: 0, resource: { buffer: bezelUniformBufferRef.current! } }, { binding: 1, resource: bezelTextureResourcesRef.current!.sampler }, { binding: 2, resource: bezelTextureResourcesRef.current!.view }] });
+            const bezelGroupEntries: GPUBindGroupEntry[] = [
+              { binding: 0, resource: { buffer: bezelUniformBufferRef.current! } },
+              { binding: 1, resource: bezelTextureResourcesRef.current!.sampler },
+              { binding: 2, resource: bezelTextureResourcesRef.current!.view },
+            ];
+            if (audioBezel && audioReactiveUniformBufferRef.current) {
+              bezelGroupEntries.push({ binding: 3, resource: { buffer: audioReactiveUniformBufferRef.current } });
+            }
+            bezelBindGroupRef.current = device.createBindGroup({ layout: bezelBindLayout, entries: bezelGroupEntries });
           } catch (e) { console.warn('Failed to initialize bezel shader', e); }
         }
 
@@ -876,6 +923,35 @@ export function useWebGPURender(
     }
 
     const p = renderParamsRef.current;
+
+    if (
+      audioReactiveUniformBufferRef.current &&
+      (usesAudioReactive(shaderFile) || usesAudioReactiveBezel(shaderFile))
+    ) {
+      const meta = p.audioReactiveRef?.current;
+      const bands = meta ? readAudioBands(meta) : {
+        bass: 0, mid: 0, high: 0, amplitude: 0, beat: 0,
+        peakL: 0, peakR: 0, rmsL: 0, rmsR: 0,
+      };
+      const enabled = !!(p.reactiveMode && meta);
+      packAudioReactiveUniform(
+        bands,
+        enabled,
+        p.bloomIntensity ?? 1,
+        audioReactiveUniformDataRef.current,
+      );
+      device.queue.writeBuffer(
+        audioReactiveUniformBufferRef.current,
+        0,
+        audioReactiveUniformDataRef.current.buffer as ArrayBuffer,
+        0,
+        AUDIO_REACTIVE_UNIFORM_BYTES,
+      );
+      // Feed legacy kickTrigger from SAB beat for non-reactive shaders reading playbackStateRef
+      if (enabled && p.playbackStateRef?.current) {
+        p.playbackStateRef.current.kickTrigger = bands.beat;
+      }
+    }
 
     if (usesInstrumentPalette(shaderFile) && p.instrumentPalette && p.instrumentPalette !== instrumentPaletteVersionRef.current) {
       if (instrumentPaletteTextureRef.current) {

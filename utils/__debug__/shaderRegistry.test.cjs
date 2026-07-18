@@ -59,6 +59,7 @@ runTsx('Registry + SHADER_GROUPS coverage', `
     usesStrictPlayheadSustainMode,
     usesOscilloscope,
     usesInstrumentPalette,
+    usesAudioReactive,
     getHitTestProfile,
     usesCircularRowPaging,
     isHorizontalLayoutShader,
@@ -87,7 +88,7 @@ runTsx('Registry + SHADER_GROUPS coverage', `
     'patternv0.21.wgsl', 'patternv0.30b.wgsl', 'patternv0.40.wgsl',
     'patternv0.50.wgsl', 'patternv0.51.wgsl', 'patternv0.52.wgsl',
     'patternv0.53.wgsl', 'patternv0.54.wgsl', 'patternv0.55.wgsl',
-    'patternv0.56.wgsl', 'patternv0.57.wgsl',
+    'patternv0.56.wgsl', 'patternv0.57.wgsl', 'patternv0.58.wgsl',
   ];
   for (const id of PARITY) {
     if (!SHADER_REGISTRY[id]) errors.push(\`parity target missing: \${id}\`);
@@ -121,6 +122,8 @@ runTsx('Registry + SHADER_GROUPS coverage', `
       errors.push(\`\${filename}: oscilloscope mismatch\`);
     if (usesInstrumentPalette(filename) !== meta.instrumentPalette)
       errors.push(\`\${filename}: instrumentPalette mismatch\`);
+    if (usesAudioReactive(filename) !== meta.audioReactive)
+      errors.push(\`\${filename}: audioReactive mismatch\`);
     if (getHitTestProfile(filename) !== meta.hitTestProfile)
       errors.push(\`\${filename}: hitTestProfile mismatch\`);
     if (usesCircularRowPaging(filename) !== meta.circularRowPaging)
@@ -158,6 +161,7 @@ runTsx('Registry + SHADER_GROUPS coverage', `
   if (!SHADER_REGISTRY['patternv0.55.wgsl']!.oscilloscope) errors.push('v0.55 oscilloscope');
   if (!SHADER_REGISTRY['patternv0.56.wgsl']!.instrumentPalette) errors.push('v0.56 instrumentPalette');
   if (!SHADER_REGISTRY['patternv0.57.wgsl']!.stepsDrivenVisibleRows) errors.push('v0.57 stepsDriven');
+  if (!SHADER_REGISTRY['patternv0.58.wgsl']!.audioReactive) errors.push('v0.58 audioReactive');
 
   for (const id of ALL_SHADER_IDS) {
     if (!SHADER_REGISTRY[id]) errors.push(\`ALL_SHADER_IDS has unregistered \${id}\`);

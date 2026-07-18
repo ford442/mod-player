@@ -91,6 +91,12 @@ export const usesOscilloscope = (shaderFile: string): boolean =>
 export const usesInstrumentPalette = (shaderFile: string): boolean =>
   resolveShaderMeta(shaderFile).instrumentPalette;
 
+export const usesAudioReactive = (shaderFile: string): boolean =>
+  resolveShaderMeta(shaderFile).audioReactive;
+
+export const usesAudioReactiveBezel = (shaderFile: string): boolean =>
+  resolveShaderMeta(shaderFile).background === 'bezel_audio.wgsl';
+
 export const usesBareCanvasChrome = (shaderFile: string): boolean =>
   resolveShaderMeta(shaderFile).bareCanvasChrome;
 

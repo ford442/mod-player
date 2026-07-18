@@ -1,5 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { LibOpenMPT, ModuleInfo, PatternMatrix, ChannelShadowState, PlaybackState, SyncDebugInfo, WorkerParseError, WorkerParseResponse } from '../types';
+import type { InstrumentTable } from '../types/instruments';
+import { emptyInstrumentTable } from '../types/instruments';
+import { extractInstrumentTable, mergeLibInstrumentNames } from '../utils/sampleExtract';
 import { OpenMPTWorkletEngine, NATIVE_RING_BUF_BYTES } from '../audio-worklet/OpenMPTWorkletEngine';
 import { computeNoteAges } from '../utils/patternExtractor';
 import { parseModuleWithLib } from '../utils/parseModuleWithLib';
@@ -26,6 +29,7 @@ import {
   rowsPerSecondFromBpm,
   type WorkletPositionSample,
 } from '../utils/playheadPrediction';
+import { viewsFromAudioSab } from '../utils/audioReactive';
 import { hasShareModuleIntent } from '../utils/shareState';
 
 
@@ -80,6 +84,10 @@ function parseOnMainThread(
     type: 'parsed',
     patternMatrices: parsed.patternMatrices,
     metadata: parsed.metadata,
+    instrumentTable: mergeLibInstrumentNames(
+      extractInstrumentTable(fileData, fileName),
+      parsed.metadata.instruments,
+    ),
   };
 }
 
@@ -90,7 +98,7 @@ async function resolveParsedModule(
   fileDataForWorker: Uint8Array,
   fileDataCopy: Uint8Array,
   fileName: string,
-  onParseProgress?: (stage: 'fetch' | 'wasm' | 'patterns') => void,
+  onParseProgress?: (stage: 'fetch' | 'wasm' | 'patterns' | 'instruments') => void,
 ): Promise<WorkerParseResponse> {
   // Main thread already has initialized libopenmpt from index.html — use it directly.
   // The worker re-fetches WASM from CDN (slow, can fail under strict COEP/CORP).
@@ -136,7 +144,7 @@ async function resolveParsedModule(
   return parseOnMainThread(lib, fileDataCopy, fileName);
 }
 
-export function useLibOpenMPT(initialVolume: number = 0.4) {
+export function useLibOpenMPT(initialVolume: number = 0.4, liteMode: boolean = false) {
   const [status, setStatus] = useState<string>("Initializing...");
   const [isReady, setIsReady] = useState<boolean>(false);
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
@@ -145,6 +153,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
   const [patternData, _setPatternData] = useState<Uint8Array | null>(null);
   const [sequencerMatrix, setSequencerMatrix] = useState<PatternMatrix | null>(null);
   const [instrumentNames, setInstrumentNames] = useState<string[]>([]);
+  const [instrumentTable, setInstrumentTable] = useState<InstrumentTable>(emptyInstrumentTable());
   const [moduleComments, setModuleComments] = useState<string>('');
   const [sequencerCurrentRow, setSequencerCurrentRow] = useState<number>(0);
   const [sequencerGlobalRow, setSequencerGlobalRow] = useState<number>(0);
@@ -199,6 +208,11 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
   const spRightBufPtr = useRef<number>(0);
   const spFallbackTriggered = useRef<boolean>(false);
   const audioWorkletNodeRef = useRef<AudioWorkletNode | null>(null);
+
+  // Tell worklet to skip FFT band split in lite mode (coarse VU only).
+  useEffect(() => {
+    audioWorkletNodeRef.current?.port.postMessage({ type: 'setAudioLite', lite: liteMode });
+  }, [liteMode]);
   // Shared WASM memory supplied to the worklet; allocated once on main thread
   const wasmMemoryRef = useRef<WebAssembly.Memory | null>(null);
   const stereoPannerRef = useRef<StereoPannerNode | null>(null);
@@ -265,6 +279,8 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
 
   // Oscilloscope SAB view — zero-GC, ref-based pipeline to GPU
   const oscBufferRef = useRef<Float32Array | null>(null);
+  /** Band energy + meters region of the shared audio SAB (offset past osc ring). */
+  const audioReactiveRef = useRef<Float32Array | null>(null);
 
   // Sync isPlayingRef with the latest React state every render
   isPlayingRef.current = isPlaying;
@@ -374,7 +390,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
       setStatus(`Parsing "${fileName}"… (still loading)`);
     }, PARSER_SLOW_HINT_MS);
 
-    const onParseProgress = (stage: 'fetch' | 'wasm' | 'patterns') => {
+    const onParseProgress = (stage: 'fetch' | 'wasm' | 'patterns' | 'instruments') => {
       if (stage === 'fetch') {
         setStatus(`Parsing "${fileName}"… (fetching parser engine)`);
       } else if (stage === 'patterns') {
@@ -384,6 +400,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
 
     let patternMatrices: PatternMatrix[];
     let metadata: WorkerParseResponse['metadata'];
+    let loadedInstrumentTable: InstrumentTable = emptyInstrumentTable();
 
     try {
       const parsed = await resolveParsedModule(
@@ -397,6 +414,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
       );
       patternMatrices = parsed.patternMatrices;
       metadata = parsed.metadata;
+      loadedInstrumentTable = parsed.instrumentTable ?? emptyInstrumentTable();
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Module parse failed';
       console.error(`[processModuleData] Parse failed (${fileName}):`, err);
@@ -423,6 +441,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
       numChannels: metadata.numChannels,
     });
     setInstrumentNames(metadata.instruments ?? []);
+    setInstrumentTable(loadedInstrumentTable);
     setModuleComments(metadata.comments ?? '');
 
     patternMatricesRef.current = patternMatrices;
@@ -881,7 +900,9 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
     if (node) {
       const handler = (e: MessageEvent) => {
         if (e.data?.type === 'oscBuffer' && e.data.buffer) {
-          oscBufferRef.current = new Float32Array(e.data.buffer);
+          const views = viewsFromAudioSab(e.data.buffer as SharedArrayBuffer);
+          oscBufferRef.current = views.osc;
+          audioReactiveRef.current = views.meta;
           node.port.removeEventListener('message', handler);
         }
       };
@@ -1150,6 +1171,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
     loadFile: loadModule, play, stopMusic, sequencerMatrix, sequencerCurrentRow, sequencerGlobalRow,
     totalPatternRows, playbackSeconds, playbackRowFraction, setPlaybackRowFraction, channelStates, beatPhase, grooveAmount, kickTrigger, activeChannels,
     instrumentNames,
+    instrumentTable,
     moduleComments,
     isLooping, setIsLooping, seekToStep: seekToStepWrapper, panValue, setPanValue,
     activeEngine, isWorkletSupported, toggleAudioEngine, syncDebug,
@@ -1162,5 +1184,6 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
     workletLoadError,
     // Oscilloscope SAB view for GPU texture upload
     oscBufferRef,
+    audioReactiveRef,
   };
 }

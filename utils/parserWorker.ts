@@ -55,7 +55,7 @@ export function parseInWorker(
   worker: Worker,
   message: WorkerParseMessage,
   transfer: Transferable[],
-  onProgress?: (stage: 'fetch' | 'wasm' | 'patterns') => void,
+  onProgress?: (stage: 'fetch' | 'wasm' | 'patterns' | 'instruments') => void,
   timeoutMs: number = PARSER_WORKER_TIMEOUT_MS,
 ): Promise<WorkerParseResponse | WorkerParseError> {
   const { fileName } = message;
