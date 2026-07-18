@@ -60,6 +60,8 @@ import { usePatternEdit } from './hooks/usePatternEdit';
 import { ToastStack } from './components/ToastStack';
 import { buildShareUrl } from './utils/shareState';
 import { patchFromFieldCycle, type PatternEditField } from './utils/patternEdit';
+import { useOfflineExport } from './hooks/useOfflineExport';
+import { usePerformanceCapture } from './hooks/usePerformanceCapture';
 
 function App() {
   // Tier 1: global last-used shader — persisted across page reloads
@@ -143,6 +145,12 @@ function App() {
     seekToStep,
     setPanValue: setLibPan,
     replacePatternMatrix,
+    moduleDurationSeconds,
+    moduleFileName,
+    getModuleFileData,
+    toggleChannelMute,
+    getAudioContext,
+    getAudioTapNode,
     activeEngine,
     isWorkletSupported,
     toggleAudioEngine,
@@ -154,6 +162,40 @@ function App() {
     oscBufferRef,
     audioReactiveRef,
   } = useLibOpenMPT(volume, liteMode);
+
+  const { state: offlineExportState, exportWav, isExporting } = useOfflineExport();
+  const {
+    state: captureState,
+    start: startCapture,
+    stop: stopCapture,
+    isRecording,
+  } = usePerformanceCapture();
+
+  const channelMuteMask = useMemo(
+    () => channelStates.map((ch) => (ch?.isMuted ?? 0) > 0),
+    [channelStates],
+  );
+
+  const handleExportWav = useCallback(async () => {
+    const fileData = getModuleFileData();
+    if (!fileData) return;
+    await exportWav({
+      fileData,
+      fileName: moduleFileName || 'export.mod',
+      ...(channelMuteMask.some(Boolean) ? { muteMask: channelMuteMask } : {}),
+    });
+  }, [channelMuteMask, exportWav, getModuleFileData, moduleFileName]);
+
+  const handleStartCapture = useCallback(async () => {
+    const renderer = window.currentPatternRenderer;
+    await startCapture({
+      getRenderer: () => renderer,
+      audioContext: getAudioContext(),
+      audioTapNode: getAudioTapNode(),
+      preferWebGL2: true,
+      dualAudioContext: activeEngine === 'native-worklet',
+    });
+  }, [activeEngine, getAudioContext, getAudioTapNode, startCapture]);
 
   // Prevent incidental document scroll when playback starts (row-follow, layout shifts, etc.).
   const playGuarded = useCallback(() => {
@@ -372,12 +414,12 @@ function App() {
       numOrders: totalPatternRows > 0 ? Math.ceil(totalPatternRows / (sequencerMatrix?.numRows || 64)) : 0,
       numPatterns: 0,
       numInstruments: instrumentNames.length,
-      durationSeconds: 0,
+      durationSeconds: moduleDurationSeconds,
       currentBpm: 125,
       instruments: instrumentNames,
       comments: moduleComments,
     };
-  }, [isModuleLoaded, sequencerMatrix, status, activeEngine, totalPatternRows, instrumentNames, moduleComments]);
+  }, [isModuleLoaded, sequencerMatrix, status, activeEngine, totalPatternRows, instrumentNames, moduleComments, moduleDurationSeconds]);
 
   // Shader change handler — Tier 1 (global) + Tier 2 (per-module) write
   const setShaderFile = useCallback((shader: string) => {
@@ -1101,6 +1143,19 @@ function App() {
       onPatternCellClear={patternEdit.clearCell}
       onSequencerCellEdit={handleSequencerCellEdit}
       midiControls={midiControls}
+      moduleFileName={moduleFileName}
+      moduleDurationSeconds={moduleDurationSeconds}
+      channelMuteMask={channelMuteMask}
+      onToggleChannelMute={toggleChannelMute}
+      onExportWav={handleExportWav}
+      onStartCapture={handleStartCapture}
+      onStopCapture={stopCapture}
+      offlineExportState={offlineExportState}
+      isExporting={isExporting}
+      captureState={captureState}
+      isRecording={isRecording}
+      getRendererBackend={() => window.currentPatternRenderer?.backend ?? null}
+      dualAudioContext={activeEngine === 'native-worklet'}
     />
     <ToastStack toasts={toasts} onDismiss={dismissToast} />
     </>

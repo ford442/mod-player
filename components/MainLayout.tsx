@@ -17,6 +17,7 @@ import { Panel } from './Panel';
 import { ShaderSelectorPanel } from './ShaderSelectorPanel';
 import { PatternEditor } from './PatternEditor';
 import { MidiControlsPanel } from './MidiControlsPanel';
+import { ExportPanel } from './ExportPanel';
 import { cn } from '../utils/cn';
 import { setLiteOverride } from '../utils/deviceCapabilities';
 import { usesInstrumentPalette } from '../utils/shaderVersion';
@@ -185,6 +186,19 @@ interface MainLayoutProps {
   onPatternCellClear?: (row: number, channel: number) => void;
   onSequencerCellEdit?: (row: number, channel: number) => void;
   midiControls?: ReturnType<typeof useMidiControls>;
+  moduleFileName: string;
+  moduleDurationSeconds: number;
+  channelMuteMask: boolean[];
+  onToggleChannelMute: (channel: number) => void;
+  onExportWav: () => void;
+  onStartCapture: () => void;
+  onStopCapture: () => void;
+  offlineExportState: import('../hooks/useOfflineExport').OfflineExportState;
+  isExporting: boolean;
+  captureState: import('../hooks/usePerformanceCapture').PerformanceCaptureState;
+  isRecording: boolean;
+  getRendererBackend: () => import('../src/renderers/types').PatternRendererBackend | null;
+  dualAudioContext: boolean;
 }
 
 export function MainLayout({
@@ -343,6 +357,19 @@ export function MainLayout({
   onPatternCellClear,
   onSequencerCellEdit,
   midiControls,
+  moduleFileName,
+  moduleDurationSeconds,
+  channelMuteMask,
+  onToggleChannelMute,
+  onExportWav,
+  onStartCapture,
+  onStopCapture,
+  offlineExportState,
+  isExporting,
+  captureState,
+  isRecording,
+  getRendererBackend,
+  dualAudioContext,
 }: MainLayoutProps) {
   return (
     <div className="min-h-screen bg-panel-base text-[var(--text-primary)] p-4 flex flex-col items-center transition-colors duration-300">
@@ -685,7 +712,7 @@ export function MainLayout({
           <div className="mt-4">
             <SeekBar
               currentSeconds={playbackSeconds}
-              durationSeconds={0}
+              durationSeconds={moduleDurationSeconds}
               currentRow={playbackRowFraction}
               totalRows={totalPatternRows}
               isPlaying={isPlaying}
@@ -755,6 +782,26 @@ export function MainLayout({
                 <MidiControlsPanel midi={midiControls} isDarkMode={isDarkMode} />
               </Panel>
             )}
+            <Panel variant="bezel" title="Export" titleAccent>
+              <ExportPanel
+                isModuleLoaded={isModuleLoaded}
+                isDarkMode={isDarkMode}
+                moduleFileName={moduleFileName}
+                moduleDurationSeconds={moduleDurationSeconds}
+                numChannels={sequencerMatrix?.numChannels ?? 0}
+                channelMuteMask={channelMuteMask}
+                onToggleChannelMute={onToggleChannelMute}
+                onExportWav={onExportWav}
+                onStartCapture={onStartCapture}
+                onStopCapture={onStopCapture}
+                offlineExport={offlineExportState}
+                isExporting={isExporting}
+                captureState={captureState}
+                isRecording={isRecording}
+                rendererBackend={getRendererBackend()}
+                dualAudioContext={dualAudioContext}
+              />
+            </Panel>
           </div>
         </div>
 

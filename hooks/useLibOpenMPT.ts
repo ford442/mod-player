@@ -155,6 +155,8 @@ export function useLibOpenMPT(initialVolume: number = 0.4, liteMode: boolean = f
   const [instrumentNames, setInstrumentNames] = useState<string[]>([]);
   const [instrumentTable, setInstrumentTable] = useState<InstrumentTable>(emptyInstrumentTable());
   const [moduleComments, setModuleComments] = useState<string>('');
+  const [moduleDurationSeconds, setModuleDurationSeconds] = useState<number>(0);
+  const [moduleFileName, setModuleFileName] = useState<string>('');
   const [sequencerCurrentRow, setSequencerCurrentRow] = useState<number>(0);
   const [sequencerGlobalRow, setSequencerGlobalRow] = useState<number>(0);
   const [playbackSeconds, setPlaybackSeconds] = useState<number>(0);
@@ -443,6 +445,8 @@ export function useLibOpenMPT(initialVolume: number = 0.4, liteMode: boolean = f
     setInstrumentNames(metadata.instruments ?? []);
     setInstrumentTable(loadedInstrumentTable);
     setModuleComments(metadata.comments ?? '');
+    setModuleDurationSeconds(metadata.durationSeconds);
+    setModuleFileName(fileName);
 
     patternMatricesRef.current = patternMatrices;
     setTotalPatternRows(metadata.totalPatternRows);
@@ -1145,6 +1149,22 @@ export function useLibOpenMPT(initialVolume: number = 0.4, liteMode: boolean = f
     setSequencerMatrix(matrix);
   }, []);
 
+  const getModuleFileData = useCallback((): Uint8Array | null => {
+    return fileDataRef.current ? fileDataRef.current.slice() : null;
+  }, []);
+
+  const toggleChannelMute = useCallback((channelIndex: number) => {
+    setChannelStates((prev) => {
+      const next = [...prev];
+      const existing = next[channelIndex];
+      if (!existing) return prev;
+      const muted = (existing.isMuted ?? 0) > 0 ? 0 : 1;
+      next[channelIndex] = { ...existing, isMuted: muted };
+      channelStatesRef.current[channelIndex] = next[channelIndex]!;
+      return next;
+    });
+  }, []);
+
   // Load default module (only if user hasn't loaded one and no share URL)
   useEffect(() => {
     if (isReady && !userModuleLoadedRef.current && !hasShareModuleIntent()) {
@@ -1177,6 +1197,12 @@ export function useLibOpenMPT(initialVolume: number = 0.4, liteMode: boolean = f
     activeEngine, isWorkletSupported, toggleAudioEngine, syncDebug,
     analyserNode: analyserRef.current,
     replacePatternMatrix,
+    moduleDurationSeconds,
+    moduleFileName,
+    getModuleFileData,
+    toggleChannelMute,
+    getAudioContext: () => audioContextRef.current,
+    getAudioTapNode: () => stereoPannerRef.current ?? gainNodeRef.current,
     // PERFORMANCE OPTIMIZATION: Export ref for high-frequency updates
     // PatternDisplay reads directly from this to this ref - avoids React re-renders
     playbackStateRef,

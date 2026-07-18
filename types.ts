@@ -115,6 +115,8 @@ export interface LibOpenMPT {
     param: number,
     value: number
   ) => void;
+  _openmpt_module_set_position_seconds: (modPtr: number, seconds: number) => void;
+  _openmpt_module_set_repeat_count: (modPtr: number, count: number) => void;
   UTF8ToString: (ptr: number) => string;
   stringToUTF8: (str: string) => number;
   HEAPU8: Uint8Array;
