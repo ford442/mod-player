@@ -32,6 +32,9 @@ jobs:
       - name: Type check
         run: npm run typecheck
       
+      - name: Unit tests
+        run: npm test
+      
       - name: Shader registry tests
         run: npm run test:shader-registry
       
@@ -82,6 +85,9 @@ jobs:
 
       - name: Visual smoke (WebGL2 + HTML, CI profile)
         run: BASE_URL=http://127.0.0.1:4173 OUTPUT_DIR=./artifacts/visual-smoke npm run smoke:visual:ci
+
+      - name: Audio smoke (worklet lifecycle)
+        run: BASE_URL=http://127.0.0.1:4173 OUTPUT_DIR=./artifacts/audio-smoke npm run smoke:audio
 
       - name: Upload smoke artifacts on failure
         if: failure()

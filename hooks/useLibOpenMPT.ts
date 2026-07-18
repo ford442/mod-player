@@ -286,8 +286,10 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
     userModuleLoadedRef.current = true; // Mark that user loaded a module
     setStatus(`Loading "${fileName}"...`);
     await processModuleData(fileData, fileName);
-    // Auto-play ONLY when a user manually loads a file/selects from playlist
-    if (playRef.current) playRef.current();
+    // Auto-play ONLY when a user manually loads a file/selects from playlist.
+    // Must await play() so a rapid second load cannot start before the worklet
+    // node exists (otherwise initLib runs twice in the same scope).
+    if (playRef.current) await playRef.current();
   }, []);
 
   const ensureMainThreadModule = useCallback(async (data: Uint8Array) => {
@@ -1158,6 +1160,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4) {
     // PERFORMANCE OPTIMIZATION: Export ref for high-frequency updates
     // PatternDisplay reads directly from this to this ref - avoids React re-renders
     playbackStateRef,
+    audioContextRef,
     // AUDIO-001 FIX: Export worklet diagnostics
     workletLoadError,
     // Oscilloscope SAB view for GPU texture upload

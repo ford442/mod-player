@@ -37,7 +37,8 @@
     "audit:shader-modes": "node scripts/audit-shader-modes.mjs",
     "screenshot:shaders": "node scripts/screenshot-shader-check.mjs",
     "smoke:visual": "node scripts/visual-smoke.mjs",
-    "smoke:visual:ci": "SMOKE_PROFILE=ci node scripts/visual-smoke.mjs"
+    "smoke:visual:ci": "SMOKE_PROFILE=ci node scripts/visual-smoke.mjs",
+    "smoke:audio": "node scripts/audio-smoke.mjs"
   },
   "dependencies": {
     "@react-three/drei": "^9.122.0",

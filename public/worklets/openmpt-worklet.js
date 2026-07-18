@@ -126,6 +126,7 @@ async function ensureSharedLibOpenMPT(scriptText, wasmBytes) {
 
       const cleanedScript = scriptText.replace(/^\s*export\s+(default\s+)?/gm, '');
       const fn = new Function(cleanedScript); // eslint-disable-line no-new-func
+      globalThis.__openmptLibEvalCount = (globalThis.__openmptLibEvalCount || 0) + 1;
       fn.call(globalThis);
 
       const lib = globalThis.libopenmpt;

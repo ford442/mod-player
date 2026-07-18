@@ -46,7 +46,9 @@ export interface UseWorkletLoaderOptions {
  */
 export const getWorkletUrl = (): string => {
   const base = detectRuntimeBase();
-  // BUMP this version whenever openmpt-worklet.js changes to bust browser caches
+  // BUMP this version whenever openmpt-worklet.js changes to bust browser caches.
+  // Also bump CACHE_NAME in public/sw.js (e.g. mod-player-v4) so returning PWA users
+  // drop stale precache; worklet JS itself is network-first in the SW.
   // v6: keep AudioContext running across module reload (no suspend on stop)
   const WORKLET_VERSION = '6';
   const url = `${base}worklets/openmpt-worklet.js?v=${WORKLET_VERSION}`;

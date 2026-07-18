@@ -756,6 +756,8 @@ export async function startAudioPlayback(
         // Send glue (+ optional real WASM) to worklet first (must arrive before 'load').
         // Transfer wasm buffer only when present; wasm2js path sends JS alone.
         if (!canReuseWorkletNode && libJsText) {
+          const w = globalThis as typeof globalThis & { __openmptInitLibPostCount?: number };
+          w.__openmptInitLibPostCount = (w.__openmptInitLibPostCount ?? 0) + 1;
           if (libWasmBuffer) {
             node.port.postMessage(
               { type: 'initLib', scriptText: libJsText, wasmBytes: libWasmBuffer },

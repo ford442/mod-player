@@ -214,6 +214,7 @@ declare global {
     /** Agent/CI handle — set by the active pattern renderer */
     currentPatternRenderer: import('./src/renderers/types').CurrentPatternRenderer | null;
     /** Headless Chrome / Playwright automation hooks (dev + CI) */
+    __openmptInitLibPostCount?: number;
     __TEST_HOOKS__?: {
       seekToRow: (row: number) => void;
       stopPlayback: () => void;
@@ -252,6 +253,15 @@ declare global {
       getPlaybackRowFraction: () => number;
       getActiveRenderer: () => string | null;
       getAudioEngine: () => string;
+      startPlayback: () => void;
+      getAudioDiagnostics: () => {
+        contextState: string;
+        engine: string;
+        isPlaying: boolean;
+        positionSeconds: number;
+        initLibPostCount: number;
+        analyserRms: number;
+      };
       getLiteMode: () => boolean;
       getShaderFile: () => string | null;
       selectShader: (shader: string) => void;

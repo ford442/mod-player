@@ -147,6 +147,7 @@ function App() {
     syncDebug,
     analyserNode,
     playbackStateRef,
+    audioContextRef,
     workletLoadError,
     oscBufferRef,
   } = useLibOpenMPT(volume);
@@ -250,6 +251,25 @@ function App() {
       getPlaybackRowFraction: () => playbackRowFraction,
       getActiveRenderer: () => window.currentPatternRenderer?.backend ?? null,
       getAudioEngine: () => activeEngine,
+      startPlayback: () => play(),
+      getAudioDiagnostics: () => {
+        let analyserRms = 0;
+        if (analyserNode) {
+          const buf = new Uint8Array(analyserNode.frequencyBinCount);
+          analyserNode.getByteFrequencyData(buf);
+          let sum = 0;
+          for (let i = 0; i < buf.length; i++) sum += buf[i] ?? 0;
+          analyserRms = buf.length > 0 ? sum / buf.length : 0;
+        }
+        return {
+          contextState: audioContextRef.current?.state ?? 'none',
+          engine: activeEngine,
+          isPlaying,
+          positionSeconds: playbackStateRef.current.timeSec,
+          initLibPostCount: window.__openmptInitLibPostCount ?? 0,
+          analyserRms,
+        };
+      },
       getLiteMode: () => liteMode,
       getShaderFile: () => {
         const raw = localStorage.getItem('xasm1_last_shader');
@@ -313,7 +333,7 @@ function App() {
       },
     };
     return () => { delete window.__TEST_HOOKS__; };
-  }, [seekToStep, stopMusic, isModuleLoaded, sequencerMatrix, loadFile, playbackRowFraction, setPlaybackRowFraction, playbackStateRef, activeEngine, liteMode]);
+  }, [seekToStep, stopMusic, isModuleLoaded, sequencerMatrix, loadFile, playbackRowFraction, setPlaybackRowFraction, playbackStateRef, audioContextRef, activeEngine, liteMode, play, isPlaying, analyserNode]);
 
   // Project-M popup integration: broadcast PCM frames via BroadcastChannel
   useEffect(() => {
