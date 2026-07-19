@@ -120,6 +120,8 @@ export interface WebGPURenderParams {
   isHorizontal: boolean;
   externalVideoSource: HTMLVideoElement | HTMLImageElement | null;
   playbackStateRef?: React.MutableRefObject<PlaybackState>;
+  /** Live channel shadow state — preferred over `channels` in the render loop. */
+  channelStatesRef?: React.MutableRefObject<ChannelShadowState[]>;
   canvasMetrics: { width: number; height: number };
   totalRows?: number;
   colorPalette?: number;
@@ -138,6 +140,13 @@ export interface WebGPURenderParams {
   audioReactiveRef?: React.MutableRefObject<Float32Array | null>;
   /** User toggle — when false, AudioReactive.enabled is 0. */
   reactiveMode?: boolean;
+}
+
+/** Prefer ref-backed channel state for GPU uploads (avoids 60 Hz React re-renders). */
+export function resolveLiveChannels(p: WebGPURenderParams): ChannelShadowState[] {
+  const fromRef = p.channelStatesRef?.current;
+  if (fromRef && fromRef.length > 0) return fromRef;
+  return p.channels;
 }
 
 export function useWebGPURender(
@@ -848,7 +857,7 @@ export function useWebGPURender(
       } else {
         new Uint8Array(channelBufferDataRef.current).fill(0, 0, requiredSize);
       }
-      fillChannelStates(p.channels, channelsCount, channelDataViewRef.current!, p.padTopChannel);
+      fillChannelStates(resolveLiveChannels(p), channelsCount, channelDataViewRef.current!, p.padTopChannel);
       if (!channelsBufferRef.current || channelsBufferRef.current.size < requiredSize) {
         if (channelsBufferRef.current) {
           pool.releaseBuffer('channels', channelsBufferRef.current, cellsUsage);
@@ -884,7 +893,7 @@ export function useWebGPURender(
       } else {
         new Uint8Array(channelBufferDataRef.current).fill(0, 0, requiredSize);
       }
-      fillChannelStates(p.channels, count, channelDataViewRef.current!, p.padTopChannel);
+      fillChannelStates(resolveLiveChannels(p), count, channelDataViewRef.current!, p.padTopChannel);
       let recreated = false;
       if (!channelsBufferRef.current || channelsBufferRef.current.size < requiredSize) {
         if (channelsBufferRef.current) {
@@ -1064,6 +1073,18 @@ export function useWebGPURender(
           : {}),
       }, uniformUintRef.current, uniformFloatRef.current);
       device.queue.writeBuffer(uniformBufferRef.current, 0, uniformBufferDataRef.current, 0, uniformByteLength);
+    }
+
+    // TIMING FIX: Upload live channel shadow state every frame (noteAge, VU, trigger).
+    if (layoutTypeRef.current === 'extended' && channelsBufferRef.current && channelDataViewRef.current) {
+      const rawCh = p.matrix?.numChannels ?? DEFAULT_CHANNELS;
+      const channelsCount = Math.max(1, rawCh);
+      const totalCount = p.padTopChannel ? channelsCount + 1 : channelsCount;
+      const requiredSize = totalCount * 32;
+      if (channelBufferDataRef.current && channelBufferDataRef.current.byteLength >= requiredSize) {
+        fillChannelStates(resolveLiveChannels(p), channelsCount, channelDataViewRef.current, p.padTopChannel);
+        device.queue.writeBuffer(channelsBufferRef.current, 0, channelBufferDataRef.current, 0, requiredSize);
+      }
     }
 
     // Handle video texture source

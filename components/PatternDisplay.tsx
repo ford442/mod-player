@@ -68,6 +68,7 @@ interface PatternDisplayProps {
   dimFactor?: number;
   analyserNode?: AnalyserNode | null;
   playbackStateRef?: React.MutableRefObject<PlaybackState>;
+  channelStatesRef?: React.MutableRefObject<ChannelShadowState[]>;
   oscBufferRef?: React.MutableRefObject<Float32Array | null>;
   audioReactiveRef?: React.MutableRefObject<Float32Array | null>;
   reactiveMode?: boolean;
@@ -130,6 +131,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   dimFactor = 1.0,
   analyserNode,
   playbackStateRef,
+  channelStatesRef,
   oscBufferRef,
   audioReactiveRef,
   reactiveMode = true,
@@ -368,6 +370,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     ...(audioReactiveRef ? { audioReactiveRef } : {}),
     ...(totalRows !== undefined ? { totalRows } : {}),
     ...(playbackStateRef ? { playbackStateRef } : {}),
+    ...(channelStatesRef ? { channelStatesRef } : {}),
   });
   renderParamsRef.current = {
     matrix, channels, padTopChannel, isPlaying, bpm, timeSec, tickOffset,
@@ -387,6 +390,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     ...(audioReactiveRef ? { audioReactiveRef } : {}),
     ...(totalRows !== undefined ? { totalRows } : {}),
     ...(playbackStateRef ? { playbackStateRef } : {}),
+    ...(channelStatesRef ? { channelStatesRef } : {}),
   };
 
   // WebGL overlay hook (frosted caps)
@@ -395,6 +399,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     invertChannels, playheadRow, cellWidth, cellHeight,
     channels, bloomIntensity, stepsLength,
     ...(playbackStateRef ? { playbackStateRef } : {}),
+    ...(channelStatesRef ? { channelStatesRef } : {}),
   }, setDebugInfo);
 
   // WebGPU render hook — matrix and padTopChannel passed directly so React tracks them as

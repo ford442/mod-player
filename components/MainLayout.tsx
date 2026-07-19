@@ -89,6 +89,7 @@ interface MainLayoutProps {
   debugPanelOpen: boolean;
   setDebugPanelOpen: (v: boolean | ((prev: boolean) => boolean)) => void;
   playbackStateRef: React.MutableRefObject<PlaybackState>;
+  channelStatesRef: React.MutableRefObject<ChannelShadowState[]>;
   oscBufferRef: React.MutableRefObject<Float32Array | null>;
   audioReactiveRef: React.MutableRefObject<Float32Array | null>;
   bloomPreset: BloomPreset;
@@ -260,6 +261,7 @@ export function MainLayout({
   debugPanelOpen,
   setDebugPanelOpen,
   playbackStateRef,
+  channelStatesRef,
   oscBufferRef,
   audioReactiveRef,
   bloomPreset,
@@ -633,6 +635,7 @@ export function MainLayout({
               onOpenDebug={() => setDebugPanelOpen(true)}
               // PERFORMANCE OPTIMIZATION: Pass ref for high-frequency updates
               playbackStateRef={playbackStateRef}
+              channelStatesRef={channelStatesRef}
               oscBufferRef={oscBufferRef}
               audioReactiveRef={audioReactiveRef}
               reactiveMode={reactiveMode}
