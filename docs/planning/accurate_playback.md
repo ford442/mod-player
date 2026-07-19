@@ -104,6 +104,8 @@ Acceptance: visual lag ≤ ~120 ms (≤ 1 row), typically much less after pred
 
 - Bump `WORKLET_VERSION` in `useWorkletLoader.ts` when the worklet changes (currently **v4**).
 - Do not reintroduce `dt = max(0, …)` without latency compensation.
+- Worklet position handlers must **not** overwrite `noteAge` with integer row — `updateUI` owns fractional ages.
+- GPU renderers read `channelStatesRef` each frame (not stale React `channelStates` state).
 - Keep ScriptProcessor as the reference sync path; never run prediction on it.
 - Prefer self-hosted worklet assets; see `public/worklets/README.md`.
 

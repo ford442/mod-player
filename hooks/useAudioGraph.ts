@@ -6,7 +6,6 @@ import { LibOpenMPT, PatternMatrix, ChannelShadowState, ModuleInfo, PatternCell 
 import { OpenMPTWorkletEngine, NATIVE_RING_BUF_FRAMES } from '../audio-worklet/OpenMPTWorkletEngine';
 import type { WorkletPositionData } from '../audio-worklet/types';
 import { getWorkletUrl } from './useWorkletLoader';
-import { computeNoteAges } from '../utils/patternExtractor';
 import { broadcastPcmBlock } from '../utils/projectMBridge';
 import { logWorkletDiagnostics } from '../audio-worklet/diagnostics';
 import { detectRuntimeBase, withBase } from '../src/lib/paths';
@@ -308,23 +307,14 @@ export async function startAudioPlayback(
             refs.pendingSeekRef.current = null;
           }
 
-          // Update channel VU data + noteAge for hardware choke
+          // TIMING FIX: VU/trigger only — noteAge is owned by updateUI using fractional playhead.
           const numCh = data.numChannels;
-          const matrix = refs.patternMatricesRef.current[data.currentOrder];
-          const playheadRow = data.currentRow;
-          const noteAges = matrix ? computeNoteAges(matrix, playheadRow) : null;
           for (let c = 0; c < numCh && c < refs.channelStatesRef.current.length; c++) {
             const existing = refs.channelStatesRef.current[c];
-            refs.channelStatesRef.current[c] = {
-              volume: data.channelVU[c] || 0,
-              pan: existing?.pan ?? 128,
-              freq: existing?.freq ?? 0,
-              trigger: (data.channelVU[c] || 0) > 0.05 ? 1 : 0,
-              noteAge: noteAges?.[c] ?? existing?.noteAge ?? 1000,
-              activeEffect: existing?.activeEffect ?? 0,
-              effectValue: existing?.effectValue ?? 0,
-              isMuted: existing?.isMuted ?? 0,
-            };
+            if (!existing) continue;
+            const vu = data.channelVU[c] || 0;
+            existing.volume = vu;
+            existing.trigger = vu > 0.05 ? 1 : 0;
           }
 
           // When the engine supplies new pattern data (on order/pattern change),
@@ -612,23 +602,14 @@ export async function startAudioPlayback(
               refs.pendingSeekRef.current = null;
             }
 
-            // Compute note ages for hardware choke in shader
-            const matrix = refs.patternMatricesRef.current[order];
-            if (matrix) {
-              const noteAges = computeNoteAges(matrix, row);
-              for (let c = 0; c < noteAges.length && c < refs.channelStatesRef.current.length; c++) {
+            // TIMING FIX: VU/trigger only — noteAge is owned by updateUI (fractional playhead).
+            if (channelVU && refs.channelStatesRef.current.length > 0) {
+              for (let c = 0; c < channelVU.length && c < refs.channelStatesRef.current.length; c++) {
                 const existing = refs.channelStatesRef.current[c];
-                const vu = (channelVU && channelVU[c] != null) ? (channelVU[c] as number) : (existing?.volume ?? 0);
-                refs.channelStatesRef.current[c] = {
-                  volume: vu,
-                  pan: existing?.pan ?? 128,
-                  freq: existing?.freq ?? 0,
-                  trigger: vu > 0.05 ? 1 : 0,
-                  noteAge: noteAges[c] ?? existing?.noteAge ?? 1000,
-                  activeEffect: existing?.activeEffect ?? 0,
-                  effectValue: existing?.effectValue ?? 0,
-                  isMuted: existing?.isMuted ?? 0,
-                };
+                if (!existing) continue;
+                const vu = channelVU[c] != null ? (channelVU[c] as number) : existing.volume;
+                existing.volume = vu;
+                existing.trigger = vu > 0.05 ? 1 : 0;
               }
             }
           } else if (type === 'ended') {

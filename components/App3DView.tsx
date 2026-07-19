@@ -46,6 +46,7 @@ interface App3DViewProps {
   debugPanelOpen: boolean;
   setDebugPanelOpen: (v: boolean | ((prev: boolean) => boolean)) => void;
   playbackStateRef: React.MutableRefObject<PlaybackState>;
+  channelStatesRef: React.MutableRefObject<ChannelShadowState[]>;
   oscBufferRef: React.MutableRefObject<Float32Array | null>;
   bloomPreset: BloomPreset;
   setBloomPreset: (v: BloomPreset) => void;
@@ -97,6 +98,7 @@ export function App3DView({
   debugPanelOpen,
   setDebugPanelOpen,
   playbackStateRef,
+  channelStatesRef,
   oscBufferRef,
   bloomPreset,
   setBloomPreset,
@@ -179,6 +181,7 @@ export function App3DView({
               onOpenDebug={() => setDebugPanelOpen(true)}
               // PERFORMANCE OPTIMIZATION: Pass ref for high-frequency updates
               playbackStateRef={playbackStateRef}
+              channelStatesRef={channelStatesRef}
               oscBufferRef={oscBufferRef}
               // Bloom settings from preset
               bloomIntensity={bloomPreset.intensity}

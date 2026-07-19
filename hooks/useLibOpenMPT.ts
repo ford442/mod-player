@@ -613,66 +613,36 @@ export function useLibOpenMPT(initialVolume: number = 0.4, liteMode: boolean = f
     if (smoothedPlayhead < 0) smoothedPlayhead = 0;
     setPlaybackRowFraction(smoothedPlayhead);
 
-    // Compute note ages for hardware choke / shaders
-    // Compute note ages for hardware choke in shader (only update React state when integer ages change)
+    // Compute note ages for hardware choke / timed shader indicators (fractional playhead).
     const playheadRow = smoothedPlayhead;
     const currentMatrix = patternMatricesRef.current[order];
     const numChannels = channelStatesRef.current.length;
     if (currentMatrix && numChannels > 0) {
-      // PERFORMANCE: Only recompute on row boundary crossings
-      const prev = playbackStateRef.current;
-      const rowChanged = (order !== prev.currentOrder) ||
-                        (Math.floor(playheadRow) !== Math.floor(prev.playheadRow));
+      const noteAges = computeNoteAges(currentMatrix, playheadRow);
+      let stateChanged = false;
 
-      if (rowChanged) {
-        const noteAges = computeNoteAges(currentMatrix, playheadRow);
-        let changed = false;
+      const spLib = (activeEngine !== 'worklet' && activeEngine !== 'native-worklet') ? lib : null;
+      const spPtr = spLib && modPtr !== 0 ? modPtr : 0;
 
-        // On the SP fallback path, lib/modPtr are available and the worklet
-        // message handler never runs, so volume/trigger are never refreshed
-        // there. Query VU directly here instead.
-        const spLib = (activeEngine !== 'worklet' && activeEngine !== 'native-worklet') ? lib : null;
-        const spPtr = spLib && modPtr !== 0 ? modPtr : 0;
+      for (let c = 0; c < numChannels; c++) {
+        const existing = channelStatesRef.current[c];
+        if (!existing) continue;
 
-        for (let c = 0; c < numChannels; c++) {
-          const newAge = noteAges[c] ?? 1000;
-          const existing = channelStatesRef.current[c];
-          if (!existing) continue;
-
-          if ((newAge | 0) !== (existing.noteAge | 0)) {
-            changed = true;
-          }
-
-          let volume = existing.volume;
-          let trigger = existing.trigger;
-          if (spLib && spPtr) {
-            const vu: number = spLib._openmpt_module_get_current_channel_vu_mono(spPtr, c) as number;
-            volume = vu;
-            trigger = vu > 0.05 ? 1 : 0;
-          }
-
-          channelStatesRef.current[c] = {
-            ...existing,
-            noteAge: newAge,
-            volume,
-            trigger,
-          };
+        const newAge = noteAges[c] ?? 1000;
+        if ((newAge | 0) !== (existing.noteAge | 0)) {
+          stateChanged = true;
         }
+        existing.noteAge = newAge;
 
-        if (changed) {
-          setChannelStates([...channelStatesRef.current]);
+        if (spLib && spPtr) {
+          const vu: number = spLib._openmpt_module_get_current_channel_vu_mono(spPtr, c) as number;
+          existing.volume = vu;
+          existing.trigger = vu > 0.05 ? 1 : 0;
         }
-      } else {
-        // Smooth fractional ages between rows (no allocation)
-        const delta = playheadRow - prev.playheadRow;
-        if (delta > 0) {
-          for (let c = 0; c < numChannels; c++) {
-            const state = channelStatesRef.current[c];
-            if (state && state.noteAge < 999) {
-              state.noteAge += delta;
-            }
-          }
-        }
+      }
+
+      if (stateChanged) {
+        setChannelStates([...channelStatesRef.current]);
       }
     }
 
@@ -1206,6 +1176,8 @@ export function useLibOpenMPT(initialVolume: number = 0.4, liteMode: boolean = f
     // PERFORMANCE OPTIMIZATION: Export ref for high-frequency updates
     // PatternDisplay reads directly from this to this ref - avoids React re-renders
     playbackStateRef,
+    /** High-frequency channel shadow state (noteAge, VU) — read in GPU render loop. */
+    channelStatesRef,
     // AUDIO-001 FIX: Export worklet diagnostics
     workletLoadError,
     // Oscilloscope SAB view for GPU texture upload

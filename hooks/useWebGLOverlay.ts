@@ -44,6 +44,7 @@ export interface WebGLOverlayParams {
   cellWidth: number;
   cellHeight: number;
   channels?: ChannelShadowState[];
+  channelStatesRef?: React.MutableRefObject<ChannelShadowState[]>;
   bloomIntensity?: number;
   playbackStateRef?: React.MutableRefObject<PlaybackState>;
   stepsLength?: number;
@@ -360,7 +361,7 @@ export function useWebGLOverlay(
       }
 
       // Upload channel state texture (RGBA32F, width=cols, height=2)
-      const chans = p.channels || [];
+      const chans = (p.channelStatesRef?.current?.length ? p.channelStatesRef.current : p.channels) || [];
       const requiredSize = cols * 2 * 4;
       if (!stateDataRef.current || stateDataRef.current.length !== requiredSize) {
         stateDataRef.current = new Float32Array(requiredSize);

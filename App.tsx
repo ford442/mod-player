@@ -158,6 +158,7 @@ function App() {
     syncDebug,
     analyserNode,
     playbackStateRef,
+    channelStatesRef,
     workletLoadError,
     oscBufferRef,
     audioReactiveRef,
@@ -968,6 +969,7 @@ function App() {
         debugPanelOpen={debugPanelOpen}
         setDebugPanelOpen={setDebugPanelOpen}
         playbackStateRef={playbackStateRef}
+        channelStatesRef={channelStatesRef}
         oscBufferRef={oscBufferRef}
         bloomPreset={bloomPreset}
         setBloomPreset={setBloomPreset}
@@ -1046,6 +1048,7 @@ function App() {
       debugPanelOpen={debugPanelOpen}
       setDebugPanelOpen={setDebugPanelOpen}
       playbackStateRef={playbackStateRef}
+      channelStatesRef={channelStatesRef}
       oscBufferRef={oscBufferRef}
       audioReactiveRef={audioReactiveRef}
       bloomPreset={bloomPreset}

@@ -1,5 +1,6 @@
 import type { ChannelShadowState } from '../../../types';
 import type { WebGPURenderParams } from '../../../hooks/useWebGPURender';
+import { resolveLiveChannels } from '../../../hooks/useWebGPURender';
 import type { WebGL2DebugConfig } from '../types';
 import { packPatternMatrixHighPrecision } from '../../../utils/gpuPacking';
 import {
@@ -330,7 +331,7 @@ export class WebGL2PatternRenderer {
     if (this.stateData.length !== requiredSize) {
       this.stateData = new Float32Array(requiredSize);
     }
-    const chans = params.channels || [];
+    const chans = resolveLiveChannels(params);
     const startIdx = padTopChannel ? 1 : 0;
     if (startIdx === 1) {
       for (let j = 0; j < 4; j++) {
