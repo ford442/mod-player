@@ -77,6 +77,12 @@ Asserts:
 
 Optional: set `localStorage.xasm1_playhead_debug = '1'` and use the sync debug HUD (`driftMs` should stay small once rolling).
 
+**Main-thread contract (do not regress):**
+- Worklet `position` handlers must **not** call React `setState` (especially `setModuleInfo`) — samples update refs only (~350 Hz).
+- `updateUI` writes fractional playhead to `playbackStateRef` every RAF; React UI state updates only on integer row/order/BPM changes (and throttled sync HUD).
+- RAF loop must reschedule via `updateUIRef`, never a closed-over `updateUI` identity.
+- GPU renderers read `playbackStateRef` / `channelStatesRef` each frame.
+
 ### C. Engine comparison
 
 | Mode | How | Expected |
@@ -105,9 +111,10 @@ Acceptance: visual lag ≤ ~120 ms (≤ 1 row), typically much less after pred
 - Bump `WORKLET_VERSION` in `useWorkletLoader.ts` when the worklet changes (currently **v4**).
 - Do not reintroduce `dt = max(0, …)` without latency compensation.
 - Worklet position handlers must **not** overwrite `noteAge` with integer row — `updateUI` owns fractional ages.
+- Worklet position handlers must **not** call React `setState` (no `setModuleInfo` / BPM UI at quantum rate).
 - GPU renderers read `channelStatesRef` each frame (not stale React `channelStates` state).
 - Keep ScriptProcessor as the reference sync path; never run prediction on it.
 - Prefer self-hosted worklet assets; see `public/worklets/README.md`.
 
 ---
-*Updated: 2026-07-10 — predictive playhead foundation*
+*Updated: 2026-07-23 — main-thread React thrash fix (quantum setModuleInfo + 60 Hz playhead setState)*

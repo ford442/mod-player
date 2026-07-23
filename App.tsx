@@ -293,8 +293,8 @@ function App() {
         };
         setPlaybackRowFraction(value);
       },
-      getPlaybackRow: () => Math.floor(playbackRowFraction),
-      getPlaybackRowFraction: () => playbackRowFraction,
+      getPlaybackRow: () => Math.floor(playbackStateRef.current.playheadRow),
+      getPlaybackRowFraction: () => playbackStateRef.current.playheadRow,
       getActiveRenderer: () => window.currentPatternRenderer?.backend ?? null,
       getAudioEngine: () => activeEngine,
       getLiteMode: () => liteMode,
@@ -360,7 +360,7 @@ function App() {
       },
     };
     return () => { delete window.__TEST_HOOKS__; };
-  }, [seekToStep, stopMusic, isModuleLoaded, sequencerMatrix, loadFile, playbackRowFraction, setPlaybackRowFraction, playbackStateRef, activeEngine, liteMode]);
+  }, [seekToStep, stopMusic, isModuleLoaded, sequencerMatrix, loadFile, setPlaybackRowFraction, playbackStateRef, activeEngine, liteMode]);
 
   // Project-M popup integration: broadcast PCM frames via BroadcastChannel
   useEffect(() => {

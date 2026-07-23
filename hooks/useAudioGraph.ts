@@ -585,9 +585,11 @@ export async function startAudioPlayback(
             if (typeof e.data.rowFraction === 'number' && Number.isFinite(e.data.rowFraction)) {
               positionPayload.rowFraction = e.data.rowFraction;
             }
+            // BPM belongs on the sample/ref path only. Never setModuleInfo here —
+            // position messages arrive every audio quantum (~350 Hz) and flooding
+            // React was a primary A/V desync source (especially XM with varying BPM).
             if (bpm && bpm > 0) {
               positionPayload.bpm = bpm;
-              callbacks.setModuleInfo((prev: ModuleInfo) => ({ ...prev, bpm }));
             }
             if (e.data.speed != null && e.data.speed > 0) {
               positionPayload.speed = e.data.speed;

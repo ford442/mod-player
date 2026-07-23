@@ -54,10 +54,12 @@ console.log('[AudioWorklet] Configuration:', {
 // TIMING FIX: Maximum allowed drift before correction (in seconds)
 const MAX_DRIFT_SECONDS = 0.1;
 // Worklet: prediction already tracks audio clock — only light EMA to hide
-// postMessage jitter (α→1 = less lag). Was 0.88; still a small lag source.
-const WORKLET_ROW_SMOOTHING = 0.94;
+// postMessage jitter (α→1 = less lag). Was 0.94; still a small lag source.
+const WORKLET_ROW_SMOOTHING = 0.98;
 // ScriptProcessor / direct lib query: near-instant follow
-const DIRECT_ROW_SMOOTHING = 0.96;
+const DIRECT_ROW_SMOOTHING = 0.99;
+/** How often sync-debug HUD React state may update (ms). */
+const SYNC_DEBUG_UI_INTERVAL_MS = 250;
 
 function isLibReadyForParse(lib: LibOpenMPT): boolean {
   return typeof lib._openmpt_module_create_from_memory2 === 'function';
@@ -266,6 +268,12 @@ export function useLibOpenMPT(initialVolume: number = 0.4, liteMode: boolean = f
   // RAF-loop kill switch: guards against a frame that is in-flight when stop/load
   // is called from rescheduling itself and leaking a second updateUI loop.
   const uiLoopActiveRef = useRef<boolean>(false);
+
+  /** Last values pushed to React UI — avoid 60 Hz setState storms that desync A/V. */
+  const lastUiOrderRef = useRef<number>(-1);
+  const lastUiRowIntRef = useRef<number>(-1);
+  const lastUiBpmRef = useRef<number>(-1);
+  const lastSyncDebugUiMsRef = useRef<number>(0);
 
   // Track if user has manually loaded a module (to prevent default from overwriting)
   const userModuleLoadedRef = useRef<boolean>(false);
@@ -477,6 +485,10 @@ export function useLibOpenMPT(initialVolume: number = 0.4, liteMode: boolean = f
     workletPositionSampleRef.current = null;
     workletRowsPerSecRef.current = rowsPerSecondFromBpm(125);
     pendingSeekRef.current = null;
+    lastUiOrderRef.current = -1;
+    lastUiRowIntRef.current = -1;
+    lastUiBpmRef.current = -1;
+    lastSyncDebugUiMsRef.current = 0;
     seekAcknowledgedRef.current = true;
 
     // Reset playback state ref so PatternDisplay doesn't show stale playhead
@@ -581,25 +593,6 @@ export function useLibOpenMPT(initialVolume: number = 0.4, liteMode: boolean = f
       }
     }
 
-    // Update Pattern Matrix if needed
-    if (sequencerMatrix?.order !== order) {
-      const newMatrix = patternMatricesRef.current[order];
-      if (newMatrix) setSequencerMatrix(newMatrix);
-    }
-
-    // moduleInfo / sequencer UI use integer row; shaders use fractional playhead
-    const rowIntUi = Math.floor(row);
-    setModuleInfo((prev: ModuleInfo) => ({ ...prev, order, row: rowIntUi, bpm: currentBpm }));
-    setSequencerCurrentRow(rowIntUi);
-    setPlaybackSeconds(time);
-
-    // Update global row (approximate)
-    let globalRow = 0;
-    for (let i = 0; i < order; i++) {
-      globalRow += patternMatricesRef.current[i]?.numRows || 64;
-    }
-    setSequencerGlobalRow(globalRow + rowIntUi);
-
     // TIMING FIX: Smooth row for visual display (light smoothing on worklet path only)
     const targetPlayhead = row;
     const prevPlayhead = playbackStateRef.current.playheadRow;
@@ -611,7 +604,36 @@ export function useLibOpenMPT(initialVolume: number = 0.4, liteMode: boolean = f
     }
     // Never push a negative playhead after latency back-extrapolation
     if (smoothedPlayhead < 0) smoothedPlayhead = 0;
-    setPlaybackRowFraction(smoothedPlayhead);
+
+    // moduleInfo / sequencer UI use integer row; shaders read fractional playhead from ref
+    const rowIntUi = Math.floor(smoothedPlayhead);
+    const orderChanged = order !== lastUiOrderRef.current;
+    const rowChanged = rowIntUi !== lastUiRowIntRef.current;
+    const bpmChanged = Math.abs(currentBpm - lastUiBpmRef.current) >= 0.5;
+
+    if (orderChanged) {
+      const newMatrix = patternMatricesRef.current[order];
+      if (newMatrix) setSequencerMatrix(newMatrix);
+      lastUiOrderRef.current = order;
+    }
+
+    if (orderChanged || rowChanged || bpmChanged) {
+      setModuleInfo((prev: ModuleInfo) => ({ ...prev, order, row: rowIntUi, bpm: currentBpm }));
+      lastUiBpmRef.current = currentBpm;
+    }
+
+    if (rowChanged || orderChanged) {
+      setSequencerCurrentRow(rowIntUi);
+      setPlaybackSeconds(time);
+      setPlaybackRowFraction(smoothedPlayhead);
+      lastUiRowIntRef.current = rowIntUi;
+
+      let globalRow = 0;
+      for (let i = 0; i < order; i++) {
+        globalRow += patternMatricesRef.current[i]?.numRows || 64;
+      }
+      setSequencerGlobalRow(globalRow + rowIntUi);
+    }
 
     // Compute note ages for hardware choke / timed shader indicators (fractional playhead).
     const playheadRow = smoothedPlayhead;
@@ -648,9 +670,8 @@ export function useLibOpenMPT(initialVolume: number = 0.4, liteMode: boolean = f
 
     // Calculate beat phase based on actual audio time
     const beatPhaseValue = (time * 2) % 1;
-    setBeatPhase(beatPhaseValue);
 
-    // TIMING FIX: Atomic update of playbackStateRef with worklet-provided timestamp
+    // TIMING FIX: Atomic update of playbackStateRef — GPU/HTML hot path reads this every frame
     const now = workletTimestampRef.current ?? (audioCtx?.currentTime ?? performance.now() / 1000);
     playbackStateRef.current = {
       playheadRow: smoothedPlayhead,
@@ -662,33 +683,41 @@ export function useLibOpenMPT(initialVolume: number = 0.4, liteMode: boolean = f
       lastUpdateTimestamp: now
     };
 
-    // TIMING FIX: Update sync debug info
-    setSyncDebug((prev: SyncDebugInfo) => ({
-      ...prev,
-      driftMs: Math.round(driftAccumulatorRef.current * 1000),
-      row: Math.floor(smoothedPlayhead),
-      mode: scriptProcessorRef.current ? 'scriptprocessor' : activeEngine,
-      bufferMs: Math.round(
-        ((audioContextRef.current?.baseLatency ?? 0) + (audioContextRef.current?.outputLatency ?? 0)) * 1000
-      ),
-      audioContextState: audioContextRef.current?.state || 'none',
-      sampleRate: audioContextRef.current?.sampleRate || 0,
-      baseLatency: audioContextRef.current?.baseLatency ?? 0,
-      outputLatency: audioContextRef.current?.outputLatency ?? 0,
-      workletSupported: typeof AudioWorklet !== 'undefined',
-      wasmSupported: typeof WebAssembly !== 'undefined',
-      driftAccumulator: driftAccumulatorRef.current,
-      lastCorrectedTime: lastCorrectedTimeRef.current,
-      lastWorkletUpdate: lastWorkletUpdateRef.current,
-      seekPending: !!pendingSeekRef.current,
-    }));
-
-    lastUpdateTimeRef.current = performance.now() / 1000;
-    // Only reschedule if stop/load hasn't killed the loop while we were running.
-    if (uiLoopActiveRef.current) {
-      animationFrameHandle.current = requestAnimationFrame(updateUI);
+    // Throttle React HUD updates — never compete with the audio message queue at 60 Hz
+    const wallNowMs = performance.now();
+    if (wallNowMs - lastSyncDebugUiMsRef.current >= SYNC_DEBUG_UI_INTERVAL_MS) {
+      lastSyncDebugUiMsRef.current = wallNowMs;
+      setBeatPhase(beatPhaseValue);
+      setSyncDebug((prev: SyncDebugInfo) => ({
+        ...prev,
+        driftMs: Math.round(driftAccumulatorRef.current * 1000),
+        row: rowIntUi,
+        mode: scriptProcessorRef.current ? 'scriptprocessor' : activeEngine,
+        bufferMs: Math.round(
+          ((audioContextRef.current?.baseLatency ?? 0) + (audioContextRef.current?.outputLatency ?? 0)) * 1000
+        ),
+        audioContextState: audioContextRef.current?.state || 'none',
+        sampleRate: audioContextRef.current?.sampleRate || 0,
+        baseLatency: audioContextRef.current?.baseLatency ?? 0,
+        outputLatency: audioContextRef.current?.outputLatency ?? 0,
+        workletSupported: typeof AudioWorklet !== 'undefined',
+        wasmSupported: typeof WebAssembly !== 'undefined',
+        driftAccumulator: driftAccumulatorRef.current,
+        lastCorrectedTime: lastCorrectedTimeRef.current,
+        lastWorkletUpdate: lastWorkletUpdateRef.current,
+        seekPending: !!pendingSeekRef.current,
+      }));
     }
-  }, [isPlaying, activeEngine, sequencerMatrix, kickTrigger, grooveAmount]);
+
+    lastUpdateTimeRef.current = wallNowMs / 1000;
+    // Always reschedule via updateUIRef so dependency changes cannot stick the loop
+    // to a stale closure (previously held sequencerMatrix from play-start forever).
+    if (uiLoopActiveRef.current) {
+      animationFrameHandle.current = requestAnimationFrame(() => {
+        updateUIRef.current?.();
+      });
+    }
+  }, [activeEngine, kickTrigger, grooveAmount]);
 
   // Keep updateUIRef always pointing to the latest updateUI so
   // startAudioPlayback can schedule the most current callback.
@@ -819,6 +848,8 @@ export function useLibOpenMPT(initialVolume: number = 0.4, liteMode: boolean = f
     setSequencerGlobalRow(step);
     setPlaybackRowFraction(targetRow);
     playbackStateRef.current.playheadRow = targetRow;
+    lastUiOrderRef.current = targetOrder;
+    lastUiRowIntRef.current = targetRow;
 
     // TIMING FIX: Reset drift accumulator on seek
     driftAccumulatorRef.current = 0;
