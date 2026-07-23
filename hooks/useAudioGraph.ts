@@ -100,7 +100,23 @@ export async function startAudioPlayback(
   }
 
   if (refs.isPlayingRef.current && refs.audioWorkletNodeRef.current) {
-    console.log('[PLAY] Already playing — ignoring duplicate play request');
+    // Recover from "UI playing / worklet paused" races: stopMusic pauses the
+    // processor but a stale React render used to clear isPlayingRef. Always
+    // nudge the worklet + resume the context instead of hard-ignoring.
+    console.log('[PLAY] Already marked playing — ensuring worklet render + context resume');
+    try {
+      refs.audioWorkletNodeRef.current.port.postMessage({ type: 'play' });
+    } catch { /* ignore */ }
+    const existingCtx = refs.audioContextRef.current;
+    if (existingCtx?.state === 'suspended') {
+      try { await existingCtx.resume(); } catch { /* ignore */ }
+    }
+    if (refs.gainNodeRef.current) {
+      refs.gainNodeRef.current.gain.value = config.volume;
+    }
+    if (!refs.animationFrameHandle.current && refs.updateUIRef.current) {
+      refs.animationFrameHandle.current = requestAnimationFrame(refs.updateUIRef.current);
+    }
     return;
   }
 
@@ -149,13 +165,16 @@ export async function startAudioPlayback(
     if (!refs.stereoPannerRef.current) {
       console.log('[PLAY] Creating StereoPanner node...');
       refs.stereoPannerRef.current = ctx.createStereoPanner();
-      refs.stereoPannerRef.current.pan.value = config.panValue;
     }
+    refs.stereoPannerRef.current.pan.value = config.panValue;
+
     if (!refs.gainNodeRef.current) {
       console.log('[PLAY] Creating Gain node...');
       refs.gainNodeRef.current = ctx.createGain();
-      refs.gainNodeRef.current.gain.value = config.volume;
     }
+    // Always re-apply volume — App slider can change while the GainNode lives on.
+    refs.gainNodeRef.current.gain.value = config.volume;
+
     if (!refs.analyserRef.current) {
       console.log('[PLAY] Creating Analyser node...');
       refs.analyserRef.current = ctx.createAnalyser();
@@ -709,6 +728,12 @@ export async function startAudioPlayback(
             refs.isPlayingRef.current = true;
             callbacks.setIsPlaying(true);
             callbacks.setStatus("Playing...");
+            if (refs.gainNodeRef.current) {
+              refs.gainNodeRef.current.gain.value = config.volume;
+            }
+            if (ctx.state === 'suspended') {
+              try { await ctx.resume(); } catch { /* ignore */ }
+            }
             if (refs.animationFrameHandle.current) cancelAnimationFrame(refs.animationFrameHandle.current);
             refs.animationFrameHandle.current = requestAnimationFrame(refs.updateUIRef.current!);
             // Explicitly tell the worklet to begin rendering (defensive, in case

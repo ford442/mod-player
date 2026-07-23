@@ -313,6 +313,98 @@ export async function requestWebGPUDevice(
 }
 
 /**
+ * Verify that WebGPU can present pixels to an HTML canvas.
+ *
+ * Some Chrome / SwiftShader / headless environments expose a usable adapter and
+ * device, but swapchain contents never composite (createImageBitmap reads as
+ * transparent black). Pattern shaders then look "broken" for every file even
+ * though pipelines and submit succeed. Call after requestDevice; returns false
+ * when we should fall back to WebGL2/HTML.
+ */
+export async function probeWebGPUCanvasPresentation(
+  device: GPUDevice,
+  format?: GPUTextureFormat,
+): Promise<boolean> {
+  if (typeof document === 'undefined') return false;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = 8;
+  canvas.height = 8;
+  const context = canvas.getContext('webgpu') as GPUCanvasContext | null;
+  if (!context) return false;
+
+  const fmt = format ?? navigator.gpu.getPreferredCanvasFormat();
+  try {
+    context.configure({
+      device,
+      format: fmt,
+      alphaMode: 'opaque',
+      usage: DEFAULT_CANVAS_USAGE,
+    });
+
+    const tex = context.getCurrentTexture();
+    const encoder = device.createCommandEncoder();
+    const pass = encoder.beginRenderPass({
+      colorAttachments: [{
+        view: tex.createView(),
+        loadOp: 'clear',
+        clearValue: { r: 1, g: 0, b: 0, a: 1 },
+        storeOp: 'store',
+      }],
+    });
+    pass.end();
+    device.queue.submit([encoder.finish()]);
+
+    try {
+      await device.queue.onSubmittedWorkDone();
+    } catch {
+      /* optional sync point — older browsers may lack it */
+    }
+    await new Promise<void>((resolve) => {
+      requestAnimationFrame(() => resolve());
+    });
+
+    const bitmap = await createImageBitmap(canvas);
+    const offscreen = document.createElement('canvas');
+    offscreen.width = 8;
+    offscreen.height = 8;
+    const ctx2d = offscreen.getContext('2d');
+    if (!ctx2d) {
+      bitmap.close();
+      return false;
+    }
+    ctx2d.drawImage(bitmap, 0, 0);
+    bitmap.close();
+    const data = ctx2d.getImageData(0, 0, 8, 8).data;
+    let maxA = 0;
+    let maxR = 0;
+    for (let i = 0; i < data.length; i += 4) {
+      const a = data[i + 3] ?? 0;
+      const r = data[i] ?? 0;
+      if (a > maxA) maxA = a;
+      if (r > maxR) maxR = r;
+    }
+    // Opaque red clear must survive presentation. Transparent black (maxA === 0)
+    // means the swapchain never reached the canvas.
+    return maxA > 128 && maxR > 128;
+  } catch (err) {
+    if (import.meta.env.DEV) {
+      console.warn(
+        '[WebGPU] canvas presentation probe failed:',
+        err instanceof Error ? err.message : err,
+      );
+    }
+    return false;
+  } finally {
+    try {
+      context.unconfigure();
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+/**
  * Configure a canvas GPUCanvasContext with explicit usage for rendering and
  * optional screenshot copy-out. Re-call after canvas resize.
  */

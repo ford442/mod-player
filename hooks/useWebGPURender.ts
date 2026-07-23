@@ -61,6 +61,7 @@ import {
   getWebGPUCanvasContext,
   attachDeviceLostHandler,
   preferredSampledImageFormat,
+  probeWebGPUCanvasPresentation,
   WebGPUInitError,
   type WebGPUDeviceStatus,
 } from '../utils/webgpuDevice';
@@ -341,6 +342,8 @@ export function useWebGPURender(
   };
 
   const canvasFormatRef = useRef<GPUTextureFormat>('bgra8unorm');
+  /** Last canvas buffer size the WebGPU context was configured for. */
+  const configuredCanvasSizeRef = useRef<{ w: number; h: number } | null>(null);
 
   const releaseShaderGpuResources = useCallback(() => {
     renderGenerationRef.current = lifecycleRef.current.bump();
@@ -407,6 +410,22 @@ export function useWebGPURender(
           return;
         }
 
+        // Adapter/device can succeed while the canvas swapchain never composites
+        // (common on headless / software WebGPU). Detect before claiming ready.
+        const presents = await probeWebGPUCanvasPresentation(device, preferredCanvasFormat);
+        if (cancelled) {
+          try { device.destroy(); } catch { /* ignore */ }
+          return;
+        }
+        if (!presents) {
+          try { device.destroy(); } catch { /* ignore */ }
+          throw new WebGPUInitError(
+            'WebGPU canvas presentation failed (swapchain does not composite)',
+            'device-failed',
+            true,
+          );
+        }
+
         syncCanvasSize(canvas, glCanvasRef.current);
 
         const context = getWebGPUCanvasContext(canvas);
@@ -416,6 +435,7 @@ export function useWebGPURender(
           format: preferredCanvasFormat,
         });
         canvasFormatRef.current = format;
+        configuredCanvasSizeRef.current = { w: canvas.width, h: canvas.height };
 
         markLostIntentionalRef.current?.();
         markLostIntentionalRef.current = attachDeviceLostHandler(device, {
@@ -929,6 +949,24 @@ export function useWebGPURender(
       !pool.isAlive(uniformBufferRef.current) || !pool.isAlive(cellsBufferRef.current)
     ) {
       return;
+    }
+
+    // Canvas buffer size can change via ResizeObserver after the last configure().
+    // Drawing without reconfigure leaves Chrome with an invalid swapchain (black frame).
+    const configured = configuredCanvasSizeRef.current;
+    if (!configured || configured.w !== canvas.width || configured.h !== canvas.height) {
+      try {
+        configureCanvasContext({
+          device,
+          context,
+          format: canvasFormatRef.current ?? undefined,
+        });
+        configuredCanvasSizeRef.current = { w: canvas.width, h: canvas.height };
+        bloomProcessorRef?.current?.resize(canvas.width, canvas.height);
+      } catch (e) {
+        console.error('[WebGPU] mid-frame configure failed:', e);
+        return;
+      }
     }
 
     const p = renderParamsRef.current;

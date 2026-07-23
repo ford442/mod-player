@@ -162,7 +162,11 @@ export async function readbackBuffer(
     staging.destroy();
     return mapped;
   } catch (e) {
-    console.error('[DURA-PARITY] Readback failed:', e);
+    // Strict Mode / shader switches destroy buffers mid-readback — not a real parity failure.
+    const msg = e instanceof Error ? e.message : String(e);
+    if (!/destroyed|unmapped|Aborted/i.test(msg)) {
+      console.error('[DURA-PARITY] Readback failed:', e);
+    }
     return null;
   }
 }

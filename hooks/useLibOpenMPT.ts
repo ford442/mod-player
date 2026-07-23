@@ -292,8 +292,9 @@ export function useLibOpenMPT(initialVolume: number = 0.4, liteMode: boolean = f
   /** Band energy + meters region of the shared audio SAB (offset past osc ring). */
   const audioReactiveRef = useRef<Float32Array | null>(null);
 
-  // Sync isPlayingRef with the latest React state every render
-  isPlayingRef.current = isPlaying;
+  // isPlayingRef is owned ONLY by play/stop/loaded/fallback paths.
+  // Never mirror React `isPlaying` into the ref — a stale render can clear it while
+  // the worklet is mid-start and leave the UI saying Playing with a paused processor.
 
   // PERFORMANCE OPTIMIZATION: Mutable ref for high-frequency playback data
   // This prevents React re-renders 60 times/second - PatternDisplay reads directly from this ref
@@ -1121,6 +1122,11 @@ export function useLibOpenMPT(initialVolume: number = 0.4, liteMode: boolean = f
       cancelAnimationFrame(animationFrameHandle.current);
     };
   }, []);
+
+  // App owns the volume slider; keep the hook GainNode in sync with that prop.
+  useEffect(() => {
+    _setVolume(initialVolume);
+  }, [initialVolume]);
 
   // Update panning when panValue changes
   useEffect(() => {

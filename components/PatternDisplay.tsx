@@ -194,7 +194,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     if (activeBackend !== 'webgpu' || webgpuAvailable) return;
     // Guard against applying the automatic fallback more than once per session.
     if (hasWebGPUAutoFallbackApplied()) return;
-    const fallback = applyWebGPUFallback('WebGPU initialization failed');
+    const fallback = applyWebGPUFallback('WebGPU initialization or canvas presentation failed');
     setActiveBackend(fallback);
   }, [activeBackend, webgpuAvailable]);
   const [localTime, setLocalTime] = useState(0);
@@ -406,7 +406,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   // explicit deps, guaranteeing the cells buffer is rebuilt when a new module is loaded.
   const oscTextureRef = useRef<GPUTexture | null>(null);
 
-  const { gpuReady, render: renderWebGPU, deviceRef: gpuDevRef, deviceStatus } = useWebGPURender(
+  const { gpuReady, render: renderWebGPU, deviceRef: gpuDevRef, deviceStatus, contextRef: gpuHookContextRef } = useWebGPURender(
     canvasRef, glCanvasRef, shaderFile,
     syncCanvasSize, renderParamsRef, matrix, padTopChannel, setDebugInfo, setWebgpuAvailable,
     bloomRef,
@@ -426,10 +426,32 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   const gpuReadyEffective = useWebGPU ? gpuReady : useWebGL2 ? glReady : false;
   const render = useWebGPU ? renderWebGPU : useWebGL2 ? renderWebGL2 : () => {};
 
-  // Keep resize reconfiguration refs in sync
+  // Keep resize reconfiguration refs in sync with the live WebGPU device + canvas context.
+  // Without context, handleResize cannot re-configure after canvas width/height changes and
+  // Chrome leaves the swapchain invalid → permanent black frame for every shader.
   useEffect(() => {
     gpuDeviceRef.current = gpuDevRef.current;
+    gpuContextRef.current = gpuHookContextRef.current;
   });
+
+  // When the WebGPU context first becomes ready, force a configure at the current
+  // canvas buffer size. ResizeObserver may have changed width/height after the
+  // init-time configure (Strict Mode remount + flex layout), which invalidates
+  // the swapchain until reconfigured — Chrome then shows a permanent black frame.
+  useEffect(() => {
+    if (!useWebGPU || !gpuReady) return;
+    const canvas = canvasRef.current;
+    const device = gpuDevRef.current;
+    const context = gpuHookContextRef.current;
+    if (!canvas || !device || !context) return;
+    syncCanvasSize(canvas, glCanvasRef.current);
+    try {
+      configureCanvasContext({ device, context });
+      bloomRef.current?.resize(canvas.width, canvas.height);
+    } catch (e) {
+      console.error('❌ WebGPU context configure-on-ready failed:', e);
+    }
+  }, [useWebGPU, gpuReady, syncCanvasSize, gpuDevRef, gpuHookContextRef]);
 
   // Expose WebGPU renderer handle for agent/CI pixel tests
   useEffect(() => {
