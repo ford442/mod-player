@@ -3,8 +3,9 @@
 // Theme-only entry; shared body lives in lib/circular_night_body.wgsl.
 
 // NIGHT-54 THEME — saturated neon-noir
-const THEME_BG: vec3<f32> = vec3<f32>(0.015, 0.010, 0.020);
-const THEME_LED_OFF: vec3<f32> = vec3<f32>(0.020, 0.015, 0.025);
+// Floors raised (#346) — neon-noir, idle grid faintly visible against the background.
+const THEME_BG: vec3<f32> = vec3<f32>(0.030, 0.022, 0.040);
+const THEME_LED_OFF: vec3<f32> = vec3<f32>(0.090, 0.070, 0.110);
 const THEME_LED_ON: vec3<f32> = vec3<f32>(0.00, 0.90, 1.00);
 const THEME_LIT_TINT: vec3<f32> = vec3<f32>(0.70, 0.80, 0.90);
 const THEME_RIM: vec3<f32> = vec3<f32>(0.00, 0.90, 1.00);
@@ -650,7 +651,8 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     else if (isSustain) { topColor = blueColor; }
 
     var noteColor = THEME_LED_OFF * 1.2;
-    var midIntensity = 0.02;
+    // Faint always-on floor (#346) so idle LEDs read as a dim grid instead of collapsing to black.
+    var midIntensity = 0.06;
 
     if (isNoteOn || isSustain) {
       var baseColor = vec3<f32>(0.0);
@@ -681,7 +683,7 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
       midIntensity = 0.0;
     } else if (isDead) {
       noteColor = THEME_LED_OFF * 1.2;
-      midIntensity = 0.02;
+      midIntensity = 0.06;
     }
     let midColor = noteColor;
 

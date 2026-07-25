@@ -67,6 +67,7 @@ import {
 } from '../utils/webgpuDevice';
 import {
   AUDIO_REACTIVE_UNIFORM_BYTES,
+  OSC_SAMPLE_COUNT,
   packAudioReactiveUniform,
   readAudioBands,
 } from '../utils/audioReactive';
@@ -238,10 +239,21 @@ export function useWebGPURender(
         { binding: 4, resource: textureResourcesRef.current.sampler },
         { binding: 5, resource: textureResourcesRef.current.view },
       );
-      if (usesOscilloscope(shaderFile) && oscTextureRef?.current) {
+      // Bindings 6/7 are declared in the pipeline layout whenever the shader uses them, so a
+      // missing texture would make createBindGroup() throw and blank the canvas. Bail out cleanly
+      // instead — the next refresh (after the texture is (re)created in shader init) rebuilds it.
+      if (usesOscilloscope(shaderFile)) {
+        if (!oscTextureRef?.current) {
+          bindGroupRef.current = null;
+          return;
+        }
         entries.push({ binding: 6, resource: oscTextureRef.current.createView() });
       }
-      if (usesInstrumentPalette(shaderFile) && instrumentPaletteTextureRef.current) {
+      if (usesInstrumentPalette(shaderFile)) {
+        if (!instrumentPaletteTextureRef.current) {
+          bindGroupRef.current = null;
+          return;
+        }
         entries.push({ binding: 7, resource: instrumentPaletteTextureRef.current.createView() });
       }
       if (usesAudioReactive(shaderFile) && audioReactiveUniformBufferRef.current) {
@@ -377,6 +389,10 @@ export function useWebGPURender(
     bezelUniformBufferRef.current = null;
     videoTextureRef.current = null;
     instrumentPaletteTextureRef.current = null;
+    // The osc texture is tracked in the 'shader' pool scope (disposed just above), so the GPU
+    // resource is already freed here; null the shared ref so PatternDisplay's per-frame upload
+    // loop skips it until the next shader init recreates it.
+    if (oscTextureRef) oscTextureRef.current = null;
     audioReactiveUniformBufferRef.current = null;
   }, []);
 
@@ -623,6 +639,23 @@ export function useWebGPURender(
           );
           instrumentPaletteTextureRef.current = texture;
           instrumentPaletteVersionRef.current = placeholder;
+        }
+
+        // Oscilloscope 1-D texture (binding 6). Created here — co-located with the pipeline/
+        // bind-group build — so it always exists before refreshBindGroup() runs. Owning it in a
+        // separate React effect (as before) raced the pipeline rebuild on shader switch: the layout
+        // declares binding 6 but the entry was missing, so createBindGroup threw → black canvas
+        // (#348 "works first time, black after switch"). Stored on the shared oscTextureRef so
+        // PatternDisplay's per-frame upload loop keeps writing to it.
+        if (usesOscilloscope(activeShaderFile) && oscTextureRef) {
+          oscTextureRef.current = pool.track(
+            device.createTexture({
+              size: [OSC_SAMPLE_COUNT, 1, 1],
+              format: 'r32float',
+              usage: GPUTextureUsage.COPY_DST | GPUTextureUsage.TEXTURE_BINDING,
+            }),
+            'shader',
+          );
         }
 
         if (usesAudioReactive(activeShaderFile) || usesAudioReactiveBezel(activeShaderFile)) {

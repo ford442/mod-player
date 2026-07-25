@@ -5,8 +5,10 @@
 // night_theme.wgsl — default "Night" palette (v0.52 dusky)
 // Other night variants override via theme_night_53 / theme_night_54 instead of this file.
 
-const THEME_BG: vec3<f32> = vec3<f32>(0.025, 0.027, 0.032);
-const THEME_LED_OFF: vec3<f32> = vec3<f32>(0.035, 0.037, 0.045);
+// Floors raised (#346): the LED-off housing must read clearly above the background so the grid is
+// visible even when idle. Both stay dark enough to keep the "night" mood.
+const THEME_BG: vec3<f32> = vec3<f32>(0.040, 0.043, 0.050);
+const THEME_LED_OFF: vec3<f32> = vec3<f32>(0.100, 0.105, 0.120);
 const THEME_LED_ON: vec3<f32> = vec3<f32>(0.95, 0.50, 0.08);
 const THEME_LIT_TINT: vec3<f32> = vec3<f32>(0.80, 0.82, 0.88);
 const THEME_RIM: vec3<f32> = vec3<f32>(0.20, 0.30, 0.45);
@@ -652,7 +654,8 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     else if (isSustain) { topColor = blueColor; }
 
     var noteColor = THEME_LED_OFF * 1.2;
-    var midIntensity = 0.02;
+    // Faint always-on floor (#346) so idle LEDs read as a dim grid instead of collapsing to black.
+    var midIntensity = 0.06;
 
     if (isNoteOn || isSustain) {
       var baseColor = vec3<f32>(0.0);
@@ -683,7 +686,7 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
       midIntensity = 0.0;
     } else if (isDead) {
       noteColor = THEME_LED_OFF * 1.2;
-      midIntensity = 0.02;
+      midIntensity = 0.06;
     }
     let midColor = noteColor;
 

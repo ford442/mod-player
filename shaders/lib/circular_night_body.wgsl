@@ -212,7 +212,8 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     else if (isSustain) { topColor = blueColor; }
 
     var noteColor = THEME_LED_OFF * 1.2;
-    var midIntensity = 0.02;
+    // Faint always-on floor (#346) so idle LEDs read as a dim grid instead of collapsing to black.
+    var midIntensity = 0.06;
 
     if (isNoteOn || isSustain) {
       var baseColor = vec3<f32>(0.0);
@@ -243,7 +244,7 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
       midIntensity = 0.0;
     } else if (isDead) {
       noteColor = THEME_LED_OFF * 1.2;
-      midIntensity = 0.02;
+      midIntensity = 0.06;
     }
     let midColor = noteColor;
 

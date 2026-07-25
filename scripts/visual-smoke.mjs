@@ -103,11 +103,18 @@ async function readCanvasPixels(page) {
       try {
         const px = r.readPixels();
         if (!px) return { ok: false, reason: 'readPixels-null' };
+        // Alpha-opaque count alone let a fully-opaque BLACK canvas pass — the exact failure that
+        // shipped the shader blank-render cascade (#346/#347/#348). Also require luminance: some
+        // pixels must have visible RGB above a small threshold, not just non-zero alpha.
+        const LUMA_THRESHOLD = 12; // 0-255; ~0.047 — above the raised night-theme floor
         let opaque = 0;
-        for (let i = 3; i < px.length; i += 4) {
-          if (px[i] > 8) opaque++;
+        let lit = 0;
+        for (let i = 0; i < px.length; i += 4) {
+          if (px[i + 3] > 8) opaque++;
+          if (px[i] > LUMA_THRESHOLD || px[i + 1] > LUMA_THRESHOLD || px[i + 2] > LUMA_THRESHOLD) lit++;
         }
-        return { ok: opaque > 50, opaque, total: px.length / 4 };
+        const black = lit <= 50;
+        return { ok: opaque > 50 && !black, opaque, lit, black, total: px.length / 4 };
       } catch (e) {
         return { ok: false, reason: String(e) };
       }

@@ -88,9 +88,14 @@ export function generateInstrumentPalette(
 }
 
 /**
- * Generate a fallback palette for modules that report no instruments.
- * This is the same shape as a module-derived palette but every slot is muted.
+ * Generate a fallback palette used before a module-derived palette is uploaded.
+ *
+ * This is bound at binding 7 as the placeholder for palette shaders (v0.52–v0.54, v0.56). Those
+ * shaders sample it for note color whenever `paletteMode == 1`, so a muted/near-black placeholder
+ * made every note render black until the real palette arrived (#346/#347). Instead we emit the full
+ * golden-ratio hue ramp — as if all 64 slots were active — so notes are visibly colored even with
+ * no instrument names loaded. A genuine module palette still overrides this once uploaded.
  */
 export function generateEmptyInstrumentPalette(): Uint8Array {
-  return generateInstrumentPalette(0, []);
+  return generateInstrumentPalette(MAX_INSTRUMENT_PALETTE_SIZE, []);
 }

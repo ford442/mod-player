@@ -23,7 +23,6 @@ import {
   isHorizontalLayoutShader,
   getShaderCanvasSize,
   getHitTestProfile,
-  usesOscilloscope,
   usesBareCanvasChrome,
   showsChannelInvertButton,
 } from '../utils/shaderVersion';
@@ -476,22 +475,10 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     return () => setCurrentPatternRenderer(null);
   }, [useWebGPU, gpuReady, handleResize]);
 
-  // Create oscilloscope 1D texture when GPU is ready and registry marks oscilloscope
-  useEffect(() => {
-    const device = gpuDevRef.current;
-    if (!device || !gpuReady || !usesOscilloscope(shaderFile)) return;
-    if (!oscTextureRef.current) {
-      oscTextureRef.current = device.createTexture({
-        size: [OSC_SAMPLE_COUNT, 1, 1],
-        format: 'r32float',
-        usage: GPUTextureUsage.COPY_DST | GPUTextureUsage.TEXTURE_BINDING,
-      });
-    }
-    return () => {
-      oscTextureRef.current?.destroy();
-      oscTextureRef.current = null;
-    };
-  }, [gpuReady, shaderFile]);
+  // The oscilloscope 1-D texture (binding 6) is owned by useWebGPURender: it is created in the
+  // same shader-init pass that builds the pipeline/bind group and freed on shader release. Owning
+  // it here in a separate effect used to race the pipeline rebuild on shader switch (#348). The
+  // per-frame upload loop below just writes to oscTextureRef.current when it exists.
 
   // Initialize multi-layer bloom post-processor when GPU becomes ready
   useEffect(() => {

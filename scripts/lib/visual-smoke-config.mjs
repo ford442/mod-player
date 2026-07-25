@@ -27,10 +27,20 @@ export const FULL_SHADER_FILES = [
   'patternv0.57.wgsl',
 ];
 
+// The v0.52–v0.57 family shipped rendering solid-black canvases (#346/#347/#348); they are pinned
+// into CI so the luminance guard in visual-smoke.mjs catches a regression. NOTE: CI runs the webgl2
+// GLSL reference renderer, which does not fully exercise the WGSL-only night-theme / oscilloscope
+// (binding 6) / instrument-palette (binding 7) paths — those are only fully verified under the
+// webgpu (SMOKE_PROFILE=full) profile. This is best-effort coverage in CI, not a full guarantee.
 export const CI_SHADER_FILES = [
   'patternv0.30b.wgsl',
   'patternv0.46.wgsl',
   'patternv0.50.wgsl',
+  'patternv0.52.wgsl',
+  'patternv0.53.wgsl',
+  'patternv0.54.wgsl',
+  'patternv0.55.wgsl',
+  'patternv0.56.wgsl',
   'patternv0.57.wgsl',
 ];
 
