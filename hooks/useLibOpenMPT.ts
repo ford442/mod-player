@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { LibOpenMPT, ModuleInfo, PatternMatrix, ChannelShadowState, PlaybackState, SyncDebugInfo, WorkerParseError, WorkerParseResponse } from '../types';
+import { LibOpenMPT, ModuleInfo, PatternMatrix, ChannelShadowState, PlaybackState, SyncDebugInfo, PlayheadDebugSnapshot, WorkerParseError, WorkerParseResponse } from '../types';
 import type { InstrumentTable } from '../types/instruments';
 import { emptyInstrumentTable } from '../types/instruments';
 import { extractInstrumentTable, mergeLibInstrumentNames } from '../utils/sampleExtract';
@@ -24,6 +24,12 @@ import {
 } from './useWorkletLoader';
 import { logWorkletDiagnostics } from '../audio-worklet/diagnostics';
 import {
+  resolveAudioEnginePreference,
+  shouldPromoteNativeEngine,
+  writeStoredAudioEngineOverride,
+  overrideFromActiveEngine,
+} from '../utils/audioEngineSelection';
+import {
   getAudioHeardTime,
   predictPlayheadFromSample,
   rowsPerSecondFromBpm,
@@ -31,6 +37,7 @@ import {
 } from '../utils/playheadPrediction';
 import { viewsFromAudioSab } from '../utils/audioReactive';
 import { hasShareModuleIntent } from '../utils/shareState';
+import { getStopMusicWorkletActions } from '../utils/workletAudioLifecycle';
 
 
 // Use Vite BASE_URL for correct resolution under subdirectory deployment
@@ -54,12 +61,21 @@ console.log('[AudioWorklet] Configuration:', {
 // TIMING FIX: Maximum allowed drift before correction (in seconds)
 const MAX_DRIFT_SECONDS = 0.1;
 // Worklet: prediction already tracks audio clock — only light EMA to hide
-// postMessage jitter (α→1 = less lag). Was 0.94; still a small lag source.
+// postMessage jitter (α→1 = less lag).
 const WORKLET_ROW_SMOOTHING = 0.98;
 // ScriptProcessor / direct lib query: near-instant follow
 const DIRECT_ROW_SMOOTHING = 0.99;
 /** How often sync-debug HUD React state may update (ms). */
 const SYNC_DEBUG_UI_INTERVAL_MS = 250;
+
+function isPlayheadDebugEnabled(): boolean {
+  if (import.meta.env.DEV) return true;
+  try {
+    return localStorage.getItem('xasm1_playhead_debug') === '1';
+  } catch {
+    return false;
+  }
+}
 
 function isLibReadyForParse(lib: LibOpenMPT): boolean {
   return typeof lib._openmpt_module_create_from_memory2 === 'function';
@@ -529,6 +545,10 @@ export function useLibOpenMPT(initialVolume: number = 0.4, liteMode: boolean = f
     let time = 0;
     let currentBpm = workletBpmRef.current;
     let rowSmoothing = DIRECT_ROW_SMOOTHING;
+    let playheadDebugSampleRow: number | undefined;
+    let playheadDebugPredictedRow: number | undefined;
+    let playheadDebugDtSec = 0;
+    let playheadDebugRowsPerSec = 0;
 
     const usingWorkletEngine =
       (activeEngine === 'worklet' || activeEngine === 'native-worklet') &&
@@ -553,6 +573,12 @@ export function useLibOpenMPT(initialVolume: number = 0.4, liteMode: boolean = f
         time = predicted.positionSeconds;
         order = sample.order;
         if (sample.bpm > 0) currentBpm = sample.bpm;
+        if (isPlayheadDebugEnabled()) {
+          playheadDebugSampleRow = sample.row;
+          playheadDebugPredictedRow = predicted.playheadRow;
+          playheadDebugDtSec = predicted.dtSec;
+          playheadDebugRowsPerSec = rowsPerSec;
+        }
       }
 
       // Drift telemetry: compare predicted song time to hardware clock baseline
@@ -577,6 +603,11 @@ export function useLibOpenMPT(initialVolume: number = 0.4, liteMode: boolean = f
       const bpm = lib._openmpt_module_get_current_estimated_bpm(modPtr);
       if (bpm > 0) currentBpm = bpm;
       rowSmoothing = DIRECT_ROW_SMOOTHING;
+      if (isPlayheadDebugEnabled()) {
+        playheadDebugSampleRow = row;
+        playheadDebugPredictedRow = row;
+        playheadDebugRowsPerSec = rowsPerSecondFromBpm(currentBpm);
+      }
     } else {
       if (!lib || modPtr === 0) return;
       order = lib._openmpt_module_get_current_order(modPtr);
@@ -600,11 +631,29 @@ export function useLibOpenMPT(initialVolume: number = 0.4, liteMode: boolean = f
     let smoothedPlayhead = prevPlayhead + (targetPlayhead - prevPlayhead) * rowSmoothing;
 
     // Snap on seek / pattern change / large jumps (do not lag across page boundaries)
-    if (Math.abs(targetPlayhead - prevPlayhead) > 1.0) {
+    const orderUnchanged = order === lastUiOrderRef.current;
+    const snapThreshold = orderUnchanged ? 0.5 : 1.0;
+    if (Math.abs(targetPlayhead - prevPlayhead) > snapThreshold) {
       smoothedPlayhead = targetPlayhead;
     }
     // Never push a negative playhead after latency back-extrapolation
     if (smoothedPlayhead < 0) smoothedPlayhead = 0;
+
+    const engineMode = scriptProcessorRef.current ? 'scriptprocessor' : activeEngine;
+    if (isPlayheadDebugEnabled()) {
+      const sampleRow = playheadDebugSampleRow ?? smoothedPlayhead;
+      const snapshot: PlayheadDebugSnapshot = {
+        sampleRow,
+        predictedRow: playheadDebugPredictedRow ?? smoothedPlayhead,
+        smoothedRow: smoothedPlayhead,
+        dtSec: playheadDebugDtSec,
+        rowsPerSec: playheadDebugRowsPerSec || rowsPerSecondFromBpm(currentBpm),
+        predictionLagRows: smoothedPlayhead - sampleRow,
+        driftMs: Math.round(driftAccumulatorRef.current * 1000),
+        mode: engineMode,
+      };
+      window.__PLAYHEAD_DEBUG__ = snapshot;
+    }
 
     // moduleInfo / sequencer UI use integer row; shaders read fractional playhead from ref
     const rowIntUi = Math.floor(smoothedPlayhead);
@@ -689,25 +738,47 @@ export function useLibOpenMPT(initialVolume: number = 0.4, liteMode: boolean = f
     if (wallNowMs - lastSyncDebugUiMsRef.current >= SYNC_DEBUG_UI_INTERVAL_MS) {
       lastSyncDebugUiMsRef.current = wallNowMs;
       setBeatPhase(beatPhaseValue);
-      setSyncDebug((prev: SyncDebugInfo) => ({
-        ...prev,
-        driftMs: Math.round(driftAccumulatorRef.current * 1000),
-        row: rowIntUi,
-        mode: scriptProcessorRef.current ? 'scriptprocessor' : activeEngine,
-        bufferMs: Math.round(
-          ((audioContextRef.current?.baseLatency ?? 0) + (audioContextRef.current?.outputLatency ?? 0)) * 1000
-        ),
-        audioContextState: audioContextRef.current?.state || 'none',
-        sampleRate: audioContextRef.current?.sampleRate || 0,
-        baseLatency: audioContextRef.current?.baseLatency ?? 0,
-        outputLatency: audioContextRef.current?.outputLatency ?? 0,
-        workletSupported: typeof AudioWorklet !== 'undefined',
-        wasmSupported: typeof WebAssembly !== 'undefined',
-        driftAccumulator: driftAccumulatorRef.current,
-        lastCorrectedTime: lastCorrectedTimeRef.current,
-        lastWorkletUpdate: lastWorkletUpdateRef.current,
-        seekPending: !!pendingSeekRef.current,
-      }));
+      setSyncDebug((prev: SyncDebugInfo) => {
+        const {
+          sampleRow: _sr,
+          predictedRow: _pr,
+          smoothedRow: _sm,
+          dtSec: _dt,
+          rowsPerSec: _rps,
+          predictionLagRows: _plr,
+          ...base
+        } = prev;
+        const next: SyncDebugInfo = {
+          ...base,
+          driftMs: Math.round(driftAccumulatorRef.current * 1000),
+          row: rowIntUi,
+          mode: engineMode,
+          bufferMs: Math.round(
+            ((audioContextRef.current?.baseLatency ?? 0) + (audioContextRef.current?.outputLatency ?? 0)) * 1000
+          ),
+          audioContextState: audioContextRef.current?.state || 'none',
+          sampleRate: audioContextRef.current?.sampleRate || 0,
+          baseLatency: audioContextRef.current?.baseLatency ?? 0,
+          outputLatency: audioContextRef.current?.outputLatency ?? 0,
+          workletSupported: typeof AudioWorklet !== 'undefined',
+          wasmSupported: typeof WebAssembly !== 'undefined',
+          driftAccumulator: driftAccumulatorRef.current,
+          lastCorrectedTime: lastCorrectedTimeRef.current,
+          lastWorkletUpdate: lastWorkletUpdateRef.current,
+          seekPending: !!pendingSeekRef.current,
+        };
+        if (isPlayheadDebugEnabled()) {
+          if (playheadDebugSampleRow != null) next.sampleRow = playheadDebugSampleRow;
+          if (playheadDebugPredictedRow != null) next.predictedRow = playheadDebugPredictedRow;
+          next.smoothedRow = smoothedPlayhead;
+          next.dtSec = playheadDebugDtSec;
+          next.rowsPerSec = playheadDebugRowsPerSec || rowsPerSecondFromBpm(currentBpm);
+          if (playheadDebugSampleRow != null) {
+            next.predictionLagRows = smoothedPlayhead - playheadDebugSampleRow;
+          }
+        }
+        return next;
+      });
     }
 
     lastUpdateTimeRef.current = wallNowMs / 1000;
@@ -723,6 +794,21 @@ export function useLibOpenMPT(initialVolume: number = 0.4, liteMode: boolean = f
   // Keep updateUIRef always pointing to the latest updateUI so
   // startAudioPlayback can schedule the most current callback.
   updateUIRef.current = updateUI;
+
+  const requestOscBuffer = useCallback(() => {
+    const node = audioWorkletNodeRef.current;
+    if (!node) return;
+    const handler = (e: MessageEvent) => {
+      if (e.data?.type === 'oscBuffer' && e.data.buffer) {
+        const views = viewsFromAudioSab(e.data.buffer as SharedArrayBuffer);
+        oscBufferRef.current = views.osc;
+        audioReactiveRef.current = views.meta;
+        node.port.removeEventListener('message', handler);
+      }
+    };
+    node.port.addEventListener('message', handler);
+    node.port.postMessage({ type: 'getOscBuffer' });
+  }, []);
 
   const stopMusic = useCallback((destroy: boolean = false) => {
     isPlayingRef.current = false;
@@ -745,12 +831,20 @@ export function useLibOpenMPT(initialVolume: number = 0.4, liteMode: boolean = f
     // reports from the previous module cannot overwrite the new module's state.
     // Keep the node alive on normal stop/module reload — recreating it re-inits
     // libopenmpt in the shared AudioWorklet global scope and breaks XM playback.
+    const workletStop = getStopMusicWorkletActions(destroy, audioWorkletNodeRef.current != null);
+
     if (audioWorkletNodeRef.current) {
       const oldNode = audioWorkletNodeRef.current;
-      try { oldNode.port.postMessage({ type: 'pause' }); } catch { /* ignore */ }
-      try { oldNode.port.onmessage = null; } catch { /* ignore */ }
-      if (destroy) {
+      if (workletStop.pauseProcessor) {
+        try { oldNode.port.postMessage({ type: 'pause' }); } catch { /* ignore */ }
+      }
+      if (workletStop.clearMessageHandler) {
+        try { oldNode.port.onmessage = null; } catch { /* ignore */ }
+      }
+      if (workletStop.disconnectNode) {
         try { oldNode.disconnect(); } catch { /* ignore */ }
+      }
+      if (workletStop.clearNodeRef) {
         audioWorkletNodeRef.current = null;
       }
     }
@@ -900,22 +994,8 @@ export function useLibOpenMPT(initialVolume: number = 0.4, liteMode: boolean = f
     };
     await startAudioPlayback(audioRefs, audioCbs, audioConfig);
 
-    // Request oscilloscope SharedArrayBuffer from worklet (sent once in constructor,
-    // but we may have missed it; getOscBuffer allows re-delivery without re-allocation)
-    const node = audioWorkletNodeRef.current;
-    if (node) {
-      const handler = (e: MessageEvent) => {
-        if (e.data?.type === 'oscBuffer' && e.data.buffer) {
-          const views = viewsFromAudioSab(e.data.buffer as SharedArrayBuffer);
-          oscBufferRef.current = views.osc;
-          audioReactiveRef.current = views.meta;
-          node.port.removeEventListener('message', handler);
-        }
-      };
-      node.port.addEventListener('message', handler);
-      node.port.postMessage({ type: 'getOscBuffer' });
-    }
-  }, [activeEngine, isWorkletSupported, isNativeWorkletAvailable, panValue, volume, isLooping, stopMusic, seekToStepWrapper, updateUI]);
+    requestOscBuffer();
+  }, [activeEngine, isWorkletSupported, isNativeWorkletAvailable, panValue, volume, isLooping, stopMusic, seekToStepWrapper, updateUI, requestOscBuffer]);
 
   // Keep playRef always pointing to the latest play function
   // so processModuleData (which memoises over different deps) can call it without stale closure
@@ -930,6 +1010,9 @@ export function useLibOpenMPT(initialVolume: number = 0.4, liteMode: boolean = f
     } else {
       newEngine = isNativeWorkletAvailable ? 'native-worklet' : 'worklet';
     }
+
+    // Persist durable override so prefer-when-present can be escaped across reloads.
+    writeStoredAudioEngineOverride(overrideFromActiveEngine(newEngine));
 
     console.log('[toggleEngine]', { 
       from: activeEngine, 
@@ -1050,19 +1133,27 @@ export function useLibOpenMPT(initialVolume: number = 0.4, liteMode: boolean = f
           setStatus("Error: AudioWorklet not supported in this browser.");
         }
 
-        // Probe for native C++/Wasm AudioWorklet engine
+        // Probe for native C++/Wasm AudioWorklet engine.
+        // Precedence: ?engine= → localStorage.xasm1_audio_engine → auto probe.
         // Note: enabling this requires building the wasm engine using
         // ./scripts/build-wasm.sh (Emscripten SDK must be installed).
+        const enginePref = resolveAudioEnginePreference();
+        console.log('[INIT] Audio engine preference:', enginePref);
+
+        if (enginePref.mode === 'force-js') {
+          console.log('[INIT] force-JS override (?engine=js or localStorage) — skipping native promote');
+        }
+
         try {
           const nativeGlueUrl = getNativeGlueUrl();
           console.log('[INIT] Probing for native engine at:', nativeGlueUrl);
           const glueIsSafe = await isNativeGlueAvailable(nativeGlueUrl);
+
           if (glueIsSafe) {
             console.log('[INIT] Native C++/Wasm AudioWorklet glue detected');
 
-            // Allocate the ring-buffer SharedArrayBuffer before constructing the engine
-            // so it can be stored and forwarded to the engine constructor.
-            // SharedArrayBuffer requires cross-origin isolation (COOP/COEP headers).
+            // Always init when glue is present so the UI can toggle to native later,
+            // but only *promote* as active engine when preference allows.
             const sharedOutputBuffer: SharedArrayBuffer | undefined =
               window.crossOriginIsolated && typeof SharedArrayBuffer !== 'undefined'
                 ? new SharedArrayBuffer(NATIVE_RING_BUF_BYTES)
@@ -1082,8 +1173,17 @@ export function useLibOpenMPT(initialVolume: number = 0.4, liteMode: boolean = f
             await engine.init();
             nativeEngineRef.current = engine;
             setIsNativeWorkletAvailable(true);
-            setActiveEngine('native-worklet');
-            console.log('[INIT] Native engine initialized');
+
+            if (shouldPromoteNativeEngine(enginePref, true)) {
+              setActiveEngine('native-worklet');
+              console.log('[INIT] Native engine initialized and promoted (preference:', enginePref.mode, ')');
+            } else {
+              console.log('[INIT] Native engine initialized but not promoted (force-JS or preference)');
+            }
+          } else if (enginePref.mode === 'prefer-native') {
+            console.warn(
+              '[INIT] ?engine=native / localStorage prefer-native but glue missing — soft-fail to JS worklet',
+            );
           } else {
             console.log('[INIT] Native engine glue not available — using JS AudioWorklet fallback');
           }
@@ -1220,5 +1320,6 @@ export function useLibOpenMPT(initialVolume: number = 0.4, liteMode: boolean = f
     // Oscilloscope SAB view for GPU texture upload
     oscBufferRef,
     audioReactiveRef,
+    requestOscBuffer,
   };
 }

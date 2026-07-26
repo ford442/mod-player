@@ -706,6 +706,16 @@ export class OpenMPTWorkletEngine extends MiniEventEmitter<EngineEventMap> {
         if (sampleRate != null && sampleRate > 0) {
             result.sampleRate = sampleRate;
         }
+        // Sample-accurate clock for playhead prediction (same domain as JS audioTime).
+        // Prefer frame clock over leaving workletTime undefined (main ctx tagging).
+        if (
+            audioFramesRendered != null &&
+            Number.isFinite(audioFramesRendered) &&
+            sampleRate != null &&
+            sampleRate > 0
+        ) {
+            result.workletTime = audioFramesRendered / sampleRate;
+        }
         return result;
     }
 }

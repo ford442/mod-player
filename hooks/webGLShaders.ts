@@ -5,6 +5,7 @@ export function buildVertexShader(
   useNoteSustainTailMode: boolean,
   isV021: boolean,
   useCircularPaging = false,
+  useHeaderRowRemap = false,
 ): string {
   return `#version 300 es
     precision highp float;
@@ -46,6 +47,7 @@ export function buildVertexShader(
     const bool USE_NOTE_SUSTAIN_TAIL_MODE = ${useNoteSustainTailMode ? 'true' : 'false'};
     const bool IS_V021 = ${isV021 ? 'true' : 'false'};
     const bool USE_CIRCULAR_PAGING = ${useCircularPaging ? 'true' : 'false'};
+    const bool USE_HEADER_ROW_REMAP = ${useHeaderRowRemap ? 'true' : 'false'};
 
     void main() {
         int id = gl_InstanceID;
@@ -148,7 +150,7 @@ export function buildVertexShader(
             capScale *= 1.0 + (0.2 * activation);
 
             // Mirror patternv0.40.wgsl header-row channelIndex remapping.
-            bool hasHeader = u_cols > 1.0 && (u_offset.y / u_resolution.y) > 0.14;
+            bool hasHeader = USE_HEADER_ROW_REMAP && u_cols > 1.0;
             float dataChannels = u_cols - (hasHeader ? 1.0 : 0.0);
             float effectiveChannel = float(trackIndex);
             float channelIndex = (hasHeader && effectiveChannel > 0.0)

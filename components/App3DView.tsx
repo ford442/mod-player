@@ -136,6 +136,14 @@ export function App3DView({
               <div><strong>Base Latency:</strong> {syncDebug.baseLatency.toFixed(2)} ms</div>
               <div><strong>Output Latency:</strong> {syncDebug.outputLatency.toFixed(2)} ms</div>
               <div><strong>Drift:</strong> {syncDebug.driftMs} ms <span style={{color: Math.abs(syncDebug.driftAccumulator) > 0.008 ? "#ff4444" : "#44ff88"}}>({syncDebug.driftAccumulator.toFixed(4)})</span></div>
+              {syncDebug.sampleRow != null && (
+                <>
+                  <div><strong>Sample Row:</strong> {syncDebug.sampleRow.toFixed(3)}</div>
+                  <div><strong>Predicted Row:</strong> {syncDebug.predictedRow?.toFixed(3) ?? '—'}</div>
+                  <div><strong>Smoothed Row:</strong> {syncDebug.smoothedRow?.toFixed(3) ?? '—'}</div>
+                  <div><strong>Lag Rows:</strong> {syncDebug.predictionLagRows?.toFixed(3) ?? '—'}</div>
+                </>
+              )}
               <div><strong>Last Corrected:</strong> {syncDebug.lastCorrectedTime.toFixed(3)} s</div>
               <div><strong>Last Worklet Update:</strong> {syncDebug.lastWorkletUpdate.toFixed(3)} s</div>
               <div><strong>Seek Pending:</strong> <span style={{color: syncDebug.seekPending ? "#ffaa00" : "#44ff88"}}>{syncDebug.seekPending ? "YES" : "No"}</span></div>

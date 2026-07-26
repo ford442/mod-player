@@ -27,11 +27,11 @@ Offline WAV export (#333) makes “edit then bounce” newly valuable.
 
 ## Acceptance criteria
 
-- [ ] User can enter edit mode, change cells, undo/redo, revert, and exit without breaking playback
-- [ ] Dirty state is visible; switching modules prompts when dirty
-- [ ] At least one “save out” path works (WAV of edited session and/or pattern dump); full binary module rewrite explicitly in or out of scope in the issue resolution notes
-- [ ] Existing `patternEdit` tests expanded for new behaviors; CI green
-- [ ] Default play-only UX unchanged when edit mode is off
+- [x] User can enter edit mode, change cells, undo/redo, revert, and exit without breaking playback
+- [x] Dirty state is visible; switching modules prompts when dirty
+- [x] At least one “save out” path works (WAV of edited session and/or pattern dump); full binary module rewrite explicitly in or out of scope in the issue resolution notes
+- [x] Existing `patternEdit` tests expanded for new behaviors; CI green
+- [x] Default play-only UX unchanged when edit mode is off
 
 ## Dependencies / libraries
 
@@ -40,3 +40,28 @@ None required for MVP. Full `.xm` rewrite might need additional investigation of
 ## Notes
 
 Grounded in existing editor code + prior #322. Prefer completing the loop over building a full FastTracker clone.
+
+## Resolution notes (2026-07)
+
+### Spike: libopenmpt module rewrite
+
+**Full binary `.mod`/`.xm`/`.it` rewrite: out of scope.**
+
+libopenmpt (playback library) exposes pattern **read**/format APIs and `interactive` runtime controls (mute, tempo, etc.) only. There is no `set_pattern_*`, save, or export API. Audio and offline WAV continue to render from the original module bytes (`fileDataRef` / `getModuleFileData`).
+
+### MVP shipped
+
+| Area | Implementation |
+|------|----------------|
+| Chrome | `editMode` in `store/playerUiStore.ts` (not persisted); MainLayout mounts editor from store |
+| Edits | Session-only `PatternMatrix` via `usePatternEdit` + `replacePatternMatrix` (visualizer only) |
+| Dirty UX | `Edit *`, panel "unsaved", `beforeunload`, confirm on module switch and Revert |
+| Keyboard | Tab field cycle; hex nibble entry for inst/vol/eff; piano keys for notes |
+| Save-out | JSON pattern dump (`utils/patternDump.ts`) — Download pattern JSON / Dump JSON |
+| Export lock | Editor read-only / controls disabled while `isExporting` |
+| Honest limits | Banner: edits do not change audio or WAV export |
+
+### Explicit non-goals (still)
+
+- WAV of *edited* playback (requires a custom format rewriter)
+- FastTracker-clone UX (octave shift, multi-select, block copy/paste)

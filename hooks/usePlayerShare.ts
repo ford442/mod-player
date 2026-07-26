@@ -37,7 +37,8 @@ export interface UsePlayerShareOptions {
   setMediaItem: (item: MediaItem | null) => void;
   setMediaVisible: (visible: boolean) => void;
   showToast: (text: string, kind?: ToastKind) => void;
-  skipModuleShaderRestoreRef: React.MutableRefObject<boolean>;
+  /** Skip per-module shader restore on the next load (share URL / deep link). */
+  onShareShaderApplied?: () => void;
 }
 
 export function usePlayerShare({
@@ -62,7 +63,7 @@ export function usePlayerShare({
   setMediaItem,
   setMediaVisible,
   showToast,
-  skipModuleShaderRestoreRef,
+  onShareShaderApplied,
 }: UsePlayerShareOptions) {
   const hydratedRef = useRef(false);
   const pendingSeekRef = useRef<{ order: number; row: number } | null>(null);
@@ -80,7 +81,7 @@ export function usePlayerShare({
       }
     }
     if (state.shader) {
-      skipModuleShaderRestoreRef.current = true;
+      onShareShaderApplied?.();
       setShaderFile(state.shader);
     }
     const paletteModeValue = paletteModeFromShare(state.palette);
@@ -100,7 +101,7 @@ export function usePlayerShare({
     setColorPalette,
     setLiteMode,
     showToast,
-    skipModuleShaderRestoreRef,
+    onShareShaderApplied,
   ]);
 
   // Load remote module from share URL when audio engine is ready
@@ -124,7 +125,7 @@ export function usePlayerShare({
             return;
           }
           if (state.shader) {
-            skipModuleShaderRestoreRef.current = true;
+            onShareShaderApplied?.();
             setShaderFile(state.shader);
           }
           const paletteModeValue = paletteModeFromShare(state.palette);
@@ -175,7 +176,7 @@ export function usePlayerShare({
     setMediaVisible,
     setModuleSourceUrl,
     showToast,
-    skipModuleShaderRestoreRef,
+    onShareShaderApplied,
   ]);
 
   // Hydrate media overlay from ?media= without a mod param

@@ -1,8 +1,8 @@
 # Native C++ Engine Platform Epic
 
-**Status:** Planning (P2–P3)  
+**Status:** In progress (P2) — CI cache + engine flags + shared position adapter landed 2026-07-25  
 **Depends on (done):** dual-build hygiene (`openmpt-native.*` vs `openmpt-worklet.js`), playhead prediction foundation  
-**Last audited:** 2026-07-11  
+**Last audited:** 2026-07-25  
 
 ---
 

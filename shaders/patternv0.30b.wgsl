@@ -1,6 +1,11 @@
 // patternv0.30b.wgsl
 // v0.30 chrome disc aesthetic + trigger-only note-on indicators with persistent glow (DURA/TRIG-001)
 
+//#include "lib/dura.wgsl"
+//#include "lib/notes.wgsl"
+//#include "lib/pitch.wgsl"
+//#include "lib/sdf.wgsl"
+
 struct Uniforms {
   numRows: u32,
   numChannels: u32,
@@ -117,19 +122,6 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
   return out;
 }
 
-fn neonPalette(t: f32) -> vec3<f32> {
-  let a = vec3<f32>(0.5, 0.5, 0.5);
-  let b = vec3<f32>(0.5, 0.5, 0.5);
-  let c = vec3<f32>(1.0, 1.0, 1.0);
-  let d = vec3<f32>(0.0, 0.33, 0.67);
-  return a + b * cos(6.28318 * (c * t + d));
-}
-
-fn sdRoundedBox(p: vec2<f32>, b: vec2<f32>, r: f32) -> f32 {
-  let q = abs(p) - b + r;
-  return length(max(q, vec2<f32>(0.0))) + min(max(q.x, q.y), 0.0) - r;
-}
-
 fn toUpperAscii(code: u32) -> u32 {
   return select(code, code - 32u, (code >= 97u) & (code <= 122u));
 }
@@ -175,17 +167,6 @@ struct NoteDurationInfo {
   rowOffset: u32,
   isNoteOff: bool,
   isTrigger: bool,
-}
-
-fn unpackDurationInfo(packedA: u32, packedB: u32) -> NoteDurationInfo {
-  var info: NoteDurationInfo;
-  info.duration = (packedA >> 8) & 0xFFu;
-  if (info.duration == 0u) { info.duration = 1u; }
-  let durationFlags = (packedB >> 8) & 0x7Fu;
-  info.rowOffset = durationFlags >> 1u;
-  info.isNoteOff = (durationFlags & 1u) != 0u;
-  info.isTrigger = ((packedB & 0x8000u) != 0u) || (info.rowOffset == 0u && !info.isNoteOff);
-  return info;
 }
 
 fn drawChromeIndicator(

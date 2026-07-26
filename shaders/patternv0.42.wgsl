@@ -5,6 +5,9 @@
 // - instanceIndex == totalInstances → full-screen ring-grid background pass
 // Note encoding: raw OpenMPT numeric values (0=empty, 1-120=notes, 121=OFF, 122=CUT, 123=FADE)
 
+//#include "lib/pitch.wgsl"
+//#include "lib/sdf.wgsl"
+
 struct Uniforms {
   numRows:       u32,   // [0]
   numChannels:   u32,   // [1]
@@ -153,24 +156,10 @@ fn vs(
 // ── Colour helpers ──────────────────────────────────────────────────────────
 
 // Neon palette driven by beat phase
-fn neonPalette(t: f32) -> vec3<f32> {
-  let a = vec3<f32>(0.5, 0.5, 0.5);
-  let b = vec3<f32>(0.5, 0.5, 0.5);
-  let c = vec3<f32>(1.0, 1.0, 1.0);
-  let d = vec3<f32>(0.0, 0.33, 0.67);
-  let drift = uniforms.beatPhase * 0.08;
-  return a + b * cos(TWO_PI * (c * (t + drift) + d));
-}
-
 // Correct pitch class from raw OpenMPT note value (1–120)
 // Returns 0.0–1.0 fraction around the colour wheel (C=0, C#=1/12 … B=11/12)
 fn pitchClass(note: u32) -> f32 {
   return f32((note - 1u) % 12u) / 12.0;
-}
-
-fn sdRoundedBox(p: vec2<f32>, b: vec2<f32>, r: f32) -> f32 {
-  let q = abs(p) - b + r;
-  return length(max(q, vec2<f32>(0.0))) + min(max(q.x, q.y), 0.0) - r;
 }
 
 // ── Fragment ────────────────────────────────────────────────────────────────

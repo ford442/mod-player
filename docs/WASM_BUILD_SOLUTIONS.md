@@ -43,7 +43,16 @@ npm run build:emcc
 ls -lh public/worklets/openmpt-native.*
 ```
 
-libopenmpt **0.8.4** is downloaded into `vendor/` automatically if missing.
+libopenmpt **0.8.4** is downloaded into `vendor/` automatically if missing. When `vendor/libopenmpt-0.8.4+release/bin/libopenmpt.a` already exists (local prior build or CI `actions/cache`), `build-wasm.sh` skips the multi-minute `make` and only re-links thin C++.
+
+### Runtime engine override
+
+After building artifacts, the app may prefer native on probe. To force the production JS worklet while artifacts remain on disk:
+
+- URL: `?engine=js`
+- Storage: `localStorage.xasm1_audio_engine = 'js'` (or omit / `auto` for prefer-when-present)
+
+See `public/worklets/README.md` for full precedence. CI: scheduled + path-filtered jobs cache `vendor/libopenmpt-0.8.4+release` with key including `hashFiles('scripts/build-wasm.sh')`.
 
 ## Verify exports stay in sync
 

@@ -35,9 +35,15 @@ The offline renderer uses 44.1 kHz stereo, windowed-sinc interpolation (length 8
 
 | Engine | Audio for recording | Guidance |
 |--------|---------------------|----------|
-| JS AudioWorklet | Tap `stereoPanner` → `MediaStreamDestination` in main `AudioContext` | **Recommended** for capture |
+| JS AudioWorklet | Tap `stereoPanner` → `MediaStreamDestination` in main `AudioContext` | **Required for capture** |
 | ScriptProcessor fallback | Same main-context tap | Supported |
-| Native C++ worklet (`native-worklet`) | Separate `AudioContext` inside WASM bridge | **Recording blocked** — switch to JS worklet in debug panel |
+| Native C++ worklet (`native-worklet`) | Separate `AudioContext` inside WASM bridge | **Recording blocked** — no silent dual-context capture |
+
+**Switch to JS before Record clip:**
+
+- URL: `?engine=js`
+- Or debug panel engine toggle (persists `localStorage.xasm1_audio_engine=js`)
+- Offline WAV export does **not** need this — it uses a worker, not MediaRecorder
 
 Cross-origin isolation (`crossOriginIsolated`) is required for SharedArrayBuffer / native engine but does not block `MediaRecorder` when using the JS worklet path.
 
@@ -65,4 +71,5 @@ stop() / cancel()
 1. Load `4-mat_madness.mod`, open Export panel, click **Download WAV** — file plays in an external player.
 2. Mute channel 1, export again — kick/snare balance should change vs full mix.
 3. Play module, click **Record clip**, wait ~5 s, **Stop** — WebM contains audio + visuals (WebGL2 renderer).
-4. Switch to native engine — Record clip shows dual-context warning.
+4. Switch to native engine — Record clip stays disabled with dual-context warning; use `?engine=js` (or UI toggle) then record successfully.
+5. Offline WAV still works on either engine (worker path).

@@ -32,8 +32,17 @@ jobs:
       - name: Type check
         run: npm run typecheck
       
+      - name: Type check tests
+        run: npm run typecheck:tests
+      
+      - name: Unit tests (Vitest)
+        run: npm test
+      
       - name: Shader registry tests
         run: npm run test:shader-registry
+
+      - name: Shader include + parity tests
+        run: npm run test:shader-includes
       
       - name: Build
         run: npm run build
@@ -82,6 +91,18 @@ jobs:
 
       - name: Visual smoke (WebGL2 + HTML, CI profile)
         run: BASE_URL=http://127.0.0.1:4173 OUTPUT_DIR=./artifacts/visual-smoke npm run smoke:visual:ci
+
+      - name: Visual smoke (WebGPU night trio)
+        run: |
+          BASE_URL=http://127.0.0.1:4173 \
+          OUTPUT_DIR=./artifacts/visual-smoke-webgpu \
+          SMOKE_PROFILE=full \
+          RENDERERS=webgpu \
+          SHADER_FILES=patternv0.52.wgsl,patternv0.53.wgsl,patternv0.54.wgsl \
+          MODULE_URLS=/4-mat_madness.mod \
+          SEEK_ROWS=8 \
+          LITE_MODES=0 \
+          npm run smoke:visual
 
       - name: Upload smoke artifacts on failure
         if: failure()
@@ -140,8 +161,7 @@ jobs:
       - name: Verify native EXPORTED_FUNCTIONS vs TS/C++
         run: npm run verify:native-exports
       
-      # Note: Full native WASM build is skipped in PR CI (libopenmpt compile time).
-      # Syntax + export audit run every PR; optional scheduled full build can be added later.
+      # Full emcc link runs in native-full-build (path-filtered) + scheduled workflow.
       - name: Shellcheck / syntax-check build scripts
         run: |
           for f in scripts/build-wasm.sh build-wasm.sh; do
@@ -157,3 +177,105 @@ jobs:
           test -f public/worklets/openmpt-worklet.js
           grep -q 'registerProcessor\|AudioWorkletProcessor' public/worklets/openmpt-worklet.js
           echo "✅ Tracked JS worklet intact"
+
+  # Full native link when C++/build/audio-worklet surfaces change.
+  # Uses cached libopenmpt.a so PR wall time stays reasonable on cache hits.
+  native-full-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    needs: []
+    if: |
+      github.event_name == 'push' ||
+      github.event_name == 'pull_request'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect native-related path changes
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            native:
+              - 'cpp/**'
+              - 'scripts/build-wasm.sh'
+              - 'audio-worklet/**'
+              - 'public/worklets/native-bridge-processor.js'
+              - '.github/workflows/ci.yml'
+              - '.github/workflows/native-wasm-scheduled.yml'
+
+      - name: Setup Emscripten
+        if: steps.filter.outputs.native == 'true'
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: '3.1.50'
+
+      - name: Setup Node.js
+        if: steps.filter.outputs.native == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        if: steps.filter.outputs.native == 'true'
+        run: npm ci
+
+      - name: Cache libopenmpt static library
+        if: steps.filter.outputs.native == 'true'
+        uses: actions/cache@v4
+        with:
+          path: vendor/libopenmpt-0.8.4+release
+          key: libopenmpt-a-${{ runner.os }}-emsdk-3.1.50-v0.8.4-static1-${{ hashFiles('scripts/build-wasm.sh') }}
+          restore-keys: |
+            libopenmpt-a-${{ runner.os }}-emsdk-3.1.50-v0.8.4-static1-
+
+      - name: Snapshot tracked JS worklet
+        if: steps.filter.outputs.native == 'true'
+        run: |
+          test -f public/worklets/openmpt-worklet.js
+          cksum public/worklets/openmpt-worklet.js | tee /tmp/worklet-before.cksum
+          grep -q 'registerProcessor\|AudioWorkletProcessor' public/worklets/openmpt-worklet.js
+
+      - name: Verify native exports
+        if: steps.filter.outputs.native == 'true'
+        run: npm run verify:native-exports
+
+      - name: Build native engine (full emcc link)
+        if: steps.filter.outputs.native == 'true'
+        run: npm run build:emcc
+
+      - name: Assert tracked JS worklet unchanged
+        if: steps.filter.outputs.native == 'true'
+        run: |
+          cksum public/worklets/openmpt-worklet.js | tee /tmp/worklet-after.cksum
+          diff /tmp/worklet-before.cksum /tmp/worklet-after.cksum
+          grep -q 'registerProcessor\|AudioWorkletProcessor' public/worklets/openmpt-worklet.js
+          echo "✅ Tracked JS worklet intact after native build"
+
+      - name: Verify native artifacts
+        if: steps.filter.outputs.native == 'true'
+        run: |
+          for f in public/worklets/openmpt-native.js public/worklets/openmpt-native.wasm public/worklets/openmpt-native.aw.js; do
+            if [ ! -f "$f" ]; then echo "❌ missing $f"; false; fi
+          done
+          head -c 4 public/worklets/openmpt-native.wasm | od -An -tx1 | grep -q '00 61 73 6d'
+          echo "✅ openmpt-native.* artifacts present"
+
+      - name: Upload native artifacts
+        if: steps.filter.outputs.native == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: openmpt-native-pr-emsdk-3.1.50
+          path: |
+            public/worklets/openmpt-native.js
+            public/worklets/openmpt-native.wasm
+            public/worklets/openmpt-native.aw.js
+          retention-days: 7
+
+      - name: Skip full build (no native paths changed)
+        if: steps.filter.outputs.native != 'true'
+        run: echo "⏭️ Skipping full build:emcc — no cpp/scripts/audio-worklet path changes"

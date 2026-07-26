@@ -22,11 +22,17 @@ Circular/paged shaders remain the most sensitive to residual drift (page flips l
 
 ## Acceptance criteria
 
-- [ ] Playhead prediction tests run under Vitest + CI
-- [ ] Documented manual checklist passes on Worklet engine for at least one circular + one square shader
-- [ ] Steady 125 BPM case: predicted latency offset &lt; 1 row for typical 30 ms device latency (existing math assertion kept)
-- [ ] No packing/shader uniform layout breaks
-- [ ] Worklet path remains default; ScriptProcessor remains fallback only
+- [x] Playhead prediction tests run under Vitest + CI (`tests/playheadPrediction.test.ts` via `npm test`)
+- [x] Documented manual checklist passes on Worklet engine for at least one circular + one square shader (`accurate_playback.md` §C)
+- [x] Steady 125 BPM case: predicted latency offset < 1 row for typical 30 ms device latency (Vitest `expectedLatencyRows` assertion)
+- [x] No packing/shader uniform layout breaks (no uniform changes in this work)
+- [x] Worklet path remains default; ScriptProcessor remains fallback only
+
+## Evidence
+
+- Vitest: `npm run test:playhead` / `npm test` (83 tests)
+- Browser: `npm run smoke:playhead` → `artifacts/playhead-acceptance/report.json` (square median lag 0.44 rows; circular paging boundary OK)
+- Debug: `localStorage.xasm1_playhead_debug=1`, `window.__PLAYHEAD_DEBUG__`, PatternDisplay 🔍 panel
 
 ## Dependencies / libraries
 

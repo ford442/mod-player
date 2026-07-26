@@ -2,6 +2,9 @@
 // V0.21: "Precision Interface" - Sharpened details, larger cells, fwidth-based AA
 // Updated: Square bezel alignment with gridRect uniform
 
+//#include "lib/pitch.wgsl"
+//#include "lib/sdf.wgsl"
+
 struct Uniforms {
   numRows: u32,
   numChannels: u32,
@@ -105,20 +108,6 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
 }
 
 // --- FRAGMENT SHADER ---
-
-fn neonPalette(t: f32) -> vec3<f32> {
-    // Precise, colder spectrum
-    let a = vec3<f32>(0.5, 0.5, 0.5);
-    let b = vec3<f32>(0.5, 0.5, 0.5);
-    let c = vec3<f32>(1.0, 1.0, 1.0);
-    let d = vec3<f32>(0.0, 0.33, 0.67);
-    return a + b * cos(6.28318 * (c * t + d));
-}
-
-fn sdRoundedBox(p: vec2<f32>, b: vec2<f32>, r: f32) -> f32 {
-    let q = abs(p) - b + r;
-    return length(max(q, vec2<f32>(0.0))) + min(max(q.x, q.y), 0.0) - r;
-}
 
 fn toUpperAscii(code: u32) -> u32 {
     return select(code, code - 32u, (code >= 97u) & (code <= 122u));

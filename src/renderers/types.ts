@@ -1,10 +1,5 @@
-import type { WebGPURenderParams } from '../../hooks/useWebGPURender';
-
 /** Active pattern visualization backend. */
 export type PatternRendererBackend = 'webgpu' | 'webgl2' | 'html';
-
-/** Shared per-frame parameters — all GPU backends read the same ref. */
-export type PatternRenderParams = WebGPURenderParams;
 
 /** Debug visualization modes for the WebGL2 reference renderer. */
 export type WebGL2DebugMode =

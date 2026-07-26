@@ -22,7 +22,9 @@
 ```bash
 npm ci
 npm run typecheck
+npm run typecheck:tests   # optional locally, required in CI
 npm run lint
+npm test                  # Vitest unit suite (CI gate)
 npm run test:shader-registry
 npm run build
 # optional: npm run smoke:visual:ci (needs preview server)

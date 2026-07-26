@@ -186,6 +186,18 @@ export interface MediaItem {
   isObjectUrl?: boolean;
 }
 
+export interface PlayheadDebugSnapshot {
+  sampleRow: number;
+  predictedRow: number;
+  smoothedRow: number;
+  dtSec: number;
+  rowsPerSec: number;
+  /** smoothedRow − sampleRow */
+  predictionLagRows: number;
+  driftMs: number;
+  mode: string;
+}
+
 export interface SyncDebugInfo {
   mode: string;
   bufferMs: number;
@@ -205,6 +217,14 @@ export interface SyncDebugInfo {
   lastWorkletUpdate: number;
   seekPending: boolean;
   bufferHealth?: number;
+
+  // Playhead prediction (when debug enabled)
+  sampleRow?: number;
+  predictedRow?: number;
+  smoothedRow?: number;
+  dtSec?: number;
+  rowsPerSec?: number;
+  predictionLagRows?: number;
 }
 
 // Window extensions
@@ -218,10 +238,15 @@ declare global {
     DEBUG_RENDERER?: 'webgpu' | 'webgl2' | 'html';
     /** Agent/CI handle — set by the active pattern renderer */
     currentPatternRenderer: import('./src/renderers/types').CurrentPatternRenderer | null;
+    /** Live playhead prediction snapshot (when debug enabled) */
+    __PLAYHEAD_DEBUG__?: PlayheadDebugSnapshot;
     /** Headless Chrome / Playwright automation hooks (dev + CI) */
     __TEST_HOOKS__?: {
       seekToRow: (row: number) => void;
       stopPlayback: () => void;
+      startPlayback: () => void;
+      getIsPlaying: () => boolean;
+      getAudioContextState: () => string;
       setPlayheadFraction: (value: number) => void;
       isModuleLoaded: () => boolean;
       getPatternRenderer: () => import('./src/renderers/types').CurrentPatternRenderer | null;
@@ -277,6 +302,7 @@ declare global {
           staleNote: number;
         }>;
       };
+      getPlayheadDebug: () => PlayheadDebugSnapshot | null;
     };
   }
 }

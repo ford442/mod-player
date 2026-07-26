@@ -6,6 +6,13 @@
 // DURA UPDATE: Added note duration visualization with sustain tails
 // ARC-001: Added animated playhead scan-line arc at current row
 
+//#include "lib/dura.wgsl"
+//#include "lib/notes.wgsl"
+//#include "lib/palette.wgsl"
+//#include "lib/pitch.wgsl"
+//#include "lib/sdf.wgsl"
+//#include "lib/top_emitter.wgsl"
+
 struct Uniforms {
   numRows: u32,
   numChannels: u32,
@@ -33,11 +40,6 @@ struct Uniforms {
   _r3: f32,
   colorPalette: u32,
 };
-
-// DURA: Note duration constants
-const NOTE_MIN: u32 = 1u;
-const NOTE_MAX: u32 = 119u;
-const NOTE_OFF_MIN: u32 = 120u;
 
 @group(0) @binding(0) var<storage, read> cells: array<u32>;
 @group(0) @binding(1) var<uniform> uniforms: Uniforms;
@@ -121,161 +123,9 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
   return out;
 }
 
-fn selectPalette(id: u32, t: f32) -> vec3<f32> {
-  let a = vec3<f32>(0.5, 0.5, 0.5);
-  let b = vec3<f32>(0.5, 0.5, 0.5);
-  let c = vec3<f32>(1.0, 1.0, 1.0);
-  if (id == 1u) {
-    // Warm: reds, oranges, yellows
-    return a + b * cos(6.28318 * (c * t + vec3<f32>(0.0, 0.1, 0.2)));
-  } else if (id == 2u) {
-    // Cool: blues, cyans, purples
-    return a + b * cos(6.28318 * (c * t + vec3<f32>(0.5, 0.7, 0.9)));
-  } else if (id == 3u) {
-    // Neon: pink, cyan, green
-    return a + b * cos(6.28318 * (c * t + vec3<f32>(0.0, 0.5, 1.0)));
-  } else if (id == 4u) {
-    // Acid: green, yellow, chartreuse
-    return a + b * cos(6.28318 * (c * t + vec3<f32>(0.3, 0.0, 0.7)));
-  } else if (id == 5u) {
-    // Circle of Fifths: fully-saturated HSV wheel — t is used directly as hue.
-    let h6  = t * 6.0;
-    let hi  = u32(h6) % 6u;
-    let f   = h6 - floor(h6);
-    let q   = 1.0 - f;
-    if      (hi == 0u) { return vec3<f32>(1.0, f,   0.0); }
-    else if (hi == 1u) { return vec3<f32>(q,   1.0, 0.0); }
-    else if (hi == 2u) { return vec3<f32>(0.0, 1.0, f  ); }
-    else if (hi == 3u) { return vec3<f32>(0.0, q,   1.0); }
-    else if (hi == 4u) { return vec3<f32>(f,   0.0, 1.0); }
-    else               { return vec3<f32>(1.0, 0.0, q  ); }
-  }
-  // Default palette 0: Rainbow
-  return a + b * cos(6.28318 * (c * t + vec3<f32>(0.0, 0.33, 0.67)));
-}
-
-fn sdRoundedBox(p: vec2<f32>, b: vec2<f32>, r: f32) -> f32 {
-  let q = abs(p) - b + r;
-  return length(max(q, vec2<f32>(0.0))) + min(max(q.x, q.y), 0.0) - r;
-}
-
-fn sdCircle(p: vec2<f32>, r: f32) -> f32 {
-  return length(p) - r;
-}
-
-fn sdEllipse(p: vec2<f32>, ab: vec2<f32>) -> f32 {
-  let k = length(p / ab);
-  return (k - 1.0) * min(ab.x, ab.y);
-}
-
-fn pitchClassFromIndex(note: u32) -> f32 {
-  if (note == 0u || note > NOTE_MAX) { return 0.0; }
-  let semi = (note - 1u) % 12u;
-  return f32(semi) / 12.0;
-}
-
-fn fifthsHue(note: u32) -> f32 {
-  if (note == 0u || note > NOTE_MAX) { return 0.0; }
-  let semi = (note - 1u) % 12u;
-  let cof  = (semi * 7u) % 12u;
-  return f32(cof) / 12.0;
-}
-
-fn octaveBrightness(note: u32) -> f32 {
-  if (note == 0u || note > NOTE_MAX) { return 1.0; }
-  let oct = (note - 1u) / 12u;
-  return 0.65 + 0.35 * f32(oct) / 9.0;
-}
-
-fn pitchHueForPalette(note: u32, paletteId: u32) -> f32 {
-  if (paletteId == 5u) { return fifthsHue(note); }
-  return pitchClassFromIndex(note);
-}
-
-fn neonPalette(t: f32) -> vec3<f32> {
-  let a = vec3<f32>(0.5, 0.5, 0.5);
-  let b = vec3<f32>(0.5, 0.5, 0.5);
-  let c = vec3<f32>(1.0, 1.0, 1.0);
-  let d = vec3<f32>(0.0, 0.33, 0.67);
-  return a + b * cos(6.28318 * (c * t + d));
-}
-
-// DURA: Structure to hold unpacked note duration info
-struct NoteDurationInfo {
-  duration: u32,      // Total note duration in rows
-  rowOffset: u32,     // How many rows from note start (0 = note-on)
-  isNoteOff: bool,    // Whether this cell is the note-off row
-  isTrigger: bool,    // TRIG-001: explicit note-on trigger row
-}
-
 // DURA: Unpack duration info from packed cell data
-fn unpackDurationInfo(packedA: u32, packedB: u32) -> NoteDurationInfo {
-  var info: NoteDurationInfo;
-  
-  // Duration is in bits 8-15 of packedA (where volCmd used to be)
-  info.duration = (packedA >> 8) & 0xFFu;
-  if (info.duration == 0u) { info.duration = 1u; }
-  
-  // rowOffset and isNoteOff are packed into bits 8-14 of packedB
-  let durationFlags = (packedB >> 8) & 0x7Fu;
-  info.rowOffset = durationFlags >> 1u;
-  info.isNoteOff = (durationFlags & 1u) != 0u;
-  info.isTrigger = ((packedB & 0x8000u) != 0u) || (info.rowOffset == 0u && !info.isNoteOff);
-  
-  return info;
-}
-
 // DURA: Calculate sustain brightness based on position in note
-fn calculateSustainBrightness(info: NoteDurationInfo, baseIntensity: f32) -> f32 {
-  if (info.duration <= 1u) {
-    // Short note - full brightness
-    return baseIntensity;
-  }
-  
-  let progress = f32(info.rowOffset) / f32(info.duration);
-  
-  // Note-on row: full brightness
-  if (info.rowOffset == 0u) {
-    return baseIntensity;
-  }
-  
-  // Last 2-3 rows: fade out
-  let remaining = info.duration - info.rowOffset;
-  if (remaining <= 3u) {
-    // Fade from 60% to 30% over last 3 rows
-    let fadeFactor = f32(remaining) / 3.0;
-    return baseIntensity * (0.3 + 0.3 * fadeFactor);
-  }
-  
-  // Middle of sustain: 40-60% brightness
-  return baseIntensity * (0.4 + 0.2 * (1.0 - progress));
-}
-
 // AMBER-BLUE: Calculate top-emitter intensity for note-on / expression-only / sustain
-fn calculateTopIntensity(
-  isNoteOn: bool,
-  isExprOnly: bool,
-  isSustain: bool,
-  isMuted: bool,
-  trigger: u32,
-  bloom: f32,
-  beat: f32
-) -> f32 {
-  var intensity = 0.0;
-  if (isNoteOn) {
-    intensity = 1.0 + bloom * 2.0;
-    if (trigger > 0u) {
-      intensity += beat * 0.3;
-    }
-  } else if (isExprOnly) {
-    intensity = 1.0 + bloom * 2.0;
-  } else if (isSustain) {
-    intensity = 0.1 + bloom * 0.2;
-  }
-  if (isMuted) { intensity *= 0.2; }
-  return intensity;
-}
-
 struct FragmentConstants {
   bgColor: vec3<f32>,
   ledOnColor: vec3<f32>,

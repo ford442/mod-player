@@ -1,13 +1,26 @@
 import type { InstrumentTable } from '../../types/instruments';
 import { emptyInstrumentTable } from '../../types/instruments';
 import { extractModInstrumentTable, isProTrackerMod } from './mod';
+import { extractXmInstrumentTable } from './xm';
+import { extractItInstrumentTable, isItModule } from './it';
 
 export { downsamplePeaks } from './downsample';
 export { extractModInstrumentTable, isProTrackerMod, MAX_SAMPLE_DECODE_BYTES } from './mod';
+export { extractXmInstrumentTable } from './xm';
+export { extractItInstrumentTable, isItModule } from './it';
 
 function formatFromFileName(fileName: string): string {
   const dot = fileName.lastIndexOf('.');
   return dot >= 0 ? fileName.slice(dot + 1).toLowerCase() : '';
+}
+
+function isXmMagic(data: Uint8Array): boolean {
+  if (data.byteLength < 17) return false;
+  const id = 'Extended Module: ';
+  for (let i = 0; i < 17; i++) {
+    if (data[i] !== id.charCodeAt(i)) return false;
+  }
+  return true;
 }
 
 /**
@@ -25,7 +38,17 @@ export function extractInstrumentTable(
     if (table.format !== 'unknown') return table;
   }
 
-  // XM / IT / S3M parsers — phase 1b
+  if (ext === 'xm' || isXmMagic(fileData)) {
+    const table = extractXmInstrumentTable(fileData);
+    if (table.format !== 'unknown') return table;
+  }
+
+  if (ext === 'it' || isItModule(fileData)) {
+    const table = extractItInstrumentTable(fileData);
+    if (table.format !== 'unknown') return table;
+  }
+
+  // S3M deferred (metadata-only / empty)
   return emptyInstrumentTable();
 }
 

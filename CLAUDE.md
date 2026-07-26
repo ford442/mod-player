@@ -157,11 +157,13 @@ Tracker cell data is bit-packed into `Uint32Array` buffers before upload:
 Capabilities (layout, packing, canvas size, hit-test, oscilloscope, palette, bloom, etc.) live on `ShaderMeta` in `SHADER_REGISTRY`. Helpers in `utils/shaderVersion.ts` and geometry helpers read the registry via `resolveShaderMeta()`.
 
 **When adding a new shader:**
-1. Add `shaders/patternvX.YY.wgsl` (sync to `public/shaders/`)
+1. Add `shaders/patternvX.YY.wgsl` (reuse `shaders/lib/` via `//#include`; run `npm run sync:shaders`)
 2. Register one `ShaderMeta` block in `utils/shaderRegistry.ts`
 3. Add a picker entry in `appConfig.ts` `SHADER_GROUPS`
 4. Ensure WGSL uniforms match `fillUniformPayload` / `createUniformPayload`
-5. Run `npm run test:shader-registry`
+5. Run `npm run test:shader-includes` + `npm run test:shader-registry`
+
+**Include migration:** See `shaders/README.md` and `AGENTS.md` migration table. Capabilities live in `utils/shaderRegistry.ts` (not `shaderFile.includes()` chains).
 
 ---
 

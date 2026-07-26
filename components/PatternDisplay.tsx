@@ -1,8 +1,9 @@
 import React, { useEffect, useLayoutEffect, useRef, useState, useMemo, useCallback } from 'react';
-import { ChannelShadowState, PatternMatrix, PlaybackState } from '../types';
+import { ChannelShadowState, PatternMatrix, PlaybackState, SyncDebugInfo } from '../types';
 
 import { useWebGLOverlay } from '../hooks/useWebGLOverlay';
-import { useWebGPURender, type WebGPURenderParams, type DebugInfo } from '../hooks/useWebGPURender';
+import { useWebGPURender } from '../hooks/useWebGPURender';
+import type { WebGPURenderParams, DebugInfo } from '../src/renderers/params';
 import { useWebGL2PatternRender } from '../src/renderers/webgl2/useWebGL2PatternRender';
 import { PatternHTMLFallback } from '../src/renderers/html/PatternHTMLFallback';
 import {
@@ -25,12 +26,13 @@ import {
   getHitTestProfile,
   usesBareCanvasChrome,
   showsChannelInvertButton,
+  usesVideoPatternTexture,
 } from '../utils/shaderVersion';
+import { defaultVideoPatternUrl } from '../utils/videoPatternSource';
 import { getShaderMeta } from '../utils/shaderRegistry';
 import { detectRuntimeBase } from '../src/lib/paths';
 import { getBloomProfile } from '../utils/bloomProfiles';
 import { configureCanvasContext } from '../utils/webgpuDevice';
-import { OSC_SAMPLE_COUNT } from '../utils/audioReactive';
 
 const DEFAULT_CHANNELS = 4;
 
@@ -74,8 +76,11 @@ interface PatternDisplayProps {
   debugPanelOpen?: boolean;
   onCloseDebug?: () => void;
   onOpenDebug?: () => void;
+  syncDebug?: SyncDebugInfo;
   colorPalette?: number;
   paletteMode?: number;
+  /** 0 = off; 1-based instrument index for mid-LED highlight (v0.59). */
+  highlightInstrument?: number;
   instrumentPalette?: Uint8Array;
   chassisDark?: boolean;
   /** Controlled pattern steps count (32 or 64). When provided, overrides internal state.
@@ -137,8 +142,10 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   debugPanelOpen = false,
   onCloseDebug,
   onOpenDebug,
+  syncDebug,
   colorPalette = 0,
   paletteMode = 0,
+  highlightInstrument = 0,
   instrumentPalette,
   stepsLength: stepsLengthProp,
   onStepsLengthToggle,
@@ -226,6 +233,39 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   });
 
   const numChannels = matrix?.numChannels ?? DEFAULT_CHANNELS;
+
+  const needsDefaultVideo = usesVideoPatternTexture(shaderFile);
+  const defaultVideoRef = useRef<HTMLVideoElement | null>(null);
+  const [defaultVideoEl, setDefaultVideoEl] = useState<HTMLVideoElement | null>(null);
+
+  const bindDefaultVideoRef = useCallback((el: HTMLVideoElement | null) => {
+    defaultVideoRef.current = el;
+    setDefaultVideoEl(el);
+  }, []);
+
+  useEffect(() => {
+    const video = defaultVideoRef.current;
+    if (!video || !needsDefaultVideo) return;
+    video.src = defaultVideoPatternUrl();
+    video.loop = true;
+    video.muted = true;
+    video.playsInline = true;
+    video.crossOrigin = 'anonymous';
+    void video.load();
+  }, [needsDefaultVideo, shaderFile]);
+
+  useEffect(() => {
+    const video = defaultVideoRef.current;
+    if (!video || !needsDefaultVideo) return;
+    if (isPlaying) {
+      void video.play().catch(() => { /* autoplay blocked until gesture */ });
+    } else {
+      video.pause();
+    }
+  }, [isPlaying, needsDefaultVideo]);
+
+  const effectiveVideoSource =
+    externalVideoSource ?? (needsDefaultVideo ? defaultVideoEl : null);
 
   const useWebGPU = activeBackend === 'webgpu';
   const useWebGL2 = activeBackend === 'webgl2';
@@ -356,10 +396,11 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     beatPhase, grooveAmount, kickTrigger, activeChannels, isModuleLoaded,
     bloomIntensity, bloomThreshold, dimFactor, volume, pan, isLooping,
     invertChannels, clickedButton, cellWidth, cellHeight, playheadRow,
-    localTime, isHorizontal, externalVideoSource,
+    localTime, isHorizontal, externalVideoSource: effectiveVideoSource,
     canvasMetrics,
     colorPalette,
     paletteMode,
+    highlightInstrument,
     instrumentPalette,
     stepsLength,
     chassisDark,
@@ -370,16 +411,18 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     ...(totalRows !== undefined ? { totalRows } : {}),
     ...(playbackStateRef ? { playbackStateRef } : {}),
     ...(channelStatesRef ? { channelStatesRef } : {}),
+    ...(oscBufferRef ? { oscBufferRef } : {}),
   });
   renderParamsRef.current = {
     matrix, channels, padTopChannel, isPlaying, bpm, timeSec, tickOffset,
     beatPhase, grooveAmount, kickTrigger, activeChannels, isModuleLoaded,
     bloomIntensity, bloomThreshold, dimFactor, volume, pan, isLooping,
     invertChannels, clickedButton, cellWidth, cellHeight, playheadRow,
-    localTime, isHorizontal, externalVideoSource,
+    localTime, isHorizontal, externalVideoSource: effectiveVideoSource,
     canvasMetrics,
     colorPalette,
     paletteMode,
+    highlightInstrument,
     instrumentPalette,
     stepsLength,
     chassisDark,
@@ -390,6 +433,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     ...(totalRows !== undefined ? { totalRows } : {}),
     ...(playbackStateRef ? { playbackStateRef } : {}),
     ...(channelStatesRef ? { channelStatesRef } : {}),
+    ...(oscBufferRef ? { oscBufferRef } : {}),
   };
 
   // WebGL overlay hook (frosted caps)
@@ -475,10 +519,9 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     return () => setCurrentPatternRenderer(null);
   }, [useWebGPU, gpuReady, handleResize]);
 
-  // The oscilloscope 1-D texture (binding 6) is owned by useWebGPURender: it is created in the
-  // same shader-init pass that builds the pipeline/bind group and freed on shader release. Owning
-  // it here in a separate effect used to race the pipeline rebuild on shader switch (#348). The
-  // per-frame upload loop below just writes to oscTextureRef.current when it exists.
+  // The oscilloscope 1-D texture (binding 6) is owned by WebGPURenderer: created in shader
+  // init, uploaded each frame in frameDraw.uploadOscilloscopeTexture. Owning it in a separate
+  // PatternDisplay effect used to race pipeline rebuild on shader switch (#348).
 
   // Initialize multi-layer bloom post-processor when GPU becomes ready
   useEffect(() => {
@@ -632,15 +675,6 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
         }
         analyserNode.getByteFrequencyData(freqDataRef.current);
       }
-      if (oscTextureRef.current && oscBufferRef?.current && gpuDevRef.current) {
-        const osc = oscBufferRef.current;
-        gpuDevRef.current.queue.writeTexture(
-          { texture: oscTextureRef.current },
-          osc.buffer as ArrayBuffer,
-          { offset: osc.byteOffset, bytesPerRow: OSC_SAMPLE_COUNT * 4 },
-          { width: OSC_SAMPLE_COUNT, height: 1, depthOrArrayLayers: 1 }
-        );
-      }
       if (gpuReadyEffective && !useHTML) {
         if (useWebGPU) {
           bloomRef.current?.updateCRT(crtEnabledRef.current ? 1.0 : 0.0);
@@ -722,6 +756,17 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
           className="relative max-w-full max-h-full"
           style={{ width: 'fit-content', height: 'fit-content' }}
         >
+          {needsDefaultVideo && (
+            <video
+              ref={bindDefaultVideoRef}
+              className="sr-only"
+              aria-hidden
+              playsInline
+              muted
+              loop
+              preload="auto"
+            />
+          )}
           <canvas
             ref={canvasRef}
             data-shader-preview-source="true"
@@ -829,6 +874,41 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
               </div>
             ))}
           </div>
+          {syncDebug && (syncDebug.sampleRow != null || syncDebug.driftMs !== 0) && (
+            <div className="border-t border-gray-700 pt-2 mt-2">
+              <div className="text-gray-500 text-[10px] mb-1">Playhead sync:</div>
+              <div className="flex justify-between text-[10px]">
+                <span className="text-gray-400">mode:</span>
+                <span className="text-cyan-300 ml-2">{syncDebug.mode}</span>
+              </div>
+              <div className="flex justify-between text-[10px]">
+                <span className="text-gray-400">driftMs:</span>
+                <span className="text-cyan-300 ml-2">{syncDebug.driftMs}</span>
+              </div>
+              {syncDebug.sampleRow != null && (
+                <>
+                  <div className="flex justify-between text-[10px]">
+                    <span className="text-gray-400">sampleRow:</span>
+                    <span className="text-cyan-300 ml-2">{syncDebug.sampleRow.toFixed(3)}</span>
+                  </div>
+                  <div className="flex justify-between text-[10px]">
+                    <span className="text-gray-400">predictedRow:</span>
+                    <span className="text-cyan-300 ml-2">{syncDebug.predictedRow?.toFixed(3) ?? '—'}</span>
+                  </div>
+                  <div className="flex justify-between text-[10px]">
+                    <span className="text-gray-400">smoothedRow:</span>
+                    <span className="text-cyan-300 ml-2">{syncDebug.smoothedRow?.toFixed(3) ?? '—'}</span>
+                  </div>
+                  <div className="flex justify-between text-[10px]">
+                    <span className="text-gray-400">lagRows:</span>
+                    <span className={`ml-2 ${Math.abs(syncDebug.predictionLagRows ?? 0) > 0.5 ? 'text-yellow-300' : 'text-green-300'}`}>
+                      {syncDebug.predictionLagRows?.toFixed(3) ?? '—'}
+                    </span>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
         </div>
       )}
       {import.meta.env.DEV && debugBloomLayer >= 0 && (

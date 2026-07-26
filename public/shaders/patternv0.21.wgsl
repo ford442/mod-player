@@ -2,6 +2,55 @@
 // V0.21: "Precision Interface" - Sharpened details, larger cells, fwidth-based AA
 // Updated: Square bezel alignment with gridRect uniform
 
+// DURA: Note duration constants
+const NOTE_MIN: u32 = 1u;
+const NOTE_MAX: u32 = 119u;
+const NOTE_OFF_MIN: u32 = 120u;
+fn pitchClassFromIndex(note: u32) -> f32 {
+  if (note == 0u || note > NOTE_MAX) { return 0.0; }
+  let semi = (note - 1u) % 12u;
+  return f32(semi) / 12.0;
+}
+
+fn fifthsHue(note: u32) -> f32 {
+  if (note == 0u || note > NOTE_MAX) { return 0.0; }
+  let semi = (note - 1u) % 12u;
+  let cof  = (semi * 7u) % 12u;
+  return f32(cof) / 12.0;
+}
+
+fn octaveBrightness(note: u32) -> f32 {
+  if (note == 0u || note > NOTE_MAX) { return 1.0; }
+  let oct = (note - 1u) / 12u;
+  return 0.65 + 0.35 * f32(oct) / 9.0;
+}
+
+fn pitchHueForPalette(note: u32, paletteId: u32) -> f32 {
+  if (paletteId == 5u) { return fifthsHue(note); }
+  return pitchClassFromIndex(note);
+}
+
+fn neonPalette(t: f32) -> vec3<f32> {
+  let a = vec3<f32>(0.5, 0.5, 0.5);
+  let b = vec3<f32>(0.5, 0.5, 0.5);
+  let c = vec3<f32>(1.0, 1.0, 1.0);
+  let d = vec3<f32>(0.0, 0.33, 0.67);
+  return a + b * cos(6.28318 * (c * t + d));
+}
+fn sdRoundedBox(p: vec2<f32>, b: vec2<f32>, r: f32) -> f32 {
+  let q = abs(p) - b + r;
+  return length(max(q, vec2<f32>(0.0))) + min(max(q.x, q.y), 0.0) - r;
+}
+
+fn sdCircle(p: vec2<f32>, r: f32) -> f32 {
+  return length(p) - r;
+}
+
+fn sdEllipse(p: vec2<f32>, ab: vec2<f32>) -> f32 {
+  let k = length(p / ab);
+  return (k - 1.0) * min(ab.x, ab.y);
+}
+
 struct Uniforms {
   numRows: u32,
   numChannels: u32,
@@ -105,20 +154,6 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
 }
 
 // --- FRAGMENT SHADER ---
-
-fn neonPalette(t: f32) -> vec3<f32> {
-    // Precise, colder spectrum
-    let a = vec3<f32>(0.5, 0.5, 0.5);
-    let b = vec3<f32>(0.5, 0.5, 0.5);
-    let c = vec3<f32>(1.0, 1.0, 1.0);
-    let d = vec3<f32>(0.0, 0.33, 0.67);
-    return a + b * cos(6.28318 * (c * t + d));
-}
-
-fn sdRoundedBox(p: vec2<f32>, b: vec2<f32>, r: f32) -> f32 {
-    let q = abs(p) - b + r;
-    return length(max(q, vec2<f32>(0.0))) + min(max(q.x, q.y), 0.0) - r;
-}
 
 fn toUpperAscii(code: u32) -> u32 {
     return select(code, code - 32u, (code >= 97u) & (code <= 122u));

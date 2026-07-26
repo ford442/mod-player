@@ -145,10 +145,33 @@ EM_BOOL audio_process_cb(
         return EM_TRUE;
     }
 
-    // Render interleaved stereo into a temp buffer
-    float interleaved[128 * 2]; // Stack allocation for 128 frames
     // Prefer context sample rate when available (Emscripten sets 48000 typically)
     const int sr = g_renderSampleRate > 0 ? g_renderSampleRate : 48000;
+
+    // ── Pre-render position snapshot (mirrors JS worklet quantum tag) ──
+    // audioFramesRendered is the frame count at the *start* of this quantum so
+    // workletTime = frames/sampleRate tags the first output sample.
+    g_module.fillPositionInfo(g_positionInfo);
+    g_positionInfo.audioFramesRendered = g_audioFramesRendered;
+    g_positionInfo.sampleRate = sr;
+
+    {
+        const int currentRow = g_positionInfo.currentRow;
+        static double timeSinceLastReport = 0.0;
+        // Coalesce ready-flag lightly (~8 ms) but always refresh the struct above.
+        const bool rowChanged = (currentRow != g_lastReportedRow);
+        const bool timeThreshold = (timeSinceLastReport >= 0.008);
+        if (rowChanged || timeThreshold) {
+            g_lastReportedRow = currentRow;
+            timeSinceLastReport = 0.0;
+            g_positionReady.store(1, std::memory_order_release);
+        }
+        // Accumulate wall quantum even when flag not raised (next threshold)
+        timeSinceLastReport += 128.0 / static_cast<double>(sr);
+    }
+
+    // Render interleaved stereo into a temp buffer
+    float interleaved[128 * 2]; // Stack allocation for 128 frames
     int rendered = g_module.readInterleavedStereo(
         sr,
         frames,
@@ -168,6 +191,7 @@ EM_BOOL audio_process_cb(
     }
 
     g_audioFramesRendered += static_cast<double>(rendered);
+    g_lastReportTimeS += static_cast<double>(rendered) / static_cast<double>(sr);
 
     // De-interleave into planar output
     // Emscripten AudioWorklet outputs are planar: [L0,L1,...,L127, R0,R1,...,R127]
@@ -192,29 +216,6 @@ EM_BOOL audio_process_cb(
         }
         // Release fence ensures samples are visible before the updated head
         __atomic_store_n(g_ringBufHeader, (head + rendered) % g_ringCapacity, __ATOMIC_RELEASE);
-    }
-
-    // ── Report position every quantum (sample-accurate frame clock) ──
-    // Main thread polls shared memory; writing every process() keeps
-    // audioFramesRendered / rowFraction fresh for prediction between polls.
-    int currentRow = g_module.getCurrentRow();
-    double elapsed = (double)rendered / (double)sr;
-    static double timeSinceLastReport = 0.0;
-    timeSinceLastReport += elapsed;
-    g_lastReportTimeS += elapsed;
-
-    bool rowChanged = (currentRow != g_lastReportedRow);
-    // Still coalesce ready-flag polls lightly, but always refresh struct
-    bool timeThreshold = (timeSinceLastReport >= 0.008); // ~8 ms
-
-    g_module.fillPositionInfo(g_positionInfo);
-    g_positionInfo.audioFramesRendered = g_audioFramesRendered;
-    g_positionInfo.sampleRate = sr;
-
-    if (rowChanged || timeThreshold) {
-        g_lastReportedRow = currentRow;
-        timeSinceLastReport = 0.0;
-        g_positionReady.store(1, std::memory_order_release);
     }
 
     return EM_TRUE;

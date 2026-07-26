@@ -19,6 +19,7 @@ export const SHADER_GROUPS = {
     { id: 'patternv0.54.wgsl', label: 'v0.54 (Neon Night)' },
     { id: 'patternv0.58.wgsl', label: 'v0.58 (Reactive Chassis)' },
     { id: 'patternv0.57.wgsl', label: 'v0.57 (Velocity LED)' },
+    { id: 'patternv0.59.wgsl', label: 'v0.59 (Instrument Highlight)' },
     { id: 'patternv0.56.wgsl', label: 'v0.56 (Instrument Palette)' },
     { id: 'patternv0.55.wgsl', label: 'v0.55 (Oscilloscope)' },
     { id: 'patternv0.49.wgsl', label: 'v0.49 (Trap Frosted Glass)' },

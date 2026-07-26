@@ -2,6 +2,9 @@
 // Circular Layout + Integrated UI + Glass Cap Ready
 // Note: Requires padTopChannel=true in PatternDisplay to shift music channels 1-32.
 
+//#include "lib/pitch.wgsl"
+//#include "lib/sdf.wgsl"
+
 struct Uniforms {
   numRows: u32,
   numChannels: u32,
@@ -105,25 +108,6 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
   out.packedA = a;
   out.packedB = b;
   return out;
-}
-
-fn neonPalette(t: f32) -> vec3<f32> {
-  let a = vec3<f32>(0.5, 0.5, 0.5);
-  let b = vec3<f32>(0.5, 0.5, 0.5);
-  let c = vec3<f32>(1.0, 1.0, 1.0);
-  let d = vec3<f32>(0.0, 0.33, 0.67);
-  return a + b * cos(6.28318 * (c * t + d));
-}
-
-fn sdRoundedBox(p: vec2<f32>, b: vec2<f32>, r: f32) -> f32 {
-  let q = abs(p) - b + r;
-  return length(max(q, vec2<f32>(0.0))) + min(max(q.x, q.y), 0.0) - r;
-}
-
-fn pitchClassFromIndex(note: u32) -> f32 {
-  if (note == 0u) { return 0.0; }
-  let semi = (note - 1u) % 12u;
-  return f32(semi) / 12.0;
 }
 
 struct FragmentConstants {

@@ -1,23 +1,19 @@
 import type { ChannelShadowState } from '../../../types';
-import type { WebGPURenderParams } from '../../../hooks/useWebGPURender';
-import { resolveLiveChannels } from '../../../hooks/useWebGPURender';
+import type { WebGPURenderParams } from '../params';
+import { resolveLiveChannels } from '../params';
 import type { WebGL2DebugConfig } from '../types';
 import { packPatternMatrixHighPrecision } from '../../../utils/gpuPacking';
 import {
   GRID_RECT,
-  calculateHorizontalCellSize,
   calculateCapScale,
-  getLayoutModeFromShader,
   getPolarRadii,
-  horizontalLayoutHasHeader,
   LAYOUT_MODES,
   usesCircularRowPaging,
 } from '../../../utils/geometryConstants';
-import { getShaderMeta } from '../../../utils/shaderRegistry';
+import { resolveOverlayLayout, horizontalPadRowRemapEnabled } from '../../../utils/overlayLayout';
+import { getShaderMeta, resolveShaderMeta } from '../../../utils/shaderRegistry';
 import {
   usesStrictPlayheadSustainMode,
-  isHorizontalLayoutShader,
-  supportsStepsLength,
   usesWebGLOverlayHorizontal,
 } from '../../../utils/shaderVersion';
 import { detectRuntimeBase } from '../../../src/lib/paths';
@@ -94,7 +90,13 @@ export class WebGL2PatternRenderer {
   private lastTimeSec = 0;
   init(canvas: HTMLCanvasElement, shaderFile: string): boolean {
     this.destroy();
-    const gl = canvas.getContext('webgl2', { alpha: false, premultipliedAlpha: false, antialias: true });
+    const gl = canvas.getContext('webgl2', {
+      alpha: false,
+      premultipliedAlpha: false,
+      antialias: true,
+      // Required for readPixels / Playwright screenshots after the frame ends (#346 smoke guard).
+      preserveDrawingBuffer: true,
+    });
     if (!gl) return false;
 
     this.gl = gl;
@@ -136,7 +138,8 @@ export class WebGL2PatternRenderer {
     const useNoteSustainTailMode = usesStrictPlayheadSustainMode(shaderFile);
     const isV021 = usesWebGLOverlayHorizontal(shaderFile);
     const useCircularPaging = usesCircularRowPaging(shaderFile);
-    const vsSource = buildVertexShader(useNoteSustainTailMode, isV021, useCircularPaging);
+    const useHeaderRowRemap = horizontalPadRowRemapEnabled(shaderFile, resolveShaderMeta(shaderFile).padTopChannel);
+    const vsSource = buildVertexShader(useNoteSustainTailMode, isV021, useCircularPaging, useHeaderRowRemap);
     const fsSource = buildPatternFragmentShader(useNoteSustainTailMode, isV021);
 
     const vs = compileShader(gl, gl.VERTEX_SHADER, vsSource, 'pattern-vs');
@@ -238,7 +241,17 @@ export class WebGL2PatternRenderer {
     gl.clearColor(0, 0, 0, 1);
     gl.clear(gl.COLOR_BUFFER_BIT);
 
-    const layoutMode = this.resolveLayoutMode(params);
+    const layoutMode = resolveOverlayLayout({
+      shaderFile: this.shaderFile,
+      canvasWidth: canvas.width,
+      canvasHeight: canvas.height,
+      matrixNumRows: params.matrix?.numRows ?? DEFAULT_ROWS,
+      numChannels: params.padTopChannel
+        ? (params.matrix?.numChannels ?? DEFAULT_CHANNELS) + 1
+        : (params.matrix?.numChannels ?? DEFAULT_CHANNELS),
+      padTopChannel,
+      stepsLength: params.stepsLength,
+    }).layoutMode;
     const layoutModeName = layoutMode === LAYOUT_MODES.HORIZONTAL_32 ? '32-STEP'
       : layoutMode === LAYOUT_MODES.HORIZONTAL_64 ? '64-STEP' : 'CIRCULAR';
 
@@ -250,15 +263,6 @@ export class WebGL2PatternRenderer {
     }
 
     onDebug?.({ layoutMode: layoutModeName, uniforms: uniformVals, errors });
-  }
-
-  private resolveLayoutMode(params: WebGPURenderParams): number {
-    const shaderFile = this.shaderFile;
-    let layoutMode = getLayoutModeFromShader(shaderFile);
-    if (isHorizontalLayoutShader(shaderFile) && supportsStepsLength(shaderFile)) {
-      layoutMode = params.stepsLength === 64 ? LAYOUT_MODES.HORIZONTAL_64 : LAYOUT_MODES.HORIZONTAL_32;
-    }
-    return layoutMode;
   }
 
   private drawChassis(
@@ -362,6 +366,17 @@ export class WebGL2PatternRenderer {
     gl.useProgram(res.program);
     gl.bindVertexArray(res.vao);
 
+    const overlayLayout = resolveOverlayLayout({
+      shaderFile: this.shaderFile,
+      canvasWidth: canvas.width,
+      canvasHeight: canvas.height,
+      matrixNumRows: rows,
+      numChannels: cols,
+      padTopChannel,
+      stepsLength: params.stepsLength,
+    });
+    // layoutMode passed from render() matches overlayLayout.layoutMode
+
     const livePlayhead = this.resolvePlayhead(params);
     uniformVals['u_playhead'] = livePlayhead.toFixed(2);
 
@@ -369,20 +384,12 @@ export class WebGL2PatternRenderer {
     let effectiveCellH = params.cellHeight;
     let offsetX = 0;
     let offsetY = 0;
-    const hasHeaderRow = padTopChannel && horizontalLayoutHasHeader(cols);
 
-    if (layoutMode === LAYOUT_MODES.HORIZONTAL_32) {
-      const m = calculateHorizontalCellSize(canvas.width, canvas.height, 32, cols, hasHeaderRow);
-      effectiveCellW = m.cellW;
-      effectiveCellH = m.cellH;
-      offsetX = m.offsetX;
-      offsetY = m.offsetY;
-    } else if (layoutMode === LAYOUT_MODES.HORIZONTAL_64) {
-      const m = calculateHorizontalCellSize(canvas.width, canvas.height, 64, cols, hasHeaderRow);
-      effectiveCellW = m.cellW;
-      effectiveCellH = m.cellH;
-      offsetX = m.offsetX;
-      offsetY = m.offsetY;
+    if (overlayLayout.horizontal) {
+      effectiveCellW = overlayLayout.horizontal.cellW;
+      effectiveCellH = overlayLayout.horizontal.cellH;
+      offsetX = overlayLayout.horizontal.offsetX;
+      offsetY = overlayLayout.horizontal.offsetY;
     }
 
     const { innerRadius, outerRadius } = getPolarRadii(canvas.width, canvas.height, this.shaderFile);
@@ -390,7 +397,7 @@ export class WebGL2PatternRenderer {
     const u = res.uniforms;
     if (u.u_resolution) gl.uniform2f(u.u_resolution, canvas.width, canvas.height);
     if (u.u_cols) gl.uniform1f(u.u_cols, cols);
-    if (u.u_rows) gl.uniform1f(u.u_rows, rows);
+    if (u.u_rows) gl.uniform1f(u.u_rows, overlayLayout.uniformRows);
     if (u.u_playhead) gl.uniform1f(u.u_playhead, livePlayhead);
     if (u.u_invertChannels) gl.uniform1i(u.u_invertChannels, params.invertChannels ? 1 : 0);
     if (u.u_bloomIntensity) gl.uniform1f(u.u_bloomIntensity, params.bloomIntensity ?? 1);
@@ -420,9 +427,7 @@ export class WebGL2PatternRenderer {
 
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
 
-    const stepsForMode = layoutMode === LAYOUT_MODES.HORIZONTAL_32 ? 32
-      : layoutMode === LAYOUT_MODES.HORIZONTAL_64 ? 64 : rows;
-    const totalInstances = stepsForMode * cols;
+    const totalInstances = overlayLayout.overlayTotalInstances;
     uniformVals['totalInstances'] = totalInstances;
     uniformVals['layoutMode'] = layoutModeName;
 

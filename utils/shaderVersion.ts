@@ -91,6 +91,9 @@ export const usesOscilloscope = (shaderFile: string): boolean =>
 export const usesInstrumentPalette = (shaderFile: string): boolean =>
   resolveShaderMeta(shaderFile).instrumentPalette;
 
+export const usesInstrumentHighlight = (shaderFile: string): boolean =>
+  resolveShaderMeta(shaderFile).instrumentHighlight;
+
 export const usesAudioReactive = (shaderFile: string): boolean =>
   resolveShaderMeta(shaderFile).audioReactive;
 

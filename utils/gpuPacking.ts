@@ -91,6 +91,7 @@ export const fillUniformPayload = (
     nightPreset?: number;       // [30] 0=off, 1=dusk, 2=midnight, 3=deep
     invertMix?: number;         // [31] luminance-inversion blend (0–1)
     paletteMode?: number;       // [32] 0=pitch-hue, 1=per-instrument
+    highlightInstrument?: number; // [33] 0=off, else 1-based instrument index
   },
   uint: Uint32Array,
   float: Float32Array
@@ -134,7 +135,8 @@ export const fillUniformPayload = (
     uint[30] = Math.max(0, params.nightPreset ?? 0) >>> 0;
     float[31] = params.invertMix ?? 0.0;
     uint[32] = Math.max(0, params.paletteMode ?? 0) >>> 0;
-    return 132;
+    uint[33] = Math.max(0, params.highlightInstrument ?? 0) >>> 0;
+    return 136;
   }
 
   uint[0] = Math.max(0, params.numRows) >>> 0;

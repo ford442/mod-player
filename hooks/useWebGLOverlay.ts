@@ -12,20 +12,16 @@ import {
   WEBGL_HYBRID_SHADERS,
   getLayoutType,
   usesStrictPlayheadSustainMode,
-  isHorizontalLayoutShader,
-  supportsStepsLength,
   usesWebGLOverlayHorizontal,
 } from '../utils/shaderVersion';
 import {
   GRID_RECT,
-  calculateHorizontalCellSize,
   calculateCapScale,
-  getLayoutModeFromShader,
   getPolarRadii,
-  horizontalLayoutHasHeader,
   LAYOUT_MODES,
   usesCircularRowPaging,
 } from '../utils/geometryConstants';
+import { resolveOverlayLayout, horizontalPadRowRemapEnabled } from '../utils/overlayLayout';
 import { detectRuntimeBase } from '../src/lib/paths';
 
 const DEFAULT_ROWS = 64;
@@ -88,6 +84,7 @@ export function useWebGLOverlay(
     const useNoteSustainTailMode = usesStrictPlayheadSustainMode(shaderFile);
     const isV021 = usesWebGLOverlayHorizontal(shaderFile);
     const useCircularPaging = usesCircularRowPaging(shaderFile);
+    const useHeaderRowRemap = horizontalPadRowRemapEnabled(shaderFile, paramsRef.current.padTopChannel);
     console.group('🔧 initWebGL');
 
     // Clean up existing WebGL resources first
@@ -136,7 +133,7 @@ export function useWebGLOverlay(
     // --- VERTEX SHADER ---
     // Fetches cell data (packedA, packedB) and channel state in the VS,
     // passes as flat varyings to avoid per-pixel texelFetch.
-    const vsSource = buildVertexShader(useNoteSustainTailMode, isV021, useCircularPaging);
+    const vsSource = buildVertexShader(useNoteSustainTailMode, isV021, useCircularPaging, useHeaderRowRemap);
 
     // Only compile if using a hybrid shader that needs WebGL caps
     if (!WEBGL_HYBRID_SHADERS.has(shaderFile)) {
@@ -405,6 +402,16 @@ export function useWebGLOverlay(
 
       const livePlayheadRow = p.playbackStateRef?.current?.playheadRow ?? p.playheadRow;
 
+      const overlayLayout = resolveOverlayLayout({
+        shaderFile: p.shaderFile,
+        canvasWidth: gl.canvas.width,
+        canvasHeight: gl.canvas.height,
+        matrixNumRows: rows,
+        numChannels: cols,
+        padTopChannel: p.padTopChannel,
+        stepsLength: p.stepsLength,
+      });
+
       const setUniform = <T extends (loc: WebGLUniformLocation | null, ...args: any[]) => void>(
         _name: string,
         location: WebGLUniformLocation | null | undefined,
@@ -423,8 +430,8 @@ export function useWebGLOverlay(
         if (hasResolution) uniformVals['u_resolution'] = `${gl.canvas.width}x${gl.canvas.height}`;
         const hasCols = setUniform('u_cols', uniforms.u_cols, gl.uniform1f.bind(gl), cols);
         if (hasCols) uniformVals['u_cols'] = cols;
-        const hasRows = setUniform('u_rows', uniforms.u_rows, gl.uniform1f.bind(gl), rows);
-        if (hasRows) uniformVals['u_rows'] = rows;
+        const hasRows = setUniform('u_rows', uniforms.u_rows, gl.uniform1f.bind(gl), overlayLayout.uniformRows);
+        if (hasRows) uniformVals['u_rows'] = overlayLayout.uniformRows;
         const hasPlayhead = setUniform('u_playhead', uniforms.u_playhead, gl.uniform1f.bind(gl), livePlayheadRow);
         if (hasPlayhead) uniformVals['u_playhead'] = livePlayheadRow.toFixed(2);
         const hasInvert = setUniform('u_invertChannels', uniforms.u_invertChannels, gl.uniform1i.bind(gl), p.invertChannels ? 1 : 0);
@@ -472,35 +479,16 @@ export function useWebGLOverlay(
       let offsetY = 0;
       let layoutModeName = 'CIRCULAR';
 
-      // Horizontal shaders with stepsLength can toggle 32/64 page modes
-      let layoutMode = getLayoutModeFromShader(p.shaderFile);
-      if (isHorizontalLayoutShader(p.shaderFile) && supportsStepsLength(p.shaderFile)) {
-        layoutMode = p.stepsLength === 64 ? LAYOUT_MODES.HORIZONTAL_64 : LAYOUT_MODES.HORIZONTAL_32;
-      }
-      const channelCount = cols;
-      const hasHeaderRow = p.padTopChannel && horizontalLayoutHasHeader(channelCount);
-
-      if (layoutMode === LAYOUT_MODES.HORIZONTAL_32) {
-        {
-          const metrics = calculateHorizontalCellSize(gl.canvas.width, gl.canvas.height, 32, channelCount, hasHeaderRow);
-          effectiveCellW = metrics.cellW;
-          effectiveCellH = metrics.cellH;
-          offsetX = metrics.offsetX;
-          offsetY = metrics.offsetY;
-          layoutModeName = '32-STEP';
-        }
+      const layoutMode = overlayLayout.layoutMode;
+      if (overlayLayout.horizontal) {
+        effectiveCellW = overlayLayout.horizontal.cellW;
+        effectiveCellH = overlayLayout.horizontal.cellH;
+        offsetX = overlayLayout.horizontal.offsetX;
+        offsetY = overlayLayout.horizontal.offsetY;
+        layoutModeName = layoutMode === LAYOUT_MODES.HORIZONTAL_64 ? '64-STEP' : '32-STEP';
         if (uniforms.u_offset != null) gl.uniform2f(uniforms.u_offset, offsetX, offsetY);
-      } else if (layoutMode === LAYOUT_MODES.HORIZONTAL_64) {
-        const metrics = calculateHorizontalCellSize(gl.canvas.width, gl.canvas.height, 64, channelCount, hasHeaderRow);
-        effectiveCellW = metrics.cellW;
-        effectiveCellH = metrics.cellH;
-        offsetX = metrics.offsetX;
-        offsetY = metrics.offsetY;
-        if (uniforms.u_offset != null) gl.uniform2f(uniforms.u_offset, offsetX, offsetY);
-        layoutModeName = '64-STEP';
-      } else {
-        if (uniforms.u_offset != null) gl.uniform2f(uniforms.u_offset, 0.0, 0.0);
-        layoutModeName = 'CIRCULAR';
+      } else if (uniforms.u_offset != null) {
+        gl.uniform2f(uniforms.u_offset, 0.0, 0.0);
       }
 
       const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
@@ -515,14 +503,10 @@ export function useWebGLOverlay(
       uniformVals['pixelRatio'] = pixelRatio;
       uniformVals['GRID_RECT'] = `${GRID_RECT.x.toFixed(3)}, ${GRID_RECT.y.toFixed(3)}, ${GRID_RECT.w.toFixed(3)}, ${GRID_RECT.h.toFixed(3)}`;
 
-      // Additive blending: SRC_ALPHA preserves alpha-based edge anti-aliasing,
-      // ONE on destination adds light on top of WGSL cells without darkening them.
       gl.enable(gl.BLEND);
       gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
 
-      const stepsForMode = layoutMode === LAYOUT_MODES.HORIZONTAL_32 ? 32 :
-        layoutMode === LAYOUT_MODES.HORIZONTAL_64 ? 64 : rows;
-      const totalInstances = stepsForMode * cols;
+      const totalInstances = overlayLayout.overlayTotalInstances;
 
       uniformVals['totalInstances'] = totalInstances;
       uniformVals['cols'] = cols;

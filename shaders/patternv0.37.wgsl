@@ -3,6 +3,9 @@
 // PackedA: [Note(8) | Instr(8) | VolCmd(8) | VolVal(8)]
 // PackedB: [Unused(16) | EffCmd(8) | EffVal(8)]
 
+//#include "lib/pitch.wgsl"
+//#include "lib/sdf.wgsl"
+
 struct Uniforms {
   numRows: u32,
   numChannels: u32,
@@ -107,23 +110,6 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
   return out;
 }
 
-fn neonPalette(t: f32) -> vec3<f32> {
-  let a = vec3<f32>(0.5, 0.5, 0.5);
-  let b = vec3<f32>(0.5, 0.5, 0.5);
-  let c = vec3<f32>(1.0, 1.0, 1.0);
-  let d = vec3<f32>(0.0, 0.33, 0.67);
-  return a + b * cos(6.28318 * (c * t + d));
-}
-
-fn sdRoundedBox(p: vec2<f32>, b: vec2<f32>, r: f32) -> f32 {
-  let q = abs(p) - b + r;
-  return length(max(q, vec2<f32>(0.0))) + min(max(q.x, q.y), 0.0) - r;
-}
-
-fn sdCircle(p: vec2<f32>, r: f32) -> f32 {
-  return length(p) - r;
-}
-
 fn sdTriangle(p: vec2<f32>, r: f32) -> f32 {
     let k = sqrt(3.0);
     var p2 = p;
@@ -139,16 +125,6 @@ fn sdTriangle(p: vec2<f32>, r: f32) -> f32 {
 fn sdBox(p: vec2<f32>, b: vec2<f32>) -> f32 {
     let d = abs(p) - b;
     return length(max(d, vec2<f32>(0.0))) + min(max(d.x, d.y), 0.0);
-}
-
-fn pitchClassFromIndex(note: u32) -> f32 {
-  if (note == 0u) { return 0.0; }
-  // Assuming standard OpenMPT note mapping: C-? is start of octave.
-  // We just want hue.
-  // Note 0 is empty. Note 1.. are notes.
-  // (note - 1) % 12
-  let semi = (note - 1u) % 12u;
-  return f32(semi) / 12.0;
 }
 
 struct FragmentConstants {

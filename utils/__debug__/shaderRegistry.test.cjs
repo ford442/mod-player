@@ -162,6 +162,9 @@ runTsx('Registry + SHADER_GROUPS coverage', `
   if (!SHADER_REGISTRY['patternv0.56.wgsl']!.instrumentPalette) errors.push('v0.56 instrumentPalette');
   if (!SHADER_REGISTRY['patternv0.57.wgsl']!.stepsDrivenVisibleRows) errors.push('v0.57 stepsDriven');
   if (!SHADER_REGISTRY['patternv0.58.wgsl']!.audioReactive) errors.push('v0.58 audioReactive');
+  const m24 = SHADER_REGISTRY['patternv0.24.wgsl']!;
+  if (m24.cellSizeMode !== 'fullCanvas')
+    errors.push('v0.24 cellSizeMode must be fullCanvas (HUD grid fills canvas height)');
 
   for (const id of ALL_SHADER_IDS) {
     if (!SHADER_REGISTRY[id]) errors.push(\`ALL_SHADER_IDS has unregistered \${id}\`);

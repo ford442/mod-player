@@ -237,8 +237,11 @@ report_libopenmpt_failure() {
 }
 
 ensure_libopenmpt() {
+    # Cache-friendly: when vendor/.a already exists (CI actions/cache hit or prior
+    # local make), skip download + multi-minute libopenmpt compile.
     if resolve_libopenmpt_paths; then
-        echo "✅ libopenmpt ready at $LIBOPENMPT_DIR"
+        echo "✅ libopenmpt ready at $LIBOPENMPT_DIR (prebuilt .a — skipping make)"
+        echo "   include=$LIBOPENMPT_INCLUDE  lib=$LIBOPENMPT_LIB"
         return 0
     fi
 

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { PatternMatrix } from '../types';
+import { usePlayerUiStore } from '../store/playerUiStore';
 import {
   applyCellPatch,
   clonePatternMatrix,
@@ -17,7 +18,10 @@ export interface UsePatternEditOptions {
 }
 
 export function usePatternEdit({ matrix, onMatrixChange, moduleKey, onReset }: UsePatternEditOptions) {
-  const [editMode, setEditMode] = useState(false);
+  const editMode = usePlayerUiStore((s) => s.editMode);
+  const setEditMode = usePlayerUiStore((s) => s.setEditMode);
+  const toggleEditMode = usePlayerUiStore((s) => s.toggleEditMode);
+
   const [isDirty, setIsDirty] = useState(false);
   const pastRef = useRef<PatternMatrix[]>([]);
   const futureRef = useRef<PatternMatrix[]>([]);
@@ -40,7 +44,7 @@ export function usePatternEdit({ matrix, onMatrixChange, moduleKey, onReset }: U
     onReset?.();
   }, [onReset, syncHistoryFlags]);
 
-  // Force clean baseline when a different module is loaded.
+  // Force clean baseline when a different module is loaded (caller must confirm if dirty).
   useEffect(() => {
     if (moduleKey === undefined) return;
     if (moduleKeyRef.current === moduleKey) return;
@@ -51,7 +55,7 @@ export function usePatternEdit({ matrix, onMatrixChange, moduleKey, onReset }: U
       resetHistory(null);
     }
     setEditMode(false);
-  }, [moduleKey, matrix, resetHistory]);
+  }, [moduleKey, matrix, resetHistory, setEditMode]);
 
   useEffect(() => {
     if (!matrix) {
@@ -109,10 +113,6 @@ export function usePatternEdit({ matrix, onMatrixChange, moduleKey, onReset }: U
     setIsDirty(!matricesEqual(next, baselineRef.current));
     syncHistoryFlags();
   }, [matrix, onMatrixChange, syncHistoryFlags]);
-
-  const toggleEditMode = useCallback(() => {
-    setEditMode((prev) => !prev);
-  }, []);
 
   const revertToBaseline = useCallback(() => {
     if (!baselineRef.current) return;

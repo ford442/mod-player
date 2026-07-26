@@ -10,6 +10,16 @@ import { broadcastPcmBlock } from '../utils/projectMBridge';
 import { logWorkletDiagnostics } from '../audio-worklet/diagnostics';
 import { detectRuntimeBase, withBase } from '../src/lib/paths';
 import { applyWorkletPositionSample } from '../utils/playheadPrediction';
+import {
+  applyNormalizedPosition,
+  jsWorkletPositionToInput,
+  nativePositionToInput,
+} from '../utils/workletPositionAdapter';
+import {
+  canReuseWorkletNode,
+  shouldDisconnectWorkletOnPlay,
+  shouldPostInitLib,
+} from '../utils/workletAudioLifecycle';
 
 export interface AudioGraphRefs {
   libopenmptRef:       React.MutableRefObject<LibOpenMPT | null>;
@@ -184,17 +194,18 @@ export async function startAudioPlayback(
 
     // Disconnect previous source unless we can hot-reload module data into the
     // existing JS worklet node (avoids re-init of shared-scope libopenmpt WASM).
-    const canReuseWorkletNode =
-      config.activeEngine === 'worklet' &&
-      refs.workletLoadedRef.current &&
-      refs.audioWorkletNodeRef.current != null;
+    const reuseWorkletNode = canReuseWorkletNode({
+      activeEngine: config.activeEngine,
+      workletLoaded: refs.workletLoadedRef.current,
+      hasWorkletNode: refs.audioWorkletNodeRef.current != null,
+    });
 
-    if (refs.audioWorkletNodeRef.current && !canReuseWorkletNode) {
+    const staleWorkletNode = refs.audioWorkletNodeRef.current;
+    if (shouldDisconnectWorkletOnPlay(staleWorkletNode != null, reuseWorkletNode) && staleWorkletNode) {
       console.log('[PLAY] Disconnecting previous AudioWorkletNode...');
-      const oldNode = refs.audioWorkletNodeRef.current;
-      try { oldNode.port.postMessage({ type: 'pause' }); } catch { /* ignore */ }
-      try { oldNode.port.onmessage = null; } catch { /* ignore */ }
-      try { oldNode.disconnect(); } catch { /* ignore */ }
+      try { staleWorkletNode.port.postMessage({ type: 'pause' }); } catch { /* ignore */ }
+      try { staleWorkletNode.port.onmessage = null; } catch { /* ignore */ }
+      try { staleWorkletNode.disconnect(); } catch { /* ignore */ }
       refs.audioWorkletNodeRef.current = null;
     }
 
@@ -288,52 +299,22 @@ export async function startAudioPlayback(
             + 'or that emscriptenGetAudioObject is available.');
         }
 
-        // Listen for position updates from the native engine.
-        // Shared-memory PositionInfo is refreshed every quantum (with
-        // audioFramesRendered / rowFraction after rebuild). Polling tags
-        // workletTime with AudioContext.currentTime; prediction + latency
-        // back-extrapolation keep visuals within ~1 row of audio.
+        // Shared-memory PositionInfo is refreshed every quantum (pre-render
+        // snapshot + frame clock). Both engines use applyNormalizedPosition.
         engine.on('position', (data: WorkletPositionData) => {
-          const workletTime = data.workletTime ?? ctx.currentTime;
-          const positionPayload: {
-            order: number;
-            row: number;
-            rowFraction?: number;
-            positionSeconds: number;
-            workletTime: number;
-            bpm?: number;
-            speed?: number;
-          } = {
-            order: data.currentOrder,
-            row: data.currentRow,
-            positionSeconds: data.positionMs / 1000,
-            workletTime,
-            bpm: data.bpm,
-          };
-          if (data.rowFraction != null && Number.isFinite(data.rowFraction)) {
-            positionPayload.rowFraction = data.rowFraction;
-          }
-          if (data.speed != null && data.speed > 0) {
-            positionPayload.speed = data.speed;
-          }
-          applyWorkletPositionSample(refs, positionPayload);
+          const input = nativePositionToInput(data, ctx.currentTime);
+          const applied = applyNormalizedPosition(refs, input, {
+            channelStates: refs.channelStatesRef.current,
+            channelVU: data.channelVU,
+            numChannels: data.numChannels,
+          });
 
           // TIMING FIX: Check for seek acknowledgment
           if (refs.pendingSeekRef.current &&
-              data.currentOrder === refs.pendingSeekRef.current.order &&
-              data.currentRow === refs.pendingSeekRef.current.row) {
+              applied.order === refs.pendingSeekRef.current.order &&
+              applied.rowInt === refs.pendingSeekRef.current.row) {
             refs.seekAcknowledgedRef.current = true;
             refs.pendingSeekRef.current = null;
-          }
-
-          // TIMING FIX: VU/trigger only — noteAge is owned by updateUI using fractional playhead.
-          const numCh = data.numChannels;
-          for (let c = 0; c < numCh && c < refs.channelStatesRef.current.length; c++) {
-            const existing = refs.channelStatesRef.current[c];
-            if (!existing) continue;
-            const vu = data.channelVU[c] || 0;
-            existing.volume = vu;
-            existing.trigger = vu > 0.05 ? 1 : 0;
           }
 
           // When the engine supplies new pattern data (on order/pattern change),
@@ -465,7 +446,7 @@ export async function startAudioPlayback(
         let libJsText: string | undefined;
         let libWasmBuffer: ArrayBuffer | null = null;
 
-        if (canReuseWorkletNode && refs.audioWorkletNodeRef.current) {
+        if (reuseWorkletNode && refs.audioWorkletNodeRef.current) {
           node = refs.audioWorkletNodeRef.current;
           console.log('[PLAY] Reusing existing AudioWorkletNode (hot module reload)');
         } else {
@@ -582,56 +563,34 @@ export async function startAudioPlayback(
           const { type, order, row, positionSeconds, message, bpm, channelVU } = e.data;
 
           if (type === 'position') {
-            // Prefer worklet-authored audioTime (pre-render quantum tag).
-            const workletAudioTime =
-              (typeof e.data.audioTime === 'number' ? e.data.audioTime : null) ??
-              (typeof e.data.workletTime === 'number' ? e.data.workletTime : null) ??
-              ctx.currentTime;
-            const positionPayload: {
-              order: number;
-              row: number;
-              rowFraction?: number;
-              positionSeconds: number;
-              workletTime: number;
-              bpm?: number;
-              speed?: number;
-            } = {
-              order,
-              row,
-              positionSeconds,
-              workletTime: workletAudioTime,
-            };
-            if (typeof e.data.rowFraction === 'number' && Number.isFinite(e.data.rowFraction)) {
-              positionPayload.rowFraction = e.data.rowFraction;
-            }
             // BPM belongs on the sample/ref path only. Never setModuleInfo here —
             // position messages arrive every audio quantum (~350 Hz) and flooding
             // React was a primary A/V desync source (especially XM with varying BPM).
-            if (bpm && bpm > 0) {
-              positionPayload.bpm = bpm;
-            }
-            if (e.data.speed != null && e.data.speed > 0) {
-              positionPayload.speed = e.data.speed;
-            }
-            applyWorkletPositionSample(refs, positionPayload);
+            const input = jsWorkletPositionToInput(
+              {
+                order,
+                row,
+                positionSeconds,
+                bpm,
+                speed: e.data.speed,
+                rowFraction: e.data.rowFraction,
+                audioTime: e.data.audioTime,
+                workletTime: e.data.workletTime,
+                channelVU,
+              },
+              ctx.currentTime,
+            );
+            const applied = applyNormalizedPosition(refs, input, {
+              channelStates: refs.channelStatesRef.current,
+              channelVU,
+            });
 
             // TIMING FIX: Check for seek acknowledgment
             if (refs.pendingSeekRef.current &&
-                order === refs.pendingSeekRef.current.order &&
-                row === refs.pendingSeekRef.current.row) {
+                applied.order === refs.pendingSeekRef.current.order &&
+                applied.rowInt === refs.pendingSeekRef.current.row) {
               refs.seekAcknowledgedRef.current = true;
               refs.pendingSeekRef.current = null;
-            }
-
-            // TIMING FIX: VU/trigger only — noteAge is owned by updateUI (fractional playhead).
-            if (channelVU && refs.channelStatesRef.current.length > 0) {
-              for (let c = 0; c < channelVU.length && c < refs.channelStatesRef.current.length; c++) {
-                const existing = refs.channelStatesRef.current[c];
-                if (!existing) continue;
-                const vu = channelVU[c] != null ? (channelVU[c] as number) : existing.volume;
-                existing.volume = vu;
-                existing.trigger = vu > 0.05 ? 1 : 0;
-              }
             }
           } else if (type === 'ended') {
             console.log('[PLAY] Worklet reported module ended');
@@ -763,7 +722,7 @@ export async function startAudioPlayback(
 
         // Send glue (+ optional real WASM) to worklet first (must arrive before 'load').
         // Transfer wasm buffer only when present; wasm2js path sends JS alone.
-        if (!canReuseWorkletNode && libJsText) {
+        if (shouldPostInitLib(reuseWorkletNode, libJsText)) {
           if (libWasmBuffer) {
             node.port.postMessage(
               { type: 'initLib', scriptText: libJsText, wasmBytes: libWasmBuffer },

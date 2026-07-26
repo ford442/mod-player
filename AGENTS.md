@@ -48,8 +48,10 @@ Files: `audio-worklet/OpenMPTWorkletEngine.ts`, `cpp/openmpt_wrapper.cpp`, `cpp/
 - Built with `scripts/build-wasm.sh` (requires Emscripten SDK).
 - Emscripten flags: `-sAUDIO_WORKLET=1`, `-sWASM_WORKERS=1`, `-sMODULARIZE=1`, `-sEXPORT_NAME=createOpenMPTModule`.
 - Outputs: `public/worklets/openmpt-native.js`, `.wasm`, `.aw.js` (these are `.gitignore`d until built).
-- `useLibOpenMPT.ts` probes for `openmpt-native.js` at startup; if present, it instantiates `OpenMPTWorkletEngine`, which creates its own `AudioContext` + worklet thread in C++ land.
-- The native engine polls a shared-memory `PositionInfo` struct for row/BPM/channel VU data.
+- **Engine selection** (`utils/audioEngineSelection.ts`): `?engine=js|native` → `localStorage.xasm1_audio_engine` (`js`\|`native`\|`auto`) → auto-probe. Prefer native when glue is present unless force-JS. Soft-fail to JS if `?engine=native` without artifacts. UI toggle persists override. See `public/worklets/README.md`.
+- `useLibOpenMPT.ts` probes for `openmpt-native.js` at startup; if present and preference allows, it instantiates `OpenMPTWorkletEngine`, which creates its own `AudioContext` + worklet thread in C++ land.
+- The native engine polls a shared-memory `PositionInfo` struct for row/BPM/channel VU data; main thread applies via shared `utils/workletPositionAdapter.ts` (same path as JS worklet).
+- **Capture:** MediaRecorder is blocked on native (dual AudioContext) — switch to JS (`?engine=js`) for recording (`docs/EXPORT.md`).
 
 ### Fallback Path
 If the JS AudioWorklet fails to initialize WASM, `hooks/useAudioGraph.ts` falls back to a `ScriptProcessorNode` on the main thread (deprecated but functional). This is triggered by the worklet posting an `error` message.
@@ -58,8 +60,20 @@ If the JS AudioWorklet fails to initialize WASM, `hooks/useAudioGraph.ts` falls 
 - **Language:** WGSL (WebGPU Shading Language).
 - **Location:** Source shaders live in `/shaders`. There are 50+ versioned files (e.g., `patternv0.50.wgsl`, `chassisv0.40.wgsl`). Served copies must also exist in `/public/shaders`.
 - **Includes:** Source shaders can compose shared logic via `//#include "lib/<fragment>.wgsl"` directives (tolerated as WGSL comments). `npm run sync:shaders` expands these recursively into flat, self-contained output in `/public/shaders`. Shared fragments live in `/shaders/lib/` and are excluded from the public copy. Never hand-edit `/public/shaders/`.
-  - **Canonical libs:** `packing.wgsl` (TRIG-001 / PackedA/B), `emitters.wgsl` (three-emitter lens), `polar_layout.wgsl` (ring geometry), `night_theme.wgsl` + `theme_night_5x.wgsl` (palettes). Night circular variants **v0.52–v0.54** are theme-only entries over `circular_night_body.wgsl`.
-  - **Verify:** `npm run test:shader-includes`
+  - **Canonical libs:** `packing.wgsl` (TRIG-001 / PackedA/B), `emitters.wgsl` / `emitters_trap.wgsl` (three-emitter lens), `polar_layout.wgsl` (ring geometry), `night_theme.wgsl` + `theme_night_5x.wgsl` (palettes), `theme_trap_frosted.wgsl` + `circular_led_body.wgsl` (v0.50 trap family). Night circular variants **v0.52–v0.54** are theme-only entries over `circular_night_body.wgsl`.
+  - **Verify:** `npm run test:shader-includes` (includes `scripts/verify-shader-parity.mjs`)
+
+### Shader include migration status (picker shaders)
+
+| Shader(s) | Tier | Notes |
+|-----------|------|-------|
+| v0.52–v0.54 | B | `night_theme` / `theme_night_5x` + `circular_night_body` |
+| v0.50, v0.57, v0.58 | B | `theme_trap_frosted` + `circular_led_*_body` |
+| v0.50b | A | Hybrid chassis; utility libs + `theme_trap_frosted` |
+| v0.51 | B | `theme_trap_frosted` + `emitters_playhead` + playhead arc FS |
+| v0.45–49, v0.30–42, v0.35_bloom, v0.38, square v0.21/39/40/43/44 | A | Utility libs (`notes`, `dura`, `pitch`, `palette`, `sdf`, `tonemap`, …) |
+| v0.55–v0.56 | A | Utility libs + shader-specific bindings (osc / instrument palette) |
+| v0.23, v0.24 | Exception | Procedural video overlay — no PackedA/B cell-packing path |
 - **Shader Groups (in `App.tsx`):**
   - **Square:** v0.44, v0.43, v0.40, v0.39, v0.21
   - **Circular:** v0.50, v0.49, v0.48, v0.47, v0.46, v0.45, v0.45b, v0.42, v0.38, v0.35_bloom, v0.30
@@ -81,12 +95,12 @@ Tracker cells are bit-packed into `Uint32Array` before upload to the GPU:
 
 ## Directory Map
 - **`/components`** – React UI elements (`App.tsx`, `PatternDisplay.tsx`, `Controls.tsx`, `Studio3D.tsx`, `MediaOverlay.tsx`, `ChannelMeters.tsx`, `PatternSequencer.tsx`, `Playlist.tsx`, `SeekBar.tsx`, etc.)
-- **`/src/renderers`** – Pattern renderer selection + WebGL2 reference implementation + HTML fallback wrapper
+- **`/src/renderers`** – Pattern renderer selection, WebGPU engine (`webgpu/WebGPURenderer.ts`), WebGL2 reference (`webgl2/`), and HTML fallback wrapper. Shared per-frame params live in `params.ts`; backend types in `types.ts` must **not** import hooks. Run `npm run check:cycles` before merging renderer refactors.
 - **`/hooks`** – Core logic hooks
   - `useLibOpenMPT.ts` – Main audio bridge and state
   - `useAudioGraph.ts` – Audio graph construction and playback start
   - `useWorkletLoader.ts` – AudioWorklet module loading with retry/diagnostics
-  - `usePlaylist.ts`, `useKeyboardShortcuts.ts`, `useWebGPURender.ts`, `useWebGLOverlay.ts`, `useLocalStorage.ts`
+  - `usePlaylist.ts`, `useKeyboardShortcuts.ts`, `useWebGPURender.ts` (thin React glue; GPU logic in `src/renderers/webgpu/`), `useWebGLOverlay.ts`, `useLocalStorage.ts`
 - **`/audio-worklet`** – TypeScript wrapper for the native C++ engine (`OpenMPTWorkletEngine.ts`, `types.ts`, `diagnostics.ts`)
 - **`/cpp`** – C++ source for the native worklet (`openmpt_wrapper.cpp`, `openmpt_wrapper.h`, `worklet_processor.cpp`, `pre.js`)
 - **`/public/worklets`** – AudioWorklet JS processors served as static assets
@@ -178,18 +192,22 @@ python3 deploy.py
 - **ESLint:** Configured in `eslint.config.js` (typescript-eslint + react-hooks + react-refresh). `npm run lint` runs `eslint . --max-warnings 100` and is a **hard CI gate**. Remaining warnings are tracked for a follow-up cleanup PR (ratchet the budget down over time).
 
 ## Testing
-- **No formal unit-test framework** is currently installed (no Jest/Vitest/Playwright tests in `package.json`).
-- **Debug invariant test:** `utils/__debug__/packingInvariants.test.cjs` contains a Node.js script that tests GPU packing logic for buffer-size mismatches.
+- **Unit tests (Vitest):** `npm test` runs the full suite (61+ tests in `tests/**/*.test.ts`) — packing, duration parity, trigger tails, shader includes, share state, pattern edit, WAV encoder, and more. Use `npm run test:watch` during development. Focused scripts: `test:shader-includes`, `test:duration-parity`, `test:trigger-tail`, `test:octave-brightness`.
+- **Test TypeScript:** `npm run typecheck:tests` type-checks `tests/**/*.ts` via `tsconfig.test.json` (CI gate).
+- **Shader registry invariant:** `npm run test:shader-registry` (Node `.cjs` script) verifies registry ↔ `SHADER_GROUPS` agreement — not fully duplicated in Vitest.
+- **Debug invariant scripts:** `utils/__debug__/*.test.cjs` (e.g. packing invariants, circular paging) are run manually or via dedicated `npm run test:*` scripts; not part of the default `npm test` glob.
 - **Shader renderer screenshot check:** `scripts/screenshot-shader-check.mjs` captures the pattern visualizer for each renderer (`webgl2`, `html`, optionally `webgpu`) and a configurable list of shaders. Run it against a local preview with:
   ```bash
   npm run preview -- --port 4173 &
   npm run screenshot:shaders
   ```
   Outputs are written to `/mnt/ramdisk/mod-player-screenshots` by default, including `report.json` and `SCREENSHOT_REPORT.md`.
-- **GitHub Actions** (`.github/workflows/ci.yml`) runs two jobs:
-  1. `lint-and-build` – `npm ci` → `npm run lint` (hard fail) → `npm run typecheck` → `npm run build` → verifies `dist/index.html` and `dist/assets` exist.
-  2. `wasm-smoke-test` – Installs Emscripten **3.1.50**, verifies safe native build scripts, `verify:native-exports`, `bash -n`, and that tracked `openmpt-worklet.js` still looks like the JS processor.
-  3. `native-wasm-scheduled.yml` – Weekly (and manual) full `npm run build:emcc`; uploads `openmpt-native.*` artifacts and asserts the JS worklet is unchanged.
+- **GitHub Actions** (`.github/workflows/ci.yml`) runs PR jobs plus a scheduled native build:
+  1. `lint-and-build` – `npm ci` → `verify:wasm` → `npm run lint` (hard fail) → `npm run typecheck` → `npm run typecheck:tests` → **`npm test`** → `npm run test:shader-registry` → `npm run build` → artifact + `verify:build` checks.
+  2. `visual-smoke` – Build, preview server, Playwright smoke (`smoke:visual:ci`) on WebGL2 + HTML renderers.
+  3. `wasm-smoke-test` – Installs Emscripten **3.1.50**, verifies safe native build scripts, `verify:native-exports`, `bash -n`, and that tracked `openmpt-worklet.js` still looks like the JS processor.
+  4. `native-full-build` – Path-filtered full `npm run build:emcc` when `cpp/**`, `scripts/build-wasm.sh`, `audio-worklet/**`, or `native-bridge-processor.js` change; caches `vendor/libopenmpt-0.8.4+release`.
+  5. `native-wasm-scheduled.yml` – Weekly (and manual) full `npm run build:emcc` with the same libopenmpt cache; uploads `openmpt-native.*` artifacts and asserts the JS worklet is unchanged.
 
 ## Security & CORS Considerations
 - **COOP/COEP headers:** `vite.config.ts` sets:
@@ -204,7 +222,7 @@ python3 deploy.py
 1. **Worklet Caching:** Browsers cache AudioWorklet files aggressively. If you edit `openmpt-worklet.js` or any worklet asset, hard-refresh or disable cache in DevTools.
 2. **Shader Imports:** If you rename a shader file in `/shaders`, you **must** update the reference in `App.tsx` (the `SHADER_GROUPS` constant) and in any component that fetches the file by name (e.g., `PatternDisplay.tsx`). WGSL files must also be kept in sync between `/shaders` (source) and `/public/shaders` (served).
 3. **Base Path Mismatch:** Deploying to a subdirectory without setting `VITE_APP_BASE_PATH` will break shader fetches, worklet loads, and the default module fetch. Use `deploy.py` or set the env var manually before building.
-4. **Missing Native Engine:** `openmpt-native.js` does not exist in the repo by default. Run `npm run build:emcc` after activating emsdk **3.1.50**.
+4. **Missing Native Engine:** `openmpt-native.js` does not exist in the repo by default. Run `npm run build:emcc` after activating emsdk **3.1.50**. Force JS while debugging with artifacts present: `?engine=js` or `localStorage.xasm1_audio_engine=js` (see `public/worklets/README.md`).
 5. **Node OOM during build:** The Tailwind config was intentionally narrowed to explicit paths. Do not broaden the `content` glob to `"./**/*.{js,ts,jsx,tsx}"` or production builds may run out of heap memory.
 6. **Native vs JS worklet names:** Native glue is always `openmpt-native.*`. The tracked production processor is `openmpt-worklet.js`. Both `npm run build:emcc` and `npm run build:worklet` call `scripts/build-wasm.sh` and refuse to clobber the JS processor.
 7. **Shader-Uniform coupling:** Shaders are tightly coupled to TypeScript host code. Changing a shader's `struct Uniforms` requires a matching change to `createUniformPayload()` in `PatternDisplay.tsx`. Adding a new shader often requires manually updating version checks in `PatternDisplay.tsx` for layout, packing, canvas size, and input handling.
@@ -212,7 +230,7 @@ python3 deploy.py
 
 ## Cursor Cloud specific instructions
 This is a **frontend-only** app; there is no backend to run for local dev. `libopenmpt` is self-hosted under `public/libmpt/` and sample modules (`4-mat_madness.mod`, `test.xm`, `libopenmpt-test.mod`) ship in `public/`, so the player works fully offline with no CDN or storage API. `VITE_STORAGE_API_URL` (proxied `/api`, `/songs`) is optional and only needed for the remote song browser.
-- **Run/build/test/lint:** use the standard scripts in `package.json` (`npm run dev` → Vite on `http://localhost:5173`, `npm run build`, `npm test` (Vitest, 50 tests), `npm run typecheck`, `npm run lint`). See README/AGENTS build sections above.
+- **Run/build/test/lint:** use the standard scripts in `package.json` (`npm run dev` → Vite on `http://localhost:5173`, `npm run build`, `npm test` (Vitest, 61+ tests), `npm run typecheck`, `npm run lint`). See README/AGENTS build sections above.
 - **Base path:** default dev and `npm run build` use site root (`VITE_APP_BASE_PATH=/` in `.env.development` / `.env.production`). The live deploy at `test.1ink.us/xm-player/` uses `npm run build:xm-player` which bakes `/xm-player/` into asset URLs. If you see 404s for `/xm-player/assets/*` or `libopenmptjs.js` while testing at root, you built with the xm-player profile — use `npm run dev` or a root-base `npm run build` instead.
 - **Browser testing without WebGPU:** the cloud VM's Chrome has no WebGPU by default. Append `?renderer=webgl2` (or `?renderer=html`) to the dev URL to use the fallback renderers; the app otherwise tries WebGPU first and may show a blank visualizer. Audio playback requires a user gesture (click Play).
-- **Hello-world check:** open `http://localhost:5173/?renderer=webgl2`, wait for the default module `4-mat_madness.mod` to auto-load, click Play, and confirm the position/order/row counters advance and the visualizer animates.
+- **Hello-world check:** open `http://localhost:5173/?renderer=webgl2`, wait for the default module `4-mat_madness.mod` to auto-load, click Play, and confirm the position/order/row counters advance and the visualizer animates. Force JS engine with `?engine=js` when native artifacts are present locally.

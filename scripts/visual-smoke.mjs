@@ -226,6 +226,14 @@ async function captureScenario(browser, engine, scenario, appRoot) {
     }
     result.screenshots.push({ label: '00_initial', path: shotPath });
 
+    // Start playback so GPU renderers show active LEDs (not just idle chassis).
+    if (scenario.renderer !== 'html') {
+      await evaluate(page, async () => {
+        window.__TEST_HOOKS__?.startPlayback?.();
+      });
+      await new Promise((res) => setTimeout(res, 1200));
+    }
+
     for (const row of scenario.seekRows) {
       await evaluate(page, (r) => window.__TEST_HOOKS__?.seekToRow?.(r), row);
       await new Promise((res) => setTimeout(res, 900));

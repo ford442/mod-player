@@ -2,6 +2,11 @@
 // Horizontal Paged Grid Shader (Time = X, Channels = Y)
 // Note sustain/duration logic backported from patternv0.45b.wgsl
 
+//#include "lib/dura.wgsl"
+//#include "lib/notes.wgsl"
+//#include "lib/pitch.wgsl"
+//#include "lib/sdf.wgsl"
+
 struct Uniforms {
   numRows: u32,
   numChannels: u32,
@@ -60,19 +65,6 @@ struct NoteDurationInfo {
   isTrigger: bool,  // TRIG-001: explicit note-on row (packedB bit 15)
 }
 
-fn unpackDurationInfo(packedA: u32, packedB: u32) -> NoteDurationInfo {
-  var info: NoteDurationInfo;
-  // Duration is in bits 8-15 of packedA (where volCmd used to be in the high-prec path)
-  info.duration = (packedA >> 8) & 0xFFu;
-  if (info.duration == 0u) { info.duration = 1u; }
-  // rowOffset and isNoteOff are packed into bits 8-14 of packedB
-  let durationFlags = (packedB >> 8) & 0x7Fu;
-  info.rowOffset = durationFlags >> 1u;
-  info.isNoteOff = (durationFlags & 1u) != 0u;
-  info.isTrigger = ((packedB & 0x8000u) != 0u) || (info.rowOffset == 0u && !info.isNoteOff);
-  return info;
-}
-
 struct VertexOut {
   @builtin(position) position: vec4<f32>,
   @location(0) @interpolate(flat) row: u32,
@@ -107,7 +99,7 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
   }
 
   let effectiveChannel = f32(channel);
-  let hasHeader = uniforms.numChannels > 1u && uniforms.gridRect.y > 0.15;
+  let hasHeader = uniforms.numChannels > 1u && uniforms.gridRect.y >= 0.15;
   let dataChannels = f32(uniforms.numChannels) - select(0.0, 1.0, hasHeader);
   let channelIndex = select(effectiveChannel, effectiveChannel - 1.0, hasHeader && effectiveChannel > 0.0);
 
@@ -139,19 +131,6 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
   out.packedA = a;
   out.packedB = b;
   return out;
-}
-
-fn neonPalette(t: f32) -> vec3<f32> {
-    let a = vec3<f32>(0.5, 0.5, 0.5);
-    let b = vec3<f32>(0.5, 0.5, 0.5);
-    let c = vec3<f32>(1.0, 1.0, 1.0);
-    let d = vec3<f32>(0.0, 0.33, 0.67);
-    return a + b * cos(6.28318 * (c * t + d));
-}
-
-fn sdRoundedBox(p: vec2<f32>, b: vec2<f32>, r: f32) -> f32 {
-    let q = abs(p) - b + r;
-    return length(max(q, vec2<f32>(0.0, 0.0))) + min(max(q.x, q.y), 0.0) - r;
 }
 
 struct FragmentConstants {

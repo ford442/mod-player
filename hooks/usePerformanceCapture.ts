@@ -108,7 +108,7 @@ export function usePerformanceCapture() {
     if (options.dualAudioContext) {
       setState({
         stage: 'error',
-        message: 'Native engine uses a separate AudioContext — switch to JS worklet engine to record audio+video together',
+        message: 'Native engine uses a separate AudioContext — switch to JS (?engine=js or engine toggle) to record audio+video together',
         elapsedSeconds: 0,
       });
       return false;

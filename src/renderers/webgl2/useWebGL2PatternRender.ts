@@ -1,7 +1,7 @@
 import { useRef, useEffect, useState, useCallback } from 'react';
 import type React from 'react';
 import type { PatternMatrix } from '../../../types';
-import type { WebGPURenderParams, DebugInfo } from '../../../hooks/useWebGPURender';
+import type { WebGPURenderParams, DebugInfo } from '../params';
 import { WebGL2PatternRenderer } from './WebGL2PatternRenderer';
 import { setCurrentPatternRenderer } from '../global';
 import type { CurrentPatternRenderer, WebGL2DebugMode } from '../types';

@@ -68,6 +68,28 @@ Before modifying the worklet or AudioWorklet-related code:
 - [ ] **Never `import()` an AudioWorklet processor file on the main thread.** Use `audioContext.audioWorklet.addModule()` for JS processors, or Emscripten's native API for `AUDIO_WORKLET` builds.
 - [ ] **Verify line numbers in browser console.** After deploy, a hard refresh (`Ctrl+Shift+R` / `Cmd+Shift+R`) should show line numbers matching the current source (e.g., ~250), not the old stub (~130).
 - [ ] **Never commit HTML/404 bodies as `*.wasm`.** Production glue is wasm2js (`libopenmpt-audioworklet.js`); a sibling `libopenmpt.wasm` is not required. Run `npm run verify:wasm` before commit/deploy.
+- [ ] **Run `npm test`** — Vitest guards in `tests/workletAudioLifecycle.test.ts` cover #329 (shared-scope libopenmpt singleton / hot `load`) and #330 (no `AudioContext.suspend()` on normal `stopMusic(false)`).
+
+### Automated regression harness (#329 / #330)
+
+| Guard | What it catches |
+|-------|-----------------|
+| `utils/workletAudioLifecycle.ts` + `tests/workletAudioLifecycle.test.ts` | `play()` re-sending `initLib` on module reload; `stopMusic` suspending the context |
+| `utils/workletLibSingleton.ts` | Re-evaluating ~5 MB wasm2js glue when `__openmptWorkletLib` already exists |
+| Source invariants | `stopMusic` body must not call `.suspend()`; worklet must keep `ensureSharedLibOpenMPT` singleton |
+
+CI runs the full Vitest suite (`npm test`) on every PR via `lint-and-build`.
+
+### Manual audible checklist (still required)
+
+Headless CI cannot assert speaker output. After audio-path changes, verify **with sound**:
+
+1. **Default auto-load** — fresh tab, default `4-mat_madness.mod` plays after Play.
+2. **File picker** — load a local `.mod` / `.xm`, play, stop, play again.
+3. **Storage playlist** — pick a remote module, auto-play after load.
+4. **Share URL** — open `?module=…` deep link; playback starts without a second click when policy allows.
+5. **MOD ↔ XM switch** — load MOD, play, switch to XM (or vice versa); no silent output, no runaway `ended → seek 0` loop in console.
+6. **Stop → play** — `stopMusic(false)` then `play()` without extra user gesture beyond the initial unlock.
 
 ---
 

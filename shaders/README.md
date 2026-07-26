@@ -29,15 +29,17 @@ The root directory contains **30 actively-used shaders** that are production-rea
 - `patternv0.47.wgsl` — Trap Frosted (circular with trap layout)
 - `patternv0.48.wgsl` — Trap Frosted Disc (disc variant)
 - `patternv0.49.wgsl` — Trap Frosted Glass (advanced circular)
-- `patternv0.50.wgsl` — Trap Frosted Lens (latest mainstream)
-- `patternv0.51.wgsl` — Playhead Arc (experimental arc visualization)
+- `patternv0.50.wgsl` — Trap Frosted Lens (tier-B: `theme_trap_frosted` + `circular_led_body`)
+- `patternv0.50b.wgsl` — Hybrid Frosted Lens (tier-A utility includes)
+- `patternv0.51.wgsl` — Playhead Arc (tier-B: `emitters_playhead` + arc FS)
 - `patternv0.52.wgsl` — Night (theme-only entry → `lib/circular_night_body.wgsl`)
 - `patternv0.53.wgsl` — Midnight (theme-only night variant)
 - `patternv0.54.wgsl` — Neon Night (theme-only night variant)
-- `patternv0.55.wgsl` — Oscilloscope mode (1D waveform visualization)
-- `patternv0.56.wgsl` / `patternv0.57.wgsl` — still full-file forks (candidates for future lib migration)
+- `patternv0.55.wgsl` — Oscilloscope mode (tier-A includes + binding 6)
+- `patternv0.56.wgsl` / `patternv0.57.wgsl` — instrument palette / velocity LED (tier-A or tier-B body)
+- `patternv0.58.wgsl` — Reactive chassis (tier-B: `circular_led_reactive_body`)
 
-**Video Overlay Shaders:**
+**Video overlay shaders (documented exceptions — no cell-packing path):**
 - `patternv0.23.wgsl` — Clouds (video texture mode)
 - `patternv0.24.wgsl` — Tunnel (video texture mode)
 
@@ -89,10 +91,7 @@ Shaders follow semantic versioning in their filenames:
 - `chassisv0.XX.wgsl` — Background chassis shader (tracked separately)
 - Suffixes like `_bloom`, `-sized`, `_clean` indicate variants or experiments
 
-**DO NOT** refactor the version-detection logic in TypeScript code (e.g., `PatternDisplay.tsx`, `shaderVersion.ts`). The `if (shaderFile.includes('v0.XX'))` chains are load-bearing and determine:
-- GPU buffer packing strategy (standard 1×u32 vs. high-precision 2×u32)
-- Uniform struct layout (canvas size, layout mode, UI capabilities)
-- Background pass requirements
+**DO NOT** add `shaderFile.includes('v0.XX')` chains in host code. Register capabilities in `utils/shaderRegistry.ts` (`ShaderMeta`) instead.
 
 ### Adding a New Shader
 
@@ -118,6 +117,14 @@ Shared WGSL fragments live in `shaders/lib/`. **Canonical composition libs** (pr
 | `lib/polar_layout.wgsl` | Circular ring geometry helpers for VS/FS |
 | `lib/night_theme.wgsl` | Default night palette (v0.52 dusky) |
 | `lib/circular_night_body.wgsl` | Shared uniforms + VS + FS for night family |
+| `lib/theme_trap_frosted.wgsl` | Trap/frosted palette (v0.50 family) |
+| `lib/circular_led_body.wgsl` | Trap three-emitter body (v0.50) |
+| `lib/circular_led_velocity_body.wgsl` | v0.57 VEL-001 body |
+| `lib/circular_led_reactive_body.wgsl` | v0.58 REACT-001 body |
+| `lib/emitters_trap.wgsl` / `lib/lens_cap_trap.wgsl` | Trap lens cap (brilliantLEDCore mid glow) |
+| `lib/emitters_playhead.wgsl` / `lib/lens_cap_playhead.wgsl` | v0.51 playhead variant |
+| `lib/velocity_led.wgsl` | VEL-001 `normalizedCellVolume` |
+| `lib/audio_reactive.wgsl` | REACT-001 multi-band chassis helpers |
 
 Supporting fragments:
 

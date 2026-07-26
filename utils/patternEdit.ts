@@ -160,6 +160,95 @@ export function noteFromKeyboard(key: string, baseOctave = 4): number | null {
   return note >= 1 && note <= 119 ? note : null;
 }
 
+export const FIELD_ORDER: readonly PatternEditField[] = ['note', 'inst', 'vol', 'eff'] as const;
+
+/** Hex digit width for keyboard entry (note uses piano keys, not hex). */
+export function fieldDigitWidth(field: PatternEditField): number {
+  switch (field) {
+    case 'note':
+      return 0;
+    case 'inst':
+    case 'vol':
+      return 2;
+    case 'eff':
+      return 3;
+  }
+}
+
+export function nextEditField(field: PatternEditField, direction: 1 | -1): PatternEditField {
+  const index = FIELD_ORDER.indexOf(field);
+  const next = (index + direction + FIELD_ORDER.length) % FIELD_ORDER.length;
+  return FIELD_ORDER[next] ?? 'note';
+}
+
+export function parseHexDigit(key: string): string | null {
+  const lower = key.toLowerCase();
+  if (lower.length !== 1) return null;
+  if (!/^[0-9a-f]$/.test(lower)) return null;
+  return lower;
+}
+
+/**
+ * Accumulate a hex nibble for inst (2), vol (2), or eff (3).
+ * Commits a patch when the buffer reaches the field width.
+ */
+export function applyHexDigit(
+  field: PatternEditField,
+  buffer: string,
+  digit: string,
+): { buffer: string; patch: PatternCellPatch | null; done: boolean } {
+  const width = fieldDigitWidth(field);
+  if (width === 0) {
+    return { buffer: '', patch: null, done: false };
+  }
+  const hex = parseHexDigit(digit);
+  if (hex === null) {
+    return { buffer, patch: null, done: false };
+  }
+  const accumulated = `${buffer}${hex}`;
+  if (accumulated.length < width) {
+    return { buffer: accumulated, patch: null, done: false };
+  }
+  const valueStr = accumulated.slice(0, width);
+  const value = Number.parseInt(valueStr, 16);
+  if (Number.isNaN(value)) {
+    return { buffer: '', patch: null, done: false };
+  }
+
+  let patch: PatternCellPatch;
+  switch (field) {
+    case 'inst':
+      patch = { inst: value & 0xff };
+      break;
+    case 'vol':
+      if (value === 0) {
+        patch = { volCmd: 0, volVal: 0 };
+      } else {
+        patch = { volCmd: 0xc, volVal: value & 0xff };
+      }
+      break;
+    case 'eff': {
+      const effCmd = (value >> 8) & 0xf;
+      const effVal = value & 0xff;
+      patch = { effCmd, effVal };
+      break;
+    }
+    default:
+      return { buffer: '', patch: null, done: false };
+  }
+  return { buffer: '', patch, done: true };
+}
+
+export function patchFromHexBuffer(
+  field: PatternEditField,
+  hexBuffer: string,
+): PatternCellPatch | null {
+  const width = fieldDigitWidth(field);
+  if (width === 0 || hexBuffer.length !== width) return null;
+  const result = applyHexDigit(field, hexBuffer.slice(0, -1), hexBuffer.slice(-1));
+  return result.patch;
+}
+
 export function matricesEqual(a: PatternMatrix | null, b: PatternMatrix | null): boolean {
   if (a === b) return true;
   if (!a || !b) return false;

@@ -99,3 +99,17 @@ export function generateInstrumentPalette(
 export function generateEmptyInstrumentPalette(): Uint8Array {
   return generateInstrumentPalette(MAX_INSTRUMENT_PALETTE_SIZE, []);
 }
+
+/** Byte-compare two palette arrays (reference-fast-path). */
+export function instrumentPalettesEqual(
+  a: Uint8Array | null | undefined,
+  b: Uint8Array | null | undefined,
+): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
+}

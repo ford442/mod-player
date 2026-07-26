@@ -2,8 +2,12 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { PatternCell, PatternMatrix } from '../types';
 import { scrollContainerToCenter } from '../utils/scrollContainer';
 import {
+  FIELD_ORDER,
   NOTE_NAMES,
+  applyHexDigit,
+  nextEditField,
   noteFromKeyboard,
+  parseHexDigit,
   type PatternCellPatch,
   type PatternEditField,
 } from '../utils/patternEdit';
@@ -14,6 +18,10 @@ interface PatternEditorProps {
   numChannels: number;
   isPlaying: boolean;
   editMode: boolean;
+  /** When true, cell edits and keyboard entry are blocked (e.g. offline export). */
+  readOnly?: boolean;
+  /** 1-based instrument index to emphasize in the inst column (0/null = off). */
+  highlightInstrument?: number | null;
   onCellEdit: (row: number, channel: number, field: PatternEditField) => void;
   onCellPatch: (row: number, channel: number, patch: PatternCellPatch) => void;
   onCellClear: (row: number, channel: number) => void;
@@ -60,16 +68,34 @@ function formatRowNumber(row: number): string {
 
 const EMPTY_CELL: PatternCell = { type: 'empty', text: '' };
 
+interface Selection {
+  row: number;
+  channel: number;
+  field: PatternEditField;
+}
+
 interface EditableCellProps {
   cell: PatternCell;
   field: PatternEditField;
   editMode: boolean;
   selected: boolean;
+  highlight?: boolean;
+  dimmed?: boolean;
+  hexPreview?: string | null;
   onEdit: () => void;
 }
 
-function EditableCell({ cell, field, editMode, selected, onEdit }: EditableCellProps) {
-  const text = field === 'note'
+function EditableCell({
+  cell,
+  field,
+  editMode,
+  selected,
+  highlight,
+  dimmed,
+  hexPreview,
+  onEdit,
+}: EditableCellProps) {
+  let text = field === 'note'
     ? formatNote(cell)
     : field === 'inst'
       ? formatInstrument(cell)
@@ -77,13 +103,24 @@ function EditableCell({ cell, field, editMode, selected, onEdit }: EditableCellP
         ? formatVolume(cell)
         : formatEffect(cell);
 
-  const colorClass = field === 'note'
+  if (selected && hexPreview) {
+    const width = field === 'eff' ? 3 : 2;
+    text = hexPreview.toUpperCase().padEnd(width, '_');
+  }
+
+  let colorClass = field === 'note'
     ? (text === '...' ? 'text-gray-600' : 'text-cyan-300')
     : field === 'inst'
-      ? (text === '..' ? 'text-gray-600' : 'text-yellow-400')
+      ? (text === '..' || text.includes('_') ? 'text-gray-600' : 'text-yellow-400')
       : field === 'vol'
-        ? (text === '..' ? 'text-gray-600' : 'text-green-400')
-        : (text === '...' ? 'text-gray-600' : 'text-purple-400');
+        ? (text === '..' || text.includes('_') ? 'text-gray-600' : 'text-green-400')
+        : (text === '...' || text.includes('_') ? 'text-gray-600' : 'text-purple-400');
+
+  if (highlight && field === 'inst' && text !== '..' && !text.includes('_')) {
+    colorClass = 'text-cyan-200 font-bold';
+  } else if (dimmed && field === 'inst') {
+    colorClass = 'text-gray-600 opacity-40';
+  }
 
   if (!editMode) {
     return <span className={colorClass}>{text}</span>;
@@ -112,6 +149,8 @@ export const PatternEditor: React.FC<PatternEditorProps> = ({
   numChannels,
   isPlaying,
   editMode,
+  readOnly = false,
+  highlightInstrument = null,
   onCellEdit,
   onCellPatch,
   onCellClear,
@@ -119,9 +158,11 @@ export const PatternEditor: React.FC<PatternEditorProps> = ({
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const currentRowRef = useRef<HTMLDivElement>(null);
-  const [selection, setSelection] = useState<{ row: number; channel: number } | null>(null);
+  const [selection, setSelection] = useState<Selection | null>(null);
+  const [hexBuffer, setHexBuffer] = useState('');
 
   const displayChannels = Math.min(numChannels, MAX_INLINE_CHANNELS);
+  const canEdit = editMode && !readOnly;
 
   useEffect(() => {
     if (!isPlaying) return;
@@ -132,8 +173,15 @@ export const PatternEditor: React.FC<PatternEditorProps> = ({
   }, [currentRow, isPlaying]);
 
   useEffect(() => {
-    if (!editMode) setSelection(null);
+    if (!editMode) {
+      setSelection(null);
+      setHexBuffer('');
+    }
   }, [editMode]);
+
+  useEffect(() => {
+    setHexBuffer('');
+  }, [selection?.row, selection?.channel, selection?.field]);
 
   const rowRange = useMemo(() => {
     if (!matrix) return { start: 0, end: 0 };
@@ -147,55 +195,83 @@ export const PatternEditor: React.FC<PatternEditorProps> = ({
   }, [matrix, currentRow]);
 
   const handleKeyDown = useCallback((event: KeyboardEvent) => {
-    if (!editMode || !matrix || !selection) return;
+    if (!canEdit || !matrix || !selection) return;
     const target = event.target as HTMLElement | null;
     if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
       return;
     }
 
-    const { row, channel } = selection;
+    const { row, channel, field } = selection;
     if (event.key === 'Delete' || event.key === 'Backspace') {
       event.preventDefault();
+      setHexBuffer('');
       onCellClear(row, channel);
+      return;
+    }
+    if (event.key === 'Tab') {
+      event.preventDefault();
+      const nextField = nextEditField(field, event.shiftKey ? -1 : 1);
+      setSelection({ row, channel, field: nextField });
       return;
     }
     if (event.key === 'ArrowUp') {
       event.preventDefault();
-      setSelection({ row: Math.max(0, row - 1), channel });
+      setSelection({ row: Math.max(0, row - 1), channel, field });
       onSeek?.(Math.max(0, row - 1));
       return;
     }
     if (event.key === 'ArrowDown') {
       event.preventDefault();
       const nextRow = Math.min(matrix.numRows - 1, row + 1);
-      setSelection({ row: nextRow, channel });
+      setSelection({ row: nextRow, channel, field });
       onSeek?.(nextRow);
       return;
     }
     if (event.key === 'ArrowLeft') {
       event.preventDefault();
-      setSelection({ row, channel: Math.max(0, channel - 1) });
+      const fieldIndex = FIELD_ORDER.indexOf(field);
+      if (fieldIndex > 0) {
+        setSelection({ row, channel, field: FIELD_ORDER[fieldIndex - 1]! });
+      } else if (channel > 0) {
+        setSelection({ row, channel: channel - 1, field: 'eff' });
+      }
       return;
     }
     if (event.key === 'ArrowRight') {
       event.preventDefault();
-      setSelection({ row, channel: Math.min(displayChannels - 1, channel + 1) });
+      const fieldIndex = FIELD_ORDER.indexOf(field);
+      if (fieldIndex < FIELD_ORDER.length - 1) {
+        setSelection({ row, channel, field: FIELD_ORDER[fieldIndex + 1]! });
+      } else if (channel < displayChannels - 1) {
+        setSelection({ row, channel: channel + 1, field: 'note' });
+      }
       return;
     }
 
-    const note = noteFromKeyboard(event.key);
-    if (note !== null) {
-      event.preventDefault();
-      onCellPatch(row, channel, { note });
+    if (field === 'note') {
+      const note = noteFromKeyboard(event.key);
+      if (note !== null) {
+        event.preventDefault();
+        onCellPatch(row, channel, { note });
+      }
       return;
     }
-  }, [editMode, matrix, selection, displayChannels, onCellClear, onSeek, onCellPatch]);
+
+    if (parseHexDigit(event.key) !== null) {
+      event.preventDefault();
+      const result = applyHexDigit(field, hexBuffer, event.key);
+      setHexBuffer(result.buffer);
+      if (result.done && result.patch) {
+        onCellPatch(row, channel, result.patch);
+      }
+    }
+  }, [canEdit, matrix, selection, displayChannels, hexBuffer, onCellClear, onSeek, onCellPatch]);
 
   useEffect(() => {
-    if (!editMode) return;
+    if (!canEdit) return;
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [editMode, handleKeyDown]);
+  }, [canEdit, handleKeyDown]);
 
   if (!matrix) {
     return (
@@ -211,6 +287,7 @@ export const PatternEditor: React.FC<PatternEditorProps> = ({
         <span className="text-xs text-gray-400 font-mono">
           Pattern {matrix.patternIndex.toString(16).toUpperCase().padStart(2, '0')} · Order {matrix.order}
           {editMode && <span className="ml-2 text-amber-400">EDIT</span>}
+          {readOnly && <span className="ml-2 text-gray-500">READ-ONLY</span>}
         </span>
         <span className="text-xs text-gray-500 font-mono">
           Row {formatRowNumber(currentRow)}/{formatRowNumber(matrix.numRows - 1)} · {numChannels}ch
@@ -218,8 +295,15 @@ export const PatternEditor: React.FC<PatternEditorProps> = ({
       </div>
 
       {editMode && (
-        <div className="px-4 py-1.5 bg-amber-950/30 border-b border-amber-800/40 text-[10px] text-amber-200 font-mono">
-          Click columns to cycle values · Arrow keys move · Delete clears · Z-M/Q-U keys place notes
+        <div className="px-4 py-1.5 bg-amber-950/30 border-b border-amber-800/40 text-[10px] text-amber-200/90 font-mono space-y-0.5">
+          <p>
+            Session-only: edits update the visualizer, not audio or WAV export.
+            {readOnly ? ' Editor locked while export is running.' : null}
+          </p>
+          <p>
+            Click columns to cycle · Tab switches fields · Hex digits edit inst/vol/eff ·
+            Z-M/Q-U place notes · Delete clears · Arrow keys move
+          </p>
         </div>
       )}
 
@@ -257,10 +341,13 @@ export const PatternEditor: React.FC<PatternEditorProps> = ({
                     : 'text-gray-400')
               }
               onClick={() => {
-                if (editMode) {
-                  setSelection({ row: rowIndex, channel: selection?.channel ?? 0 });
-                  onSeek?.(rowIndex);
-                }
+                if (!canEdit) return;
+                setSelection({
+                  row: rowIndex,
+                  channel: selection?.channel ?? 0,
+                  field: selection?.field ?? 'note',
+                });
+                onSeek?.(rowIndex);
               }}
             >
               <span className={`w-8 text-center shrink-0 ${isCurrent ? 'text-cyan-200 font-bold' : 'text-gray-500'}`}>
@@ -270,29 +357,45 @@ export const PatternEditor: React.FC<PatternEditorProps> = ({
               <div className="flex">
                 {Array.from({ length: displayChannels }, (_, ch) => {
                   const cell = cells[ch] ?? EMPTY_CELL;
-                  const isSelected = selection?.row === rowIndex && selection.channel === ch;
+                  const isSelectedCell = selection?.row === rowIndex && selection.channel === ch;
+                  const instVal = cell.inst ?? 0;
+                  const hl = highlightInstrument != null && highlightInstrument > 0;
                   return (
                     <span
                       key={ch}
                       className={`shrink-0 px-1 border-r border-white/5 last:border-r-0 inline-flex gap-1.5 ${
-                        isSelected ? 'bg-cyan-900/30' : ''
+                        isSelectedCell ? 'bg-cyan-900/30' : ''
                       }`}
                       style={{ minWidth: '10.5ch' }}
                       onClick={(e) => {
-                        if (!editMode) return;
+                        if (!canEdit) return;
                         e.stopPropagation();
-                        setSelection({ row: rowIndex, channel: ch });
+                        setSelection({
+                          row: rowIndex,
+                          channel: ch,
+                          field: selection?.field ?? 'note',
+                        });
                         onSeek?.(rowIndex);
                       }}
                     >
-                      {(['note', 'inst', 'vol', 'eff'] as const).map((field) => (
+                      {FIELD_ORDER.map((field) => (
                         <EditableCell
                           key={field}
                           cell={cell}
                           field={field}
-                          editMode={editMode}
-                          selected={isSelected}
-                          onEdit={() => onCellEdit(rowIndex, ch, field)}
+                          editMode={canEdit}
+                          selected={isSelectedCell && selection.field === field}
+                          highlight={hl && field === 'inst' && instVal === highlightInstrument}
+                          dimmed={hl && field === 'inst' && instVal > 0 && instVal !== highlightInstrument}
+                          hexPreview={
+                            isSelectedCell && selection.field === field && hexBuffer
+                              ? hexBuffer
+                              : null
+                          }
+                          onEdit={() => {
+                            setSelection({ row: rowIndex, channel: ch, field });
+                            onCellEdit(rowIndex, ch, field);
+                          }}
                         />
                       ))}
                     </span>

@@ -2,8 +2,10 @@
 
 ## Problem Summary
 - **ScriptProcessor**: position query runs in the same `onaudioprocess` callback that renders audio → inherently tight A/V sync.
-- **AudioWorklet** (historical): main-thread pumps / integer row polling / non-negative extrapolation left the visual playhead **~200–500 ms** behind (or ahead of) the ear, depending on buffer depth and latency handling.
+- **AudioWorklet** (historical): main-thread pumps / integer row polling / non-negative extrapolation left the visual playhead **~200–500 ms** behind (or ahead of) the ear, depending on buffer depth and latency handling.
 - **Visual effect**: circular/paged shaders trail the music; page boundaries jump late when `playheadRow` is truncated to `u32`.
+
+**Status (2026-07-25):** The prediction pipeline below closes the historical gap. Headless acceptance on `4-mat_madness.mod` @ 125 BPM (worklet, `patternv0.44.wgsl`, webgl2) measured **median |predictionLagRows| ≈ 0.44** (max ≈ 1.09 rows, steady-state after 1.5 s warmup) — well under the 1-row (~120 ms) budget. The old ~200–500 ms lag is no longer observed on the worklet path when prediction + f32 uniforms are active.
 
 ## Architecture (current)
 
@@ -17,14 +19,15 @@ AudioWorklet process()                    Main thread RAF (updateUI)
 3. Compute rowFraction via                3. playhead = sample.row
    get_time_at_position(row, row+1)            + (heardTime − sample.workletTime)
 4. Render quantum                              × rowsPerSecond
-5. postMessage({ type:'position',         4. Light EMA (α=0.94); snap if |Δ|>1
-     row, rowFraction, audioTime, … })    5. playbackStateRef.playheadRow (f32)
+5. postMessage({ type:'position',         4. Light EMA (α=0.98); snap if |Δ|>0.5
+     row, rowFraction, audioTime, … })       (same order) or >1.0 (order change)
+                                          5. playbackStateRef.playheadRow (f32)
                                           6. GPU uniforms: playhead as f32
 ```
 
 **ScriptProcessor path is unchanged**: still queries `_openmpt_module_get_current_*` on the SP/render path with no prediction.
 
-**Native C++ worklet** (optional rebuild): `PositionInfo` includes `audioFramesRendered`, `rowFraction`, `speed`, `sampleRate` for shared-memory sample clocks. Polling still uses prediction between updates.
+**Native C++ worklet** (optional rebuild): `PositionInfo` includes `audioFramesRendered`, `rowFraction`, `speed`, `sampleRate` for shared-memory sample clocks. Sample-accurate `workletTime` from frames is tracked separately (issue 09).
 
 ## Root causes addressed
 
@@ -33,39 +36,80 @@ AudioWorklet process()                    Main thread RAF (updateUI)
 | Integer row only | Worklet sends `rowFraction` from time-at-position markers |
 | Post-render position vs start-of-quantum clock | Snapshot **before** `read_float_stereo`, tag `audioTime = currentTime` |
 | `dt ≥ 0` clamp ignored output latency | Allow bounded **negative** dt so playhead can sit slightly behind a fresh sample |
-| Heavy visual smoothing | Worklet EMA α = **0.94**; snap when \|Δ\| > 1 row |
+| Heavy visual smoothing | Worklet EMA α = **0.98**; snap when \|Δ\| > 0.5 row (same order) or > 1 row (order change) |
 | `playheadRow` as `u32` in paged shaders | `usesPlayheadRowAsFloat` for all v0.2x–v0.6x production shaders |
 
 ## Measurement method
 
-### A. Automated (CI / local, no browser)
+### A. Automated unit tests (CI / local, no browser)
 
 ```bash
-npm run test:playhead
-# or: node utils/__debug__/playheadPrediction.test.cjs
+npm run test:playhead          # focused
+npm test                       # includes tests/playheadPrediction.test.ts + tests/circularPaging.test.ts
 ```
 
 Asserts:
 - Forward extrapolation math
 - **Negative dt** (latency back-extrapolation)
-- At 125 BPM, 30 ms device latency ⇒ **&lt; 1 row** of pure latency offset
+- At 125 BPM, 30 ms device latency ⇒ **< 1 row** of pure latency offset
 - Quantum step (128/44100 × rows/sec) ≪ 1 row
+- Circular paging helpers (`circularPageStart`, `overlayActualRow`)
 
-### B. Manual browser check (acceptance)
+### B. Browser acceptance (local)
 
-1. Load a steady-tempo module (e.g. `4-mat` / any 125 BPM MOD) in **Chrome**.
-2. Ensure engine is **⚡ Worklet** (not ScriptProcessor fallback).
-3. Open debug panel (🔍) → note `driftMs`, `bufferMs`, `row`.
-4. Watch a **circular / paged** shader (v0.45–v0.50): page flips should land on note attacks, not ~¼ s late.
-5. Optional console (DevTools) while playing:
+```bash
+npm run preview -- --port 4173 &
+npm run smoke:playhead
+# report → artifacts/playhead-acceptance/report.json
+```
+
+| Scenario | Shader | Checks |
+|----------|--------|--------|
+| Square lag | `patternv0.44.wgsl` | Worklet `predictionLagRows` median < 1 row (steady-state) |
+| Circular paging | `patternv0.46.wgsl` | `pageStart ≥ 64` at playhead ≥ 64; paging oracle mismatches confirm paged fetch |
+
+**Measured (2026-07-25, headless Chrome, preview build):**
+
+| Metric | Square v0.44 | Circular v0.46 |
+|--------|--------------|----------------|
+| Engine | worklet | worklet |
+| Median \|lagRows\| | 0.44 | (lag not sampled — GPU-heavy shader starves RAF in headless) |
+| Max \|lagRows\| | 1.09 | — |
+| Pass ratio (≥1.5 s warmup) | 97% | paging boundary OK |
+
+### C. Manual browser checklist (sign-off)
+
+| Step | Pass? |
+|------|-------|
+| Chrome, **worklet** engine (not ScriptProcessor fallback) | ☐ |
+| `localStorage.xasm1_playhead_debug = '1'` → 🔍 panel shows `lagRows` near 0 while playing | ☐ |
+| **Circular** shader (v0.45–v0.50): page flip at row 64 aligns with note attack | ☐ |
+| **Square** shader (e.g. v0.44): playhead advances smoothly (f32 uniform) | ☐ |
+| ScriptProcessor fallback still tight; worklet remains default | ☐ |
+
+### D. Debug telemetry
+
+Enable in production:
 
 ```js
-// Paste once; samples ~2s of prediction vs sample row
+localStorage.xasm1_playhead_debug = '1';
+// reload — also auto-enabled in Vite dev (import.meta.env.DEV)
+```
+
+Surfaces:
+- **🔍 PatternDisplay debug panel** — `sampleRow`, `predictedRow`, `smoothedRow`, `lagRows`, `driftMs`, `mode`
+- **3D studio HUD** — same fields under Audio Engine
+- **`window.__PLAYHEAD_DEBUG__`** — live snapshot every RAF when debug enabled
+- **`window.__TEST_HOOKS__.getPlayheadDebug()`** — Playwright / CI hook
+
+Console sampler:
+
+```js
 (() => {
   const start = performance.now();
   const samples = [];
   const id = setInterval(() => {
-    const s = window.__PLAYHEAD_DEBUG__; // see below if exposed
+    const s = window.__PLAYHEAD_DEBUG__;
     if (s) samples.push({ ...s, t: performance.now() - start });
     if (performance.now() - start > 2000) {
       clearInterval(id);
@@ -75,25 +119,23 @@ Asserts:
 })();
 ```
 
-Optional: set `localStorage.xasm1_playhead_debug = '1'` and use the sync debug HUD (`driftMs` should stay small once rolling).
+### E. Engine comparison
+
+| Mode | How | Expected |
+|------|-----|----------|
+| ScriptProcessor | Force SP fallback or disable worklet | Sync already tight; **must not regress** |
+| JS Worklet | Default path | Lag **≤ ~1 row** at 125 BPM / speed 6 |
+| Native worklet | After `npm run build:emcc` | Same prediction path + frame clock fields (poll clock: issue 09) |
+
+**Rule of thumb at 125 BPM** (4 rows/beat):  
+`rows/sec ≈ 8.33` → **1 row ≈ 120 ms**.  
+Acceptance: visual lag ≤ ~120 ms (≤ 1 row), typically **< 0.5 row** after prediction in steady state.
 
 **Main-thread contract (do not regress):**
 - Worklet `position` handlers must **not** call React `setState` (especially `setModuleInfo`) — samples update refs only (~350 Hz).
 - `updateUI` writes fractional playhead to `playbackStateRef` every RAF; React UI state updates only on integer row/order/BPM changes (and throttled sync HUD).
 - RAF loop must reschedule via `updateUIRef`, never a closed-over `updateUI` identity.
 - GPU renderers read `playbackStateRef` / `channelStatesRef` each frame.
-
-### C. Engine comparison
-
-| Mode | How | Expected |
-|------|-----|----------|
-| ScriptProcessor | Force SP fallback or disable worklet | Sync already tight; **must not regress** |
-| JS Worklet | Default path | Lag **≤ ~1 row** at 125 BPM / speed 6 |
-| Native worklet | After `npm run build:emcc` | Same prediction path + frame clock fields |
-
-**Rule of thumb at 125 BPM** (4 rows/beat):  
-`rows/sec ≈ 8.33` → **1 row ≈ 120 ms**.  
-Acceptance: visual lag ≤ ~120 ms (≤ 1 row), typically much less after prediction.
 
 ## Key files
 
@@ -103,6 +145,8 @@ Acceptance: visual lag ≤ ~120 ms (≤ 1 row), typically much less after pred
 | `utils/playheadPrediction.ts` | `predictPlayheadFromSample`, latency-aware dt, sample apply |
 | `hooks/useLibOpenMPT.ts` | RAF `updateUI` prediction + light EMA |
 | `hooks/useAudioGraph.ts` | Forwards `rowFraction` / `audioTime` from worklet messages |
+| `tests/playheadPrediction.test.ts` | Vitest math regression (CI via `npm test`) |
+| `scripts/playhead-acceptance.mjs` | Browser lag + paging acceptance (`npm run smoke:playhead`) |
 | `utils/gpuPacking.ts` + `shaderVersion.ts` | f32 playhead uniform for paged/circular shaders |
 | `cpp/openmpt_wrapper.*` / `worklet_processor.cpp` | Shared-memory frame clock + rowFraction (native rebuild) |
 
@@ -117,4 +161,4 @@ Acceptance: visual lag ≤ ~120 ms (≤ 1 row), typically much less after pred
 - Prefer self-hosted worklet assets; see `public/worklets/README.md`.
 
 ---
-*Updated: 2026-07-23 — main-thread React thrash fix (quantum setModuleInfo + 60 Hz playhead setState)*
+*Updated: 2026-07-25 — Vitest playhead tests, debug HUD, smoke:playhead acceptance, measured lag evidence*

@@ -26,7 +26,8 @@
  * canvasSize          – logical render size (before DPR)
  * hitTestProfile      – embedded transport hit-testing layout
  * oscilloscope        – binding 6 oscilloscope texture (v0.55)
- * instrumentPalette   – binding 7 palette texture (v0.52–54, v0.56)
+ * instrumentPalette   – binding 7 palette texture (v0.52–54, v0.56, v0.59)
+ * instrumentHighlight – highlightInstrument uniform slot 33 (v0.59)
  * audioReactive       – binding 8 AudioReactive uniform + bezel_audio background (v0.58+)
  * highPrecisionPacking– PackedA/PackedB + DURA/TRIG packing
  * playheadRowAsFloat  – uniform slot [2] is f32 (not u32)
@@ -43,6 +44,7 @@
  * nightModeBezel      – v0.35 night-mode bezel color path
  * chassisControlEncoding – frosted f32 vs chassisv0.37 u32 control slots
  * webglOverlayHorizontal  – v0.21-style horizontal WebGL overlay shader path
+ * horizontalPadRowRemap   – WebGL overlay skips channel 0 for data rows (v0.40)
  */
 
 export type HitTestProfile = 'none' | 'polar-ui' | 'square-ui';
@@ -77,6 +79,8 @@ export interface ShaderMeta {
   hitTestProfile: HitTestProfile;
   oscilloscope: boolean;
   instrumentPalette: boolean;
+  /** highlightInstrument uniform (slot 33) — dim/boost mid LEDs by instrument. */
+  instrumentHighlight: boolean;
   /** Multi-band chassis reactivity — binding 8 uniform + bezel_audio.wgsl. */
   audioReactive: boolean;
   highPrecisionPacking: boolean;
@@ -95,6 +99,8 @@ export interface ShaderMeta {
   chassisControlEncoding: ChassisControlEncoding;
   /** WebGL hybrid overlay uses horizontal v0.21 layout path (IS_V021 in webGLShaders). */
   webglOverlayHorizontal: boolean;
+  /** Remap channel 0 as header row in horizontal overlay + WGSL (v0.40). */
+  horizontalPadRowRemap: boolean;
 }
 
 /** Default outer ring factor (matches POLAR_RINGS.OUTER_RADIUS). */
@@ -121,6 +127,7 @@ function circularLed(overrides: Partial<ShaderMeta> = {}): ShaderMeta {
     hitTestProfile: 'none',
     oscilloscope: false,
     instrumentPalette: false,
+    instrumentHighlight: false,
     audioReactive: false,
     highPrecisionPacking: true,
     playheadRowAsFloat: true,
@@ -137,6 +144,7 @@ function circularLed(overrides: Partial<ShaderMeta> = {}): ShaderMeta {
     nightModeBezel: false,
     chassisControlEncoding: 'none',
     webglOverlayHorizontal: false,
+    horizontalPadRowRemap: false,
     ...overrides,
   };
 }
@@ -157,6 +165,7 @@ function horizontalPanel(overrides: Partial<ShaderMeta> = {}): ShaderMeta {
     hitTestProfile: 'none',
     oscilloscope: false,
     instrumentPalette: false,
+    instrumentHighlight: false,
     audioReactive: false,
     highPrecisionPacking: true,
     playheadRowAsFloat: true,
@@ -173,6 +182,7 @@ function horizontalPanel(overrides: Partial<ShaderMeta> = {}): ShaderMeta {
     nightModeBezel: false,
     chassisControlEncoding: 'frosted-f32',
     webglOverlayHorizontal: false,
+    horizontalPadRowRemap: false,
     ...overrides,
   };
 }
@@ -204,6 +214,7 @@ export const SHADER_REGISTRY: Readonly<Record<string, ShaderMeta>> = {
     hitTestProfile: 'none',
     oscilloscope: false,
     instrumentPalette: false,
+    instrumentHighlight: false,
     audioReactive: false,
     highPrecisionPacking: false,
     playheadRowAsFloat: true,
@@ -220,6 +231,7 @@ export const SHADER_REGISTRY: Readonly<Record<string, ShaderMeta>> = {
     nightModeBezel: false,
     chassisControlEncoding: 'none',
     webglOverlayHorizontal: false,
+    horizontalPadRowRemap: false,
   },
   'patternv0.24.wgsl': {
     extendedLayout: true,
@@ -236,6 +248,7 @@ export const SHADER_REGISTRY: Readonly<Record<string, ShaderMeta>> = {
     hitTestProfile: 'none',
     oscilloscope: false,
     instrumentPalette: false,
+    instrumentHighlight: false,
     audioReactive: false,
     highPrecisionPacking: false,
     playheadRowAsFloat: true,
@@ -247,11 +260,12 @@ export const SHADER_REGISTRY: Readonly<Record<string, ShaderMeta>> = {
     circularRowPaging: false,
     polarOuterRadiusFactor: DEFAULT_POLAR_OUTER,
     stepsDrivenVisibleRows: false,
-    cellSizeMode: 'props',
+    cellSizeMode: 'fullCanvas',
     uiExtraInstances: 0,
     nightModeBezel: false,
     chassisControlEncoding: 'none',
     webglOverlayHorizontal: false,
+    horizontalPadRowRemap: false,
   },
   'patternv0.30.wgsl': {
     extendedLayout: true,
@@ -268,6 +282,7 @@ export const SHADER_REGISTRY: Readonly<Record<string, ShaderMeta>> = {
     hitTestProfile: 'none',
     oscilloscope: false,
     instrumentPalette: false,
+    instrumentHighlight: false,
     audioReactive: false,
     highPrecisionPacking: false,
     playheadRowAsFloat: true,
@@ -284,6 +299,7 @@ export const SHADER_REGISTRY: Readonly<Record<string, ShaderMeta>> = {
     nightModeBezel: false,
     chassisControlEncoding: 'none',
     webglOverlayHorizontal: false,
+    horizontalPadRowRemap: false,
   },
   'patternv0.30b.wgsl': {
     extendedLayout: true,
@@ -300,6 +316,7 @@ export const SHADER_REGISTRY: Readonly<Record<string, ShaderMeta>> = {
     hitTestProfile: 'none',
     oscilloscope: false,
     instrumentPalette: false,
+    instrumentHighlight: false,
     audioReactive: false,
     highPrecisionPacking: true,
     playheadRowAsFloat: true,
@@ -316,6 +333,7 @@ export const SHADER_REGISTRY: Readonly<Record<string, ShaderMeta>> = {
     nightModeBezel: false,
     chassisControlEncoding: 'none',
     webglOverlayHorizontal: false,
+    horizontalPadRowRemap: false,
   },
   'patternv0.35_bloom.wgsl': {
     extendedLayout: true,
@@ -332,6 +350,7 @@ export const SHADER_REGISTRY: Readonly<Record<string, ShaderMeta>> = {
     hitTestProfile: 'none',
     oscilloscope: false,
     instrumentPalette: false,
+    instrumentHighlight: false,
     audioReactive: false,
     highPrecisionPacking: false,
     playheadRowAsFloat: true,
@@ -348,6 +367,7 @@ export const SHADER_REGISTRY: Readonly<Record<string, ShaderMeta>> = {
     nightModeBezel: true,
     chassisControlEncoding: 'none',
     webglOverlayHorizontal: false,
+    horizontalPadRowRemap: false,
   },
 
   // ── v0.37 family — circular with v0.37 chassis ───────────────────────────
@@ -389,6 +409,7 @@ export const SHADER_REGISTRY: Readonly<Record<string, ShaderMeta>> = {
     hitTestProfile: 'square-ui',
     bareCanvasChrome: true,
     showChannelInvertButton: true,
+    horizontalPadRowRemap: true,
   }),
 
   // ── v0.42 — circular, single-pass frosted ────────────────────────────────
@@ -472,6 +493,14 @@ export const SHADER_REGISTRY: Readonly<Record<string, ShaderMeta>> = {
   'patternv0.56.wgsl': circularLed({
     bloomProfile: 'three-emitter',
     instrumentPalette: true,
+    stepsDrivenVisibleRows: true,
+  }),
+
+  // ── v0.59 — instrument palette + selection highlight (slot 33) ─────────────
+  'patternv0.59.wgsl': circularLed({
+    bloomProfile: 'three-emitter',
+    instrumentPalette: true,
+    instrumentHighlight: true,
     stepsDrivenVisibleRows: true,
   }),
 

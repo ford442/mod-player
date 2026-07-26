@@ -3,6 +3,9 @@
 // - Instanced rings (like v0.35)
 // - Frosted cap material (like v0.43)
 
+//#include "lib/palette.wgsl"
+//#include "lib/sdf.wgsl"
+
 struct Uniforms {
   numRows: u32,
   numChannels: u32,
@@ -130,39 +133,9 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
   return out;
 }
 
-fn selectPalette(id: u32, t: f32) -> vec3<f32> {
-  let a = vec3<f32>(0.5, 0.5, 0.5);
-  let b = vec3<f32>(0.5, 0.5, 0.5);
-  let c = vec3<f32>(1.0, 1.0, 1.0);
-  if (id == 1u) {
-    // Warm: reds, oranges, yellows
-    return a + b * cos(6.28318 * (c * t + vec3<f32>(0.0, 0.1, 0.2)));
-  } else if (id == 2u) {
-    // Cool: blues, cyans, purples
-    return a + b * cos(6.28318 * (c * t + vec3<f32>(0.5, 0.7, 0.9)));
-  } else if (id == 3u) {
-    // Neon: pink, cyan, green
-    return a + b * cos(6.28318 * (c * t + vec3<f32>(0.0, 0.5, 1.0)));
-  } else if (id == 4u) {
-    // Acid: green, yellow, chartreuse
-    return a + b * cos(6.28318 * (c * t + vec3<f32>(0.3, 0.0, 0.7)));
-  }
-  // Default palette 0: Rainbow
-  return a + b * cos(6.28318 * (c * t + vec3<f32>(0.0, 0.33, 0.67)));
-}
-
-fn sdRoundedBox(p: vec2<f32>, b: vec2<f32>, r: f32) -> f32 {
-  let q = abs(p) - b + r;
-  return length(max(q, vec2<f32>(0.0))) + min(max(q.x, q.y), 0.0) - r;
-}
-
 fn sdBox(p: vec2<f32>, b: vec2<f32>) -> f32 {
   let d = abs(p) - b;
   return length(max(d, vec2<f32>(0.0))) + min(max(d.x, d.y), 0.0);
-}
-
-fn sdCircle(p: vec2<f32>, r: f32) -> f32 {
-  return length(p) - r;
 }
 
 fn sdTriangle(p: vec2<f32>, r: f32) -> f32 {

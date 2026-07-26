@@ -153,7 +153,8 @@ export function ExportPanel({
         )}
         {dualAudioContext && (
           <p className="text-xs text-amber-400 font-mono">
-            Native engine uses a separate AudioContext — switch to JS worklet to record audio.
+            Native engine uses a separate AudioContext — recording is blocked.
+            Switch to JS worklet (?engine=js or engine toggle) before Record clip.
           </p>
         )}
         <div className="flex gap-2">

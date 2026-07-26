@@ -5,6 +5,55 @@
 // - instanceIndex == totalInstances → full-screen ring-grid background pass
 // Note encoding: raw OpenMPT numeric values (0=empty, 1-120=notes, 121=OFF, 122=CUT, 123=FADE)
 
+// DURA: Note duration constants
+const NOTE_MIN: u32 = 1u;
+const NOTE_MAX: u32 = 119u;
+const NOTE_OFF_MIN: u32 = 120u;
+fn pitchClassFromIndex(note: u32) -> f32 {
+  if (note == 0u || note > NOTE_MAX) { return 0.0; }
+  let semi = (note - 1u) % 12u;
+  return f32(semi) / 12.0;
+}
+
+fn fifthsHue(note: u32) -> f32 {
+  if (note == 0u || note > NOTE_MAX) { return 0.0; }
+  let semi = (note - 1u) % 12u;
+  let cof  = (semi * 7u) % 12u;
+  return f32(cof) / 12.0;
+}
+
+fn octaveBrightness(note: u32) -> f32 {
+  if (note == 0u || note > NOTE_MAX) { return 1.0; }
+  let oct = (note - 1u) / 12u;
+  return 0.65 + 0.35 * f32(oct) / 9.0;
+}
+
+fn pitchHueForPalette(note: u32, paletteId: u32) -> f32 {
+  if (paletteId == 5u) { return fifthsHue(note); }
+  return pitchClassFromIndex(note);
+}
+
+fn neonPalette(t: f32) -> vec3<f32> {
+  let a = vec3<f32>(0.5, 0.5, 0.5);
+  let b = vec3<f32>(0.5, 0.5, 0.5);
+  let c = vec3<f32>(1.0, 1.0, 1.0);
+  let d = vec3<f32>(0.0, 0.33, 0.67);
+  return a + b * cos(6.28318 * (c * t + d));
+}
+fn sdRoundedBox(p: vec2<f32>, b: vec2<f32>, r: f32) -> f32 {
+  let q = abs(p) - b + r;
+  return length(max(q, vec2<f32>(0.0))) + min(max(q.x, q.y), 0.0) - r;
+}
+
+fn sdCircle(p: vec2<f32>, r: f32) -> f32 {
+  return length(p) - r;
+}
+
+fn sdEllipse(p: vec2<f32>, ab: vec2<f32>) -> f32 {
+  let k = length(p / ab);
+  return (k - 1.0) * min(ab.x, ab.y);
+}
+
 struct Uniforms {
   numRows:       u32,   // [0]
   numChannels:   u32,   // [1]
@@ -153,24 +202,10 @@ fn vs(
 // ── Colour helpers ──────────────────────────────────────────────────────────
 
 // Neon palette driven by beat phase
-fn neonPalette(t: f32) -> vec3<f32> {
-  let a = vec3<f32>(0.5, 0.5, 0.5);
-  let b = vec3<f32>(0.5, 0.5, 0.5);
-  let c = vec3<f32>(1.0, 1.0, 1.0);
-  let d = vec3<f32>(0.0, 0.33, 0.67);
-  let drift = uniforms.beatPhase * 0.08;
-  return a + b * cos(TWO_PI * (c * (t + drift) + d));
-}
-
 // Correct pitch class from raw OpenMPT note value (1–120)
 // Returns 0.0–1.0 fraction around the colour wheel (C=0, C#=1/12 … B=11/12)
 fn pitchClass(note: u32) -> f32 {
   return f32((note - 1u) % 12u) / 12.0;
-}
-
-fn sdRoundedBox(p: vec2<f32>, b: vec2<f32>, r: f32) -> f32 {
-  let q = abs(p) - b + r;
-  return length(max(q, vec2<f32>(0.0))) + min(max(q.x, q.y), 0.0) - r;
 }
 
 // ── Fragment ────────────────────────────────────────────────────────────────

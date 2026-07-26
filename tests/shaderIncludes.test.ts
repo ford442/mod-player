@@ -19,6 +19,21 @@ const NIGHT_VARIANTS = [
   'patternv0.54.wgsl',
 ] as const;
 
+const LED_CORE_VARIANTS = [
+  'patternv0.50.wgsl',
+  'patternv0.50b.wgsl',
+  'patternv0.51.wgsl',
+  'patternv0.57.wgsl',
+  'patternv0.58.wgsl',
+] as const;
+
+const TIER_A_SAMPLES = [
+  'patternv0.45b.wgsl',
+  'patternv0.47.wgsl',
+  'patternv0.55.wgsl',
+  'patternv0.56.wgsl',
+] as const;
+
 describe('shader include expansion (night circular family)', () => {
   beforeAll(() => {
     // Ensure public/ is current (predev/prebuild also run this)
@@ -89,6 +104,63 @@ describe('shader include expansion (night circular family)', () => {
       // Must call shared unpack rather than hand-assign partial NoteDurationInfo
       expect(flat).toContain('unpackDurationInfo(in.packedA, in.packedB)');
       expect(flat).toContain('classifyCell(');
+    }
+  });
+});
+
+describe('shader include expansion (trap LED core family)', () => {
+  it('tier-B entry files are thin theme + body shells', () => {
+    const thin = ['patternv0.50.wgsl', 'patternv0.57.wgsl', 'patternv0.58.wgsl'] as const;
+    for (const name of thin) {
+      const src = readFileSync(join(SRC, name), 'utf8');
+      const lines = src.split('\n').filter((l: string) => l.trim().length > 0);
+      expect(lines.length).toBeLessThan(14);
+      expect(src).toMatch(/\/\/#include\s+"lib\/theme_trap_frosted\.wgsl"/);
+      expect(src).toMatch(/\/\/#include\s+"lib\/circular_led/);
+    }
+  });
+
+  it('expands LED core variants without residual includes', () => {
+    for (const name of LED_CORE_VARIANTS) {
+      const { flat, includes } = expandShader(join(SRC, name));
+      expect(flat).not.toMatch(/^\s*\/\/\s*#include\s+"/m);
+      if (name !== 'patternv0.50b.wgsl') {
+        expect(
+          includes.some((p: string) =>
+            p.includes('emitters_trap.wgsl') || p.includes('emitters_playhead.wgsl') || p.includes('circular_led')
+          )
+        ).toBe(true);
+      }
+      expect(flat).toContain('fn unpackDurationInfo');
+      if (name !== 'patternv0.50b.wgsl') {
+        expect(flat).toContain('fn drawUnifiedLensCap');
+      }
+      expect(flat).toContain('@fragment');
+    }
+  });
+
+  it('v0.58 includes audio-reactive lib', () => {
+    const { includes, flat } = expandShader(join(SRC, 'patternv0.58.wgsl'));
+    expect(includes.some((p: string) => p.includes('audio_reactive.wgsl'))).toBe(true);
+    expect(flat).toContain('audioKickPulse');
+  });
+});
+
+describe('shader include expansion (tier-A utility includes)', () => {
+  it('tier-A shaders use //#include for shared libs', () => {
+    for (const name of TIER_A_SAMPLES) {
+      const src = readFileSync(join(SRC, name), 'utf8');
+      expect(src).toMatch(/\/\/#include\s+"lib\//);
+      const { flat } = expandShader(join(SRC, name));
+      expect(flat).not.toMatch(/^\s*\/\/\s*#include\s+"/m);
+    }
+  });
+
+  it('video shaders are documented procedural exceptions (no packing path)', () => {
+    for (const name of ['patternv0.23.wgsl', 'patternv0.24.wgsl'] as const) {
+      const src = readFileSync(join(SRC, name), 'utf8');
+      // May use pitch helpers only; must not duplicate full packing stack
+      expect(src).not.toMatch(/fn unpackDurationInfo/);
     }
   });
 });

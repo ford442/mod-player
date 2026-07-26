@@ -8,7 +8,6 @@ import { usePlaylist } from './hooks/usePlaylist';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { useRegisterPlayerCommands } from './hooks/useRegisterPlayerCommands';
 import { useMidiControls } from './hooks/useMidiControls';
-import { useLocalStorage } from './hooks/useLocalStorage';
 import { useLibrary, useSaveSong, useSyncLibrary } from './hooks/useLibrary';
 import { useLocalLibrary } from './hooks/useLocalLibrary';
 import { useRateShader } from './hooks/useRateShader';
@@ -19,30 +18,21 @@ import {
   supportsStepsLength,
   isLiteRecommendedShader,
   usesCircularRowPaging,
-  usesInstrumentPalette,
   usesNightModeBezel,
+  usesOscilloscope,
 } from './utils/shaderVersion';
 import { getLiteRecommendedShader } from './utils/shaderRegistry';
-import { DEVICE_CAPABILITIES } from './utils/deviceCapabilities';
 import type { MediaItem } from './types';
 import type { LibraryEntry } from './types/localLibrary';
 import {
-  DEFAULT_BLOOM_PRESET,
-  DEFAULT_COLOR_SCHEME,
-  type BloomPreset,
-  type ColorScheme,
-  type NightPreset,
   NIGHT_PRESETS,
-  DEFAULT_NIGHT_PRESET,
 } from './types/bloomPresets';
 import {
-  DEFAULT_SHADER,
   ALL_SHADER_IDS,
   LIGHT_THEMES,
   computeModuleHash,
   AVAILABLE_SHADERS,
   IS_PROJECTM_EMBED,
-  type AppTheme,
 } from './appConfig';
 import {
   calculateNoteDurations,
@@ -60,66 +50,67 @@ import { usePatternEdit } from './hooks/usePatternEdit';
 import { ToastStack } from './components/ToastStack';
 import { buildShareUrl } from './utils/shareState';
 import { patchFromFieldCycle, type PatternEditField } from './utils/patternEdit';
+import { downloadPatternDump } from './utils/patternDump';
 import { useOfflineExport } from './hooks/useOfflineExport';
 import { usePerformanceCapture } from './hooks/usePerformanceCapture';
+import { PlayerSessionProvider, type PlayerSessionValue } from './context/PlayerSessionContext';
+import { PlayerFeaturesProvider, type PlayerFeaturesValue } from './context/PlayerFeaturesContext';
+import { usePlayerUiStore } from './store/playerUiStore';
+import { useShaderPrefsStore } from './store/shaderPrefsStore';
+import { readLocalStorage, writeLocalStorage } from './utils/localStorageIO';
 
 function App() {
-  // Tier 1: global last-used shader — persisted across page reloads
-  const [_storedShader, _setStoredShader] = useLocalStorage<string>('xasm1_last_shader', DEFAULT_SHADER);
-  // Validate: fall back to default if the stored shader was removed from the selector list
-  const shaderFile = ALL_SHADER_IDS.has(_storedShader) ? _storedShader : DEFAULT_SHADER;
+  const theme = usePlayerUiStore((s) => s.theme);
+  const setTheme = usePlayerUiStore((s) => s.setTheme);
+  const liteMode = usePlayerUiStore((s) => s.liteMode);
+  const setLiteMode = usePlayerUiStore((s) => s.setLiteMode);
+  const debugPanelOpen = usePlayerUiStore((s) => s.debugPanelOpen);
+  const setDebugPanelOpen = usePlayerUiStore((s) => s.setDebugPanelOpen);
+  const cheatsheetOpen = usePlayerUiStore((s) => s.cheatsheetOpen);
+  const setCheatsheetOpen = usePlayerUiStore((s) => s.setCheatsheetOpen);
+  const editMode = usePlayerUiStore((s) => s.editMode);
 
-  // Tier 2: per-module shader memory — keyed by first-16-byte hash of the loaded file
-  const [moduleHash, setModuleHash] = useState<string | null>(null);
-  const [shaderFavorites, setShaderFavorites] = useLocalStorage<string[]>('xasm1-shader-favorites', []);
-  const [shaderRecents, setShaderRecents] = useLocalStorage<string[]>('xasm1-shader-recents', []);
-  const [shaderThumbnails, setShaderThumbnails] = useLocalStorage<Record<string, string>>('xasm1-shader-thumbnails', {});
+  const shaderFile = useShaderPrefsStore((s) => s.storedShader);
+  const shaderFavorites = useShaderPrefsStore((s) => s.shaderFavorites);
+  const shaderRecents = useShaderPrefsStore((s) => s.shaderRecents);
+  const shaderThumbnails = useShaderPrefsStore((s) => s.shaderThumbnails);
+  const setShaderThumbnails = useShaderPrefsStore((s) => s.setShaderThumbnails);
+  const setModuleHash = useShaderPrefsStore((s) => s.setModuleHash);
+  const bloomPreset = useShaderPrefsStore((s) => s.bloomPreset);
+  const setBloomPreset = useShaderPrefsStore((s) => s.setBloomPreset);
+  const colorScheme = useShaderPrefsStore((s) => s.colorScheme);
+  const setColorScheme = useShaderPrefsStore((s) => s.setColorScheme);
+  const colorPalette = useShaderPrefsStore((s) => s.colorPalette);
+  const setColorPalette = useShaderPrefsStore((s) => s.setColorPalette);
+  const paletteMode = useShaderPrefsStore((s) => s.paletteMode);
+  const setPaletteMode = useShaderPrefsStore((s) => s.setPaletteMode);
+  const setStepsLength = useShaderPrefsStore((s) => s.setStepsLength);
+  const nightModeEnabled = useShaderPrefsStore((s) => s.nightModeEnabled);
+  const nightModePreset = useShaderPrefsStore((s) => s.nightModePreset);
+  const markSkipModuleShaderRestore = useShaderPrefsStore((s) => s.markSkipModuleShaderRestore);
+  const setShaderFile = useShaderPrefsStore((s) => s.selectShader);
+
+  const clearInstrumentSelection = usePlayerUiStore((s) => s.clearInstrumentSelection);
 
   const [volume, setVolume] = useState<number>(0.5);
   const [pan, setPan] = useState<number>(0.0);
   const [isMuted, setIsMuted] = useState<boolean>(false);
   const preMuteVolumeRef = useRef<number>(0.5);
 
-  // 3D View State
   const [is3DMode, setIs3DMode] = useState<boolean>(false);
-  const [theme, setTheme] = useLocalStorage<AppTheme>('xasm1_theme', 'dark');
   const isDarkMode = !LIGHT_THEMES.has(theme);
   const [viewMode, setViewMode] = useState<'device' | 'wall'>('device');
-
-  // Lite mode — auto-detected from device capabilities, overridable via toggle
-  const [liteMode, setLiteMode] = useState<boolean>(DEVICE_CAPABILITIES.isLite);
-
-  // Audio-reactive chassis (SAB bands → GPU) — persisted, shader must support it
-  const [reactiveMode, setReactiveMode] = useLocalStorage<boolean>('xasm1_reactive_mode', true);
 
   // Apply data-theme attribute to <html> so CSS variables cascade globally
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
   }, [theme]);
 
-  // Bloom and Color Scheme State
-  const [bloomPreset, setBloomPreset] = useState<BloomPreset>(DEFAULT_BLOOM_PRESET);
-  const [colorScheme, setColorScheme] = useState<ColorScheme>(DEFAULT_COLOR_SCHEME);
-  // Persist colorPalette selection across page reloads
-  const [colorPalette, setColorPalette] = useLocalStorage<number>('xasm1_colorPalette', 0);
-  // Per-instrument palette mode — persisted alongside the colorPalette selector
-  const [paletteMode, setPaletteMode] = useLocalStorage<number>('xasm1_paletteMode', 0);
-
-  // Pattern length toggle — lifted to App.tsx so it can be shown in the toolbar
-  // Uses supportsStepsLength() from shaderVersion.ts as the single source of truth
   const isStepsShader = supportsStepsLength(shaderFile);
-  const [stepsLength, setStepsLength] = useLocalStorage<32 | 64>('xasm1_stepsLength', 32);
-  // Reset to 32 when switching to a shader that doesn't support stepsLength
   useEffect(() => {
     if (!isStepsShader) setStepsLength(32);
   }, [isStepsShader, setStepsLength]);
 
-  // Night Mode 2.0 — persisted, active only on patternv0.35_bloom
-  const [nightModeEnabled, setNightModeEnabled] = useLocalStorage<boolean>('xasm1_nightMode_enabled', false);
-  const [nightModePreset, setNightModePreset] = useLocalStorage<NightPreset>('xasm1_nightMode_preset', DEFAULT_NIGHT_PRESET);
-
-  // CRT scanline/vignette effect — persisted across page reloads
-  const [crtEnabled, setCrtEnabled] = useLocalStorage<boolean>('xasm1-crt-enabled', false);
   const {
     isReady,
     isModuleLoaded,
@@ -133,6 +124,7 @@ function App() {
     channelStates,
     moduleInfo,
     instrumentNames,
+    instrumentTable,
     moduleComments,
     beatPhase,
     grooveAmount,
@@ -162,6 +154,7 @@ function App() {
     workletLoadError,
     oscBufferRef,
     audioReactiveRef,
+    requestOscBuffer,
   } = useLibOpenMPT(volume, liteMode);
 
   const { state: offlineExportState, exportWav, isExporting } = useOfflineExport();
@@ -208,6 +201,9 @@ function App() {
     window.__TEST_HOOKS__ = {
       seekToRow: (row: number) => seekToStep(row),
       stopPlayback: () => stopMusic(false),
+      startPlayback: () => playGuarded(),
+      getIsPlaying: () => isPlaying,
+      getAudioContextState: () => getAudioContext()?.state ?? 'none',
       isModuleLoaded: () => isModuleLoaded,
       getPatternRenderer: () => window.currentPatternRenderer,
       loadModuleFromUrl: async (url: string) => {
@@ -319,7 +315,13 @@ function App() {
       getCircularOverlayPaging: () => {
         const matrix = sequencerMatrix;
         if (!matrix) return { ok: false, reason: 'no matrix' };
-        const shader = localStorage.getItem('xasm1_last_shader') ?? '';
+        const raw = localStorage.getItem('xasm1_last_shader') ?? '';
+        let shader = raw;
+        try {
+          shader = JSON.parse(raw) as string;
+        } catch {
+          /* keep raw */
+        }
         if (!usesCircularRowPaging(shader)) {
           return { ok: true, skipped: true, reason: 'not circular-paging shader' };
         }
@@ -358,6 +360,7 @@ function App() {
           pagingDiffersAtPlayhead: pageStart > 0,
         };
       },
+      getPlayheadDebug: () => window.__PLAYHEAD_DEBUG__ ?? null,
     };
     return () => { delete window.__TEST_HOOKS__; };
   }, [seekToStep, stopMusic, isModuleLoaded, sequencerMatrix, loadFile, setPlaybackRowFraction, playbackStateRef, activeEngine, liteMode]);
@@ -373,26 +376,22 @@ function App() {
   const [mediaItem, setMediaItem] = useState<MediaItem | null>(null);
   const [currentModuleFileName, setCurrentModuleFileName] = useState<string>('');
   const [moduleSourceUrl, setModuleSourceUrl] = useState<string | null>(null);
-  const skipModuleShaderRestoreRef = useRef(false);
   // Track object URLs created from local files so we can revoke them on replacement/unmount
   const mediaObjectUrlRef = useRef<string | null>(null);
-  const [mediaFades, setMediaFades] = useLocalStorage<{ in: number; out: number }>('xasm1_media_fades', { in: 500, out: 500 });
+  const [mediaFades, setMediaFades] = useState<{ in: number; out: number }>(
+    () => readLocalStorage('xasm1_media_fades', { in: 500, out: 500 }),
+  );
+  useEffect(() => {
+    writeLocalStorage('xasm1_media_fades', mediaFades);
+  }, [mediaFades]);
 
-  // Panel visibility
-  const [showChannelMeters, setShowChannelMeters] = useState<boolean>(true);
-  const [showMetadata, setShowMetadata] = useState<boolean>(true);
-  const [showPlaylist, setShowPlaylist] = useState<boolean>(true);
-  const [showLibraryBrowser, setShowLibraryBrowser] = useState<boolean>(false);
-  const [showLocalLibrary, setShowLocalLibrary] = useState<boolean>(false);
-  const [debugPanelOpen, setDebugPanelOpen] = useLocalStorage<boolean>('xasm1.debugPanel.open', false);
-  const [chassisDark, setChassisDark] = useLocalStorage<boolean>('xasm1_chassisDark', false);
-  const [cheatsheetOpen, setCheatsheetOpen] = useState<boolean>(false);
+  const [activeLibraryEntryId, setActiveLibraryEntryId] = useState<string | null>(null);
+
   const { songsQuery, shadersQuery } = useLibrary();
   const rateShaderMutation = useRateShader();
   const saveSongMutation = useSaveSong();
   const syncLibraryMutation = useSyncLibrary();
   const localLibrary = useLocalLibrary();
-  const [activeLibraryEntryId, setActiveLibraryEntryId] = useState<string | null>(null);
 
   // Channel VU data (from worklet channelStates)
   const channelVU = useMemo(() => {
@@ -422,40 +421,10 @@ function App() {
     };
   }, [isModuleLoaded, sequencerMatrix, status, activeEngine, totalPatternRows, instrumentNames, moduleComments, moduleDurationSeconds]);
 
-  // Shader change handler — Tier 1 (global) + Tier 2 (per-module) write
-  const setShaderFile = useCallback((shader: string) => {
-    _setStoredShader(shader);
-    setShaderRecents(previousRecents => [shader, ...previousRecents.filter(s => s !== shader)].slice(0, 5));
-    // Per-instrument palette only makes sense for shaders that read it; switch back to pitch-hue
-    // on shaders that do not use the paletteMode uniform to avoid silent no-ops in the UI.
-    if (!usesInstrumentPalette(shader)) setPaletteMode(0);
-    if (moduleHash) {
-      try {
-        localStorage.setItem(`xasm1_module_shader_${moduleHash}`, shader);
-      } catch {
-        // Ignore quota/security errors
-      }
-    }
-  }, [_setStoredShader, moduleHash, setShaderRecents, setPaletteMode]);
-
-  const toggleShaderFavorite = useCallback((shader: string) => {
-    setShaderFavorites(
-      previousFavorites => (
-        previousFavorites.includes(shader)
-          ? previousFavorites.filter(s => s !== shader)
-          : [shader, ...previousFavorites]
-      ),
-    );
-  }, [setShaderFavorites]);
-
-  const handleRandomShader = useCallback(() => {
-    const others = AVAILABLE_SHADERS.filter(shader => shader.id !== shaderFile);
-    const pool = others.length > 0 ? others : AVAILABLE_SHADERS;
-    const pick = pool[Math.floor(Math.random() * pool.length)];
-    if (pick) {
-      setShaderFile(pick.id);
-    }
-  }, [shaderFile, setShaderFile]);
+  // Clear instrument/sample selection when a new module is loaded.
+  useEffect(() => {
+    clearInstrumentSelection();
+  }, [moduleFileName, clearInstrumentSelection]);
 
   useEffect(() => {
     const canvas = document.querySelector<HTMLCanvasElement>('canvas[data-shader-preview-source="true"]');
@@ -509,29 +478,21 @@ function App() {
     return error instanceof Error ? error.message : 'Library sync failed.';
   }, [syncLibraryMutation.error]);
 
-  // Tier 2: restore per-module shader whenever the loaded module changes
-  useEffect(() => {
-    if (!moduleHash) return;
-    if (skipModuleShaderRestoreRef.current) {
-      skipModuleShaderRestoreRef.current = false;
-      return;
-    }
-    try {
-      const saved = localStorage.getItem(`xasm1_module_shader_${moduleHash}`);
-      if (saved !== null && ALL_SHADER_IDS.has(saved)) {
-        _setStoredShader(saved);
-      }
-    } catch (e) {
-      console.warn('[xasm1] Failed to read per-module shader from localStorage', e);
-    }
-  }, [moduleHash, _setStoredShader]);
+  /** Kept in sync with usePatternEdit so module loads can confirm before discarding. */
+  const patternEditDirtyRef = useRef(false);
 
   // Wrapper: compute per-module hash then load — used by all load call sites
   const loadFileWithHash = useCallback((fileData: Uint8Array, fileName: string) => {
+    if (patternEditDirtyRef.current) {
+      const ok = window.confirm(
+        'You have unsaved pattern edits. Discard them and load a new module?',
+      );
+      if (!ok) return;
+    }
     setModuleHash(computeModuleHash(fileData));
     setCurrentModuleFileName(fileName);
     loadFile(fileData, fileName);
-  }, [loadFile]);
+  }, [loadFile, setModuleHash]);
 
   // Playlist
   const playlist = usePlaylist();
@@ -646,7 +607,7 @@ function App() {
   const onKbdSeekNextOrder = useCallback(() => seekByOrderDelta(1), [seekByOrderDelta]);
   const onKbdSeekPrevOrder = useCallback(() => seekByOrderDelta(-1), [seekByOrderDelta]);
   const onKbdToggleDebugPanel = useCallback(() => setDebugPanelOpen(!debugPanelOpen), [setDebugPanelOpen, debugPanelOpen]);
-  const onKbdToggleCheatsheet = useCallback(() => setCheatsheetOpen(open => !open), []);
+  const onKbdToggleCheatsheet = useCallback(() => setCheatsheetOpen(!cheatsheetOpen), [cheatsheetOpen, setCheatsheetOpen]);
   const onKbdCloseCheatsheet = useCallback(() => setCheatsheetOpen(false), []);
 
   const onKbdVolumeSet = useCallback((value: number) => setVolume(Math.max(0, Math.min(1, value))), []);
@@ -800,6 +761,12 @@ function App() {
     return shaderFile;
   }, [liteMode, shaderFile]);
 
+  useEffect(() => {
+    if (usesOscilloscope(displayShaderFile)) {
+      requestOscBuffer();
+    }
+  }, [displayShaderFile, requestOscBuffer]);
+
   // Derive a stable per-instrument palette from the loaded module's instrument names.
   const instrumentPalette = useMemo(() => {
     if (!instrumentNames || instrumentNames.length === 0) return generateEmptyInstrumentPalette();
@@ -818,15 +785,57 @@ function App() {
     moduleKey: patternModuleKey,
   });
 
+  useEffect(() => {
+    patternEditDirtyRef.current = patternEdit.isDirty;
+  }, [patternEdit.isDirty]);
+
   const handlePatternCellEdit = useCallback((row: number, channel: number, field: PatternEditField) => {
-    if (!sequencerMatrix) return;
+    if (!sequencerMatrix || isExporting) return;
     const cell = sequencerMatrix.rows[row]?.[channel] ?? { type: 'empty', text: '' };
     patternEdit.editCell(row, channel, patchFromFieldCycle(field, cell));
-  }, [sequencerMatrix, patternEdit]);
+  }, [sequencerMatrix, patternEdit, isExporting]);
+
+  const handlePatternCellPatch = useCallback((row: number, channel: number, patch: Parameters<typeof patternEdit.editCell>[2]) => {
+    if (isExporting) return;
+    patternEdit.editCell(row, channel, patch);
+  }, [patternEdit, isExporting]);
+
+  const handlePatternCellClear = useCallback((row: number, channel: number) => {
+    if (isExporting) return;
+    patternEdit.clearCell(row, channel);
+  }, [patternEdit, isExporting]);
 
   const handleSequencerCellEdit = useCallback((row: number, channel: number) => {
     handlePatternCellEdit(row, channel, 'note');
   }, [handlePatternCellEdit]);
+
+  const handlePatternRevert = useCallback(() => {
+    if (!patternEdit.isDirty) return;
+    const ok = window.confirm('Discard all pattern edits and restore the loaded pattern?');
+    if (!ok) return;
+    patternEdit.revertToBaseline();
+  }, [patternEdit]);
+
+  const handleExportPatternDump = useCallback(() => {
+    if (!sequencerMatrix) return;
+    const name = moduleFileName || currentModuleFileName;
+    if (name) {
+      downloadPatternDump(sequencerMatrix, { moduleFileName: name });
+    } else {
+      downloadPatternDump(sequencerMatrix);
+    }
+  }, [sequencerMatrix, moduleFileName, currentModuleFileName]);
+
+  // Warn before refresh/close when pattern edits are unsaved
+  useEffect(() => {
+    if (!patternEdit.isDirty) return;
+    const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, [patternEdit.isDirty]);
 
   const { copyShareLink } = usePlayerShare({
     isReady,
@@ -850,7 +859,7 @@ function App() {
     setMediaItem,
     setMediaVisible,
     showToast,
-    skipModuleShaderRestoreRef,
+    onShareShaderApplied: markSkipModuleShaderRestore,
   });
 
   const sharePageUrl = useMemo(() => {
@@ -890,7 +899,7 @@ function App() {
 
   // Edit-mode undo/redo shortcuts
   useEffect(() => {
-    if (!patternEdit.editMode) return;
+    if (!editMode || isExporting) return;
     const onKeyDown = (event: KeyboardEvent) => {
       const mod = event.metaKey || event.ctrlKey;
       if (!mod) return;
@@ -904,12 +913,162 @@ function App() {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [patternEdit.editMode, patternEdit.undo, patternEdit.redo]);
+  }, [editMode, isExporting, patternEdit.undo, patternEdit.redo]);
 
-  // Project-M embed / audio-only mode: render a compact transport-only UI and
-  // skip MainLayout / App3DView entirely so the heavy WebGPU pattern display
-  // never mounts. The PCM bridge (startProjectMBridge / broadcastPcmBlock) stays
-  // active regardless, so audio keeps flowing to the Project-M host.
+  const playerSession = useMemo((): PlayerSessionValue => ({
+    isReady,
+    isModuleLoaded,
+    isPlaying,
+    isLooping,
+    playbackSeconds,
+    playbackRowFraction,
+    totalPatternRows,
+    sequencerMatrix,
+    channelStates,
+    beatPhase,
+    grooveAmount,
+    kickTrigger,
+    activeChannels,
+    volume,
+    pan,
+    status,
+    activeEngine,
+    isWorkletSupported,
+    syncDebug,
+    workletLoadError,
+    analyserNode,
+    channelVU,
+    moduleMetadata,
+    moduleFileName,
+    moduleDurationSeconds,
+    instrumentTable,
+    channelMuteMask,
+    displayShaderFile,
+    instrumentPalette,
+    dimFactor,
+    isNightShader,
+    isStepsShader,
+    nightConfig,
+    playbackStateRef,
+    channelStatesRef,
+    oscBufferRef,
+    audioReactiveRef,
+    play: playGuarded,
+    stopMusic,
+    seekToStep,
+    setIsLooping,
+    setVolume,
+    setPan,
+    handleFileSelected,
+    toggleAudioEngine,
+    toggleChannelMute,
+  }), [
+    isReady, isModuleLoaded, isPlaying, isLooping, playbackSeconds, playbackRowFraction,
+    totalPatternRows, sequencerMatrix, channelStates, beatPhase, grooveAmount, kickTrigger,
+    activeChannels, volume, pan, status, activeEngine, isWorkletSupported, syncDebug, workletLoadError,
+    analyserNode, channelVU, moduleMetadata, moduleFileName, moduleDurationSeconds,
+    instrumentTable, channelMuteMask, displayShaderFile, instrumentPalette, dimFactor, isNightShader,
+    isStepsShader, nightConfig, playbackStateRef, channelStatesRef, oscBufferRef,
+    audioReactiveRef, playGuarded, stopMusic, seekToStep, setIsLooping, setVolume, setPan,
+    handleFileSelected, toggleAudioEngine, toggleChannelMute,
+  ]);
+
+  const playerFeatures = useMemo((): PlayerFeaturesValue => ({
+    setIs3DMode,
+    onCopyShareLink: () => { void copyShareLink(); },
+    mediaItem,
+    mediaVisible,
+    mediaFades,
+    moduleMediaFileName: currentModuleFileName,
+    moduleMediaHintText,
+    setMediaVisible,
+    setMediaItem,
+    onMediaRemove: handleMediaRemove,
+    onMediaFadesChange: setMediaFades,
+    handleMediaAdd,
+    handleRemoteMediaSelect,
+    shaderCatalog: shadersQuery.data ?? [],
+    shaderCatalogLoading: shadersQuery.isLoading || shadersQuery.isFetching,
+    shaderCatalogError: shaderCatalogErrorMessage,
+    onRateShader: async (shaderId, score) => { await rateShaderMutation.mutateAsync({ id: shaderId, score }); },
+    ratingInFlightShaderId: rateShaderMutation.isPending ? rateShaderMutation.variables?.id ?? null : null,
+    validShaderFavorites,
+    validShaderRecents,
+    localLibraryRoots: localLibrary.roots,
+    localLibraryLoading: localLibrary.isLoading,
+    localLibraryImporting: localLibrary.isImporting,
+    localLibraryImportProgress: localLibrary.importProgress,
+    localLibraryImportError: localLibrary.importError,
+    localLibraryFsAccessSupported: localLibrary.fsAccessSupported,
+    activeLibraryEntryId,
+    onLocalLibraryImportFolder: () => { void localLibrary.importFolder(); },
+    onLocalLibraryImportWebkit: (files) => { void localLibrary.importWebkitFiles(files); },
+    onLocalLibraryRescanRoot: (rootId) => { void localLibrary.rescanRoot(rootId); },
+    onLocalLibraryRemoveRoot: (rootId) => { void localLibrary.removeRoot(rootId); },
+    onLocalLibraryCancelImport: localLibrary.cancelImport,
+    onLocalLibraryPlay: handleLocalLibraryPlay,
+    playlistItems: playlist.items,
+    playlistCurrentIndex: playlist.currentIndex,
+    playlistIsPlaying: isPlaying,
+    playlistShuffle: playlist.shuffle,
+    playlistRepeat: playlist.repeat,
+    onPlaylistSelect: handlePlaylistSelect,
+    onPlaylistRemove: playlist.remove,
+    onPlaylistClear: playlist.clear,
+    onPlaylistPrev: handlePlaylistPrev,
+    onPlaylistNext: handlePlaylistNext,
+    onPlaylistShuffleToggle: playlist.toggleShuffle,
+    onPlaylistRepeatCycle: playlist.cycleRepeat,
+    onPlaylistFilesAdded: handlePlaylistFilesAdded,
+    songsData: songsQuery.data,
+    songsLoading: songsQuery.isLoading,
+    songsRefreshing: songsQuery.isFetching && !songsQuery.isLoading,
+    libraryErrorMessage,
+    onRefreshLibrary: () => { void songsQuery.refetch(); },
+    handleLibrarySongLoad,
+    onSyncLibrary: async () => { await syncLibraryMutation.mutateAsync(); },
+    syncPending: syncLibraryMutation.isPending,
+    syncLibraryErrorMessage,
+    activeModuleForSave,
+    onSaveModule: async (req) => { await saveSongMutation.mutateAsync(req); },
+    savePending: saveSongMutation.isPending,
+    saveSongErrorMessage,
+    patternEditDirty: patternEdit.isDirty,
+    canPatternUndo: patternEdit.canUndo,
+    canPatternRedo: patternEdit.canRedo,
+    onPatternUndo: patternEdit.undo,
+    onPatternRedo: patternEdit.redo,
+    onPatternRevert: handlePatternRevert,
+    onPatternCellEdit: handlePatternCellEdit,
+    onPatternCellPatch: handlePatternCellPatch,
+    onPatternCellClear: handlePatternCellClear,
+    onSequencerCellEdit: handleSequencerCellEdit,
+    onExportPatternDump: handleExportPatternDump,
+    midiControls,
+    onExportWav: handleExportWav,
+    onStartCapture: handleStartCapture,
+    onStopCapture: stopCapture,
+    offlineExportState,
+    isExporting,
+    captureState,
+    isRecording,
+    getRendererBackend: () => window.currentPatternRenderer?.backend ?? null,
+    dualAudioContext: activeEngine === 'native-worklet',
+  }), [
+    setIs3DMode, copyShareLink, mediaItem, mediaVisible, mediaFades, currentModuleFileName,
+    moduleMediaHintText, handleMediaRemove, handleMediaAdd, handleRemoteMediaSelect,
+    shadersQuery.data, shadersQuery.isLoading, shadersQuery.isFetching, shaderCatalogErrorMessage,
+    rateShaderMutation, validShaderFavorites, validShaderRecents, localLibrary, activeLibraryEntryId,
+    handleLocalLibraryPlay, playlist, isPlaying, handlePlaylistSelect, handlePlaylistPrev,
+    handlePlaylistNext, handlePlaylistFilesAdded, songsQuery, libraryErrorMessage,
+    handleLibrarySongLoad, syncLibraryMutation, activeModuleForSave, saveSongMutation,
+    saveSongErrorMessage, patternEdit, handlePatternCellEdit, handlePatternCellPatch,
+    handlePatternCellClear, handleSequencerCellEdit, handlePatternRevert, handleExportPatternDump,
+    midiControls, handleExportWav, handleStartCapture, stopCapture, offlineExportState,
+    isExporting, captureState, isRecording, activeEngine,
+  ]);
+
+  // Project-M embed / audio-only mode:
   if (IS_PROJECTM_EMBED) {
     return (
       <ProjectMEmbedView
@@ -989,178 +1148,12 @@ function App() {
 
   return (
     <>
-    <MainLayout
-      isDarkMode={isDarkMode}
-      theme={theme}
-      setTheme={setTheme}
-      setIs3DMode={setIs3DMode}
-      liteMode={liteMode}
-      setLiteMode={setLiteMode}
-      reactiveMode={reactiveMode}
-      setReactiveMode={setReactiveMode}
-      isWorkletSupported={isWorkletSupported}
-      workletLoadError={workletLoadError}
-      toggleAudioEngine={toggleAudioEngine}
-      activeEngine={activeEngine}
-      shaderFile={shaderFile}
-      displayShaderFile={displayShaderFile}
-      setShaderFile={setShaderFile}
-      handleRandomShader={handleRandomShader}
-      validShaderFavorites={validShaderFavorites}
-      validShaderRecents={validShaderRecents}
-      shaderThumbnails={shaderThumbnails}
-      toggleShaderFavorite={toggleShaderFavorite}
-      shaderCatalog={shadersQuery.data ?? []}
-      shaderCatalogLoading={shadersQuery.isLoading || shadersQuery.isFetching}
-      shaderCatalogError={shaderCatalogErrorMessage}
-      onRateShader={async (shaderId, score) => { await rateShaderMutation.mutateAsync({ id: shaderId, score }); }}
-      ratingInFlightShaderId={rateShaderMutation.isPending ? rateShaderMutation.variables?.id ?? null : null}
-      colorPalette={colorPalette}
-      setColorPalette={setColorPalette}
-      paletteMode={paletteMode}
-      setPaletteMode={setPaletteMode}
-      instrumentPalette={instrumentPalette}
-      isStepsShader={isStepsShader}
-      stepsLength={stepsLength}
-      setStepsLength={setStepsLength}
-      sequencerMatrix={sequencerMatrix}
-      playbackRowFraction={playbackRowFraction}
-      isPlaying={isPlaying}
-      playbackSeconds={playbackSeconds}
-      channelStates={channelStates}
-      beatPhase={beatPhase}
-      grooveAmount={grooveAmount}
-      kickTrigger={kickTrigger}
-      activeChannels={activeChannels}
-      isModuleLoaded={isModuleLoaded}
-      volume={volume}
-      pan={pan}
-      isLooping={isLooping}
-      totalPatternRows={totalPatternRows}
-      play={playGuarded}
-      stopMusic={stopMusic}
-      seekToStep={seekToStep}
-      setIsLooping={setIsLooping}
-      setVolume={setVolume}
-      setPan={setPan}
-      handleFileSelected={handleFileSelected}
-      analyserNode={analyserNode}
-      debugPanelOpen={debugPanelOpen}
-      setDebugPanelOpen={setDebugPanelOpen}
-      playbackStateRef={playbackStateRef}
-      channelStatesRef={channelStatesRef}
-      oscBufferRef={oscBufferRef}
-      audioReactiveRef={audioReactiveRef}
-      bloomPreset={bloomPreset}
-      setBloomPreset={setBloomPreset}
-      colorScheme={colorScheme}
-      setColorScheme={setColorScheme}
-      isNightShader={isNightShader}
-      nightModeEnabled={nightModeEnabled}
-      nightConfig={nightConfig}
-      nightModePreset={nightModePreset}
-      setNightModeEnabled={setNightModeEnabled}
-      setNightModePreset={setNightModePreset}
-      crtEnabled={crtEnabled}
-      setCrtEnabled={setCrtEnabled}
-      chassisDark={chassisDark}
-      setChassisDark={setChassisDark}
-      dimFactor={dimFactor}
-      mediaItem={mediaItem}
-      mediaVisible={mediaVisible}
-      setMediaVisible={setMediaVisible}
-      setMediaItem={setMediaItem}
-      mediaFades={mediaFades}
-      moduleMediaFileName={currentModuleFileName}
-      moduleMediaHintText={moduleMediaHintText}
-      onMediaRemove={handleMediaRemove}
-      onMediaFadesChange={setMediaFades}
-      handleMediaAdd={handleMediaAdd}
-      handleRemoteMediaSelect={handleRemoteMediaSelect}
-      isReady={isReady}
-      channelVU={channelVU}
-      moduleMetadata={moduleMetadata}
-      showChannelMeters={showChannelMeters}
-      setShowChannelMeters={setShowChannelMeters}
-      showMetadata={showMetadata}
-      setShowMetadata={setShowMetadata}
-      showPlaylist={showPlaylist}
-      setShowPlaylist={setShowPlaylist}
-      showLibraryBrowser={showLibraryBrowser}
-      setShowLibraryBrowser={setShowLibraryBrowser}
-      showLocalLibrary={showLocalLibrary}
-      setShowLocalLibrary={setShowLocalLibrary}
-      localLibraryRoots={localLibrary.roots}
-      localLibraryLoading={localLibrary.isLoading}
-      localLibraryImporting={localLibrary.isImporting}
-      localLibraryImportProgress={localLibrary.importProgress}
-      localLibraryImportError={localLibrary.importError}
-      localLibraryFsAccessSupported={localLibrary.fsAccessSupported}
-      activeLibraryEntryId={activeLibraryEntryId}
-      onLocalLibraryImportFolder={() => void localLibrary.importFolder()}
-      onLocalLibraryImportWebkit={(files) => void localLibrary.importWebkitFiles(files)}
-      onLocalLibraryRescanRoot={(rootId) => void localLibrary.rescanRoot(rootId)}
-      onLocalLibraryRemoveRoot={(rootId) => void localLibrary.removeRoot(rootId)}
-      onLocalLibraryCancelImport={localLibrary.cancelImport}
-      onLocalLibraryPlay={handleLocalLibraryPlay}
-      playlistItems={playlist.items}
-      playlistCurrentIndex={playlist.currentIndex}
-      playlistIsPlaying={isPlaying}
-      playlistShuffle={playlist.shuffle}
-      playlistRepeat={playlist.repeat}
-      onPlaylistSelect={handlePlaylistSelect}
-      onPlaylistRemove={playlist.remove}
-      onPlaylistClear={playlist.clear}
-      onPlaylistPrev={handlePlaylistPrev}
-      onPlaylistNext={handlePlaylistNext}
-      onPlaylistShuffleToggle={playlist.toggleShuffle}
-      onPlaylistRepeatCycle={playlist.cycleRepeat}
-      onPlaylistFilesAdded={handlePlaylistFilesAdded}
-      songsData={songsQuery.data}
-      songsLoading={songsQuery.isLoading}
-      songsRefreshing={songsQuery.isFetching && !songsQuery.isLoading}
-      libraryErrorMessage={libraryErrorMessage}
-      onRefreshLibrary={() => void songsQuery.refetch()}
-      handleLibrarySongLoad={handleLibrarySongLoad}
-      onSyncLibrary={async () => { await syncLibraryMutation.mutateAsync(); }}
-      syncPending={syncLibraryMutation.isPending}
-      syncLibraryErrorMessage={syncLibraryErrorMessage}
-      activeModuleForSave={activeModuleForSave}
-      onSaveModule={async (req) => { await saveSongMutation.mutateAsync(req); }}
-      savePending={saveSongMutation.isPending}
-      saveSongErrorMessage={saveSongErrorMessage}
-      cheatsheetOpen={cheatsheetOpen}
-      setCheatsheetOpen={setCheatsheetOpen}
-      status={status}
-      onCopyShareLink={() => void copyShareLink()}
-      editMode={patternEdit.editMode}
-      onToggleEditMode={patternEdit.toggleEditMode}
-      patternEditDirty={patternEdit.isDirty}
-      canPatternUndo={patternEdit.canUndo}
-      canPatternRedo={patternEdit.canRedo}
-      onPatternUndo={patternEdit.undo}
-      onPatternRedo={patternEdit.redo}
-      onPatternRevert={patternEdit.revertToBaseline}
-      onPatternCellEdit={handlePatternCellEdit}
-      onPatternCellPatch={patternEdit.editCell}
-      onPatternCellClear={patternEdit.clearCell}
-      onSequencerCellEdit={handleSequencerCellEdit}
-      midiControls={midiControls}
-      moduleFileName={moduleFileName}
-      moduleDurationSeconds={moduleDurationSeconds}
-      channelMuteMask={channelMuteMask}
-      onToggleChannelMute={toggleChannelMute}
-      onExportWav={handleExportWav}
-      onStartCapture={handleStartCapture}
-      onStopCapture={stopCapture}
-      offlineExportState={offlineExportState}
-      isExporting={isExporting}
-      captureState={captureState}
-      isRecording={isRecording}
-      getRendererBackend={() => window.currentPatternRenderer?.backend ?? null}
-      dualAudioContext={activeEngine === 'native-worklet'}
-    />
-    <ToastStack toasts={toasts} onDismiss={dismissToast} />
+      <PlayerSessionProvider value={playerSession}>
+        <PlayerFeaturesProvider value={playerFeatures}>
+          <MainLayout />
+        </PlayerFeaturesProvider>
+      </PlayerSessionProvider>
+      <ToastStack toasts={toasts} onDismiss={dismissToast} />
     </>
   );
 }

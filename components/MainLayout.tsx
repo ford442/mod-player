@@ -1,15 +1,12 @@
-import React from 'react';
 import { Header } from './Header';
 import { Controls } from './Controls';
 import { PatternDisplay } from './PatternDisplay';
 import { MediaOverlay } from './MediaOverlay';
-import { MediaPanel, type MediaFades } from './MediaPanel';
+import { MediaPanel } from './MediaPanel';
 import { KeyboardShortcutHelp } from './KeyboardShortcutHelp';
 import { ChannelMeters } from './ChannelMeters';
 import { MetadataPanel } from './MetadataPanel';
-import type { ModuleMetadata } from './MetadataPanel';
 import { Playlist } from './Playlist';
-import type { PlaylistItem } from './Playlist';
 import { LibraryBrowser } from './LibraryBrowser';
 import { LibraryPanel } from './LibraryPanel';
 import { SeekBar } from './SeekBar';
@@ -18,361 +15,204 @@ import { ShaderSelectorPanel } from './ShaderSelectorPanel';
 import { PatternEditor } from './PatternEditor';
 import { MidiControlsPanel } from './MidiControlsPanel';
 import { ExportPanel } from './ExportPanel';
+import { InstrumentPanel } from './InstrumentPanel';
 import { cn } from '../utils/cn';
 import { setLiteOverride } from '../utils/deviceCapabilities';
 import { usesInstrumentPalette } from '../utils/shaderVersion';
-import { IS_PUBLIC_MODE, AVAILABLE_SHADERS, THEME_OPTIONS } from '../appConfig';
-import type { AppTheme } from '../appConfig';
-import type { PatternMatrix, ChannelShadowState, PlaybackState, MediaItem } from '../types';
-import type { BloomPreset, ColorScheme, NightPreset } from '../types/bloomPresets';
-import type { RemoteSong, SongSaveRequest, ShaderMeta } from '../utils/storageApi';
-import type { LibraryEntry, LibraryImportProgress, LibraryRoot } from '../types/localLibrary';
-import type { PatternCellPatch, PatternEditField } from '../utils/patternEdit';
-import type { useMidiControls } from '../hooks/useMidiControls';
+import { IS_PUBLIC_MODE, AVAILABLE_SHADERS, THEME_OPTIONS, LIGHT_THEMES, type AppTheme } from '../appConfig';
+import { usePlayerSession } from '../context/PlayerSessionContext';
+import { usePlayerFeatures } from '../context/PlayerFeaturesContext';
+import { usePlayerUiStore } from '../store/playerUiStore';
+import { useShaderPrefsStore } from '../store/shaderPrefsStore';
 
-interface MainLayoutProps {
-  isDarkMode: boolean;
-  theme: AppTheme;
-  setTheme: (t: AppTheme) => void;
-  setIs3DMode: (v: boolean) => void;
-  liteMode: boolean;
-  setLiteMode: (v: boolean) => void;
-  reactiveMode: boolean;
-  setReactiveMode: (v: boolean) => void;
-  isWorkletSupported: boolean;
-  workletLoadError: string | null | undefined;
-  toggleAudioEngine: () => void;
-  activeEngine: string;
-  shaderFile: string;
-  displayShaderFile: string;
-  setShaderFile: (s: string) => void;
-  handleRandomShader: () => void;
-  validShaderFavorites: string[];
-  validShaderRecents: string[];
-  shaderThumbnails: Record<string, string>;
-  toggleShaderFavorite: (s: string) => void;
-  shaderCatalog: ShaderMeta[];
-  shaderCatalogLoading: boolean;
-  shaderCatalogError: string | null;
-  onRateShader: (shaderId: string, score: number) => Promise<void>;
-  ratingInFlightShaderId: string | null;
-  colorPalette: number;
-  setColorPalette: (v: number) => void;
-  paletteMode: number;
-  setPaletteMode: (v: number) => void;
-  instrumentPalette: Uint8Array;
-  isStepsShader: boolean;
-  stepsLength: 32 | 64;
-  setStepsLength: (v: 32 | 64) => void;
-  sequencerMatrix: PatternMatrix | null;
-  playbackRowFraction: number;
-  isPlaying: boolean;
-  playbackSeconds: number;
-  channelStates: ChannelShadowState[];
-  beatPhase: number;
-  grooveAmount: number;
-  kickTrigger: number;
-  activeChannels: number[];
-  isModuleLoaded: boolean;
-  volume: number;
-  pan: number;
-  isLooping: boolean;
-  totalPatternRows: number;
-  play: () => void;
-  stopMusic: (v: boolean) => void;
-  seekToStep: (step: number) => void;
-  setIsLooping: (v: boolean | ((prev: boolean) => boolean)) => void;
-  setVolume: (v: number | ((prev: number) => number)) => void;
-  setPan: (v: number) => void;
-  handleFileSelected: (file: File) => void;
-  analyserNode: AnalyserNode | null;
-  debugPanelOpen: boolean;
-  setDebugPanelOpen: (v: boolean | ((prev: boolean) => boolean)) => void;
-  playbackStateRef: React.MutableRefObject<PlaybackState>;
-  channelStatesRef: React.MutableRefObject<ChannelShadowState[]>;
-  oscBufferRef: React.MutableRefObject<Float32Array | null>;
-  audioReactiveRef: React.MutableRefObject<Float32Array | null>;
-  bloomPreset: BloomPreset;
-  setBloomPreset: (v: BloomPreset) => void;
-  colorScheme: ColorScheme;
-  setColorScheme: (v: ColorScheme) => void;
-  isNightShader: boolean;
-  nightModeEnabled: boolean;
-  nightConfig: { bloomIntensity: number; dimFactor: number; vignetteStrength: number; filmGrain: number; invertMix: number; presetIndex: number };
-  nightModePreset: NightPreset;
-  setNightModeEnabled: (v: boolean) => void;
-  setNightModePreset: (v: NightPreset) => void;
-  crtEnabled: boolean;
-  setCrtEnabled: (v: boolean) => void;
-  chassisDark: boolean;
-  setChassisDark: (v: boolean) => void;
-  dimFactor: number;
-  mediaItem: MediaItem | null;
-  mediaVisible: boolean;
-  mediaFades?: { in: number; out: number };
-  moduleMediaFileName?: string;
-  moduleMediaHintText?: string;
-  setMediaVisible: (v: boolean) => void;
-  setMediaItem: (item: MediaItem | null) => void;
-  onMediaRemove: (id: string) => void;
-  onMediaFadesChange: (fades: MediaFades) => void;
-  handleMediaAdd: (file: File) => void;
-  handleRemoteMediaSelect: (item: MediaItem) => void;
-  isReady: boolean;
-  channelVU: Float32Array | null;
-  moduleMetadata: ModuleMetadata | null;
-  showChannelMeters: boolean;
-  setShowChannelMeters: (v: boolean) => void;
-  showMetadata: boolean;
-  setShowMetadata: (v: boolean) => void;
-  showPlaylist: boolean;
-  setShowPlaylist: (v: boolean) => void;
-  showLibraryBrowser: boolean;
-  setShowLibraryBrowser: (v: boolean) => void;
-  showLocalLibrary: boolean;
-  setShowLocalLibrary: (v: boolean) => void;
-  localLibraryRoots: LibraryRoot[];
-  localLibraryLoading: boolean;
-  localLibraryImporting: boolean;
-  localLibraryImportProgress: LibraryImportProgress | null;
-  localLibraryImportError: string | null;
-  localLibraryFsAccessSupported: boolean;
-  activeLibraryEntryId?: string | null;
-  onLocalLibraryImportFolder: () => void;
-  onLocalLibraryImportWebkit: (files: FileList) => void;
-  onLocalLibraryRescanRoot: (rootId: string) => void;
-  onLocalLibraryRemoveRoot: (rootId: string) => void;
-  onLocalLibraryCancelImport: () => void;
-  onLocalLibraryPlay: (entry: LibraryEntry) => Promise<void>;
-  playlistItems: PlaylistItem[];
-  playlistCurrentIndex: number;
-  playlistIsPlaying: boolean;
-  playlistShuffle: boolean;
-  playlistRepeat: 'none' | 'one' | 'all';
-  onPlaylistSelect: (index: number) => void;
-  onPlaylistRemove: (index: number) => void;
-  onPlaylistClear: () => void;
-  onPlaylistPrev: () => void;
-  onPlaylistNext: () => void;
-  onPlaylistShuffleToggle: () => void;
-  onPlaylistRepeatCycle: () => void;
-  onPlaylistFilesAdded: (files: FileList) => void;
-  songsData: RemoteSong[] | undefined;
-  songsLoading: boolean;
-  songsRefreshing: boolean;
-  libraryErrorMessage: string | null;
-  onRefreshLibrary: () => void;
-  handleLibrarySongLoad: (song: RemoteSong) => Promise<void>;
-  onSyncLibrary: () => Promise<void>;
-  syncPending: boolean;
-  syncLibraryErrorMessage: string | null;
-  activeModuleForSave: SongSaveRequest | null;
-  onSaveModule: (req: SongSaveRequest) => Promise<void>;
-  savePending: boolean;
-  saveSongErrorMessage: string | null;
-  cheatsheetOpen: boolean;
-  setCheatsheetOpen: (v: boolean) => void;
-  status: string;
-  onCopyShareLink?: () => void;
-  editMode?: boolean;
-  onToggleEditMode?: () => void;
-  patternEditDirty?: boolean;
-  canPatternUndo?: boolean;
-  canPatternRedo?: boolean;
-  onPatternUndo?: () => void;
-  onPatternRedo?: () => void;
-  onPatternRevert?: () => void;
-  onPatternCellEdit?: (row: number, channel: number, field: PatternEditField) => void;
-  onPatternCellPatch?: (row: number, channel: number, patch: PatternCellPatch) => void;
-  onPatternCellClear?: (row: number, channel: number) => void;
-  onSequencerCellEdit?: (row: number, channel: number) => void;
-  midiControls?: ReturnType<typeof useMidiControls>;
-  moduleFileName: string;
-  moduleDurationSeconds: number;
-  channelMuteMask: boolean[];
-  onToggleChannelMute: (channel: number) => void;
-  onExportWav: () => void;
-  onStartCapture: () => void;
-  onStopCapture: () => void;
-  offlineExportState: import('../hooks/useOfflineExport').OfflineExportState;
-  isExporting: boolean;
-  captureState: import('../hooks/usePerformanceCapture').PerformanceCaptureState;
-  isRecording: boolean;
-  getRendererBackend: () => import('../src/renderers/types').PatternRendererBackend | null;
-  dualAudioContext: boolean;
-}
+export function MainLayout() {
+  const session = usePlayerSession();
+  const features = usePlayerFeatures();
+  const {
+    theme,
+    setTheme,
+    liteMode,
+    setLiteMode,
+    reactiveMode,
+    setReactiveMode,
+    debugPanelOpen,
+    setDebugPanelOpen,
+    chassisDark,
+    setChassisDark,
+    cheatsheetOpen,
+    setCheatsheetOpen,
+    showChannelMeters,
+    setShowChannelMeters,
+    showMetadata,
+    setShowMetadata,
+    showInstruments,
+    setShowInstruments,
+    showPlaylist,
+    setShowPlaylist,
+    showLibraryBrowser,
+    setShowLibraryBrowser,
+    showLocalLibrary,
+    setShowLocalLibrary,
+    editMode,
+    toggleEditMode,
+    selectedInstrumentIndex,
+  } = usePlayerUiStore();
+  const {
+    storedShader: shaderFile,
+    selectShader: setShaderFile,
+    randomizeShader: handleRandomShader,
+    shaderThumbnails,
+    toggleShaderFavorite,
+    colorPalette,
+    setColorPalette,
+    paletteMode,
+    setPaletteMode,
+    stepsLength,
+    setStepsLength,
+    bloomPreset,
+    setBloomPreset,
+    colorScheme,
+    setColorScheme,
+    nightModeEnabled,
+    setNightModeEnabled,
+    nightModePreset,
+    setNightModePreset,
+    crtEnabled,
+    setCrtEnabled,
+  } = useShaderPrefsStore();
 
-export function MainLayout({
-  isDarkMode,
-  theme,
-  setTheme,
-  setIs3DMode,
-  liteMode,
-  setLiteMode,
-  reactiveMode,
-  setReactiveMode,
-  isWorkletSupported,
-  workletLoadError,
-  toggleAudioEngine,
-  activeEngine,
-  shaderFile,
-  displayShaderFile,
-  setShaderFile,
-  handleRandomShader,
-  validShaderFavorites,
-  validShaderRecents,
-  shaderThumbnails,
-  toggleShaderFavorite,
-  shaderCatalog,
-  shaderCatalogLoading,
-  shaderCatalogError,
-  onRateShader,
-  ratingInFlightShaderId,
-  colorPalette,
-  setColorPalette,
-  paletteMode,
-  setPaletteMode,
-  instrumentPalette,
-  isStepsShader,
-  stepsLength,
-  setStepsLength,
-  sequencerMatrix,
-  playbackRowFraction,
-  isPlaying,
-  playbackSeconds,
-  channelStates,
-  beatPhase,
-  grooveAmount,
-  kickTrigger,
-  activeChannels,
-  isModuleLoaded,
-  volume,
-  pan,
-  isLooping,
-  totalPatternRows,
-  play,
-  stopMusic,
-  seekToStep,
-  setIsLooping,
-  setVolume,
-  setPan,
-  handleFileSelected,
-  analyserNode,
-  debugPanelOpen,
-  setDebugPanelOpen,
-  playbackStateRef,
-  channelStatesRef,
-  oscBufferRef,
-  audioReactiveRef,
-  bloomPreset,
-  setBloomPreset,
-  colorScheme,
-  setColorScheme,
-  isNightShader,
-  nightModeEnabled,
-  nightConfig,
-  nightModePreset,
-  setNightModeEnabled,
-  setNightModePreset,
-  crtEnabled,
-  setCrtEnabled,
-  chassisDark,
-  setChassisDark,
-  dimFactor,
-  mediaItem,
-  mediaVisible,
-  setMediaVisible,
-  setMediaItem,
-  mediaFades,
-  moduleMediaFileName,
-  moduleMediaHintText,
-  onMediaRemove,
-  onMediaFadesChange,
-  handleMediaAdd,
-  handleRemoteMediaSelect,
-  isReady,
-  channelVU,
-  moduleMetadata,
-  showChannelMeters,
-  setShowChannelMeters,
-  showMetadata,
-  setShowMetadata,
-  showPlaylist,
-  setShowPlaylist,
-  showLibraryBrowser,
-  setShowLibraryBrowser,
-  showLocalLibrary,
-  setShowLocalLibrary,
-  localLibraryRoots,
-  localLibraryLoading,
-  localLibraryImporting,
-  localLibraryImportProgress,
-  localLibraryImportError,
-  localLibraryFsAccessSupported,
-  activeLibraryEntryId,
-  onLocalLibraryImportFolder,
-  onLocalLibraryImportWebkit,
-  onLocalLibraryRescanRoot,
-  onLocalLibraryRemoveRoot,
-  onLocalLibraryCancelImport,
-  onLocalLibraryPlay,
-  playlistItems,
-  playlistCurrentIndex,
-  playlistIsPlaying,
-  playlistShuffle,
-  playlistRepeat,
-  onPlaylistSelect,
-  onPlaylistRemove,
-  onPlaylistClear,
-  onPlaylistPrev,
-  onPlaylistNext,
-  onPlaylistShuffleToggle,
-  onPlaylistRepeatCycle,
-  onPlaylistFilesAdded,
-  songsData,
-  songsLoading,
-  songsRefreshing,
-  libraryErrorMessage,
-  onRefreshLibrary,
-  handleLibrarySongLoad,
-  onSyncLibrary,
-  syncPending,
-  syncLibraryErrorMessage,
-  activeModuleForSave,
-  onSaveModule,
-  savePending,
-  saveSongErrorMessage,
-  cheatsheetOpen,
-  setCheatsheetOpen,
-  status,
-  onCopyShareLink,
-  editMode = false,
-  onToggleEditMode,
-  patternEditDirty = false,
-  canPatternUndo = false,
-  canPatternRedo = false,
-  onPatternUndo,
-  onPatternRedo,
-  onPatternRevert,
-  onPatternCellEdit,
-  onPatternCellPatch,
-  onPatternCellClear,
-  onSequencerCellEdit,
-  midiControls,
-  moduleFileName,
-  moduleDurationSeconds,
-  channelMuteMask,
-  onToggleChannelMute,
-  onExportWav,
-  onStartCapture,
-  onStopCapture,
-  offlineExportState,
-  isExporting,
-  captureState,
-  isRecording,
-  getRendererBackend,
-  dualAudioContext,
-}: MainLayoutProps) {
+  const isDarkMode = !LIGHT_THEMES.has(theme);
+  const {
+    isReady,
+    isModuleLoaded,
+    isPlaying,
+    isLooping,
+    playbackSeconds,
+    playbackRowFraction,
+    totalPatternRows,
+    sequencerMatrix,
+    channelStates,
+    beatPhase,
+    grooveAmount,
+    kickTrigger,
+    activeChannels,
+    volume,
+    pan,
+    status,
+    activeEngine,
+    isWorkletSupported,
+    syncDebug,
+    workletLoadError,
+    analyserNode,
+    channelVU,
+    moduleMetadata,
+    moduleFileName,
+    moduleDurationSeconds,
+    instrumentTable,
+    channelMuteMask,
+    displayShaderFile,
+    instrumentPalette,
+    dimFactor,
+    isNightShader,
+    isStepsShader,
+    nightConfig,
+    playbackStateRef,
+    channelStatesRef,
+    oscBufferRef,
+    audioReactiveRef,
+    play,
+    stopMusic,
+    seekToStep,
+    setIsLooping,
+    setVolume,
+    setPan,
+    handleFileSelected,
+    toggleAudioEngine,
+    toggleChannelMute: onToggleChannelMute,
+  } = session;
+  const {
+    setIs3DMode,
+    onCopyShareLink,
+    mediaItem,
+    mediaVisible,
+    mediaFades,
+    moduleMediaFileName,
+    moduleMediaHintText,
+    setMediaVisible,
+    setMediaItem,
+    onMediaRemove,
+    onMediaFadesChange,
+    handleMediaAdd,
+    handleRemoteMediaSelect,
+    shaderCatalog,
+    shaderCatalogLoading,
+    shaderCatalogError,
+    onRateShader,
+    ratingInFlightShaderId,
+    validShaderFavorites,
+    validShaderRecents,
+    localLibraryRoots,
+    localLibraryLoading,
+    localLibraryImporting,
+    localLibraryImportProgress,
+    localLibraryImportError,
+    localLibraryFsAccessSupported,
+    activeLibraryEntryId,
+    onLocalLibraryImportFolder,
+    onLocalLibraryImportWebkit,
+    onLocalLibraryRescanRoot,
+    onLocalLibraryRemoveRoot,
+    onLocalLibraryCancelImport,
+    onLocalLibraryPlay,
+    playlistItems,
+    playlistCurrentIndex,
+    playlistIsPlaying,
+    playlistShuffle,
+    playlistRepeat,
+    onPlaylistSelect,
+    onPlaylistRemove,
+    onPlaylistClear,
+    onPlaylistPrev,
+    onPlaylistNext,
+    onPlaylistShuffleToggle,
+    onPlaylistRepeatCycle,
+    onPlaylistFilesAdded,
+    songsData,
+    songsLoading,
+    songsRefreshing,
+    libraryErrorMessage,
+    onRefreshLibrary,
+    handleLibrarySongLoad,
+    onSyncLibrary,
+    syncPending,
+    syncLibraryErrorMessage,
+    activeModuleForSave,
+    onSaveModule,
+    savePending,
+    saveSongErrorMessage,
+    patternEditDirty = false,
+    canPatternUndo = false,
+    canPatternRedo = false,
+    onPatternUndo,
+    onPatternRedo,
+    onPatternRevert,
+    onPatternCellEdit,
+    onPatternCellPatch,
+    onPatternCellClear,
+    onSequencerCellEdit,
+    onExportPatternDump,
+    midiControls,
+    onExportWav,
+    onStartCapture,
+    onStopCapture,
+    offlineExportState,
+    isExporting,
+    captureState,
+    isRecording,
+    getRendererBackend,
+    dualAudioContext,
+  } = features;
+
   return (
     <div className="min-h-screen bg-panel-base text-[var(--text-primary)] p-4 flex flex-col items-center transition-colors duration-300">
       <div className="w-full max-w-[1280px]">
@@ -463,20 +303,24 @@ export function MainLayout({
                     🔗 Share
                   </button>
                 )}
-                {onToggleEditMode && (
+                {isModuleLoaded && (
                   <button
                     type="button"
-                    onClick={onToggleEditMode}
-                    disabled={!isModuleLoaded}
+                    onClick={() => toggleEditMode()}
+                    disabled={isExporting}
                     className={cn(
                       'px-4 py-2 text-sm font-mono rounded-lg shadow-lg transition-colors border',
                       editMode
                         ? 'bg-amber-600 text-white border-amber-500 hover:bg-amber-700'
-                        : isModuleLoaded
-                          ? 'bg-gray-700 text-gray-200 border-gray-600 hover:bg-gray-600'
-                          : 'bg-gray-700 text-gray-500 border-gray-600 cursor-not-allowed opacity-60',
+                        : isExporting
+                          ? 'bg-gray-700 text-gray-500 border-gray-600 cursor-not-allowed opacity-60'
+                          : 'bg-gray-700 text-gray-200 border-gray-600 hover:bg-gray-600',
                     )}
-                    title="Toggle pattern edit mode (session-only)"
+                    title={
+                      isExporting
+                        ? 'Pattern editor locked while export is running'
+                        : 'Toggle pattern edit mode (session-only visualization)'
+                    }
                   >
                     ✏️ Edit{patternEditDirty ? ' *' : ''}
                   </button>
@@ -486,10 +330,10 @@ export function MainLayout({
                     <button
                       type="button"
                       onClick={onPatternUndo}
-                      disabled={!canPatternUndo}
+                      disabled={!canPatternUndo || isExporting}
                       className={cn(
                         'px-3 py-2 text-sm font-mono rounded-lg border transition-colors',
-                        canPatternUndo
+                        canPatternUndo && !isExporting
                           ? 'bg-gray-700 text-gray-200 border-gray-600 hover:bg-gray-600'
                           : 'bg-gray-800 text-gray-600 border-gray-700 cursor-not-allowed',
                       )}
@@ -500,10 +344,10 @@ export function MainLayout({
                     <button
                       type="button"
                       onClick={onPatternRedo}
-                      disabled={!canPatternRedo}
+                      disabled={!canPatternRedo || isExporting}
                       className={cn(
                         'px-3 py-2 text-sm font-mono rounded-lg border transition-colors',
-                        canPatternRedo
+                        canPatternRedo && !isExporting
                           ? 'bg-gray-700 text-gray-200 border-gray-600 hover:bg-gray-600'
                           : 'bg-gray-800 text-gray-600 border-gray-700 cursor-not-allowed',
                       )}
@@ -515,10 +359,26 @@ export function MainLayout({
                       <button
                         type="button"
                         onClick={onPatternRevert}
-                        className="px-3 py-2 text-sm font-mono rounded-lg border transition-colors bg-amber-900/60 text-amber-100 border-amber-700 hover:bg-amber-800/70"
+                        disabled={isExporting}
+                        className={cn(
+                          'px-3 py-2 text-sm font-mono rounded-lg border transition-colors',
+                          isExporting
+                            ? 'bg-gray-800 text-gray-600 border-gray-700 cursor-not-allowed'
+                            : 'bg-amber-900/60 text-amber-100 border-amber-700 hover:bg-amber-800/70',
+                        )}
                         title="Discard edits and restore loaded pattern (session-only)"
                       >
                         ↩ Revert
+                      </button>
+                    )}
+                    {onExportPatternDump && (
+                      <button
+                        type="button"
+                        onClick={onExportPatternDump}
+                        className="px-3 py-2 text-sm font-mono rounded-lg border transition-colors bg-cyan-900/50 text-cyan-100 border-cyan-700 hover:bg-cyan-800/70"
+                        title="Download edited pattern matrix as JSON"
+                      >
+                        ⬇ Dump JSON
                       </button>
                     )}
                   </>
@@ -633,6 +493,7 @@ export function MainLayout({
               debugPanelOpen={debugPanelOpen}
               onCloseDebug={() => setDebugPanelOpen(false)}
               onOpenDebug={() => setDebugPanelOpen(true)}
+              syncDebug={syncDebug}
               // PERFORMANCE OPTIMIZATION: Pass ref for high-frequency updates
               playbackStateRef={playbackStateRef}
               channelStatesRef={channelStatesRef}
@@ -644,6 +505,7 @@ export function MainLayout({
              bloomThreshold={bloomPreset.threshold}
              colorPalette={colorPalette}
              paletteMode={paletteMode}
+             highlightInstrument={selectedInstrumentIndex ?? 0}
              instrumentPalette={instrumentPalette}
              stepsLength={stepsLength}
              onStepsLengthToggle={() => setStepsLength(stepsLength === 32 ? 64 : 32)}
@@ -729,6 +591,7 @@ export function MainLayout({
           {[
             { key: 'meters', label: '📊 VU Meters', state: showChannelMeters, toggle: setShowChannelMeters },
             { key: 'meta', label: 'ℹ️ Metadata', state: showMetadata, toggle: setShowMetadata },
+            { key: 'instruments', label: '🎹 Instruments', state: showInstruments, toggle: setShowInstruments },
             { key: 'playlist', label: '📋 Playlist', state: showPlaylist, toggle: setShowPlaylist },
             { key: 'library', label: '☁️ Browse Library', state: showLibraryBrowser, toggle: setShowLibraryBrowser },
             { key: 'collection', label: '📁 Library', state: showLocalLibrary, toggle: setShowLocalLibrary },
@@ -767,6 +630,16 @@ export function MainLayout({
                   matrix={sequencerMatrix}
                   isPlaying={isPlaying}
                   playbackSeconds={playbackSeconds}
+                />
+              </Panel>
+            )}
+            {showInstruments && (
+              <Panel variant="bezel" title="Instruments" titleAccent>
+                <InstrumentPanel
+                  table={instrumentTable}
+                  instrumentPalette={instrumentPalette}
+                  shaderFile={shaderFile}
+                  isDarkMode={isDarkMode}
                 />
               </Panel>
             )}
@@ -816,12 +689,25 @@ export function MainLayout({
               title={patternEditDirty ? 'Pattern Editor (unsaved)' : 'Pattern Editor'}
               titleAccent
             >
+              <div className="mb-2 flex flex-wrap items-center gap-2">
+                {onExportPatternDump && (
+                  <button
+                    type="button"
+                    onClick={onExportPatternDump}
+                    className="px-3 py-1.5 text-xs font-mono rounded border bg-cyan-900/50 text-cyan-100 border-cyan-700 hover:bg-cyan-800/70"
+                  >
+                    Download pattern JSON
+                  </button>
+                )}
+              </div>
               <PatternEditor
                 matrix={sequencerMatrix}
                 currentRow={Math.floor(playbackRowFraction)}
                 numChannels={sequencerMatrix?.numChannels ?? 4}
                 isPlaying={isPlaying}
                 editMode={editMode}
+                readOnly={isExporting}
+                highlightInstrument={selectedInstrumentIndex}
                 onCellEdit={onPatternCellEdit}
                 onCellPatch={onPatternCellPatch}
                 onCellClear={onPatternCellClear}

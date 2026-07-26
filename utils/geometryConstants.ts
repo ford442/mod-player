@@ -87,9 +87,12 @@ export function calculateHorizontalCellSize(
   return { cellW, cellH, offsetX, offsetY, dataChannels };
 }
 
-/** True when WGSL horizontal shaders reserve channel 0 as a header/pad row. */
-export function horizontalLayoutHasHeader(numChannels: number): boolean {
-  return numChannels > 1 && GRID_RECT.y > 0.15;
+/**
+ * True when WGSL horizontal shaders remap channel 0 as a header/pad row.
+ * @deprecated Use horizontalPadRowRemapEnabled(shaderFile, padTopChannel) from overlayLayout.ts
+ */
+export function horizontalLayoutHasHeader(_numChannels: number): boolean {
+  return false;
 }
 
 // Calculate cap scale for pixel-perfect button sizing

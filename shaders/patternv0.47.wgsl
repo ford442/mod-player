@@ -3,6 +3,11 @@
 // Circular Layout with Translucent Glass Caps + Blue/Orange Lighting
 // Based on v0.30 (disc layout with ASCII-packed note data)
 
+//#include "lib/dura.wgsl"
+//#include "lib/palette.wgsl"
+//#include "lib/pitch.wgsl"
+//#include "lib/sdf.wgsl"
+
 struct Uniforms {
   numRows: u32,
   numChannels: u32,
@@ -112,36 +117,6 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
   return out;
 }
 
-fn selectPalette(id: u32, t: f32) -> vec3<f32> {
-  let a = vec3<f32>(0.5, 0.5, 0.5);
-  let b = vec3<f32>(0.5, 0.5, 0.5);
-  let c = vec3<f32>(1.0, 1.0, 1.0);
-  if (id == 1u) {
-    // Warm: reds, oranges, yellows
-    return a + b * cos(6.28318 * (c * t + vec3<f32>(0.0, 0.1, 0.2)));
-  } else if (id == 2u) {
-    // Cool: blues, cyans, purples
-    return a + b * cos(6.28318 * (c * t + vec3<f32>(0.5, 0.7, 0.9)));
-  } else if (id == 3u) {
-    // Neon: pink, cyan, green
-    return a + b * cos(6.28318 * (c * t + vec3<f32>(0.0, 0.5, 1.0)));
-  } else if (id == 4u) {
-    // Acid: green, yellow, chartreuse
-    return a + b * cos(6.28318 * (c * t + vec3<f32>(0.3, 0.0, 0.7)));
-  }
-  // Default palette 0: Rainbow
-  return a + b * cos(6.28318 * (c * t + vec3<f32>(0.0, 0.33, 0.67)));
-}
-
-fn sdRoundedBox(p: vec2<f32>, b: vec2<f32>, r: f32) -> f32 {
-  let q = abs(p) - b + r;
-  return length(max(q, vec2<f32>(0.0))) + min(max(q.x, q.y), 0.0) - r;
-}
-
-fn sdCircle(p: vec2<f32>, r: f32) -> f32 {
-  return length(p) - r;
-}
-
 fn toUpperAscii(code: u32) -> u32 {
   return select(code, code - 32u, (code >= 97u) & (code <= 122u));
 }
@@ -173,12 +148,6 @@ fn pitchClassFromPacked(packed: u32) -> f32 {
 const NOTE_MAX: u32 = 119u;
 
 // Octave brightness multiplier: higher octaves glow brighter (0.65 at C-0, 1.0 at B-9).
-fn octaveBrightness(note: u32) -> f32 {
-  if (note == 0u || note > NOTE_MAX) { return 1.0; }
-  let oct = (note - 1u) / 12u; // 0..9
-  return 0.65 + 0.35 * f32(oct) / 9.0;
-}
-
 fn effectColorFromCode(code: u32, fallback: vec3<f32>) -> vec3<f32> {
   let c = toUpperAscii(code & 255u);
   switch c {
@@ -205,17 +174,6 @@ struct NoteDurationInfo {
   rowOffset: u32,
   isNoteOff: bool,
   isTrigger: bool,
-}
-
-fn unpackDurationInfo(packedA: u32, packedB: u32) -> NoteDurationInfo {
-  var info: NoteDurationInfo;
-  info.duration = (packedA >> 8) & 0xFFu;
-  if (info.duration == 0u) { info.duration = 1u; }
-  let durationFlags = (packedB >> 8) & 0x7Fu;
-  info.rowOffset = durationFlags >> 1u;
-  info.isNoteOff = (durationFlags & 1u) != 0u;
-  info.isTrigger = ((packedB & 0x8000u) != 0u) || (info.rowOffset == 0u && !info.isNoteOff);
-  return info;
 }
 
 fn getFragmentConstants() -> FragmentConstants {
