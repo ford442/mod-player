@@ -56,6 +56,21 @@ Files: `audio-worklet/OpenMPTWorkletEngine.ts`, `cpp/openmpt_wrapper.cpp`, `cpp/
 ### Fallback Path
 If the JS AudioWorklet fails to initialize WASM, `hooks/useAudioGraph.ts` falls back to a `ScriptProcessorNode` on the main thread (deprecated but functional). This is triggered by the worklet posting an `error` message.
 
+### Audio regression guards (#329 / #330 / 2026-07)
+
+Production silent-playback and MOD/XM switch failures were fixed in PRs **#329** and **#330**. **Read `docs/WORKLET_AUDIO_BUG.md` before touching audio hooks or the worklet.**
+
+| Symptom | Root cause | Guard |
+|---------|------------|-------|
+| XM silent after MOD↔XM switch; runaway `ended → seek 0` | Re-init libopenmpt in shared `AudioWorkletGlobalScope` on every new node / `initLib` | `ensureSharedLibOpenMPT` singleton; reuse `AudioWorkletNode` on hot reload; `shouldPostInitLib` |
+| UI “Playing” but no audio after picker/playlist load | `stopMusic` suspended `AudioContext` (needs fresh gesture to `resume()`) | Never call `audioContext.suspend()` on normal stop/reload |
+| MOD hiccups / main-thread jank | `position` postMessage every audio quantum (~350 Hz) | Worklet throttles position reports to ~60 Hz; main thread extrapolates via `playheadPrediction` |
+| Hot reload glitches | `node.disconnect()` on every `play()` | Skip reconnect when `canReuseWorkletNode` |
+
+**When editing `openmpt-worklet.js`:** bump `WORKLET_VERSION` in `hooks/useWorkletLoader.ts`. Run `npm test` — `tests/workletAudioLifecycle.test.ts` enforces suspend/initLib invariants.
+
+**Manual audible checklist** (CI cannot assert speakers): default MOD play → file picker `.mod`/`.xm` → MOD↔XM switch while playing → stop→play. See `docs/WORKLET_AUDIO_BUG.md`.
+
 ## WebGPU & Shaders
 - **Language:** WGSL (WebGPU Shading Language).
 - **Location:** Source shaders live in `/shaders`. There are 50+ versioned files (e.g., `patternv0.50.wgsl`, `chassisv0.40.wgsl`). Served copies must also exist in `/public/shaders`.
@@ -227,6 +242,7 @@ python3 deploy.py
 6. **Native vs JS worklet names:** Native glue is always `openmpt-native.*`. The tracked production processor is `openmpt-worklet.js`. Both `npm run build:emcc` and `npm run build:worklet` call `scripts/build-wasm.sh` and refuse to clobber the JS processor.
 7. **Shader-Uniform coupling:** Shaders are tightly coupled to TypeScript host code. Changing a shader's `struct Uniforms` requires a matching change to `createUniformPayload()` in `PatternDisplay.tsx`. Adding a new shader often requires manually updating version checks in `PatternDisplay.tsx` for layout, packing, canvas size, and input handling.
 8. **Symlink watcher infinite loop:** The CodeQL scanner leaves a self-referential symlink (`_codeql_detected_source_root` → `.`). The Vite config mitigates this with `watch.followSymlinks: false`. Do not remove this setting.
+9. **MOD/XM silent playback / hiccups:** Do not re-init libopenmpt per `play()`, do not `suspend()` the `AudioContext` on module reload, do not post worklet `position` every audio quantum, and do not `disconnect()` the worklet node on hot reload. See `docs/WORKLET_AUDIO_BUG.md` and `tests/workletAudioLifecycle.test.ts`.
 
 ## Cursor Cloud specific instructions
 This is a **frontend-only** app; there is no backend to run for local dev. `libopenmpt` is self-hosted under `public/libmpt/` and sample modules (`4-mat_madness.mod`, `test.xm`, `libopenmpt-test.mod`) ship in `public/`, so the player works fully offline with no CDN or storage API. `VITE_STORAGE_API_URL` (proxied `/api`, `/songs`) is optional and only needed for the remote song browser.

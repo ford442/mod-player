@@ -220,6 +220,8 @@ EngineState           // Worklet engine lifecycle state
 
 9. **Race conditions in audio-visual sync:** `channelStatesRef` is a double-buffered mutable ref. Do not replace it with React state — it will cause jank.
 
+10. **MOD/XM playback regressions (#329 / #330):** libopenmpt must init **once** per `AudioWorkletGlobalScope`; reuse the worklet node on module reload; never `suspend()` `AudioContext` on normal stop; throttle worklet `position` postMessage to ~60 Hz; skip `node.disconnect()` on hot reload. Bump `WORKLET_VERSION` when editing `openmpt-worklet.js`. See `docs/WORKLET_AUDIO_BUG.md` and `tests/workletAudioLifecycle.test.ts`.
+
 ---
 
 ## Critical Data Flows
