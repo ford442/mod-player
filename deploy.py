@@ -166,6 +166,9 @@ def validate_stylesheet_assets(build_path: Path) -> None:
         sys.exit(1)
 
     html = index_html.read_text(encoding="utf-8")
+    if b"\x00" in index_html.read_bytes()[:128]:
+        print("ERROR: dist/index.html appears to be UTF-16 (NUL bytes in header)")
+        sys.exit(1)
     hrefs = STYLESHEET_RE.findall(html)
     if not hrefs:
         print("ERROR: dist/index.html has no <link rel=\"stylesheet\">")
@@ -391,7 +394,48 @@ def main() -> None:
             )
 
     print(f"\n=== {'Deployment complete' if success else 'Deployment finished with errors'} ===")
+    if success:
+        verify_live_directory_index(build_path)
     sys.exit(0 if success else 1)
+
+
+def verify_live_directory_index(build_path: Path) -> None:
+    """Warn when the live directory URL serves a different bundle than index.html."""
+    index_html = build_path / "index.html"
+    if not index_html.is_file():
+        return
+    expected_scripts = MODULE_SCRIPT_RE.findall(index_html.read_text(encoding="utf-8"))
+    if not expected_scripts:
+        return
+    expected = expected_scripts[0]
+    live_url = "https://test.1ink.us/xm-player/"
+    try:
+        resp = requests.get(live_url, timeout=15, headers={"User-Agent": "mod-player-deploy-verify"})
+        if resp.status_code != 200:
+            print(f"\n⚠ Live check: {live_url} returned HTTP {resp.status_code}")
+            return
+        charset = resp.headers.get("content-type", "")
+        if "utf-16" in charset.lower():
+            print(
+                "\n⚠ LIVE MISMATCH: /xm-player/ is served as UTF-16 (stale directory index). "
+                "Browsers load the OLD bundle and XM/MOD audio breaks.\n"
+                "  Fix: redeploy with DEPLOY_CLEAN=1, ensure .htaccess DirectoryIndex is active,\n"
+                "  or delete the stale UTF-16 index on the VPS. /xm-player/index.html should match:"
+            )
+        body = resp.text
+        if expected not in body:
+            found = re.search(r"index-[A-Za-z0-9_-]+\.js", body)
+            found_name = found.group(0) if found else "(none)"
+            expected_name = re.search(r"index-[A-Za-z0-9_-]+\.js", expected)
+            print(
+                f"\n⚠ LIVE MISMATCH: /xm-player/ references {found_name} "
+                f"but dist/index.html has {expected_name.group(0) if expected_name else expected}.\n"
+                f"  Users visiting test.1ink.us/xm-player/ get the OLD app until the server index is replaced."
+            )
+        else:
+            print(f"\n✓ Live directory index references current bundle ({expected})")
+    except Exception as exc:
+        print(f"\n⚠ Live directory index check skipped: {exc}")
 
 
 if __name__ == "__main__":
