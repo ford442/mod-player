@@ -44,11 +44,6 @@ struct Uniforms {
   outerRadius: f32,
 };
 
-// Note constants — must match TypeScript NOTE_MIN/NOTE_MAX/NOTE_OFF_MIN in gpuPacking.ts
-const NOTE_MIN: u32     = 1u;
-const NOTE_MAX: u32     = 119u;   // Full range: covers MOD/XM/IT notes (C-0 to B-9)
-const NOTE_OFF_MIN: u32 = 120u;   // Any note value >= this is note-off/cut/fade
-
 // === SUSTAIN TUNING CONSTANTS ===
 // Adjust these to change the visual feel of the Note-On Sustain effect.
 const SUSTAIN_GLOW: f32        = 0.45;  // Glow strength for sustain tail rows (0–1)
@@ -183,14 +178,6 @@ fn sdTriangle(p: vec2<f32>, r: f32) -> f32 {
 
 fn toUpperAscii(code: u32) -> u32 {
   return select(code, code - 32u, (code >= 97u) & (code <= 122u));
-}
-
-// Duration info unpacked from high-precision cell packing
-struct NoteDurationInfo {
-  duration: u32,
-  rowOffset: u32,
-  isNoteOff: bool,
-  isTrigger: bool,  // TRIG-001: explicit note-on row (packedB bit 15)
 }
 
 @fragment

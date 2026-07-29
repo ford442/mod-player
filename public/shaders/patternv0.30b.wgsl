@@ -102,11 +102,6 @@ struct Uniforms {
   invertChannels: u32,
 };
 
-// Note constants — must match TypeScript NOTE_MIN/NOTE_MAX/NOTE_OFF_MIN in gpuPacking.ts
-const NOTE_MIN: u32     = 1u;
-const NOTE_MAX: u32     = 119u;
-const NOTE_OFF_MIN: u32 = 120u;
-
 // Note-on lighting — trigger cells only; instant on, fade-out at end
 const IDLE_NOTE_GLOW: f32      = 0.22;
 const ACTIVE_NOTE_GLOW: f32      = 0.88;
@@ -233,14 +228,6 @@ fn getFragmentConstants() -> FragmentConstants {
   c.borderColor = vec3<f32>(0.0, 0.0, 0.0);
   c.housingSize = vec2<f32>(0.92, 0.92);
   return c;
-}
-
-// TRIG-001 / DURA-001 duration metadata
-struct NoteDurationInfo {
-  duration: u32,
-  rowOffset: u32,
-  isNoteOff: bool,
-  isTrigger: bool,
 }
 
 fn drawChromeIndicator(
