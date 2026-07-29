@@ -16,4 +16,9 @@
 <IfModule mod_mime.c>
   AddType text/css .css
   RemoveCharset .css
+  AddType text/html .html
+  RemoveCharset .html
 </IfModule>
+
+# Always serve the Vite-built index.html for directory requests (not a stale UTF-16 copy).
+DirectoryIndex index.html

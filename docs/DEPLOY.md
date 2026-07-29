@@ -59,6 +59,19 @@ Or retain only files referenced by live `index.html`:
 grep -oE '/xm-player/assets/[^\"]+' index.html
 ```
 
+## Directory index mismatch (critical)
+
+Apache may serve **two different HTML files**:
+
+| URL | Expected |
+|-----|----------|
+| `https://test.1ink.us/xm-player/index.html` | Current Vite `dist/index.html` (UTF-8, correct `index-*.js`) |
+| `https://test.1ink.us/xm-player/` | **Must be the same file** |
+
+If `/xm-player/` returns UTF-16 HTML or references an old `index-D7iykI5o.js` while `index.html` has `index-DrVowyq4.js`, users get **broken audio** (worklet 404 at site root, no #329/#330 fixes). `deploy.py` prints a post-upload warning when this mismatch is detected.
+
+**Fix:** redeploy with prune (`python deploy.py`), ensure `dist/.htaccess` includes `DirectoryIndex index.html`, and delete any stale UTF-16 `index.html` on the VPS if it persists.
+
 ## COOP / COEP headers
 
 Production must match dev (`public/.htaccess` copied into `dist/`):
