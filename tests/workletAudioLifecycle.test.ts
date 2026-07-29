@@ -156,4 +156,16 @@ describe('audio hook source invariants', () => {
     expect(workletSource).toContain('Reusing shared libopenmpt instance');
     expect(workletSource).toContain('Attached to pre-initialised shared libopenmpt');
   });
+
+  it('worklet throttles position postMessage to ~60 Hz', () => {
+    expect(workletSource).toContain('positionReportInterval');
+    expect(workletSource).toContain('lastPositionReportTime');
+    expect(workletSource).toMatch(/lastPositionReportTime\s*=\s*currentTime/);
+  });
+
+  it('play path skips disconnect on hot reload', () => {
+    expect(useAudioGraph).toContain('Hot reload — keeping existing audio graph wiring');
+    expect(useAudioGraph).toContain('forceModuleLoad');
+    expect(useAudioGraph).toContain('workletModuleTokenRef');
+  });
 });

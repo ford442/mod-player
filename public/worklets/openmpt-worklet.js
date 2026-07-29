@@ -611,17 +611,17 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
       }
     }
 
-    // Position every quantum — main thread interpolates with audio clock.
-    // VU is sampled post-render (reflects the quantum just produced).
-    {
-      const numCh = lib._openmpt_module_get_num_channels(mod);
-      const channelVU = [];
-      for (let i = 0; i < Math.min(numCh, 32); i++) {
-        channelVU.push(lib._openmpt_module_get_current_channel_vu_mono(mod, i));
-      }
+    const numCh = lib._openmpt_module_get_num_channels(mod);
+    const channelVU = [];
+    for (let i = 0; i < Math.min(numCh, 32); i++) {
+      channelVU.push(lib._openmpt_module_get_current_channel_vu_mono(mod, i));
+    }
 
-      this._updateAudioReactive(outL, outR, samplesWritten, channelVU);
+    this._updateAudioReactive(outL, outR, samplesWritten, channelVU);
 
+    // Position at ~60 Hz — main thread extrapolates with audio clock between reports.
+    // Posting every audio quantum (~350 Hz) flooded the main thread and caused MOD hiccups.
+    if (currentTime - this.lastPositionReportTime >= this.positionReportInterval) {
       this._lastReportedRowInt = rowInt;
       this.port.postMessage({
         type: 'position',
@@ -639,6 +639,7 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
         sampleRate,
         channelVU,
       });
+      this.lastPositionReportTime = currentTime;
     }
 
     return true;

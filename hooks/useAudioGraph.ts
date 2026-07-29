@@ -60,6 +60,9 @@ export interface AudioGraphRefs {
   nativeSharedBuffer:  React.MutableRefObject<SharedArrayBuffer | null>;
   /** Callback to lazily create a main-thread libopenmpt module for ScriptProcessor fallback. */
   ensureMainThreadModuleRef: React.MutableRefObject<((data: Uint8Array) => Promise<void>) | null>;
+  /** Incremented on each processModuleData — guards stale worklet `loaded` acks. */
+  workletModuleTokenRef: React.MutableRefObject<number>;
+  lastWorkletModuleTokenSentRef: React.MutableRefObject<number>;
 }
 
 export interface AudioGraphCallbacks {
@@ -81,6 +84,8 @@ export interface AudioGraphConfig {
   volume:                 number;
   isLooping:              boolean;
   WORKLET_URL:            string;
+  /** Set after processModuleData — always post `load` even if isPlayingRef is still true (#329). */
+  forceModuleLoad?:       boolean;
 }
 
 // AUDIO-001 FIX COMPLETE: Centralized worklet URL from useWorkletLoader
@@ -89,8 +94,9 @@ const WORKLET_URL = getWorkletUrl();
 /** Exact module bytes for worklet load — safe when Uint8Array is a subarray. */
 function moduleBytesFromFileData(fileData: Uint8Array | null): ArrayBuffer | null {
   if (!fileData || fileData.byteLength === 0) return null;
-  // slice() copies into a fresh ArrayBuffer when the view is a subarray or SAB-backed.
-  return fileData.slice().buffer;
+  const copy = new Uint8Array(fileData.byteLength);
+  copy.set(fileData);
+  return copy.buffer;
 }
 
 export async function startAudioPlayback(
@@ -109,7 +115,26 @@ export async function startAudioPlayback(
     return;
   }
 
+  const moduleToken = refs.workletModuleTokenRef.current;
+  const moduleNeedsWorkletLoad =
+    moduleToken !== refs.lastWorkletModuleTokenSentRef.current ||
+    config.forceModuleLoad === true;
+
   if (refs.isPlayingRef.current && refs.audioWorkletNodeRef.current) {
+    // Hot module reload (#329): stopMusic clears isPlayingRef, but a concurrent
+    // `loaded` ack can flip it back before loadModule's play() runs — never skip
+    // posting `load` when the module token advanced.
+    if (moduleNeedsWorkletLoad) {
+      const moduleBuf = moduleBytesFromFileData(refs.fileDataRef.current);
+      if (moduleBuf) {
+        console.log('[PLAY] Hot reload while playing — posting load to worklet:', moduleBuf.byteLength, 'bytes');
+        refs.lastWorkletModuleTokenSentRef.current = moduleToken;
+        refs.audioWorkletNodeRef.current.port.postMessage({ type: 'load', moduleData: moduleBuf });
+        callbacks.setStatus('Loading audio engine...');
+      }
+      return;
+    }
+
     // Recover from "UI playing / worklet paused" races: stopMusic pauses the
     // processor but a stale React render used to clear isPlayingRef. Always
     // nudge the worklet + resume the context instead of hard-ignoring.
@@ -680,6 +705,11 @@ export async function startAudioPlayback(
               callbacks.setStatus("Worklet error: " + message);
             }
           } else if (type === 'loaded') {
+            const ackToken = refs.workletModuleTokenRef.current;
+            if (ackToken !== refs.lastWorkletModuleTokenSentRef.current) {
+              console.log('[PLAY] Ignoring stale worklet loaded ack (token mismatch)');
+              return;
+            }
             // Module is now loaded inside the worklet – safe to start the UI.
             // This deferred start avoids the ~1-2 s off-timing caused by WASM
             // initialisation happening after isPlaying was already set to true.
@@ -737,17 +767,22 @@ export async function startAudioPlayback(
         const moduleBuf = moduleBytesFromFileData(refs.fileDataRef.current);
         if (moduleBuf) {
           console.log('[PLAY] Sending module data to worklet:', moduleBuf.byteLength, 'bytes');
+          refs.lastWorkletModuleTokenSentRef.current = refs.workletModuleTokenRef.current;
           node.port.postMessage({ type: 'load', moduleData: moduleBuf });
         } else {
           console.error("[PLAY] No buffer to send to worklet!");
         }
 
         console.log('[PLAY] Connecting audio graph: worklet -> analyser -> panner -> gain -> destination');
-        try { node.disconnect(); } catch { /* ignore stale edges */ }
-        node.connect(refs.analyserRef.current!);
-        refs.analyserRef.current!.connect(refs.stereoPannerRef.current!);
-        refs.stereoPannerRef.current!.connect(refs.gainNodeRef.current!);
-        refs.gainNodeRef.current!.connect(ctx.destination);
+        if (!reuseWorkletNode) {
+          try { node.disconnect(); } catch { /* ignore stale edges */ }
+          node.connect(refs.analyserRef.current!);
+          refs.analyserRef.current!.connect(refs.stereoPannerRef.current!);
+          refs.stereoPannerRef.current!.connect(refs.gainNodeRef.current!);
+          refs.gainNodeRef.current!.connect(ctx.destination);
+        } else {
+          console.log('[PLAY] Hot reload — keeping existing audio graph wiring');
+        }
 
         refs.audioWorkletNodeRef.current = node;
         // Show a loading state while the 4.8 MB WASM finishes initialising.

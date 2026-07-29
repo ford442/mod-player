@@ -64,6 +64,10 @@ This didn't break playback directly (the error was caught and the app fell back 
 Before modifying the worklet or AudioWorklet-related code:
 
 - [ ] **Bump `WORKLET_VERSION`** in `hooks/useWorkletLoader.ts` if `openmpt-worklet.js` changes.
+- [ ] **Never re-init libopenmpt** on module reload — reuse `AudioWorkletNode` + shared-scope singleton (`#329`).
+- [ ] **Never suspend `AudioContext`** on normal `stopMusic(false)` / module reload (`#330`).
+- [ ] **Throttle worklet `position` postMessage** to ~60 Hz; main thread extrapolates fractional playhead (`playheadPrediction`).
+- [ ] **Skip `node.disconnect()`** when hot-reloading module data into an existing worklet node.
 - [ ] **Never add a `setTimeout` polyfill** that ignores the `delay` argument. Chrome 116+ has native `setTimeout` in AudioWorklet; for older browsers, use `currentTime`-based timing in `process()` instead.
 - [ ] **Never `import()` an AudioWorklet processor file on the main thread.** Use `audioContext.audioWorklet.addModule()` for JS processors, or Emscripten's native API for `AUDIO_WORKLET` builds.
 - [ ] **Verify line numbers in browser console.** After deploy, a hard refresh (`Ctrl+Shift+R` / `Cmd+Shift+R`) should show line numbers matching the current source (e.g., ~250), not the old stub (~130).
@@ -112,6 +116,22 @@ Production `libopenmpt-audioworklet.js` is a **wasm2js** build (`isWasm2js:!0`, 
 | CI | `npm run verify:wasm` rejects any `*.wasm` under `public/`/`dist/` that is tiny, HTML, or missing `\0asm` |
 
 See also `public/worklets/README.md`.
+
+---
+
+## Position report flood — MOD hiccups (2026-07)
+
+### Problem
+
+`openmpt-worklet.js` posted a `position` message on **every** `process()` quantum (~350 Hz at 128-sample blocks). That flooded the main-thread message queue and caused audible MOD stutter, especially alongside React/GPU work.
+
+### Fix
+
+| Change | Detail |
+|--------|--------|
+| `openmpt-worklet.js` | Restore ~60 Hz `position` throttle (`positionReportInterval`); keep audio render + SAB VU update every quantum |
+| `playheadPrediction.ts` | Main thread extrapolates fractional playhead between reports |
+| `WORKLET_VERSION` | Bumped to `7` (cache bust) |
 
 ---
 

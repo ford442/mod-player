@@ -274,9 +274,12 @@ export function useLibOpenMPT(initialVolume: number = 0.4, liteMode: boolean = f
 
   // Stable refs to avoid stale closures across renders
   const isPlayingRef = useRef<boolean>(false);
-  const playRef = useRef<(() => Promise<void>) | null>(null);
+  const playRef = useRef<((options?: { forceModuleLoad?: boolean }) => Promise<void>) | null>(null);
   // Track whether the worklet module is loaded on the current AudioContext
   const workletLoadedRef = useRef<boolean>(false);
+  /** Bumped on every processModuleData — worklet must receive matching `load`. */
+  const workletModuleTokenRef = useRef<number>(0);
+  const lastWorkletModuleTokenSentRef = useRef<number>(-1);
 
   // Stabilize updateUI callback so startAudioPlayback always calls the latest version
   const updateUIRef = useRef<(() => void) | null>(null);
@@ -330,7 +333,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4, liteMode: boolean = f
     setStatus(`Loading "${fileName}"...`);
     await processModuleData(fileData, fileName);
     // Auto-play ONLY when a user manually loads a file/selects from playlist
-    if (playRef.current) playRef.current();
+    if (playRef.current) playRef.current({ forceModuleLoad: true });
   }, []);
 
   const ensureMainThreadModule = useCallback(async (data: Uint8Array) => {
@@ -374,6 +377,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4, liteMode: boolean = f
     // all timing/worklet refs, pauses any active native engine, and clears the
     // worklet message handler so a stray late position report from the old module
     // cannot corrupt the new module's state. The AudioWorkletNode is kept alive.
+    workletModuleTokenRef.current += 1;
     stopMusic(false);
 
     // Mark UI as loading and clear stale playhead/fraction state so the display
@@ -970,7 +974,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4, liteMode: boolean = f
     }
   }, [activeEngine]);
 
-  const play = useCallback(async () => {
+  const play = useCallback(async (options?: { forceModuleLoad?: boolean }) => {
     const audioRefs: AudioGraphRefs = {
       libopenmptRef, fileDataRef, audioContextRef, workletLoadedRef,
       stereoPannerRef, gainNodeRef, analyserRef, audioWorkletNodeRef,
@@ -983,6 +987,8 @@ export function useLibOpenMPT(initialVolume: number = 0.4, liteMode: boolean = f
       audioClockStartRef, workletTimeAtStartRef, driftAccumulatorRef,
       updateUIRef, nativeSharedBuffer: nativeSharedBufferRef,
       ensureMainThreadModuleRef,
+      workletModuleTokenRef,
+      lastWorkletModuleTokenSentRef,
     };
     const audioCbs: AudioGraphCallbacks = {
       setStatus, setIsPlaying, setActiveEngine, setModuleInfo, setSequencerMatrix,
@@ -991,6 +997,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4, liteMode: boolean = f
     const audioConfig: AudioGraphConfig = {
       activeEngine, isWorkletSupported, isNativeWorkletAvailable,
       panValue, volume, isLooping, WORKLET_URL,
+      ...(options?.forceModuleLoad ? { forceModuleLoad: true } : {}),
     };
     await startAudioPlayback(audioRefs, audioCbs, audioConfig);
 
