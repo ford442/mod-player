@@ -168,14 +168,6 @@ struct FragmentConstants {
   housingSize: vec2<f32>,
 };
 
-// TRIG-001: Duration + trigger metadata (high-precision packing)
-struct NoteDurationInfo {
-  duration: u32,
-  rowOffset: u32,
-  isNoteOff: bool,
-  isTrigger: bool,
-}
-
 fn getFragmentConstants() -> FragmentConstants {
   var c: FragmentConstants;
   c.bgColor = vec3<f32>(0.04, 0.04, 0.05);
