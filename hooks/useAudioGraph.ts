@@ -12,16 +12,22 @@ import { detectRuntimeBase, withBase } from '../src/lib/paths';
 import { applyWorkletPositionSample } from '../utils/playheadPrediction';
 import {
   applyNormalizedPosition,
-  jsWorkletPositionToInput,
   nativePositionToInput,
 } from '../utils/workletPositionAdapter';
 import {
   canReuseWorkletNode,
-  shouldAcceptWorkletLoadedAck,
   shouldDisconnectWorkletOnPlay,
   shouldForceWorkletModuleLoad,
   shouldPostInitLib,
 } from '../utils/workletAudioLifecycle';
+import {
+  parseWorkletToMainMessageOrWarn,
+  postInitLib,
+  postLoad,
+  postPause,
+  postPlay,
+} from '../audio-worklet/protocol';
+import { dispatchWorkletToMainMessage } from '../audio-worklet/jsWorkletDispatch';
 
 export interface AudioGraphRefs {
   libopenmptRef:       React.MutableRefObject<LibOpenMPT | null>;
@@ -133,7 +139,7 @@ export async function startAudioPlayback(
       if (moduleBuf) {
         console.log('[PLAY] Hot reload while playing — posting load to worklet:', moduleBuf.byteLength, 'bytes');
         refs.lastWorkletModuleTokenSentRef.current = moduleToken;
-        refs.audioWorkletNodeRef.current.port.postMessage({ type: 'load', moduleData: moduleBuf });
+        refs.audioWorkletNodeRef.current.port.postMessage(postLoad(moduleBuf));
         callbacks.setStatus('Loading audio engine...');
       }
       return;
@@ -144,7 +150,7 @@ export async function startAudioPlayback(
     // nudge the worklet + resume the context instead of hard-ignoring.
     console.log('[PLAY] Already marked playing — ensuring worklet render + context resume');
     try {
-      refs.audioWorkletNodeRef.current.port.postMessage({ type: 'play' });
+      refs.audioWorkletNodeRef.current.port.postMessage(postPlay());
     } catch { /* ignore */ }
     const existingCtx = refs.audioContextRef.current;
     if (existingCtx?.state === 'suspended') {
@@ -232,7 +238,7 @@ export async function startAudioPlayback(
     const staleWorkletNode = refs.audioWorkletNodeRef.current;
     if (shouldDisconnectWorkletOnPlay(staleWorkletNode != null, reuseWorkletNode) && staleWorkletNode) {
       console.log('[PLAY] Disconnecting previous AudioWorkletNode...');
-      try { staleWorkletNode.port.postMessage({ type: 'pause' }); } catch { /* ignore */ }
+      try { staleWorkletNode.port.postMessage(postPause()); } catch { /* ignore */ }
       try { staleWorkletNode.port.onmessage = null; } catch { /* ignore */ }
       try { staleWorkletNode.disconnect(); } catch { /* ignore */ }
       refs.audioWorkletNodeRef.current = null;
@@ -434,8 +440,13 @@ export async function startAudioPlayback(
               setTimeout(() => reject(new Error('Worklet module load timeout (10s)')), 10000);
             });
             
+            const protocolUrl = withBase('worklets/worklet-protocol-constants.js?v=1');
+            const loadProtocol = ctx.audioWorklet.addModule(protocolUrl);
             const loadWorklet = ctx.audioWorklet.addModule(workletUrl);
-            await Promise.race([loadWorklet, loadTimeout]);
+            await Promise.race([
+              Promise.all([loadProtocol, loadWorklet]),
+              loadTimeout,
+            ]);
             
             refs.workletLoadedRef.current = true;
             console.log('[PLAY] ✅ AudioWorklet module loaded successfully');
@@ -589,193 +600,170 @@ export async function startAudioPlayback(
         } // end first-time node + lib fetch
 
         node.port.onmessage = async (e) => {
-          const { type, order, row, positionSeconds, message, bpm, channelVU } = e.data;
+          const message = parseWorkletToMainMessageOrWarn(e.data, '[PLAY]');
+          if (!message) return;
 
-          if (type === 'position') {
-            // BPM belongs on the sample/ref path only. Never setModuleInfo here —
-            // position messages arrive every audio quantum (~350 Hz) and flooding
-            // React was a primary A/V desync source (especially XM with varying BPM).
-            const input = jsWorkletPositionToInput(
-              {
-                order,
-                row,
-                positionSeconds,
-                bpm,
-                speed: e.data.speed,
-                rowFraction: e.data.rowFraction,
-                audioTime: e.data.audioTime,
-                workletTime: e.data.workletTime,
-                channelVU,
-              },
-              ctx.currentTime,
-            );
-            const applied = applyNormalizedPosition(refs, input, {
-              channelStates: refs.channelStatesRef.current,
-              channelVU,
-            });
+          const result = dispatchWorkletToMainMessage({
+            refs,
+            message,
+            audioContextCurrentTime: ctx.currentTime,
+          });
 
-            // TIMING FIX: Check for seek acknowledgment
-            if (refs.pendingSeekRef.current &&
-                applied.order === refs.pendingSeekRef.current.order &&
-                applied.rowInt === refs.pendingSeekRef.current.row) {
-              refs.seekAcknowledgedRef.current = true;
-              refs.pendingSeekRef.current = null;
-            }
-          } else if (type === 'ended') {
-            console.log('[PLAY] Worklet reported module ended');
-            if (config.isLooping) {
-              callbacks.seekToStepWrapper(0);
-            } else {
-              callbacks.stopMusic(false);
-            }
-          } else if (type === 'error') {
-            console.error("[PLAY] Worklet error:", message);
-            // Detect WASM init failure and fall back to ScriptProcessorNode
-            if ((message?.includes('Lib init failed') || message?.includes('WASM library init timeout'))
-                && !refs.spFallbackTriggered.current) {
-              refs.spFallbackTriggered.current = true;
-              console.warn('[PLAY] Worklet WASM init failed — falling back to ScriptProcessorNode');
-              try { node.port.postMessage({ type: 'pause' }); } catch (_e) { /* ignore */ }
-              try { node.port.onmessage = null; } catch (_e) { /* ignore */ }
-              try { node.disconnect(); } catch (_e) { /* ignore */ }
-              refs.audioWorkletNodeRef.current = null;
+          switch (result.kind) {
+            case 'position':
+              break;
 
-              // Lazily create main-thread module if it doesn't exist (normal path now uses worker parse).
-              if (refs.currentModulePtr.current === 0 && refs.ensureMainThreadModuleRef.current && refs.fileDataRef.current) {
-                await refs.ensureMainThreadModuleRef.current(refs.fileDataRef.current);
-              }
-
-              const lib = refs.libopenmptRef.current;
-              const modPtr = refs.currentModulePtr.current;
-              if (lib && modPtr) {
-                const SP_BUFFER = 4096;
-                const spNode = ctx.createScriptProcessor(SP_BUFFER, 0, 2);
-                const leftPtr  = lib._malloc(4 * SP_BUFFER);
-                const rightPtr = lib._malloc(4 * SP_BUFFER);
-                refs.spLeftBufPtr.current  = leftPtr;
-                refs.spRightBufPtr.current = rightPtr;
-                // Best-quality interpolation
-                lib._openmpt_module_set_render_param(modPtr, 2, 8);
-
-                spNode.onaudioprocess = (audioEvt: AudioProcessingEvent) => {
-                  const outL = audioEvt.outputBuffer.getChannelData(0);
-                  const outR = audioEvt.outputBuffer.getChannelData(1);
-                  const mPtr = refs.currentModulePtr.current;
-                  const mLib = refs.libopenmptRef.current;
-                  if (!mLib || !mPtr) { outL.fill(0); outR.fill(0); return; }
-
-                  let written = mLib._openmpt_module_read_float_stereo(
-                    mPtr, ctx.sampleRate, SP_BUFFER, leftPtr, rightPtr
-                  );
-                  if (written === 0 && config.isLooping) {
-                    // Loop back to start when module ends
-                    mLib._openmpt_module_set_position_order_row(mPtr, 0, 0);
-                    written = mLib._openmpt_module_read_float_stereo(
-                      mPtr, ctx.sampleRate, SP_BUFFER, leftPtr, rightPtr
-                    );
-                  }
-                  if (written > 0) {
-                    outL.set(new Float32Array(mLib.HEAPF32.buffer, leftPtr, written));
-                    outR.set(new Float32Array(mLib.HEAPF32.buffer, rightPtr, written));
-                    if (written < SP_BUFFER) { outL.fill(0, written); outR.fill(0, written); }
-                  } else {
-                    outL.fill(0); outR.fill(0);
-                  }
-
-                  // Update position refs for UI (audio-clock tagged)
-                  const spTime = ctx.currentTime;
-                  applyWorkletPositionSample(refs, {
-                    order: mLib._openmpt_module_get_current_order(mPtr),
-                    row: mLib._openmpt_module_get_current_row(mPtr),
-                    positionSeconds: mLib._openmpt_module_get_position_seconds(mPtr),
-                    workletTime: spTime,
-                    bpm: mLib._openmpt_module_get_current_estimated_bpm(mPtr),
-                    speed: mLib._openmpt_module_get_current_speed(mPtr),
-                  });
-                };
-
-                spNode.connect(refs.analyserRef.current!);
-                refs.scriptProcessorRef.current = spNode;
-
-                refs.isPlayingRef.current = true;
-                callbacks.setIsPlaying(true);
-                callbacks.setStatus("Playing (ScriptProcessor fallback)...");
-                if (refs.animationFrameHandle.current) cancelAnimationFrame(refs.animationFrameHandle.current);
-                refs.animationFrameHandle.current = requestAnimationFrame(refs.updateUIRef.current!);
-              } else {
-                callbacks.setStatus("Error: no module loaded for ScriptProcessor fallback");
-              }
-            } else if (!refs.spFallbackTriggered.current) {
-              callbacks.setStatus("Worklet error: " + message);
-            }
-          } else if (type === 'loaded') {
-            // #354: ignore stale/mismatched load tokens from a prior module reload.
-            if (!shouldAcceptWorkletLoadedAck(
-              refs.workletModuleTokenRef.current,
-              refs.lastWorkletModuleTokenSentRef.current,
-            )) {
+            case 'loaded-stale':
               console.log('[PLAY] Ignoring stale worklet loaded ack (token mismatch)');
               return;
+
+            case 'loaded-accepted': {
+              console.log("[PLAY] Worklet loaded module – starting animation");
+              refs.isPlayingRef.current = true;
+              callbacks.setIsPlaying(true);
+              callbacks.setStatus("Playing...");
+              if (refs.gainNodeRef.current) {
+                refs.gainNodeRef.current.gain.value = config.volume;
+              }
+              if (ctx.state === 'suspended') {
+                try { await ctx.resume(); } catch { /* ignore */ }
+              }
+              if (refs.animationFrameHandle.current) cancelAnimationFrame(refs.animationFrameHandle.current);
+              refs.animationFrameHandle.current = requestAnimationFrame(refs.updateUIRef.current!);
+              node.port.postMessage(postPlay());
+              break;
             }
-            // Module is now loaded inside the worklet – safe to start the UI.
-            // This deferred start avoids the ~1-2 s off-timing caused by WASM
-            // initialisation happening after isPlaying was already set to true.
-            console.log("[PLAY] Worklet loaded module – starting animation");
-            refs.isPlayingRef.current = true;
-            callbacks.setIsPlaying(true);
-            callbacks.setStatus("Playing...");
-            if (refs.gainNodeRef.current) {
-              refs.gainNodeRef.current.gain.value = config.volume;
+
+            case 'ended':
+              console.log('[PLAY] Worklet reported module ended');
+              if (config.isLooping) {
+                callbacks.seekToStepWrapper(0);
+              } else {
+                callbacks.stopMusic(false);
+              }
+              break;
+
+            case 'error': {
+              console.error("[PLAY] Worklet error:", result.message);
+              if (result.shouldAttemptSpFallback) {
+                refs.spFallbackTriggered.current = true;
+                console.warn('[PLAY] Worklet WASM init failed — falling back to ScriptProcessorNode');
+                try { node.port.postMessage(postPause()); } catch (_e) { /* ignore */ }
+                try { node.port.onmessage = null; } catch (_e) { /* ignore */ }
+                try { node.disconnect(); } catch (_e) { /* ignore */ }
+                refs.audioWorkletNodeRef.current = null;
+
+                if (refs.currentModulePtr.current === 0 && refs.ensureMainThreadModuleRef.current && refs.fileDataRef.current) {
+                  await refs.ensureMainThreadModuleRef.current(refs.fileDataRef.current);
+                }
+
+                const lib = refs.libopenmptRef.current;
+                const modPtr = refs.currentModulePtr.current;
+                if (lib && modPtr) {
+                  const SP_BUFFER = 4096;
+                  const spNode = ctx.createScriptProcessor(SP_BUFFER, 0, 2);
+                  const leftPtr  = lib._malloc(4 * SP_BUFFER);
+                  const rightPtr = lib._malloc(4 * SP_BUFFER);
+                  refs.spLeftBufPtr.current  = leftPtr;
+                  refs.spRightBufPtr.current = rightPtr;
+                  lib._openmpt_module_set_render_param(modPtr, 2, 8);
+
+                  spNode.onaudioprocess = (audioEvt: AudioProcessingEvent) => {
+                    const outL = audioEvt.outputBuffer.getChannelData(0);
+                    const outR = audioEvt.outputBuffer.getChannelData(1);
+                    const mPtr = refs.currentModulePtr.current;
+                    const mLib = refs.libopenmptRef.current;
+                    if (!mLib || !mPtr) { outL.fill(0); outR.fill(0); return; }
+
+                    let written = mLib._openmpt_module_read_float_stereo(
+                      mPtr, ctx.sampleRate, SP_BUFFER, leftPtr, rightPtr
+                    );
+                    if (written === 0 && config.isLooping) {
+                      mLib._openmpt_module_set_position_order_row(mPtr, 0, 0);
+                      written = mLib._openmpt_module_read_float_stereo(
+                        mPtr, ctx.sampleRate, SP_BUFFER, leftPtr, rightPtr
+                      );
+                    }
+                    if (written > 0) {
+                      outL.set(new Float32Array(mLib.HEAPF32.buffer, leftPtr, written));
+                      outR.set(new Float32Array(mLib.HEAPF32.buffer, rightPtr, written));
+                      if (written < SP_BUFFER) { outL.fill(0, written); outR.fill(0, written); }
+                    } else {
+                      outL.fill(0); outR.fill(0);
+                    }
+
+                    const spTime = ctx.currentTime;
+                    applyWorkletPositionSample(refs, {
+                      order: mLib._openmpt_module_get_current_order(mPtr),
+                      row: mLib._openmpt_module_get_current_row(mPtr),
+                      positionSeconds: mLib._openmpt_module_get_position_seconds(mPtr),
+                      workletTime: spTime,
+                      bpm: mLib._openmpt_module_get_current_estimated_bpm(mPtr),
+                      speed: mLib._openmpt_module_get_current_speed(mPtr),
+                    });
+                  };
+
+                  spNode.connect(refs.analyserRef.current!);
+                  refs.scriptProcessorRef.current = spNode;
+
+                  refs.isPlayingRef.current = true;
+                  callbacks.setIsPlaying(true);
+                  callbacks.setStatus("Playing (ScriptProcessor fallback)...");
+                  if (refs.animationFrameHandle.current) cancelAnimationFrame(refs.animationFrameHandle.current);
+                  refs.animationFrameHandle.current = requestAnimationFrame(refs.updateUIRef.current!);
+                } else {
+                  callbacks.setStatus("Error: no module loaded for ScriptProcessor fallback");
+                }
+              } else if (!refs.spFallbackTriggered.current) {
+                callbacks.setStatus("Worklet error: " + result.message);
+              }
+              break;
             }
-            if (ctx.state === 'suspended') {
-              try { await ctx.resume(); } catch { /* ignore */ }
+
+            case 'seek-ack':
+              break;
+
+            case 'diagnostic':
+              console.warn(`[PLAY] Worklet ${result.subtype}:`, result.raw);
+              break;
+
+            case 'projectm-pcm': {
+              const buf = result.buffer;
+              const ch = result.channels;
+              if (buf instanceof Float32Array && (ch === 1 || ch === 2)) {
+                broadcastPcmBlock(buf, ch);
+              }
+              break;
             }
-            if (refs.animationFrameHandle.current) cancelAnimationFrame(refs.animationFrameHandle.current);
-            refs.animationFrameHandle.current = requestAnimationFrame(refs.updateUIRef.current!);
-            // Explicitly tell the worklet to begin rendering (defensive, in case
-            // a future worklet version requires a play signal).
-            node.port.postMessage({ type: 'play' });
-          } else if (type === 'seekAck') {
-            // TIMING FIX: Worklet acknowledged seek
-            refs.seekAcknowledgedRef.current = true;
-            refs.pendingSeekRef.current = null;
-          } else if (type === 'needData' || type === 'starvation') {
-            // Defensive: ring-buffer worklets may request refills; we do not
-            // implement a main-thread pump, so log for diagnostics.
-            console.warn(`[PLAY] Worklet ${type}:`, e.data);
-          } else if (type === 'projectm-pcm') {
-            // Audio-clock-accurate PCM block from the worklet render callback.
-            // Forward to Project-M receivers via BroadcastChannel + opener/parent
-            // postMessage.  This path replaces the legacy RAF+AnalyserNode tap:
-            // blocks are fixed-size (default 512 samples/channel), stereo, and
-            // arrive at audio-clock rate with no background-tab throttling.
-            const buf = e.data.buffer;
-            const ch  = e.data.channels;
-            if (buf instanceof Float32Array && (ch === 1 || ch === 2)) {
-              broadcastPcmBlock(buf, ch);
+
+            case 'ignored':
+              break;
+
+            default: {
+              const _exhaustive: never = result;
+              return _exhaustive;
             }
           }
         };
 
         // Send glue (+ optional real WASM) to worklet first (must arrive before 'load').
         // Transfer wasm buffer only when present; wasm2js path sends JS alone.
-        if (shouldPostInitLib(reuseWorkletNode, libJsText)) {
+        if (shouldPostInitLib(reuseWorkletNode, libJsText) && libJsText) {
           if (libWasmBuffer) {
             node.port.postMessage(
-              { type: 'initLib', scriptText: libJsText, wasmBytes: libWasmBuffer },
+              postInitLib(libJsText, libWasmBuffer),
               [libWasmBuffer],
             );
           } else {
-            node.port.postMessage({ type: 'initLib', scriptText: libJsText });
+            node.port.postMessage(postInitLib(libJsText));
           }
         }
 
-        // Send module data (cloned, not transferred, so fileDataRef remains valid)
         const moduleBuf = moduleBytesFromFileData(refs.fileDataRef.current);
         if (moduleBuf) {
           console.log('[PLAY] Sending module data to worklet:', moduleBuf.byteLength, 'bytes');
           refs.lastWorkletModuleTokenSentRef.current = refs.workletModuleTokenRef.current;
-          node.port.postMessage({ type: 'load', moduleData: moduleBuf });
+          node.port.postMessage(postLoad(moduleBuf));
         } else {
           console.error("[PLAY] No buffer to send to worklet!");
         }

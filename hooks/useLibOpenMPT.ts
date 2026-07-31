@@ -36,6 +36,13 @@ import {
   type WorkletPositionSample,
 } from '../utils/playheadPrediction';
 import { viewsFromAudioSab } from '../utils/audioReactive';
+import {
+  parseOscBufferMessage,
+  postGetOscBuffer,
+  postPause,
+  postSeek,
+  postSetAudioLite,
+} from '../audio-worklet/protocol';
 import { hasShareModuleIntent } from '../utils/shareState';
 import { getStopMusicWorkletActions } from '../utils/workletAudioLifecycle';
 
@@ -231,7 +238,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4, liteMode: boolean = f
 
   // Tell worklet to skip FFT band split in lite mode (coarse VU only).
   useEffect(() => {
-    audioWorkletNodeRef.current?.port.postMessage({ type: 'setAudioLite', lite: liteMode });
+    audioWorkletNodeRef.current?.port.postMessage(postSetAudioLite(liteMode));
   }, [liteMode]);
   // Shared WASM memory supplied to the worklet; allocated once on main thread
   const wasmMemoryRef = useRef<WebAssembly.Memory | null>(null);
@@ -803,15 +810,16 @@ export function useLibOpenMPT(initialVolume: number = 0.4, liteMode: boolean = f
     const node = audioWorkletNodeRef.current;
     if (!node) return;
     const handler = (e: MessageEvent) => {
-      if (e.data?.type === 'oscBuffer' && e.data.buffer) {
-        const views = viewsFromAudioSab(e.data.buffer as SharedArrayBuffer);
+      const oscMsg = parseOscBufferMessage(e.data);
+      if (oscMsg) {
+        const views = viewsFromAudioSab(oscMsg.buffer);
         oscBufferRef.current = views.osc;
         audioReactiveRef.current = views.meta;
         node.port.removeEventListener('message', handler);
       }
     };
     node.port.addEventListener('message', handler);
-    node.port.postMessage({ type: 'getOscBuffer' });
+    node.port.postMessage(postGetOscBuffer());
   }, []);
 
   const stopMusic = useCallback((destroy: boolean = false) => {
@@ -840,7 +848,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4, liteMode: boolean = f
     if (audioWorkletNodeRef.current) {
       const oldNode = audioWorkletNodeRef.current;
       if (workletStop.pauseProcessor) {
-        try { oldNode.port.postMessage({ type: 'pause' }); } catch { /* ignore */ }
+        try { oldNode.port.postMessage(postPause()); } catch { /* ignore */ }
       }
       if (workletStop.clearMessageHandler) {
         try { oldNode.port.onmessage = null; } catch { /* ignore */ }
@@ -964,13 +972,9 @@ export function useLibOpenMPT(initialVolume: number = 0.4, liteMode: boolean = f
       // Native engine seek is synchronous, mark as acknowledged
       seekAcknowledgedRef.current = true;
     } else if (activeEngine === 'worklet' && audioWorkletNodeRef.current) {
-      audioWorkletNodeRef.current.port.postMessage({
-        type: 'seek',
-        order: targetOrder,
-        row: targetRow,
-        // TIMING FIX: Include timestamp for worklet to correlate
-        timestamp: audioCtx ? audioCtx.currentTime : 0
-      });
+      audioWorkletNodeRef.current.port.postMessage(
+        postSeek(targetOrder, targetRow, audioCtx ? audioCtx.currentTime : 0),
+      );
     }
   }, [activeEngine]);
 

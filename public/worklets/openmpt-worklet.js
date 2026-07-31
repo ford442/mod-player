@@ -39,7 +39,21 @@ if (typeof self !== 'undefined' && (!self.crypto || !self.crypto.getRandomValues
  * browsers don't, so we polyfill it below using process()-driven ticks.
  */
 
-// ── setTimeout/clearTimeout polyfill for AudioWorkletGlobalScope ──────
+// Message types: loaded via worklet-protocol-constants.js (audio-worklet/workletProtocolConstants.ts)
+const _proto = globalThis.WorkletProtocolConstants;
+const MT = _proto ? _proto.MAIN_TO_WORKLET : {
+  initLib: 'initLib', load: 'load', play: 'play', pause: 'pause', seek: 'seek',
+  getOscBuffer: 'getOscBuffer', setAudioLite: 'setAudioLite',
+};
+const WT = _proto ? _proto.WORKLET_TO_MAIN : {
+  position: 'position', loaded: 'loaded', ended: 'ended', seekAck: 'seekAck',
+  error: 'error', oscBuffer: 'oscBuffer', needData: 'needData',
+  starvation: 'starvation', projectmPcm: 'projectm-pcm',
+};
+const parseMainToWorklet = _proto
+  ? _proto.parseMainToWorkletMessage.bind(_proto)
+  : (data) => ({ ok: false, error: 'WorkletProtocolConstants not loaded' });
+
 // Older Chrome/Edge/Firefox don't expose timers in the worklet scope.
 // Schedule callbacks via currentTime checks driven by process().
 if (typeof globalThis.setTimeout !== 'function') {
@@ -232,43 +246,50 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
       });
       this._libInitTimeout = setTimeout(() => {
         this._rejectLib(new Error('WASM init timeout: initLib message never received'));
-        this.port.postMessage({ type: 'error', message: 'WASM library init timeout' });
+        this.port.postMessage({ type: WT.error, message: 'WASM library init timeout' });
       }, 30000);
     }
 
     this.port.onmessage = async (e) => {
-      const { type, moduleData } = e.data;
-      log('Received message:', type || '(no-type)', 'bytes:', moduleData?.byteLength);
+      const parsed = parseMainToWorklet(e.data);
+      if (!parsed.ok) {
+        error('Rejected main→worklet message:', parsed.error, e.data);
+        return;
+      }
+      const msg = parsed.message;
+      const type = msg.type;
+      const moduleData = msg.moduleData;
+      log('Received message:', type || '(legacy-load)', 'bytes:', moduleData?.byteLength);
 
-      if (type === 'initLib') {
-        await this._handleInitLib(e.data);
-      } else if (type === 'load' && moduleData) {
+      if (type === MT.initLib) {
+        await this._handleInitLib(msg);
+      } else if (type === MT.load && moduleData) {
         this.hasEnded = false;
         await this.loadModule(moduleData);
-      } else if (type === 'play') {
+      } else if (type === MT.play) {
         this.isPlaying = true;
         this.hasEnded = false;
         log('Playback started');
-      } else if (type === 'pause') {
+      } else if (type === MT.pause) {
         this.isPlaying = false;
         log('Playback paused');
-      } else if (type === 'seek') {
+      } else if (type === MT.seek) {
         this.hasEnded = false;
         if (this.modulePtr && this.lib) {
           this.lib._openmpt_module_set_position_order_row(
-            this.modulePtr, e.data.order, e.data.row
+            this.modulePtr, msg.order, msg.row
           );
-          log('Seek executed:', e.data.order, e.data.row);
+          log('Seek executed:', msg.order, msg.row);
         } else {
           error('Cannot seek: module not loaded');
         }
-        this.port.postMessage({ type: 'seekAck' });
-      } else if (type === 'getOscBuffer') {
+        this.port.postMessage({ type: WT.seekAck });
+      } else if (type === MT.getOscBuffer) {
         if (this.oscBuffer) {
-          this.port.postMessage({ type: 'oscBuffer', buffer: this.oscBuffer });
+          this.port.postMessage({ type: WT.oscBuffer, buffer: this.oscBuffer });
         }
-      } else if (type === 'setAudioLite') {
-        this._audioLite = !!e.data.lite;
+      } else if (type === MT.setAudioLite) {
+        this._audioLite = !!msg.lite;
       } else if (!type && moduleData) {
         await this.loadModule(moduleData);
       }
@@ -295,7 +316,7 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
     this._alphaBass = onePoleAlpha(180, sampleRate);
     this._alphaMid = onePoleAlpha(1200, sampleRate);
     if (this.oscBuffer) {
-      this.port.postMessage({ type: 'oscBuffer', buffer: this.oscBuffer });
+      this.port.postMessage({ type: WT.oscBuffer, buffer: this.oscBuffer });
     }
   }
 
@@ -412,7 +433,7 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
     } catch (err) {
       error('Failed to initialise libopenmpt:', err);
       this._rejectLib(err);
-      this.port.postMessage({ type: 'error', message: 'Lib init failed: ' + String(err) });
+      this.port.postMessage({ type: WT.error, message: 'Lib init failed: ' + String(err) });
     }
   }
 
@@ -424,7 +445,7 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
 
     if (!this.isLibReady) {
       error('WASM library never became ready');
-      this.port.postMessage({ type: 'error', message: 'WASM library init timeout' });
+      this.port.postMessage({ type: WT.error, message: 'WASM library init timeout' });
       return;
     }
 
@@ -467,10 +488,10 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
       lib._openmpt_module_set_render_param(this.modulePtr, 2, 8);
 
       log('Module loaded ✅ ptr=', this.modulePtr);
-      this.port.postMessage({ type: 'loaded' });
+      this.port.postMessage({ type: WT.loaded });
     } catch (err) {
       error('loadModule error:', err);
-      this.port.postMessage({ type: 'error', message: String(err) });
+      this.port.postMessage({ type: WT.error, message: String(err) });
     }
   }
 
@@ -547,7 +568,7 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
       outR.fill(0);
       if (!this.hasEnded) {
         this.hasEnded = true;
-        this.port.postMessage({ type: 'ended' });
+        this.port.postMessage({ type: WT.ended });
       }
       return true;
     }
@@ -602,7 +623,7 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
           // `sampleRate` is a read-only global in AudioWorkletGlobalScope
           // (spec §4.3), like `currentTime`.  No `this.` prefix needed.
           this.port.postMessage(
-            { type: 'projectm-pcm', buffer: interleaved, channels: 2,
+            { type: WT.projectmPcm, buffer: interleaved, channels: 2,
               sampleRate, samplesPerChannel: this.pcmChunkSize },
             [interleaved.buffer]
           );
@@ -624,7 +645,7 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
     if (currentTime - this.lastPositionReportTime >= this.positionReportInterval) {
       this._lastReportedRowInt = rowInt;
       this.port.postMessage({
-        type: 'position',
+        type: WT.position,
         order,
         row: rowInt,
         rowFraction,
