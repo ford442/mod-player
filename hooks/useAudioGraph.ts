@@ -17,7 +17,9 @@ import {
 } from '../utils/workletPositionAdapter';
 import {
   canReuseWorkletNode,
+  shouldAcceptWorkletLoadedAck,
   shouldDisconnectWorkletOnPlay,
+  shouldForceWorkletModuleLoad,
   shouldPostInitLib,
 } from '../utils/workletAudioLifecycle';
 
@@ -116,9 +118,11 @@ export async function startAudioPlayback(
   }
 
   const moduleToken = refs.workletModuleTokenRef.current;
-  const moduleNeedsWorkletLoad =
-    moduleToken !== refs.lastWorkletModuleTokenSentRef.current ||
-    config.forceModuleLoad === true;
+  const moduleNeedsWorkletLoad = shouldForceWorkletModuleLoad(
+    moduleToken,
+    refs.lastWorkletModuleTokenSentRef.current,
+    config.forceModuleLoad,
+  );
 
   if (refs.isPlayingRef.current && refs.audioWorkletNodeRef.current) {
     // Hot module reload (#329): stopMusic clears isPlayingRef, but a concurrent
@@ -705,8 +709,11 @@ export async function startAudioPlayback(
               callbacks.setStatus("Worklet error: " + message);
             }
           } else if (type === 'loaded') {
-            const ackToken = refs.workletModuleTokenRef.current;
-            if (ackToken !== refs.lastWorkletModuleTokenSentRef.current) {
+            // #354: ignore stale/mismatched load tokens from a prior module reload.
+            if (!shouldAcceptWorkletLoadedAck(
+              refs.workletModuleTokenRef.current,
+              refs.lastWorkletModuleTokenSentRef.current,
+            )) {
               console.log('[PLAY] Ignoring stale worklet loaded ack (token mismatch)');
               return;
             }

@@ -72,15 +72,16 @@ Before modifying the worklet or AudioWorklet-related code:
 - [ ] **Never `import()` an AudioWorklet processor file on the main thread.** Use `audioContext.audioWorklet.addModule()` for JS processors, or Emscripten's native API for `AUDIO_WORKLET` builds.
 - [ ] **Verify line numbers in browser console.** After deploy, a hard refresh (`Ctrl+Shift+R` / `Cmd+Shift+R`) should show line numbers matching the current source (e.g., ~250), not the old stub (~130).
 - [ ] **Never commit HTML/404 bodies as `*.wasm`.** Production glue is wasm2js (`libopenmpt-audioworklet.js`); a sibling `libopenmpt.wasm` is not required. Run `npm run verify:wasm` before commit/deploy.
-- [ ] **Run `npm test`** — Vitest guards in `tests/workletAudioLifecycle.test.ts` cover #329 (shared-scope libopenmpt singleton / hot `load`) and #330 (no `AudioContext.suspend()` on normal `stopMusic(false)`).
+- [ ] **Run `npm test`** — Vitest guards in `tests/workletAudioLifecycle.test.ts` cover #329 (shared-scope libopenmpt singleton / hot `load`) and #330 (no `AudioContext.suspend()` on normal `stopMusic(false)`). `tests/workletRegressionGuards.test.ts` covers #354 (≤~60 Hz position throttle + hot-reload node reuse / load-token ack).
 
-### Automated regression harness (#329 / #330)
+### Automated regression harness (#329 / #330 / #354)
 
 | Guard | What it catches |
 |-------|-----------------|
-| `utils/workletAudioLifecycle.ts` + `tests/workletAudioLifecycle.test.ts` | `play()` re-sending `initLib` on module reload; `stopMusic` suspending the context |
+| `utils/workletAudioLifecycle.ts` + `tests/workletAudioLifecycle.test.ts` | `play()` re-sending `initLib` on module reload; `stopMusic` suspending the context; #354 helper smoke |
+| `tests/workletRegressionGuards.test.ts` | Position postMessage flood (fake-clock ≤~60 Hz); hot-reload disconnect; stale `loaded` ack token; SP structural immunity |
 | `utils/workletLibSingleton.ts` | Re-evaluating ~5 MB wasm2js glue when `__openmptWorkletLib` already exists |
-| Source invariants | `stopMusic` body must not call `.suspend()`; worklet must keep `ensureSharedLibOpenMPT` singleton |
+| Source invariants | `stopMusic` body must not call `.suspend()`; worklet must keep `ensureSharedLibOpenMPT` singleton + position throttle `if`; hooks must call token helpers |
 
 CI runs the full Vitest suite (`npm test`) on every PR via `lint-and-build`.
 
@@ -132,6 +133,51 @@ See also `public/worklets/README.md`.
 | `openmpt-worklet.js` | Restore ~60 Hz `position` throttle (`positionReportInterval`); keep audio render + SAB VU update every quantum |
 | `playheadPrediction.ts` | Main thread extrapolates fractional playhead between reports |
 | `WORKLET_VERSION` | Bumped to `7` (cache bust) |
+
+---
+
+## #354 regression lock — invariants + automated tripwires (2026-07-31)
+
+Two failure modes shipped in #354 (`21cb5b6`) without a test that would have gone red on the pre-fix code. Both are now locked by pure decision helpers + behavioral Vitest coverage.
+
+### Invariant A — position postMessage ≤ ~60 Hz
+
+| Item | Detail |
+|------|--------|
+| Failure | Worklet posts `position` every audio quantum (~350 Hz) → main-thread flood → MOD hiccups |
+| Production guard | `public/worklets/openmpt-worklet.js`: `positionReportInterval = 1/60` gates `port.postMessage({ type: 'position', … })` |
+| Pure helper | `shouldReportWorkletPosition` / `countThrottledPositionReports` in `utils/workletAudioLifecycle.ts` |
+| Tests | `tests/workletRegressionGuards.test.ts` — fake-clock quantum simulation asserts ≤~60 Hz and ≪ unthrottled; source invariant requires the throttle `if` around the position post |
+| Not a sleep test | Cadence is asserted by advancing a synthetic `currentTime` in `128/44100` steps — no real-time waits |
+
+### Invariant B — hot module reload reuses node + ignores stale `loaded` acks
+
+| Item | Detail |
+|------|--------|
+| Failure | Second `loadModule` disconnects/reconnects `AudioWorkletNode` and/or accepts a stale `loaded` ack → XM silence / UI “Playing” with no audio |
+| Production guards | `canReuseWorkletNode` + skip `disconnect`/`connect` on hot path; `workletModuleTokenRef` bumped in `processModuleData`; `forceModuleLoad` from `loadModule`; `shouldAcceptWorkletLoadedAck` drops mismatched tokens in `useAudioGraph.ts` |
+| Pure helpers | `planJsWorkletHotReloadPlay`, `shouldForceWorkletModuleLoad`, `shouldAcceptWorkletLoadedAck` in `utils/workletAudioLifecycle.ts` |
+| Tests | `tests/workletRegressionGuards.test.ts` — two-load session keeps one node identity / zero disconnects / single `initLib`; stale token ack rejected; source invariants require hooks call the helpers |
+| Related | #329 singleton/`initLib` once; #330 never `AudioContext.suspend()` on normal stop — still covered by `tests/workletAudioLifecycle.test.ts` |
+
+### ScriptProcessor fallback (structurally immune)
+
+| Concern | Why SP cannot reintroduce the #354 failures |
+|---------|-----------------------------------------------|
+| Position flood | SP updates position via direct `applyWorkletPositionSample` in `onaudioprocess` — **no** `port.postMessage({ type: 'position' })`. Buffer is `SP_BUFFER = 4096` → ≈10.8 Hz @ 44.1 kHz ≪ 350 Hz. |
+| Silent reload / stale ack | `stopMusic` always `disconnect()`s and nulls `scriptProcessorRef` and clears `spFallbackTriggered`. There is no deferred `loaded` ack on the SP path; playback starts synchronously after node creation. Next play rebuilds SP against the new main-thread module pointer. |
+
+Native engine (`OpenMPTWorkletEngine`) polls shared-memory position at `setInterval(16)` (~60 Hz) — already capped; out of scope for the JS-worklet #354 postMessage flood.
+
+### Test map (CI: `npm test`)
+
+| File | Guards |
+|------|--------|
+| `tests/workletAudioLifecycle.test.ts` | #329 reuse/`initLib`, #330 no suspend, source invariants, #354 helper smoke |
+| `tests/workletRegressionGuards.test.ts` | #354 behavioral throttle + hot-reload token/node identity + SP immunity docs-as-tests |
+| `utils/workletAudioLifecycle.ts` | Single source of pure lifecycle decisions used by hooks **and** tests |
+
+**Do not** weaken `canReuseWorkletNode`, the position throttle interval, or the loaded-ack token check to make a test pass — fix the test.
 
 ---
 

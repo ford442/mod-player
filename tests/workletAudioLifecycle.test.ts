@@ -5,8 +5,13 @@ import { describe, expect, it } from 'vitest';
 import {
   canReuseWorkletNode,
   getStopMusicWorkletActions,
+  planJsWorkletHotReloadPlay,
+  shouldAcceptWorkletLoadedAck,
   shouldDisconnectWorkletOnPlay,
+  shouldForceWorkletModuleLoad,
   shouldPostInitLib,
+  shouldReportWorkletPosition,
+  WORKLET_POSITION_REPORT_INTERVAL_SEC,
 } from '../utils/workletAudioLifecycle';
 import {
   ensureSharedLibOpenMPT,
@@ -167,5 +172,39 @@ describe('audio hook source invariants', () => {
     expect(useAudioGraph).toContain('Hot reload — keeping existing audio graph wiring');
     expect(useAudioGraph).toContain('forceModuleLoad');
     expect(useAudioGraph).toContain('workletModuleTokenRef');
+    expect(useAudioGraph).toContain('shouldForceWorkletModuleLoad');
+    expect(useAudioGraph).toContain('shouldAcceptWorkletLoadedAck');
+  });
+});
+
+describe('workletAudioLifecycle (#354 pure helpers smoke)', () => {
+  it('position throttle helper matches 1/60 s cadence', () => {
+    expect(WORKLET_POSITION_REPORT_INTERVAL_SEC).toBeCloseTo(1 / 60, 12);
+    expect(shouldReportWorkletPosition(0, Number.NEGATIVE_INFINITY)).toBe(true);
+    expect(shouldReportWorkletPosition(0.001, 0)).toBe(false);
+  });
+
+  it('loaded-ack helper drops mismatched tokens', () => {
+    expect(shouldAcceptWorkletLoadedAck(2, 1)).toBe(false);
+    expect(shouldAcceptWorkletLoadedAck(2, 2)).toBe(true);
+    expect(shouldForceWorkletModuleLoad(2, 1)).toBe(true);
+    expect(shouldForceWorkletModuleLoad(1, 1, true)).toBe(true);
+    expect(shouldForceWorkletModuleLoad(1, 1, false)).toBe(false);
+  });
+
+  it('hot-reload plan reuses node without disconnect or re-initLib', () => {
+    const plan = planJsWorkletHotReloadPlay({
+      activeEngine: 'worklet',
+      workletLoaded: true,
+      hasWorkletNode: true,
+      libJsText: 'glue',
+      moduleToken: 2,
+      lastSentToken: 1,
+      forceModuleLoad: true,
+    });
+    expect(plan.reuseNode).toBe(true);
+    expect(plan.disconnectNode).toBe(false);
+    expect(plan.postInitLib).toBe(false);
+    expect(plan.postModuleLoad).toBe(true);
   });
 });
