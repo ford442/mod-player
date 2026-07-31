@@ -56,6 +56,9 @@ jobs:
       - name: Post-build verify (CSS + WASM magic)
         run: npm run verify:build
 
+      - name: Bundle budget (entry chunk + three-r3f split)
+        run: npm run verify:bundle-budget
+
   visual-smoke:
     runs-on: ubuntu-latest
     timeout-minutes: 20

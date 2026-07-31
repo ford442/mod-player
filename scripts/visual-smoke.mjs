@@ -70,6 +70,31 @@ function sanitize(name) {
   return name.replace(/[^a-zA-Z0-9_.-]/g, '_');
 }
 
+/** Fail fast when preview/CI does not serve COOP/COEP (blocks SharedArrayBuffer path). */
+async function assertCrossOriginIsolation(appRoot) {
+  const res = await fetch(`${appRoot}/`);
+  if (!res.ok) {
+    throw new Error(`isolation preflight HTTP ${res.status}`);
+  }
+  const coop = res.headers.get('cross-origin-opener-policy');
+  const coep = res.headers.get('cross-origin-embedder-policy');
+  if (!coop || coop.toLowerCase() !== 'same-origin') {
+    throw new Error(`expected COOP same-origin, got ${coop ?? '(missing)'}`);
+  }
+  if (!coep || !coep.toLowerCase().includes('credentialless')) {
+    throw new Error(`expected COEP credentialless, got ${coep ?? '(missing)'}`);
+  }
+  console.log('✓ COOP/COEP headers present on preview server');
+}
+
+async function assertBrowserCrossOriginIsolated(page) {
+  const isolated = await evaluate(page, () => window.crossOriginIsolated === true);
+  if (!isolated) {
+    throw new Error('window.crossOriginIsolated is false — native SAB path not exercisable');
+  }
+  console.log('✓ window.crossOriginIsolated === true');
+}
+
 function classifyConsole(lines) {
   const failures = [];
   const warnings = [];
@@ -463,12 +488,11 @@ async function main() {
   console.log(`Modules:  ${modules.join(', ')}`);
   console.log(`Scenarios:${scenarios.length}\n`);
 
-  // Preflight: server reachable
+  // Preflight: server reachable + cross-origin isolation headers (COOP/COEP)
   try {
-    const res = await fetch(`${appRoot}/`);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    await assertCrossOriginIsolation(appRoot);
   } catch (e) {
-    console.error(`❌ Cannot reach ${appRoot} — start preview/dev first (${e.message})`);
+    console.error(`❌ Cross-origin isolation check failed: ${e.message}`);
     process.exit(1);
   }
 
@@ -476,6 +500,16 @@ async function main() {
   const results = [];
 
   try {
+    // Browser-level isolation (SharedArrayBuffer / native ring-buffer path)
+    const { page: isoPage, context: isoContext } = await openPage(browser, engine);
+    try {
+      await goto(isoPage, engine, `${appRoot}/?renderer=webgl2`, TIMEOUT);
+      await assertBrowserCrossOriginIsolated(isoPage);
+    } finally {
+      if (isoContext) await isoContext.close();
+      else await isoPage.close();
+    }
+
     for (const scenario of scenarios) {
       const label = `${scenario.renderer} lite=${scenario.lite} ${scenario.shaderFile}`;
       console.log(`→ ${label}`);
