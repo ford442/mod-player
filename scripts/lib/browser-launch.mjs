@@ -86,12 +86,15 @@ export async function launchBrowser(options = {}) {
 /** @param {import('playwright').Browser | import('puppeteer').Browser} browser */
 export async function openPage(browser, engine, viewport = { width: 1280, height: 720 }) {
   if (engine === 'playwright') {
-    const context = await browser.newContext({ viewport });
+    // Pin deviceScaleFactor to 1 so readPixels() returns canvas-resolution pixels
+    // regardless of the CI runner's display configuration — required for deterministic
+    // coverage computations across local and CI environments.
+    const context = await browser.newContext({ viewport, deviceScaleFactor: 1 });
     const page = await context.newPage();
     return { page, context, engine };
   }
   const page = await browser.newPage();
-  await page.setViewport(viewport);
+  await page.setViewport({ ...viewport, deviceScaleFactor: 1 });
   return { page, context: null, engine };
 }
 
