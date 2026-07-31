@@ -10,6 +10,99 @@
 
 export const DEFAULT_SEEK_ROWS = [0, 8, 16];
 
+// ─── Coverage assertion config ───────────────────────────────────────────────
+// Structural coverage assertions catch partial/misaligned renders (thin bands,
+// scanline offsets, overlay misalignment) that the non-black check misses.
+// See docs/VISUAL_SMOKE.md and scripts/lib/coverage-assert.mjs for details.
+
+/**
+ * Default coverage floors per layout type.
+ *
+ * Circular:   ring area (innerR 0.15 → outerR 0.45) split into 3 annuli × 4 sectors.
+ *             Each sector must show ≥ 3% lit-pixel coverage when playing a module.
+ * Horizontal: pattern grid rows/columns must be ≥ 2% lit.
+ * Simple:     quadrant check for video / fallback shaders; lenient due to CI codec constraints.
+ */
+export const COVERAGE_DEFAULTS = {
+  circular: {
+    globalFloor: 0.02,        // 2% global   — catches solid-black (#346–#348)
+    regionFloor: 0.03,        // 3% per ring sector — catches thin bands (#349)
+    bboxSpanMinX: 0.25,       // 25% width   — catches systematic H-offsets (#351)
+    bboxSpanMinY: 0.25,       // 25% height  — catches systematic V-offsets
+    centroidTolerance: 0.25,  // centroid within ±25% of centre — catches scanline offsets (#350)
+  },
+  horizontal: {
+    globalFloor: 0.02,
+    regionFloor: 0.02,        // Horizontal bands can be legitimately thinner
+    bboxSpanMinX: 0.40,       // Horizontal shaders should span most of the width
+    bboxSpanMinY: 0.20,
+    centroidTolerance: 0.30,
+  },
+  simple: {
+    globalFloor: 0.005,       // Very low — video shaders may be sparse under CI/headless
+    regionFloor: 0.005,
+    bboxSpanMinX: 0.10,
+    bboxSpanMinY: 0.10,
+    centroidTolerance: 0.45,  // Video shaders can be legitimately asymmetric
+  },
+};
+
+/**
+ * Per-shader overrides applied on top of the layout-type defaults.
+ * Only specify fields that differ from the layout default.
+ *
+ * Historical regression targets:
+ *   #346–#348  v0.52/53/54 solid-black night trio
+ *   #349       v0.24 Tunnel thin horizontal band
+ *   #350       v0.23 Clouds scanline vertical offset
+ *   #351       WebGL2 hybrid overlay misalignment
+ */
+export const COVERAGE_SHADER_OVERRIDES = {
+  // Night trio (v0.52–v0.54): dark background; ring area must still be lit.
+  // Uses circular defaults (3% regionFloor) — no additional leniency needed.
+  'patternv0.52.wgsl': {},
+  'patternv0.53.wgsl': {},
+  'patternv0.54.wgsl': {},
+  // v0.55 Oscilloscope: trace can be sparse on some rows
+  'patternv0.55.wgsl': { regionFloor: 0.02 },
+  // v0.56 Instrument palette: binding 7 texture; ring coverage can vary by song
+  'patternv0.56.wgsl': { regionFloor: 0.02 },
+  // v0.23 Clouds — full-screen video, scanline offset risk (#350)
+  'patternv0.23.wgsl': { bboxSpanMinX: 0.20, bboxSpanMinY: 0.20 },
+  // v0.24 Tunnel — thin-band risk (#349)
+  'patternv0.24.wgsl': { bboxSpanMinX: 0.20, bboxSpanMinY: 0.20 },
+};
+
+/**
+ * Derive layout type from shader filename for coverage config selection.
+ * Mirrors layoutFromShader in coverage-assert.mjs without introducing an import
+ * (keeps this config file dependency-free for easy review in PRs).
+ *
+ * @param {string} shaderFile
+ * @returns {'circular' | 'horizontal' | 'simple'}
+ */
+function layoutTypeForCoverage(shaderFile) {
+  if (/v0\.(21|39|40|43|44)\.wgsl$/.test(shaderFile)) return 'horizontal';
+  if (/v0\.(23|24)\.wgsl$/.test(shaderFile)) return 'simple';
+  return 'circular';
+}
+
+/**
+ * Get the merged coverage assertion config for a given shader.
+ * Combines the layout default with any per-shader override.
+ *
+ * @param {string} shaderFile
+ * @returns {{ globalFloor: number, regionFloor: number,
+ *             bboxSpanMinX: number, bboxSpanMinY: number,
+ *             centroidTolerance: number }}
+ */
+export function coverageConfigForShader(shaderFile) {
+  const layout = layoutTypeForCoverage(shaderFile);
+  const defaults = COVERAGE_DEFAULTS[layout] ?? COVERAGE_DEFAULTS.circular;
+  const overrides = COVERAGE_SHADER_OVERRIDES[shaderFile] ?? {};
+  return { ...defaults, ...overrides };
+}
+
 export const DEFAULT_MODULES = {
   mod: '/4-mat_madness.mod',
   xm: '/test.xm',
@@ -27,11 +120,25 @@ export const FULL_SHADER_FILES = [
   'patternv0.57.wgsl',
 ];
 
-// The v0.52–v0.57 family shipped rendering solid-black canvases (#346/#347/#348); they are pinned
-// into CI so the luminance guard in visual-smoke.mjs catches a regression. NOTE: CI runs the webgl2
-// GLSL reference renderer, which does not fully exercise the WGSL-only night-theme / oscilloscope
-// (binding 6) / instrument-palette (binding 7) paths — those are only fully verified under the
-// webgpu (SMOKE_PROFILE=full) profile. This is best-effort coverage in CI, not a full guarantee.
+// CI shader set — representative subset per layout class + historical regression targets.
+//
+// Layout coverage:
+//   circular:   v0.50, v0.46, v0.30b — baseline ring, row-paging, note-on sustain
+//   horizontal: (tested via lite-mode v0.21 substitution path)
+//   simple/video: v0.23 Clouds (#350 scanline offset), v0.24 Tunnel (#349 thin band)
+//
+// Regression guards:
+//   v0.52–v0.54 Night trio (#346–#348 solid-black)
+//   v0.55 Oscilloscope (#347 blank)
+//   v0.56 Instrument Palette (#347)
+//   v0.57 Velocity LEDs
+//
+// NOTE: CI runs the webgl2 GLSL reference renderer, which does not fully exercise
+// the WGSL-only night-theme / oscilloscope (binding 6) / instrument-palette (binding 7)
+// paths — those are fully verified only under the webgpu (SMOKE_PROFILE=full) profile.
+// v0.23/v0.24 are video shaders; they render via the WebGL2 reference path which may
+// produce different content than WebGPU, but the structural checks (bbox, centroid) still
+// catch severe misalignment regressions.
 export const CI_SHADER_FILES = [
   'patternv0.30b.wgsl',
   'patternv0.46.wgsl',
@@ -42,6 +149,9 @@ export const CI_SHADER_FILES = [
   'patternv0.55.wgsl',
   'patternv0.56.wgsl',
   'patternv0.57.wgsl',
+  // Historical regression targets — video/procedural shaders:
+  'patternv0.23.wgsl',
+  'patternv0.24.wgsl',
 ];
 
 export const QUICK_SHADER_FILES = ['patternv0.40.wgsl', 'patternv0.50.wgsl'];

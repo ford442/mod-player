@@ -18,6 +18,7 @@
  *   TIMEOUT          ms (default 60000)
  *   WEBGPU_TIMEOUT   ms for webgpu attempts (default 12000)
  *   FAIL_ON_WARN     1 to treat buffer warnings as hard fail
+ *   SKIP_COVERAGE    1 to disable structural coverage assertions
  */
 import { mkdirSync, writeFileSync, existsSync, rmSync, statSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -33,13 +34,21 @@ import {
   buildScenarioMatrix,
   CONSOLE_FAIL_PATTERNS,
   CONSOLE_WARN_PATTERNS,
+  coverageConfigForShader,
 } from './lib/visual-smoke-config.mjs';
+import {
+  computeBrowserCoverage,
+  assertCoverageResult,
+  regionsForShader,
+  LUMA_THRESHOLD,
+} from './lib/coverage-assert.mjs';
 
 const BASE_URL = (process.env.BASE_URL || 'http://localhost:4173').replace(/\/$/, '');
 const OUTPUT_DIR = process.env.OUTPUT_DIR || join(process.cwd(), 'artifacts', 'visual-smoke');
 const TIMEOUT = Number(process.env.TIMEOUT || 60000);
 const WEBGPU_TIMEOUT = Number(process.env.WEBGPU_TIMEOUT || 12000);
 const FAIL_ON_WARN = process.env.FAIL_ON_WARN === '1';
+const SKIP_COVERAGE = process.env.SKIP_COVERAGE === '1';
 
 /** Detect Vite base path from served index.html (e.g. /xm-player). */
 async function detectAppBase(url) {
@@ -96,8 +105,34 @@ async function waitForAppReady(page, timeout) {
   );
 }
 
+/**
+ * Disable CSS animations/transitions and await font loading before capture.
+ * Ensures deterministic pixel output regardless of when during a transition
+ * the screenshot is taken.
+ */
+async function prepareForCapture(page) {
+  await evaluate(page, () => {
+    if (!document.getElementById('__smoke-deterministic')) {
+      const style = document.createElement('style');
+      style.id = '__smoke-deterministic';
+      style.textContent =
+        '*, *::before, *::after {' +
+        '  animation-duration: 0.001ms !important;' +
+        '  animation-delay: 0ms !important;' +
+        '  transition-duration: 0.001ms !important;' +
+        '  transition-delay: 0ms !important;' +
+        '}';
+      document.head.appendChild(style);
+    }
+    // Return document.fonts.ready so page.evaluate awaits font loading.
+    return document.fonts.ready.then(() => true);
+  });
+}
+
 async function readCanvasPixels(page) {
-  return evaluate(page, () => {
+  // Use the module-level LUMA_THRESHOLD from coverage-assert.mjs for consistency.
+  const lt = LUMA_THRESHOLD;
+  return evaluate(page, (lumaThreshold) => {
     const r = window.currentPatternRenderer;
     if (r?.readPixels) {
       try {
@@ -106,12 +141,11 @@ async function readCanvasPixels(page) {
         // Alpha-opaque count alone let a fully-opaque BLACK canvas pass — the exact failure that
         // shipped the shader blank-render cascade (#346/#347/#348). Also require luminance: some
         // pixels must have visible RGB above a small threshold, not just non-zero alpha.
-        const LUMA_THRESHOLD = 12; // 0-255; ~0.047 — above the raised night-theme floor
         let opaque = 0;
         let lit = 0;
         for (let i = 0; i < px.length; i += 4) {
           if (px[i + 3] > 8) opaque++;
-          if (px[i] > LUMA_THRESHOLD || px[i + 1] > LUMA_THRESHOLD || px[i + 2] > LUMA_THRESHOLD) lit++;
+          if (px[i] > lumaThreshold || px[i + 1] > lumaThreshold || px[i + 2] > lumaThreshold) lit++;
         }
         const black = lit <= 50;
         return { ok: opaque > 50 && !black, opaque, lit, black, total: px.length / 4 };
@@ -122,7 +156,64 @@ async function readCanvasPixels(page) {
     const canvas = document.querySelector('canvas[data-shader-preview-source="true"]');
     if (!canvas) return { ok: false, reason: 'no-canvas' };
     return { ok: canvas.width > 0 && canvas.height > 0, width: canvas.width, height: canvas.height };
-  });
+  }, lt);
+}
+
+/**
+ * Run structural coverage assertions for a scenario.
+ *
+ * Computes per-region coverage inside the browser (avoids transferring large pixel
+ * arrays to Node), then asserts the result against layout-aware config floors.
+ * Saves a coverage-map.json artifact in the scenario output directory on failure.
+ *
+ * @returns {{ coverageStats: object|null, coverageResult: object|null }}
+ */
+async function runCoverageAssertions(page, scenario, dir) {
+  if (SKIP_COVERAGE || scenario.renderer === 'html') {
+    return { coverageStats: null, coverageResult: null };
+  }
+
+  let coverageStats = null;
+  let coverageResult = null;
+
+  try {
+    const regions = regionsForShader(scenario.shaderFile);
+    const config = coverageConfigForShader(scenario.shaderFile);
+
+    // computeBrowserCoverage is serialised by Playwright and runs inside the browser.
+    coverageStats = await evaluate(page, computeBrowserCoverage, {
+      regions,
+      lumaThreshold: LUMA_THRESHOLD,
+    });
+
+    coverageResult = assertCoverageResult(coverageStats, config);
+
+    if (!coverageResult.pass) {
+      // Persist a coverage-map.json alongside screenshots so failures are debuggable
+      // without needing a golden-image baseline to compare against.
+      const coverageMapPath = join(dir, 'coverage-map.json');
+      writeFileSync(
+        coverageMapPath,
+        JSON.stringify(
+          {
+            shaderFile: scenario.shaderFile,
+            renderer: scenario.renderer,
+            timestamp: new Date().toISOString(),
+            config,
+            failures: coverageResult.failures,
+            stats: coverageStats,
+          },
+          null,
+          2,
+        ),
+      );
+    }
+  } catch (e) {
+    coverageStats = { error: e.message };
+    coverageResult = { pass: false, failures: [`coverage-assert threw: ${e.message}`] };
+  }
+
+  return { coverageStats, coverageResult };
 }
 
 async function captureScenario(browser, engine, scenario, appRoot) {
@@ -216,6 +307,10 @@ async function captureScenario(browser, engine, scenario, appRoot) {
       window.__TEST_HOOKS__?.getLiteMode?.() ?? null,
     );
 
+    // Deterministic capture: disable CSS animations and await font loading
+    // so the frame is stable regardless of where we land in a transition.
+    await prepareForCapture(page);
+
     const shotPath = join(dir, '00_initial.png');
     if (scenario.renderer === 'html') {
       const ok = await screenshotElement(page, engine, '.pattern-html-fallback', shotPath);
@@ -248,6 +343,13 @@ async function captureScenario(browser, engine, scenario, appRoot) {
     }
 
     result.signals.canvasPixels = await readCanvasPixels(page);
+
+    // Structural coverage assertions — run after seek so the frame reflects active
+    // playback at a known row (reproducible for oscillator/envelope-driven shaders).
+    const { coverageStats, coverageResult } = await runCoverageAssertions(page, scenario, dir);
+    result.signals.coverageStats = coverageStats;
+    result.signals.coverageResult = coverageResult;
+
     const consoleAudit = classifyConsole([...logs, ...pageErrors.map((e) => `[pageerror] ${e}`)]);
     result.signals.duraParityOk = consoleAudit.duraOk;
     result.consoleMessages = logs.length;
@@ -281,6 +383,9 @@ async function captureScenario(browser, engine, scenario, appRoot) {
     } else if (shotBytes < 3000 && scenario.renderer !== 'html') {
       result.status = 'FAIL — screenshot too small (likely blank canvas)';
       result.errors.push(`screenshot bytes=${shotBytes}`);
+    } else if (coverageResult && !coverageResult.pass) {
+      result.status = 'FAIL — coverage assertions';
+      result.errors.push(...coverageResult.failures);
     } else {
       result.status = 'PASS';
     }
@@ -318,13 +423,18 @@ function generateMarkdown(report) {
     '',
     '## Results',
     '',
-    '| Renderer | Lite | Shader | Module | Status | Engine | DURA | Canvas |',
-    '|----------|------|--------|--------|--------|--------|------|--------|',
+    '| Renderer | Lite | Shader | Module | Status | Engine | DURA | Canvas | Coverage |',
+    '|----------|------|--------|--------|--------|--------|------|--------|----------|',
   ];
   for (const r of report.results) {
     const mod = new URL(r.moduleUrl).pathname;
+    const coverageOk = r.signals.coverageResult === null
+      ? '—'
+      : r.signals.coverageResult.pass
+        ? `✓ ${r.signals.coverageStats?.globalCoverage != null ? (r.signals.coverageStats.globalCoverage * 100).toFixed(1) + '%' : ''}`
+        : `✗ ${r.signals.coverageResult.failures[0]?.split(' (')[0] ?? 'fail'}`;
     lines.push(
-      `| ${r.renderer} | ${r.lite} | ${r.shaderFile} | ${mod} | ${r.status} | ${r.signals.audioEngine ?? '—'} | ${r.signals.duraParityOk ? '✓' : '—'} | ${r.signals.canvasPixels?.ok ? 'ok' : '—'} |`,
+      `| ${r.renderer} | ${r.lite} | ${r.shaderFile} | ${mod} | ${r.status} | ${r.signals.audioEngine ?? '—'} | ${r.signals.duraParityOk ? '✓' : '—'} | ${r.signals.canvasPixels?.ok ? 'ok' : '—'} | ${coverageOk} |`,
     );
   }
   lines.push('', '## Manual WebGPU checklist', '');
