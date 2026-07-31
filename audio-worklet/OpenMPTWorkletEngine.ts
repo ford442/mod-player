@@ -26,6 +26,7 @@ import type {
     CreateOpenMPTModule,
 } from './types';
 import { withBase } from '../src/lib/paths';
+import { decodePositionInfo } from './positionInfoLayout';
 
 // ── Public constants ─────────────────────────────────────────────────
 
@@ -68,38 +69,7 @@ export interface NativeEngineOptions {
 
 // ── Internal constants ───────────────────────────────────────────────
 
-const MAX_VU_CHANNELS = 32;
-
-// Byte offsets within the PositionInfo struct (must match C++ layout)
-// struct PositionInfo {
-//   double positionMs;           // offset 0, 8
-//   int    currentRow;           // offset 8, 4
-//   int    currentPattern;       // offset 12, 4
-//   int    currentOrder;         // offset 16, 4
-//   (pad 4 for double align)
-//   double bpm;                  // offset 24, 8
-//   int    numChannels;          // offset 32, 4
-//   float  channelVU[32];        // offset 36, 128 → ends 164
-//   (pad 4 for double align)
-//   double audioFramesRendered;  // offset 168, 8
-//   float  rowFraction;          // offset 176, 4
-//   int    speed;                // offset 180, 4
-//   int    sampleRate;           // offset 184, 4
-// };
-
-const POS_OFFSET_POSITION_MS     = 0;
-const POS_OFFSET_CURRENT_ROW     = 8;
-const POS_OFFSET_CURRENT_PATTERN = 12;
-const POS_OFFSET_CURRENT_ORDER   = 16;
-const POS_OFFSET_BPM             = 24;
-const POS_OFFSET_NUM_CHANNELS    = 32;
-const POS_OFFSET_CHANNEL_VU      = 36;
-const POS_OFFSET_AUDIO_FRAMES    = 168;
-const POS_OFFSET_ROW_FRACTION    = 176;
-const POS_OFFSET_SPEED           = 180;
-const POS_OFFSET_SAMPLE_RATE     = 184;
-/** Minimum byte length for extended PositionInfo fields. */
-const POS_INFO_EXTENDED_BYTES    = 188;
+// PositionInfo layout: audio-worklet/positionInfoLayout.ts (must match cpp/openmpt_wrapper.h)
 
 // ── EventEmitter ─────────────────────────────────────────────────────
 
@@ -655,67 +625,9 @@ export class OpenMPTWorkletEngine extends MiniEventEmitter<EngineEventMap> {
         const ptr = this.module._poll_position();
         if (!ptr) return null;
 
-        // Read fields from the PositionInfo struct in WASM memory
         const view = new DataView(this.module.HEAPU8.buffer);
-
-        const positionMs     = view.getFloat64(ptr + POS_OFFSET_POSITION_MS, true);
-        const currentRow     = view.getInt32(ptr + POS_OFFSET_CURRENT_ROW, true);
-        const currentPattern = view.getInt32(ptr + POS_OFFSET_CURRENT_PATTERN, true);
-        const currentOrder   = view.getInt32(ptr + POS_OFFSET_CURRENT_ORDER, true);
-        const bpm            = view.getFloat64(ptr + POS_OFFSET_BPM, true);
-        const numChannels    = view.getInt32(ptr + POS_OFFSET_NUM_CHANNELS, true);
-
-        // Read channel VU array
-        const vuCount = Math.min(numChannels, MAX_VU_CHANNELS);
-        const channelVU = new Float32Array(MAX_VU_CHANNELS);
-        for (let i = 0; i < vuCount; i++) {
-            channelVU[i] = view.getFloat32(ptr + POS_OFFSET_CHANNEL_VU + i * 4, true);
-        }
-
-        // Extended fields (present after native rebuild with updated PositionInfo)
-        let rowFraction: number | undefined;
-        let speed: number | undefined;
-        let audioFramesRendered: number | undefined;
-        let sampleRate: number | undefined;
-        const bytesAvailable = this.module.HEAPU8.byteLength - ptr;
-        if (bytesAvailable >= POS_INFO_EXTENDED_BYTES) {
-            audioFramesRendered = view.getFloat64(ptr + POS_OFFSET_AUDIO_FRAMES, true);
-            rowFraction = view.getFloat32(ptr + POS_OFFSET_ROW_FRACTION, true);
-            speed = view.getInt32(ptr + POS_OFFSET_SPEED, true);
-            sampleRate = view.getInt32(ptr + POS_OFFSET_SAMPLE_RATE, true);
-        }
-
-        const result: WorkletPositionData = {
-            positionMs,
-            currentRow,
-            currentPattern,
-            currentOrder,
-            bpm,
-            numChannels,
-            channelVU,
-        };
-        if (rowFraction != null && Number.isFinite(rowFraction)) {
-            result.rowFraction = rowFraction;
-        }
-        if (speed != null && speed > 0) {
-            result.speed = speed;
-        }
-        if (audioFramesRendered != null && Number.isFinite(audioFramesRendered)) {
-            result.audioFramesRendered = audioFramesRendered;
-        }
-        if (sampleRate != null && sampleRate > 0) {
-            result.sampleRate = sampleRate;
-        }
-        // Sample-accurate clock for playhead prediction (same domain as JS audioTime).
-        // Prefer frame clock over leaving workletTime undefined (main ctx tagging).
-        if (
-            audioFramesRendered != null &&
-            Number.isFinite(audioFramesRendered) &&
-            sampleRate != null &&
-            sampleRate > 0
-        ) {
-            result.workletTime = audioFramesRendered / sampleRate;
-        }
-        return result;
+        return decodePositionInfo(view, ptr, {
+            bufferByteLength: this.module.HEAPU8.byteLength,
+        });
     }
 }

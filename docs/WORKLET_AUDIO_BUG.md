@@ -64,6 +64,9 @@ This didn't break playback directly (the error was caught and the app fell back 
 Before modifying the worklet or AudioWorklet-related code:
 
 - [ ] **Bump `WORKLET_VERSION`** in `hooks/useWorkletLoader.ts` if `openmpt-worklet.js` changes.
+- [ ] **Extend `audio-worklet/protocol.ts`** (not ad-hoc string literals) when adding worklet message types; update `worklet-protocol-constants.js` and parity tests.
+- [ ] **Validate at the receive boundary** via `parseWorkletToMainMessage` / `parseMainToWorkletMessage` — never destructure `e.data` blindly.
+- [ ] **Native `PositionInfo` changes** must update `audio-worklet/positionInfoLayout.ts` and `tests/positionInfoLayout.test.ts`.
 - [ ] **Never re-init libopenmpt** on module reload — reuse `AudioWorkletNode` + shared-scope singleton (`#329`).
 - [ ] **Never suspend `AudioContext`** on normal `stopMusic(false)` / module reload (`#330`).
 - [ ] **Throttle worklet `position` postMessage** to ~60 Hz; main thread extrapolates fractional playhead (`playheadPrediction`).
@@ -178,6 +181,45 @@ Native engine (`OpenMPTWorkletEngine`) polls shared-memory position at `setInter
 | `utils/workletAudioLifecycle.ts` | Single source of pure lifecycle decisions used by hooks **and** tests |
 
 **Do not** weaken `canReuseWorkletNode`, the position throttle interval, or the loaded-ack token check to make a test pass — fix the test.
+
+---
+
+## Typed / validated postMessage boundary (2026-07-31)
+
+### Problem
+
+Three consecutive weekly regressions (#329 → #330 → #354) patched symptoms at the
+main-thread↔worklet boundary without a shared contract. Message-type string literals,
+`e.data` destructuring, and native `PositionInfo` byte offsets were duplicated across
+`openmpt-worklet.js`, `useAudioGraph.ts`, `useLibOpenMPT.ts`, and
+`OpenMPTWorkletEngine.ts` with no compile-time or runtime validation.
+
+### Durable fix
+
+| Layer | Location | Role |
+|-------|----------|------|
+| Constants | `audio-worklet/workletProtocolConstants.ts` + `public/worklets/worklet-protocol-constants.js` | Single source of message-type strings (parity tested) |
+| Types + zod | `audio-worklet/protocol.ts` | Discriminated unions + `parseWorkletToMainMessage` / `parseMainToWorkletMessage` |
+| JS dispatch | `audio-worklet/jsWorkletDispatch.ts` | Testable `onmessage` handler (position, loaded token, seekAck, error, projectm-pcm) |
+| Native layout | `audio-worklet/positionInfoLayout.ts` | Documented `PositionInfo` offsets + `decodePositionInfo` (replaces hardcoded `DataView` reads) |
+| Receive guards | `useAudioGraph.ts`, `useLibOpenMPT.ts`, `openmpt-worklet.js` | Validate before destructuring; reject/log malformed messages |
+
+`useAudioGraph` loads `worklet-protocol-constants.js` before `openmpt-worklet.js`.
+`WORKLET_VERSION` bumped to `8` (cache bust).
+
+### Test map (CI: `npm test`)
+
+| File | Guards |
+|------|--------|
+| `tests/workletProtocol.test.ts` | Constant parity, zod accept/reject, oscBuffer SAB size |
+| `tests/jsWorkletDispatch.test.ts` | Dispatch path: position, stale loaded token, seekAck, SP-fallback flag |
+| `tests/positionInfoLayout.test.ts` | Fixture encode/decode; offset table size 188 B |
+| `tests/workletAudioLifecycle.test.ts` | #329/#330 invariants + dispatch integration |
+| `tests/workletRegressionGuards.test.ts` | #354 throttle + hot-reload source invariants |
+
+This supersedes per-incident string-literal patches as the long-term guard for the
+audio message boundary. Incident-specific helpers in `utils/workletAudioLifecycle.ts`
+remain the source for pure lifecycle decisions (reuse node, throttle cadence, load tokens).
 
 ---
 

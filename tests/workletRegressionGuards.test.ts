@@ -197,9 +197,9 @@ describe('#354 production source invariants', () => {
   it('worklet throttles position posts at 1/60 s (not every quantum)', () => {
     expect(workletSource).toMatch(/positionReportInterval\s*=\s*1\s*\/\s*60/);
     expect(workletSource).toContain('lastPositionReportTime');
-    // Guard condition must gate postMessage({ type: 'position'
+    // Guard condition must gate postMessage({ type: WT.position
     const throttleBlock = workletSource.match(
-      /if\s*\(\s*currentTime\s*-\s*this\.lastPositionReportTime\s*>=\s*this\.positionReportInterval\s*\)\s*\{[\s\S]*?type:\s*['"]position['"]/,
+      /if\s*\(\s*currentTime\s*-\s*this\.lastPositionReportTime\s*>=\s*this\.positionReportInterval\s*\)\s*\{[\s\S]*?type:\s*WT\.position/,
     );
     expect(throttleBlock, 'position postMessage must sit inside the ~60 Hz throttle if').toBeTruthy();
     // Must not post position unconditionally every process() without the interval check nearby
@@ -207,8 +207,10 @@ describe('#354 production source invariants', () => {
   });
 
   it('play path uses shouldForceWorkletModuleLoad + shouldAcceptWorkletLoadedAck', () => {
+    const jsDispatch = readFileSync(join(ROOT, 'audio-worklet/jsWorkletDispatch.ts'), 'utf8');
     expect(useAudioGraph).toContain('shouldForceWorkletModuleLoad');
-    expect(useAudioGraph).toContain('shouldAcceptWorkletLoadedAck');
+    expect(useAudioGraph).toContain('dispatchWorkletToMainMessage');
+    expect(jsDispatch).toContain('shouldAcceptWorkletLoadedAck');
     expect(useAudioGraph).toContain('canReuseWorkletNode');
     expect(useAudioGraph).toContain('Hot reload — keeping existing audio graph wiring');
     // Stale-ack path must remain
@@ -229,10 +231,10 @@ describe('#354 production source invariants', () => {
     expect(lifecycle).toContain('WORKLET_POSITION_REPORT_INTERVAL_SEC');
   });
 
-  it('WORKLET_VERSION stays cache-busted at ≥ 7 after #354', () => {
+  it('WORKLET_VERSION stays cache-busted at ≥ 8 after typed protocol boundary', () => {
     const m = useWorkletLoader.match(/WORKLET_VERSION\s*=\s*['"](\d+)['"]/);
     expect(m, 'WORKLET_VERSION must be defined').toBeTruthy();
-    expect(Number(m![1])).toBeGreaterThanOrEqual(7);
+    expect(Number(m![1])).toBeGreaterThanOrEqual(8);
   });
 });
 
