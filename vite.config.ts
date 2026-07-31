@@ -1,6 +1,10 @@
 import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 import { libopenmptHtmlPlugin } from './vite-plugins/libopenmptHtml'
+import {
+  CROSS_ORIGIN_ISOLATION_HEADERS,
+  threeVendorManualChunk,
+} from './vite-plugins/crossOriginIsolationHeaders'
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => {
@@ -37,14 +41,7 @@ export default defineConfig(({ mode }) => {
         followSymlinks: false,
         ignored: ['**/_codeql_detected_source_root**', '**/node_modules/**'],
       },
-      headers: {
-        // Required for SharedArrayBuffer / Atomics (Emscripten WASM Workers)
-        'Cross-Origin-Opener-Policy': 'same-origin',
-        // 'credentialless' still unlocks SharedArrayBuffer but lets cross-origin
-        // resources (e.g. esm.sh importmap) load without CORP headers.
-        // Self-hosted libopenmpt under public/libmpt/ is same-origin.
-        'Cross-Origin-Embedder-Policy': 'credentialless',
-      },
+      headers: CROSS_ORIGIN_ISOLATION_HEADERS,
       proxy: {
         '/api': {
           target: storageProxyTarget,
@@ -57,6 +54,9 @@ export default defineConfig(({ mode }) => {
           secure: false,
         },
       },
+    },
+    preview: {
+      headers: CROSS_ORIGIN_ISOLATION_HEADERS,
     },
     optimizeDeps: {
       // Don't pre-bundle the Emscripten-generated glue code
@@ -71,6 +71,7 @@ export default defineConfig(({ mode }) => {
           entryFileNames: 'assets/[name]-[hash].js',
           chunkFileNames: 'assets/[name]-[hash].js',
           assetFileNames: 'assets/[name]-[hash][extname]',
+          manualChunks: threeVendorManualChunk,
         },
       },
     },

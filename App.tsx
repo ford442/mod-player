@@ -1,5 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { App3DView } from './components/App3DView';
+import { useState, useEffect, useCallback, useMemo, useRef, lazy, Suspense } from 'react';
 import { MainLayout } from './components/MainLayout';
 import { ProjectMEmbedView } from './components/ProjectMEmbedView';
 import type { ModuleMetadata } from './components/MetadataPanel';
@@ -58,6 +57,19 @@ import { PlayerFeaturesProvider, type PlayerFeaturesValue } from './context/Play
 import { usePlayerUiStore } from './store/playerUiStore';
 import { useShaderPrefsStore } from './store/shaderPrefsStore';
 import { readLocalStorage, writeLocalStorage } from './utils/localStorageIO';
+
+/** 3D Studio pulls in three/R3F/drei — lazy-loaded so 2D-only users skip that payload. */
+const App3DView = lazy(() =>
+  import('./components/App3DView').then((m) => ({ default: m.App3DView })),
+);
+
+function App3DLoadingFallback() {
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-panel text-edge">
+      <p className="text-sm tracking-wide">Loading 3D Studio…</p>
+    </div>
+  );
+}
 
 function App() {
   const theme = usePlayerUiStore((s) => s.theme);
@@ -1092,7 +1104,8 @@ function App() {
 
   if (is3DMode) {
     return (
-      <App3DView
+      <Suspense fallback={<App3DLoadingFallback />}>
+        <App3DView
         isDarkMode={isDarkMode}
         viewMode={viewMode}
         setViewMode={setViewMode}
@@ -1142,7 +1155,8 @@ function App() {
         isReady={isReady}
         cheatsheetOpen={cheatsheetOpen}
         setCheatsheetOpen={setCheatsheetOpen}
-      />
+        />
+      </Suspense>
     );
   }
 
