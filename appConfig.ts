@@ -1,8 +1,12 @@
 // Shader Definitions
 
-export const DEFAULT_SHADER = 'patternv0.50.wgsl';
+/** Production / public-build default — Note-On Disc circular visualizer. */
+export const PUBLIC_DEFAULT_SHADER = 'patternv0.30b.wgsl';
 
-export const SHADER_GROUPS = {
+export const DEFAULT_SHADER = PUBLIC_DEFAULT_SHADER;
+
+/** Full dev catalog — every registered picker shader. */
+export const SHADER_GROUPS_ALL = {
   SQUARE: [
     { id: 'patternv0.44.wgsl', label: 'v0.44 (Frosted Wall 64)' },
     { id: 'patternv0.43.wgsl', label: 'v0.43 (Frosted Wall 32)' },
@@ -32,13 +36,47 @@ export const SHADER_GROUPS = {
     { id: 'patternv0.38.wgsl', label: 'v0.38 (Glass)' },
     { id: 'patternv0.35_bloom.wgsl', label: 'v0.35 (Bloom)' },
     { id: 'patternv0.30.wgsl', label: 'v0.30 (Disc)' },
-    { id: 'patternv0.30b.wgsl', label: 'v0.30b (Note-On Disc)' },
+    { id: PUBLIC_DEFAULT_SHADER, label: 'v0.30b (Note-On Disc)' },
   ],
   VIDEO: [
     { id: 'patternv0.23.wgsl', label: 'v0.23 (Clouds)' },
     { id: 'patternv0.24.wgsl', label: 'v0.24 (Tunnel)' },
-  ]
-};
+  ],
+} as const;
+
+/** Public / demo build — single production shader. */
+export const SHADER_GROUPS_PUBLIC = {
+  SQUARE: [] as const,
+  CIRCULAR: [
+    { id: PUBLIC_DEFAULT_SHADER, label: 'Note-On Disc' },
+  ],
+  VIDEO: [] as const,
+} as const;
+
+// Public / demo mode — evaluated once at module load from URL params.
+const _urlParams = new URLSearchParams(
+  typeof window !== 'undefined' ? window.location.search : '',
+);
+
+export const IS_PUBLIC_MODE =
+  _urlParams.get('public') === '1' || _urlParams.get('demo') === '1';
+
+/** Expose full shader catalog in public builds (`?shaderDebug=1` or localStorage). */
+export const IS_SHADER_DEBUG = (() => {
+  if (_urlParams.get('shaderDebug') === '1' || _urlParams.get('debugShaders') === '1') {
+    return true;
+  }
+  if (typeof window === 'undefined') return false;
+  try {
+    return window.localStorage.getItem('xasm1_shader_debug') === '1';
+  } catch {
+    return false;
+  }
+})();
+
+const _showAllShaders = IS_SHADER_DEBUG || !IS_PUBLIC_MODE;
+
+export const SHADER_GROUPS = _showAllShaders ? SHADER_GROUPS_ALL : SHADER_GROUPS_PUBLIC;
 
 export const ALL_SHADER_OPTIONS = [
   ...SHADER_GROUPS.SQUARE.map(s => ({ ...s, group: 'Square' as const })),
@@ -47,10 +85,17 @@ export const ALL_SHADER_OPTIONS = [
 ];
 export const AVAILABLE_SHADERS = ALL_SHADER_OPTIONS;
 
-// Flat set of all valid shader IDs (used for localStorage validation)
+// Full registered shader set (share URLs, localStorage validation, registry tests).
 export const ALL_SHADER_IDS = new Set<string>([
-  ...AVAILABLE_SHADERS.map(s => s.id),
+  ...SHADER_GROUPS_ALL.SQUARE.map(s => s.id),
+  ...SHADER_GROUPS_ALL.CIRCULAR.map(s => s.id),
+  ...SHADER_GROUPS_ALL.VIDEO.map(s => s.id),
 ]);
+
+/** Picker-visible shader IDs (public mode exposes v0.30b only unless shaderDebug). */
+export const PICKER_SHADER_IDS = new Set<string>(
+  AVAILABLE_SHADERS.map(s => s.id),
+);
 
 // Available UI themes.
 // Each theme value maps to a `data-theme` attribute on <html> and a CSS selector
@@ -75,11 +120,6 @@ export function computeModuleHash(data: Uint8Array): string {
     .map(b => b.toString(16).padStart(2, '0'))
     .join('');
 }
-
-// Public / demo mode — evaluated once at module load from URL params.
-// Activated by ?public=1 or ?demo=1; value doesn't change during the page lifecycle.
-const _urlParams = new URLSearchParams(window.location.search);
-export const IS_PUBLIC_MODE = _urlParams.get('public') === '1' || _urlParams.get('demo') === '1';
 
 // Project-M embed / audio-only mode — evaluated once at module load.
 // Activated by ?projectm=1 (or a bare ?projectm), or by being opened with

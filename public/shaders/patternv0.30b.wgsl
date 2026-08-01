@@ -338,11 +338,12 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   if (inButton > 0.5) {
     let note = (in.packedA >> 24) & 255u;
     let inst = (in.packedA >> 16) & 255u;
-    let effCode = (in.packedB >> 8) & 255u;
-    let effParam = in.packedB & 255u;
+    // DURA-002 packedB: [effCmd:8][effVal:8][durationFlags:7][trigger:1][volCmd:8]
+    let effCode = (in.packedB >> 24) & 255u;
+    let effParam = (in.packedB >> 16) & 255u;
 
     let hasNote = (note >= NOTE_MIN && note <= NOTE_MAX);
-    let hasEffect = (effParam > 0u);
+    let hasEffect = (effCode > 0u) || (effParam > 0u);
     let ch = channels[in.channel];
     let isMuted = (ch.isMuted == 1u);
 
@@ -397,7 +398,7 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
       let topLed = drawChromeIndicator(topUV, topSize, topColor, topActive, aa);
       finalColor = mix(finalColor, topLed.rgb, topLed.a);
       if (topActive) {
-        finalColor += topColor * topLed.a * 0.5;
+        finalColor += topColor * topLed.a * 0.22;
       }
     }
 
@@ -415,7 +416,7 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
       let instBright = 0.8 + (select(0.0, f32(instBand) / 15.0, instBand > 0u)) * 0.2;
       noteColor = baseColor * instBright;
 
-      if (isSounding) {
+      if (isInSoundingArc) {
         // Snap to full brightness at note-on; only fade-out near note end
         lightAmount = ACTIVE_NOTE_GLOW * noteFadeOut;
       } else {

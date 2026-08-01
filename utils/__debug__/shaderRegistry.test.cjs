@@ -68,11 +68,11 @@ runTsx('Registry + SHADER_GROUPS coverage', `
     hasEmbeddedTransportUI,
   } = await import('${UTILS_DIR}/shaderVersion.ts');
   const { getLayoutModeFromShader, LAYOUT_MODES } = await import('${UTILS_DIR}/geometryConstants.ts');
-  const { SHADER_GROUPS, ALL_SHADER_IDS, DEFAULT_SHADER } = await import('${ROOT}/appConfig.ts');
+  const { SHADER_GROUPS_ALL, ALL_SHADER_IDS, DEFAULT_SHADER, PUBLIC_DEFAULT_SHADER } = await import('${ROOT}/appConfig.ts');
 
   const errors: string[] = [];
 
-  for (const group of Object.values(SHADER_GROUPS)) {
+  for (const group of Object.values(SHADER_GROUPS_ALL)) {
     for (const { id } of group as { id: string }[]) {
       if (!SHADER_REGISTRY[id]) {
         errors.push(\`SHADER_GROUPS id "\${id}" is not in SHADER_REGISTRY\`);
@@ -82,6 +82,9 @@ runTsx('Registry + SHADER_GROUPS coverage', `
 
   if (!SHADER_REGISTRY[DEFAULT_SHADER]) {
     errors.push(\`DEFAULT_SHADER "\${DEFAULT_SHADER}" missing from registry\`);
+  }
+  if (DEFAULT_SHADER !== PUBLIC_DEFAULT_SHADER) {
+    errors.push(\`DEFAULT_SHADER must be PUBLIC_DEFAULT_SHADER (\${PUBLIC_DEFAULT_SHADER})\`);
   }
 
   const PARITY = [

@@ -3,6 +3,10 @@ import {
   ALL_SHADER_IDS,
   AVAILABLE_SHADERS,
   DEFAULT_SHADER,
+  IS_PUBLIC_MODE,
+  IS_SHADER_DEBUG,
+  PICKER_SHADER_IDS,
+  PUBLIC_DEFAULT_SHADER,
 } from '../appConfig';
 import { usesInstrumentPalette } from '../utils/shaderVersion';
 import {
@@ -16,7 +20,20 @@ import {
 import { readLocalStorage, writeLocalStorage } from '../utils/localStorageIO';
 
 function validateShader(shader: string): string {
+  if (IS_PUBLIC_MODE && !IS_SHADER_DEBUG) {
+    return PUBLIC_DEFAULT_SHADER;
+  }
+  if (PICKER_SHADER_IDS.has(shader)) {
+    return shader;
+  }
   return ALL_SHADER_IDS.has(shader) ? shader : DEFAULT_SHADER;
+}
+
+function initialStoredShader(): string {
+  if (IS_PUBLIC_MODE && !IS_SHADER_DEBUG) {
+    return PUBLIC_DEFAULT_SHADER;
+  }
+  return validateShader(readLocalStorage<string>('xasm1_last_shader', DEFAULT_SHADER));
 }
 
 export interface ShaderPrefsState {
@@ -52,7 +69,7 @@ export interface ShaderPrefsState {
 }
 
 export const useShaderPrefsStore = create<ShaderPrefsState>((set, get) => ({
-  storedShader: validateShader(readLocalStorage<string>('xasm1_last_shader', DEFAULT_SHADER)),
+  storedShader: initialStoredShader(),
   shaderFavorites: readLocalStorage<string[]>('xasm1-shader-favorites', []),
   shaderRecents: readLocalStorage<string[]>('xasm1-shader-recents', []),
   shaderThumbnails: readLocalStorage<Record<string, string>>('xasm1-shader-thumbnails', {}),
@@ -78,6 +95,10 @@ export const useShaderPrefsStore = create<ShaderPrefsState>((set, get) => ({
     }
   },
   restoreModuleShader: () => {
+    if (IS_PUBLIC_MODE && !IS_SHADER_DEBUG) {
+      set({ storedShader: PUBLIC_DEFAULT_SHADER });
+      return;
+    }
     const { moduleHash, skipNextModuleShaderRestore } = get();
     if (!moduleHash || skipNextModuleShaderRestore) {
       set({ skipNextModuleShaderRestore: false });
