@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { ALL_SHADER_IDS } from '../appConfig';
+import { ALL_SHADER_IDS, IS_PUBLIC_MODE, IS_SHADER_DEBUG, PUBLIC_DEFAULT_SHADER } from '../appConfig';
 import { detectRuntimeBase } from '../src/lib/paths';
 import { toApiUrl } from './storageApi';
 import {
@@ -98,7 +98,10 @@ export function parseShareParams(search?: string): ShareParseResult {
   const shaderRaw = params.get('shader');
   if (shaderRaw) {
     const shader = normalizeShaderId(shaderRaw);
-    if (ALL_SHADER_IDS.has(shader)) {
+    if (IS_PUBLIC_MODE && !IS_SHADER_DEBUG && shader !== PUBLIC_DEFAULT_SHADER) {
+      warnings.push(`Shader "${shaderRaw}" is not available in public mode — using ${PUBLIC_DEFAULT_SHADER}`);
+      state.shader = PUBLIC_DEFAULT_SHADER;
+    } else if (ALL_SHADER_IDS.has(shader)) {
       state.shader = shader;
     } else {
       warnings.push(`Unknown shader "${shaderRaw}" — using your saved shader`);
