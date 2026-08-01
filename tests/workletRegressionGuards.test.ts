@@ -212,7 +212,7 @@ describe('#354 production source invariants', () => {
     expect(useAudioGraph).toContain('dispatchWorkletToMainMessage');
     expect(jsDispatch).toContain('shouldAcceptWorkletLoadedAck');
     expect(useAudioGraph).toContain('canReuseWorkletNode');
-    expect(useAudioGraph).toContain('Hot reload — keeping existing audio graph wiring');
+    expect(useAudioGraph).toContain('Hot reload — keeping existing worklet wiring');
     // Stale-ack path must remain
     expect(useAudioGraph).toMatch(/Ignoring stale worklet loaded ack/);
   });

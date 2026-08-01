@@ -285,6 +285,7 @@ export const Controls: React.FC<ControlsProps> = ({
             step="0.01"
             value={volume}
             onChange={(e) => setVolume(parseFloat(e.target.value))}
+            onInput={(e) => setVolume(parseFloat((e.target as HTMLInputElement).value))}
             className="w-20"
           />
         </div>
@@ -299,6 +300,7 @@ export const Controls: React.FC<ControlsProps> = ({
             step="0.01"
             value={pan}
             onChange={(e) => setPan(parseFloat(e.target.value))}
+            onInput={(e) => setPan(parseFloat((e.target as HTMLInputElement).value))}
             className="w-20"
           />
         </div>
