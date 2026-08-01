@@ -146,7 +146,54 @@ npm test -- tests/workletAudioLifecycle.test.ts tests/workletRegressionGuards.te
 
 **Verdict:** All three lifecycle guards are present in production code and locked by 35 regression tests. No code changes required for this sub-phase.
 
-### 1.1 Reproduce & measure
+### 1.1 Position reporting & playhead clock ✅ (2026-08-01)
+
+#### Worklet throttle (production)
+
+```javascript
+// public/worklets/openmpt-worklet.js
+this.positionReportInterval = 1 / 60;
+if (currentTime - this.lastPositionReportTime >= this.positionReportInterval) {
+  this.port.postMessage({ type: WT.position, rowFraction, audioTime, … });
+  this.lastPositionReportTime = currentTime;
+}
+```
+
+Verified by `tests/workletRegressionGuards.test.ts` — simulated 1 s of audio quanta caps reports at ≤~61 Hz (unthrottled would be >300 Hz).
+
+#### Playhead extrapolation chain
+
+```
+worklet position (~60 Hz)
+  → applyWorkletPositionSample (playheadPrediction.ts)
+  → predictPlayheadFromSample(sample, heardTime, rowsPerSec)   // allows negative dt for latency
+  → light EMA (WORKLET_ROW_SMOOTHING = 0.98)
+  → playbackStateRef.playheadRow → GPU uniform (f32 for v0.30b)
+```
+
+#### Diagnostic logging (temporary, debug-gated)
+
+Enable with `?playheadDebug=1` or `localStorage.xasm1_playhead_debug='1'` (always on in `import.meta.env.DEV`):
+
+| Surface | Fields |
+|---------|--------|
+| `window.__PLAYHEAD_DEBUG__` | `sampleRow`, `predictedRow`, `smoothedRow`, `predictionLagRows`, `maxAbsLagRows`, `positionReportHz` |
+| Console `[Playhead]` warnings | Sustained lag > 1.5 rows for ~0.75 s; growing drift > 1.5 rows/s; position flood > 75 Hz |
+
+Pure helpers: `utils/playheadLagMonitor.ts` (+ `tests/playheadLagMonitor.test.ts`).
+
+#### Automated acceptance
+
+```bash
+npm run smoke:playhead
+# square v0.44 @ 125 BPM: median |lagRows| = 0.532, max = 0.777 (< 1.0 threshold) — PASS
+```
+
+#### Manual audible checklist
+
+See **`docs/PHASE1_AUDIBLE_CHECKLIST.md`** — 5-minute script covering default play, file picker, MOD↔XM switch, seek/loop, and playhead sync.
+
+### 1.2 Reproduce & measure (manual)
 
 ```bash
 npm run dev

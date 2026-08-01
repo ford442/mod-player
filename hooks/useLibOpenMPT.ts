@@ -45,6 +45,14 @@ import {
 } from '../audio-worklet/protocol';
 import { hasShareModuleIntent } from '../utils/shareState';
 import { getStopMusicWorkletActions } from '../utils/workletAudioLifecycle';
+import {
+  createPlayheadLagTracker,
+  createPositionReportTracker,
+  trackPositionReport,
+  updatePlayheadLagTracker,
+  type PlayheadLagTracker,
+  type PositionReportTracker,
+} from '../utils/playheadLagMonitor';
 
 
 // Use Vite BASE_URL for correct resolution under subdirectory deployment
@@ -78,6 +86,8 @@ const SYNC_DEBUG_UI_INTERVAL_MS = 250;
 function isPlayheadDebugEnabled(): boolean {
   if (import.meta.env.DEV) return true;
   try {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('playheadDebug') === '1') return true;
     return localStorage.getItem('xasm1_playhead_debug') === '1';
   } catch {
     return false;
@@ -287,6 +297,9 @@ export function useLibOpenMPT(initialVolume: number = 0.4, liteMode: boolean = f
   /** Bumped on every processModuleData — worklet must receive matching `load`. */
   const workletModuleTokenRef = useRef<number>(0);
   const lastWorkletModuleTokenSentRef = useRef<number>(-1);
+  const playheadLagTrackerRef = useRef<PlayheadLagTracker>(createPlayheadLagTracker());
+  const positionReportTrackerRef = useRef<PositionReportTracker>(createPositionReportTracker());
+  const lastPositionSampleTimeRef = useRef<number>(-1);
 
   // Stabilize updateUI callback so startAudioPlayback always calls the latest version
   const updateUIRef = useRef<(() => void) | null>(null);
@@ -385,6 +398,9 @@ export function useLibOpenMPT(initialVolume: number = 0.4, liteMode: boolean = f
     // worklet message handler so a stray late position report from the old module
     // cannot corrupt the new module's state. The AudioWorkletNode is kept alive.
     workletModuleTokenRef.current += 1;
+    playheadLagTrackerRef.current = createPlayheadLagTracker();
+    positionReportTrackerRef.current = createPositionReportTracker();
+    lastPositionSampleTimeRef.current = -1;
     stopMusic(false);
 
     // Mark UI as loading and clear stale playhead/fraction state so the display
@@ -651,20 +667,6 @@ export function useLibOpenMPT(initialVolume: number = 0.4, liteMode: boolean = f
     if (smoothedPlayhead < 0) smoothedPlayhead = 0;
 
     const engineMode = scriptProcessorRef.current ? 'scriptprocessor' : activeEngine;
-    if (isPlayheadDebugEnabled()) {
-      const sampleRow = playheadDebugSampleRow ?? smoothedPlayhead;
-      const snapshot: PlayheadDebugSnapshot = {
-        sampleRow,
-        predictedRow: playheadDebugPredictedRow ?? smoothedPlayhead,
-        smoothedRow: smoothedPlayhead,
-        dtSec: playheadDebugDtSec,
-        rowsPerSec: playheadDebugRowsPerSec || rowsPerSecondFromBpm(currentBpm),
-        predictionLagRows: smoothedPlayhead - sampleRow,
-        driftMs: Math.round(driftAccumulatorRef.current * 1000),
-        mode: engineMode,
-      };
-      window.__PLAYHEAD_DEBUG__ = snapshot;
-    }
 
     // moduleInfo / sequencer UI use integer row; shaders read fractional playhead from ref
     const rowIntUi = Math.floor(smoothedPlayhead);
@@ -746,6 +748,48 @@ export function useLibOpenMPT(initialVolume: number = 0.4, liteMode: boolean = f
 
     // Throttle React HUD updates — never compete with the audio message queue at 60 Hz
     const wallNowMs = performance.now();
+
+    if (isPlayheadDebugEnabled()) {
+      const sampleRow = playheadDebugSampleRow ?? smoothedPlayhead;
+      const lagUpdate = updatePlayheadLagTracker(
+        playheadLagTrackerRef.current,
+        sampleRow,
+        smoothedPlayhead,
+        wallNowMs,
+      );
+      playheadLagTrackerRef.current = lagUpdate.tracker;
+
+      const sampleTime = workletPositionSampleRef.current?.workletTime;
+      let positionReportHz = positionReportTrackerRef.current.hz;
+      if (sampleTime != null && sampleTime !== lastPositionSampleTimeRef.current) {
+        lastPositionSampleTimeRef.current = sampleTime;
+        const rateUpdate = trackPositionReport(positionReportTrackerRef.current, wallNowMs);
+        positionReportTrackerRef.current = rateUpdate.tracker;
+        positionReportHz = rateUpdate.tracker.hz;
+        if (rateUpdate.warning) {
+          console.warn(`[Playhead] ${rateUpdate.warning}`);
+        }
+      }
+
+      if (lagUpdate.warning) {
+        console.warn(`[Playhead] ${lagUpdate.warning}`);
+      }
+
+      const snapshot: PlayheadDebugSnapshot = {
+        sampleRow,
+        predictedRow: playheadDebugPredictedRow ?? smoothedPlayhead,
+        smoothedRow: smoothedPlayhead,
+        dtSec: playheadDebugDtSec,
+        rowsPerSec: playheadDebugRowsPerSec || rowsPerSecondFromBpm(currentBpm),
+        predictionLagRows: smoothedPlayhead - sampleRow,
+        driftMs: Math.round(driftAccumulatorRef.current * 1000),
+        mode: engineMode,
+        maxAbsLagRows: lagUpdate.tracker.maxAbsLagRows,
+        positionReportHz,
+      };
+      window.__PLAYHEAD_DEBUG__ = snapshot;
+    }
+
     if (wallNowMs - lastSyncDebugUiMsRef.current >= SYNC_DEBUG_UI_INTERVAL_MS) {
       lastSyncDebugUiMsRef.current = wallNowMs;
       setBeatPhase(beatPhaseValue);
