@@ -295,10 +295,16 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   if (delta < -maxRows * 0.5) { delta += maxRows; }
   else if (delta > maxRows * 0.5) { delta -= maxRows; }
   let onPlayhead = abs(delta) < 0.5;
+  let timingDebug = uniforms.invertChannels == 2u;
 
   // --- INDICATOR RING (Channel 0 / Outer Ring) ---
   if (in.channel == 0u) {
     let indSize = vec2(0.3, 0.3);
+    if (timingDebug) {
+      let dbgColor = select(vec3(0.15, 0.05, 0.05), vec3(0.1, 0.95, 0.2), onPlayhead);
+      let dbgLed = drawChromeIndicator(p, indSize, dbgColor, onPlayhead, aa);
+      return vec4<f32>(dbgLed.rgb, clamp(dbgLed.a, 0.0, 1.0));
+    }
     let indColor = select(vec3(0.2), fs.ledOnColor, onPlayhead);
     let indLed = drawChromeIndicator(p, indSize, indColor, onPlayhead, aa);
 
@@ -351,21 +357,18 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
       let dInfo = unpackDurationInfo(in.packedA, in.packedB);
       let isRealNoteOff = dInfo.isNoteOff || note >= NOTE_OFF_MIN;
       isTrigger = dInfo.isTrigger && !isRealNoteOff;
-      isSustain = dInfo.rowOffset > 0u && !isRealNoteOff && !dInfo.isTrigger;
+      isSustain = dInfo.rowOffset > 0u && !isRealNoteOff && !isTrigger;
 
       if (isTrigger || isSustain) {
         let durationF = f32(dInfo.duration);
         let noteRelativeAge = delta + f32(dInfo.rowOffset);
-        let cellOffset = f32(dInfo.rowOffset);
 
         let isCurrentNote = abs(noteRelativeAge - ch.noteAge) < NOTE_AGE_TOLERANCE;
         let channelLive = ch.noteAge < 999.0;
-        let noteStillLive = ch.noteAge < durationF;
-        let cellInArc = cellOffset < durationF;
 
-        // Full arc (trigger + sustain) stays active from note-on through note-off
-        isInSoundingArc = (uniforms.isPlaying == 1u) && channelLive && noteStillLive &&
-                          cellInArc && isCurrentNote;
+        // Match v0.45b: arc is live while note-relative age is within packed duration.
+        isInSoundingArc = (uniforms.isPlaying == 1u) && channelLive && isCurrentNote &&
+                          noteRelativeAge >= 0.0 && noteRelativeAge < durationF;
         isSounding = isTrigger && isInSoundingArc;
 
         // Fade-out only near note end — no fade-in
@@ -385,7 +388,11 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
       let topUV = btnUV - vec2(0.5, 0.16);
       let topSize = vec2(0.20, 0.20);
       let topActive = isInSoundingArc && !isMuted;
-      let topColor = vec3(0.0, 0.9, 1.0);
+      var topColor = vec3(0.0, 0.9, 1.0);
+      if (timingDebug) {
+        topColor = select(vec3(0.12, 0.12, 0.14), vec3(0.95, 0.15, 0.85), isInSoundingArc);
+        if (isSounding) { topColor = vec3(1.0, 0.92, 0.1); }
+      }
 
       let topLed = drawChromeIndicator(topUV, topSize, topColor, topActive, aa);
       finalColor = mix(finalColor, topLed.rgb, topLed.a);

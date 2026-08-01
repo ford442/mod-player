@@ -76,7 +76,7 @@ export const fillUniformPayload = (
     isModuleLoaded: boolean;
     bloomIntensity?: number;
     bloomThreshold?: number;
-    invertChannels?: boolean;
+    invertChannels?: boolean | number;
     dimFactor?: number;
     innerRadius?: number;
     outerRadius?: number;
@@ -119,7 +119,9 @@ export const fillUniformPayload = (
     uint[15] = params.isModuleLoaded ? 1 : 0;
     float[16] = params.bloomIntensity ?? 1.0;
     float[17] = params.bloomThreshold ?? 0.8;
-    uint[18] = params.invertChannels ? 1 : 0;
+    uint[18] = typeof params.invertChannels === 'number'
+      ? (params.invertChannels >>> 0)
+      : (params.invertChannels ? 1 : 0);
     float[19] = params.dimFactor ?? 1.0;
     float[20] = params.gridRect?.x ?? GRID_RECT.x;
     float[21] = params.gridRect?.y ?? GRID_RECT.y;
