@@ -99,6 +99,53 @@ See `docs/WORKLET_AUDIO_BUG.md` § Manual audible checklist.
 
 **Priority:** Fix before any visual polish. A player with drifting or silent audio cannot ship.
 
+### 1.0 Worklet lifecycle audit ✅ (2026-08-01)
+
+Systematic code + test verification of the three #329/#354 guards.
+
+#### A. `ensureSharedLibOpenMPT` singleton
+
+| Location | Status | Detail |
+|----------|--------|--------|
+| `public/worklets/openmpt-worklet.js:94–177` | ✅ | Returns existing `globalThis.__openmptWorkletLib` if `_openmpt_module_create_from_memory2` exists; otherwise one shared `__openmptWorkletLibInitPromise` |
+| `openmpt-worklet.js:231–239` | ✅ | New processor nodes attach to pre-initialised lib (`Attached to pre-initialised shared libopenmpt`) |
+| `utils/workletLibSingleton.ts` | ✅ | Testable mirror; 3 unit tests assert single eval + concurrent promise sharing |
+| `hooks/useAudioGraph.ts:751` | ✅ | `shouldPostInitLib(reuseWorkletNode, …)` — **no `initLib` on hot reload** |
+
+#### B. Hot-reload reuses `AudioWorkletNode` (no disconnect/reconnect)
+
+| Location | Status | Detail |
+|----------|--------|--------|
+| `utils/workletAudioLifecycle.ts:16–22` | ✅ | `canReuseWorkletNode` — true when `activeEngine==='worklet' && workletLoaded && hasWorkletNode` |
+| `hooks/useAudioGraph.ts:232–245` | ✅ | `shouldDisconnectWorkletOnPlay` — only disconnects when reuse is **false** |
+| `hooks/useAudioGraph.ts:772–780` | ✅ | Hot path logs `Hot reload — keeping existing audio graph wiring`; skips `node.connect()` |
+| `hooks/useLibOpenMPT.ts:387–388` | ✅ | `processModuleData` bumps token then `stopMusic(false)` — node kept alive |
+| `hooks/useLibOpenMPT.ts:846–861` | ✅ | `getStopMusicWorkletActions(false, …)` → `disconnectNode: false`, `clearNodeRef: false` |
+
+#### C. Module token + stale `loaded` ack rejection
+
+| Location | Status | Detail |
+|----------|--------|--------|
+| `hooks/useLibOpenMPT.ts:288–289` | ✅ | `workletModuleTokenRef` bumped on every `processModuleData` |
+| `hooks/useAudioGraph.ts:127–131` | ✅ | `shouldForceWorkletModuleLoad` gates hot `load` while already playing |
+| `hooks/useAudioGraph.ts:765` | ✅ | `lastWorkletModuleTokenSentRef` set **before** `postLoad` |
+| `audio-worklet/jsWorkletDispatch.ts:91–100` | ✅ | `shouldAcceptWorkletLoadedAck(current, lastSent)` — mismatch → `loaded-stale` |
+| `hooks/useAudioGraph.ts:616–618` | ✅ | Stale ack logged and ignored; does **not** flip `isPlaying` |
+
+#### D. Automated guards (run 2026-08-01)
+
+```bash
+npm test -- tests/workletAudioLifecycle.test.ts tests/workletRegressionGuards.test.ts
+# → 2 files, 35 tests passed
+```
+
+| Test file | Coverage |
+|-----------|----------|
+| `tests/workletAudioLifecycle.test.ts` | #329 reuse/`initLib`, #330 no suspend, singleton eval-once, source invariants |
+| `tests/workletRegressionGuards.test.ts` | #354 ≤60 Hz throttle simulation, two-load session (1 node, 0 disconnects), stale-ack tokens, source invariants |
+
+**Verdict:** All three lifecycle guards are present in production code and locked by 35 regression tests. No code changes required for this sub-phase.
+
 ### 1.1 Reproduce & measure
 
 ```bash
