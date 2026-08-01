@@ -58,8 +58,11 @@ const _urlParams = new URLSearchParams(
   typeof window !== 'undefined' ? window.location.search : '',
 );
 
+/** True for production xm-player deploy (`VITE_PUBLIC_MODE=1`) or `?public=1` / `?demo=1`. */
 export const IS_PUBLIC_MODE =
-  _urlParams.get('public') === '1' || _urlParams.get('demo') === '1';
+  import.meta.env.VITE_PUBLIC_MODE === '1' ||
+  _urlParams.get('public') === '1' ||
+  _urlParams.get('demo') === '1';
 
 /** Expose full shader catalog in public builds (`?shaderDebug=1` or localStorage). */
 export const IS_SHADER_DEBUG = (() => {

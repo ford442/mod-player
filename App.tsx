@@ -32,6 +32,7 @@ import {
   computeModuleHash,
   AVAILABLE_SHADERS,
   IS_PROJECTM_EMBED,
+  IS_PUBLIC_MODE,
 } from './appConfig';
 import {
   calculateNoteDurations,
@@ -1102,7 +1103,7 @@ function App() {
     );
   }
 
-  if (is3DMode) {
+  if (is3DMode && !IS_PUBLIC_MODE) {
     return (
       <Suspense fallback={<App3DLoadingFallback />}>
         <App3DView
