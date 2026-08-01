@@ -303,6 +303,10 @@ declare global {
         }>;
       };
       getPlayheadDebug: () => PlayheadDebugSnapshot | null;
+      getMasterGainValue: () => number | null;
+      getMasterPanValue: () => number | null;
+      setMasterVolume: (value: number) => void;
+      setMasterPan: (value: number) => void;
     };
   }
 }

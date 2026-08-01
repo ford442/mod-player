@@ -149,6 +149,9 @@ function App() {
     setIsLooping,
     seekToStep,
     setPanValue: setLibPan,
+    applyMasterLevels: applyAudioMasterLevels,
+    getMasterGainValue,
+    getMasterPanValue,
     replacePatternMatrix,
     moduleDurationSeconds,
     moduleFileName,
@@ -374,9 +377,13 @@ function App() {
         };
       },
       getPlayheadDebug: () => window.__PLAYHEAD_DEBUG__ ?? null,
+      getMasterGainValue,
+      getMasterPanValue,
+      setMasterVolume: (value: number) => applyAudioMasterLevels(Math.max(0, Math.min(1, value)), pan),
+      setMasterPan: (value: number) => applyAudioMasterLevels(volume, Math.max(-1, Math.min(1, value))),
     };
     return () => { delete window.__TEST_HOOKS__; };
-  }, [seekToStep, stopMusic, isModuleLoaded, sequencerMatrix, loadFile, setPlaybackRowFraction, playbackStateRef, activeEngine, liteMode]);
+  }, [seekToStep, stopMusic, isModuleLoaded, sequencerMatrix, loadFile, setPlaybackRowFraction, playbackStateRef, activeEngine, liteMode, getMasterGainValue, getMasterPanValue, applyAudioMasterLevels, volume, pan]);
 
   // Project-M popup integration: broadcast PCM frames via BroadcastChannel
   useEffect(() => {
@@ -569,6 +576,11 @@ function App() {
 
   // Sync pan with library
   useEffect(() => { setLibPan(pan); }, [pan, setLibPan]);
+
+  // Apply master levels immediately when UI sliders move (no wait for hook state round-trip).
+  useEffect(() => {
+    applyAudioMasterLevels(volume, pan);
+  }, [volume, pan, applyAudioMasterLevels]);
 
   const seekByOrderDelta = useCallback((delta: number) => {
     const rowsPerPattern = sequencerMatrix?.numRows ?? 64;
