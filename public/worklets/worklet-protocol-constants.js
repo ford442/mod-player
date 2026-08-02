@@ -17,7 +17,8 @@
     seek: 'seek',
     getOscBuffer: 'getOscBuffer',
     setAudioLite: 'setAudioLite',
-    setPcmEmit: 'setPcmEmit',
+    setProjectmPcm: 'setProjectmPcm',
+    setAudioDiag: 'setAudioDiag',
   });
 
   var WORKLET_TO_MAIN = Object.freeze({
@@ -30,6 +31,7 @@
     needData: 'needData',
     starvation: 'starvation',
     projectmPcm: 'projectm-pcm',
+    audioDiag: 'audioDiag',
   });
 
   function isObject(v) {
@@ -91,9 +93,9 @@
       return { ok: true, message: data };
     }
 
-    if (type === MAIN_TO_WORKLET.setPcmEmit) {
+    if (type === MAIN_TO_WORKLET.setProjectmPcm || type === MAIN_TO_WORKLET.setAudioDiag) {
       if (typeof data.enabled !== 'boolean') {
-        return { ok: false, error: 'setPcmEmit requires enabled boolean' };
+        return { ok: false, error: String(type) + ' requires enabled boolean' };
       }
       return { ok: true, message: data };
     }

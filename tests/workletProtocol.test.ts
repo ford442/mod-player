@@ -15,7 +15,7 @@ import {
   postLoad,
   postPlay,
   postSeek,
-  postSetPcmEmit,
+  postSetProjectmPcm,
 } from '../audio-worklet/protocol';
 import { AUDIO_SAB_BYTES } from '../utils/audioReactive';
 
@@ -136,14 +136,14 @@ describe('parseMainToWorkletMessage', () => {
     expect(parseMainToWorkletMessage(postPlay()).ok).toBe(true);
     expect(parseMainToWorkletMessage(postLoad(buf)).ok).toBe(true);
     expect(parseMainToWorkletMessage(postSeek(2, 16, 1.5)).ok).toBe(true);
-    expect(parseMainToWorkletMessage(postSetPcmEmit(true)).ok).toBe(true);
-    expect(parseMainToWorkletMessage(postSetPcmEmit(false)).ok).toBe(true);
+    expect(parseMainToWorkletMessage(postSetProjectmPcm(true)).ok).toBe(true);
+    expect(parseMainToWorkletMessage(postSetProjectmPcm(false)).ok).toBe(true);
   });
 
-  it('rejects malformed setPcmEmit', () => {
-    expect(parseMainToWorkletMessage({ type: MAIN_TO_WORKLET.setPcmEmit }).ok).toBe(false);
+  it('rejects malformed setProjectmPcm', () => {
+    expect(parseMainToWorkletMessage({ type: MAIN_TO_WORKLET.setProjectmPcm }).ok).toBe(false);
     expect(
-      parseMainToWorkletMessage({ type: MAIN_TO_WORKLET.setPcmEmit, enabled: 'yes' }).ok,
+      parseMainToWorkletMessage({ type: MAIN_TO_WORKLET.setProjectmPcm, enabled: 'yes' }).ok,
     ).toBe(false);
   });
 

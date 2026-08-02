@@ -5,7 +5,7 @@
  * dispatchWorkletToMainMessage and applies the returned side-effect hints.
  */
 
-import type { WorkletToMainMessage } from './protocol';
+import type { WorkletAudioDiagMessage, WorkletToMainMessage } from './protocol';
 import { WORKLET_TO_MAIN } from './workletProtocolConstants';
 import {
   applyNormalizedPosition,
@@ -34,6 +34,7 @@ export type JsWorkletDispatchResult =
   | { kind: 'seek-ack' }
   | { kind: 'diagnostic'; subtype: 'needData' | 'starvation'; raw: unknown }
   | { kind: 'projectm-pcm'; buffer: Float32Array; channels: 1 | 2 }
+  | { kind: 'audio-diag'; diag: WorkletAudioDiagMessage }
   | { kind: 'ignored' };
 
 export interface DispatchWorkletToMainOptions {
@@ -132,6 +133,9 @@ export function dispatchWorkletToMainMessage(
         buffer: message.buffer,
         channels: message.channels,
       };
+
+    case WORKLET_TO_MAIN.audioDiag:
+      return { kind: 'audio-diag', diag: message };
 
     case WORKLET_TO_MAIN.oscBuffer:
       // Handled by dedicated one-shot listener in useLibOpenMPT.requestOscBuffer.

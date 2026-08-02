@@ -15,8 +15,8 @@ export const MAIN_TO_WORKLET = {
   seek: 'seek',
   getOscBuffer: 'getOscBuffer',
   setAudioLite: 'setAudioLite',
-  /** Enable worklet→main projectm-pcm posts (off by default for XM stutter). */
-  setPcmEmit: 'setPcmEmit',
+  setProjectmPcm: 'setProjectmPcm',
+  setAudioDiag: 'setAudioDiag',
 } as const;
 
 /** AudioWorklet processor → main thread */
@@ -30,6 +30,7 @@ export const WORKLET_TO_MAIN = {
   needData: 'needData',
   starvation: 'starvation',
   projectmPcm: 'projectm-pcm',
+  audioDiag: 'audioDiag',
 } as const;
 
 export type MainToWorkletType = (typeof MAIN_TO_WORKLET)[keyof typeof MAIN_TO_WORKLET];

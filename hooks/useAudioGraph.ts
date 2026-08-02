@@ -27,7 +27,14 @@ import {
   postLoad,
   postPause,
   postPlay,
+  postSetAudioDiag,
+  postSetProjectmPcm,
 } from '../audio-worklet/protocol';
+import {
+  hasProjectMConsumer,
+  isAudioDiagEnabled,
+  mergeAudioDiag,
+} from '../utils/audioDiagOptions';
 import { dispatchWorkletToMainMessage } from '../audio-worklet/jsWorkletDispatch';
 
 export interface AudioGraphRefs {
@@ -768,6 +775,19 @@ export async function startAudioPlayback(
               break;
             }
 
+            case 'audio-diag': {
+              const snapshot = mergeAudioDiag(window.__AUDIO_DIAG__, result.diag);
+              window.__AUDIO_DIAG__ = snapshot;
+              if (result.diag.wrapOverruns > 0) {
+                console.warn(
+                  `[AudioDiag] process() overran the ${snapshot.budgetMs.toFixed(2)} ms quantum ` +
+                  `on a pattern boundary: ${result.diag.wrapMaxProcessMs.toFixed(2)} ms ` +
+                  `(order ${result.diag.order}, row ${result.diag.row})`,
+                );
+              }
+              break;
+            }
+
             case 'ignored':
               break;
 
@@ -790,6 +810,11 @@ export async function startAudioPlayback(
             node.port.postMessage(postInitLib(libJsText));
           }
         }
+
+        // Opt-in per-quantum extras. Both default to off inside the worklet, so
+        // these must be re-sent for a reused node as well.
+        node.port.postMessage(postSetProjectmPcm(hasProjectMConsumer()));
+        node.port.postMessage(postSetAudioDiag(isAudioDiagEnabled()));
 
         const moduleBuf = moduleBytesFromFileData(refs.fileDataRef.current);
         if (moduleBuf) {

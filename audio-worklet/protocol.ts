@@ -100,6 +100,21 @@ const projectmPcmMessageSchema = z.object({
   samplesPerChannel: nonNegInt.optional(),
 });
 
+const audioDiagMessageSchema = z.object({
+  type: z.literal(WORKLET_TO_MAIN.audioDiag),
+  budgetMs: finiteNumber,
+  quanta: nonNegInt,
+  avgProcessMs: finiteNumber,
+  maxProcessMs: finiteNumber,
+  overruns: nonNegInt,
+  wraps: nonNegInt,
+  wrapMaxProcessMs: finiteNumber,
+  wrapOverruns: nonNegInt,
+  order: nonNegInt,
+  row: nonNegInt,
+  audioTime: finiteNumber.optional(),
+});
+
 export const workletToMainMessageSchema = z.discriminatedUnion('type', [
   positionMessageSchema,
   loadedMessageSchema,
@@ -110,7 +125,10 @@ export const workletToMainMessageSchema = z.discriminatedUnion('type', [
   needDataMessageSchema,
   starvationMessageSchema,
   projectmPcmMessageSchema,
+  audioDiagMessageSchema,
 ]);
+
+export type WorkletAudioDiagMessage = z.infer<typeof audioDiagMessageSchema>;
 
 export type WorkletToMainMessage = z.infer<typeof workletToMainMessageSchema>;
 export type WorkletPositionMessage = z.infer<typeof positionMessageSchema>;
@@ -193,8 +211,13 @@ const setAudioLiteMessageSchema = z.object({
   lite: z.boolean(),
 });
 
-const setPcmEmitMessageSchema = z.object({
-  type: z.literal(MAIN_TO_WORKLET.setPcmEmit),
+const setProjectmPcmMessageSchema = z.object({
+  type: z.literal(MAIN_TO_WORKLET.setProjectmPcm),
+  enabled: z.boolean(),
+});
+
+const setAudioDiagMessageSchema = z.object({
+  type: z.literal(MAIN_TO_WORKLET.setAudioDiag),
   enabled: z.boolean(),
 });
 
@@ -212,7 +235,8 @@ export const mainToWorkletMessageSchema = z.discriminatedUnion('type', [
   seekMessageSchema,
   getOscBufferMessageSchema,
   setAudioLiteMessageSchema,
-  setPcmEmitMessageSchema,
+  setProjectmPcmMessageSchema,
+  setAudioDiagMessageSchema,
 ]);
 
 export type MainToWorkletMessage = z.infer<typeof mainToWorkletMessageSchema>;
@@ -276,8 +300,14 @@ export function postSetAudioLite(lite: boolean): MainToWorkletMessage {
   return { type: MAIN_TO_WORKLET.setAudioLite, lite };
 }
 
-export function postSetPcmEmit(enabled: boolean): MainToWorkletMessage {
-  return { type: MAIN_TO_WORKLET.setPcmEmit, enabled };
+/** Enable/disable the worklet's projectm-pcm block stream (off unless a consumer exists). */
+export function postSetProjectmPcm(enabled: boolean): MainToWorkletMessage {
+  return { type: MAIN_TO_WORKLET.setProjectmPcm, enabled };
+}
+
+/** Enable/disable per-quantum process() timing diagnostics (?audioDiag=1). */
+export function postSetAudioDiag(enabled: boolean): MainToWorkletMessage {
+  return { type: MAIN_TO_WORKLET.setAudioDiag, enabled };
 }
 
 /** Runtime check for oscBuffer handler (replaces unchecked `as SharedArrayBuffer`). */

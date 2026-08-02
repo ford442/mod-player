@@ -263,3 +263,53 @@ At pattern starts those extras tipped `process()` past the ~2.9 ms quantum budge
    - `Module loaded ✅ ptr= ...`
 4. The Network tab should show `openmpt-worklet.js?v=2` (or current version) loaded successfully.
 5. Audio should play the actual MOD/XM file, not a test tone.
+
+---
+
+## Pattern-Boundary Hitches — Per-Quantum Worklet Budget
+
+`process()` runs ~350×/s and has one quantum of wall time to finish
+(128 frames ≈ 2.9 ms @ 44.1 kHz). At row 0 libopenmpt retriggers notes and its
+own DSP gets heavier, so any fixed per-quantum overhead is most likely to push
+the callback past its deadline exactly at a pattern boundary — audible as a
+hitch. #354 removed the position `postMessage` flood; three other per-quantum
+costs remained and are now gated:
+
+| Work | Before | Now |
+|------|--------|-----|
+| `get_time_at_position` (up to 3 WASM calls, for `rowFraction`) | every quantum | only when a position report is due (~60 Hz) |
+| Per-channel VU sweep (up to 32 WASM calls) | every quantum | sampled at report rate; last snapshot reused in between |
+| `projectm-pcm` interleave + `postMessage` (~88/s) | always | only when a Project-M consumer exists (popup/iframe) |
+
+The report gate is the hoisted `shouldReportPosition` boolean — it drives both
+the report-only work and the `postMessage` itself, so they cannot drift apart.
+`tests/workletRegressionGuards.test.ts` asserts all three.
+
+### `?audioDiag=1` — process() timing
+
+Add `?audioDiag=1` (or set `localStorage.xasm1_audio_diag = '1'`) and reload.
+The worklet then times every `process()` call and posts a rolling summary with
+each position report. Read it from the console while playing:
+
+```js
+window.__AUDIO_DIAG__
+// { budgetMs, quanta, avgProcessMs, maxProcessMs, overruns,
+//   totalQuanta, totalOverruns,
+//   wraps, wrapMaxProcessMs, wrapOverruns, order, row, updatedAt }
+```
+
+`wrap*` fields cover only the quanta where the row counter went backwards — a
+pattern wrap or order change — and are worst-case-since-enabled so a hitch every
+few patterns stays visible. Any `wrapOverruns > 0` also logs an
+`[AudioDiag] process() overran…` console warning naming the order/row.
+
+Interpretation:
+
+- `wrapMaxProcessMs > budgetMs` with `overruns` near zero elsewhere → the
+  boundary itself is over budget (worklet/libopenmpt — hypothesis A).
+- `maxProcessMs` high everywhere → general worklet overload, not boundary-specific.
+- Both near zero while a hitch is still audible → the problem is main-thread/GPU
+  or the visual playhead snap, not the DSP. Re-test with `?renderer=html`.
+
+Diagnostics are off unless requested; the timing code costs two
+`performance.now()` calls per quantum only when enabled.

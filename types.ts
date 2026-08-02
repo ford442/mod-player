@@ -202,6 +202,35 @@ export interface PlayheadDebugSnapshot {
   positionReportHz?: number;
 }
 
+/**
+ * Rolling AudioWorklet `process()` timing snapshot (?audioDiag=1).
+ *
+ * Each quantum is 128 frames (~2.9 ms @ 44.1 kHz); `budgetMs` is that deadline.
+ * `wrap*` fields cover only the quanta where the row counter went backwards —
+ * a pattern wrap or order change — which is where hitches are reported.
+ */
+export interface AudioDiagSnapshot {
+  /** Wall-clock deadline for one quantum (ms). */
+  budgetMs: number;
+  /** Quanta covered by the most recent report window (~16 ms). */
+  quanta: number;
+  avgProcessMs: number;
+  maxProcessMs: number;
+  /** Quanta in the window that exceeded budgetMs. */
+  overruns: number;
+  /** Cumulative totals since diagnostics were enabled. */
+  totalQuanta: number;
+  totalOverruns: number;
+  /** Worst process() duration observed on a pattern-boundary quantum. */
+  wrapMaxProcessMs: number;
+  wraps: number;
+  wrapOverruns: number;
+  order: number;
+  row: number;
+  /** performance.now() of the last report received on the main thread. */
+  updatedAt: number;
+}
+
 export interface SyncDebugInfo {
   mode: string;
   bufferMs: number;
@@ -244,6 +273,8 @@ declare global {
     currentPatternRenderer: import('./src/renderers/types').CurrentPatternRenderer | null;
     /** Live playhead prediction snapshot (when debug enabled) */
     __PLAYHEAD_DEBUG__?: PlayheadDebugSnapshot;
+    /** Worklet process() timing snapshot (when ?audioDiag=1) */
+    __AUDIO_DIAG__?: AudioDiagSnapshot;
     /** Headless Chrome / Playwright automation hooks (dev + CI) */
     __TEST_HOOKS__?: {
       seekToRow: (row: number) => void;
