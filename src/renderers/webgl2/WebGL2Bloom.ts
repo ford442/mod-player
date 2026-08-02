@@ -50,6 +50,17 @@ export class WebGL2Bloom {
   private intensity = 1.0;
   private crtEnabled = 0.0;
 
+  // Cached uniform locations
+  private uCompositeScene: WebGLUniformLocation | null = null;
+  private uCompositeBloom: WebGLUniformLocation | null = null;
+  private uCompositeBloomIntensity: WebGLUniformLocation | null = null;
+  private uCompositeCrtEnabled: WebGLUniformLocation | null = null;
+
+  private uBlurSource: WebGLUniformLocation | null = null;
+  private uBlurDirection: WebGLUniformLocation | null = null;
+  private uBlurTexelSize: WebGLUniformLocation | null = null;
+  private uBlurThreshold: WebGLUniformLocation | null = null;
+
   constructor(gl: WebGL2RenderingContext) {
     this.gl = gl;
     this.quadVao = gl.createVertexArray()!;
@@ -63,6 +74,17 @@ export class WebGL2Bloom {
     const vs = compileShader(gl, gl.VERTEX_SHADER, FULLSCREEN_VERTEX);
     this.blurProgram = linkProgram(gl, vs, compileShader(gl, gl.FRAGMENT_SHADER, BLUR_FRAGMENT));
     this.compositeProgram = linkProgram(gl, vs, compileShader(gl, gl.FRAGMENT_SHADER, COMPOSITE_FRAGMENT));
+
+    // Cache uniform locations
+    this.uCompositeScene = gl.getUniformLocation(this.compositeProgram, 'u_scene');
+    this.uCompositeBloom = gl.getUniformLocation(this.compositeProgram, 'u_bloom');
+    this.uCompositeBloomIntensity = gl.getUniformLocation(this.compositeProgram, 'u_bloomIntensity');
+    this.uCompositeCrtEnabled = gl.getUniformLocation(this.compositeProgram, 'u_crtEnabled');
+
+    this.uBlurSource = gl.getUniformLocation(this.blurProgram, 'u_source');
+    this.uBlurDirection = gl.getUniformLocation(this.blurProgram, 'u_direction');
+    this.uBlurTexelSize = gl.getUniformLocation(this.blurProgram, 'u_texelSize');
+    this.uBlurThreshold = gl.getUniformLocation(this.blurProgram, 'u_threshold');
   }
 
   resize(width: number, height: number): void {
@@ -112,14 +134,14 @@ export class WebGL2Bloom {
 
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.sceneFbo.texture);
-    gl.uniform1i(gl.getUniformLocation(this.compositeProgram, 'u_scene')!, 0);
+    if (this.uCompositeScene) gl.uniform1i(this.uCompositeScene, 0);
 
     gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_2D, this.pongFbo.texture);
-    gl.uniform1i(gl.getUniformLocation(this.compositeProgram, 'u_bloom')!, 1);
+    if (this.uCompositeBloom) gl.uniform1i(this.uCompositeBloom, 1);
 
-    gl.uniform1f(gl.getUniformLocation(this.compositeProgram, 'u_bloomIntensity')!, this.intensity);
-    gl.uniform1f(gl.getUniformLocation(this.compositeProgram, 'u_crtEnabled')!, this.crtEnabled);
+    if (this.uCompositeBloomIntensity) gl.uniform1f(this.uCompositeBloomIntensity, this.intensity);
+    if (this.uCompositeCrtEnabled) gl.uniform1f(this.uCompositeCrtEnabled, this.crtEnabled);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
   }
 
@@ -137,10 +159,10 @@ export class WebGL2Bloom {
 
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, source);
-    gl.uniform1i(gl.getUniformLocation(this.blurProgram, 'u_source')!, 0);
-    gl.uniform2f(gl.getUniformLocation(this.blurProgram, 'u_direction')!, direction[0], direction[1]);
-    gl.uniform2f(gl.getUniformLocation(this.blurProgram, 'u_texelSize')!, texel[0]!, texel[1]!);
-    gl.uniform1f(gl.getUniformLocation(this.blurProgram, 'u_threshold')!, this.threshold);
+    if (this.uBlurSource) gl.uniform1i(this.uBlurSource, 0);
+    if (this.uBlurDirection) gl.uniform2f(this.uBlurDirection, direction[0], direction[1]);
+    if (this.uBlurTexelSize) gl.uniform2f(this.uBlurTexelSize, texel[0]!, texel[1]!);
+    if (this.uBlurThreshold) gl.uniform1f(this.uBlurThreshold, this.threshold);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
   }
 
