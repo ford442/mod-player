@@ -196,6 +196,10 @@ export interface PlayheadDebugSnapshot {
   predictionLagRows: number;
   driftMs: number;
   mode: string;
+  /** Peak |lag| observed this session (debug only). */
+  maxAbsLagRows?: number;
+  /** Measured worklet position postMessage rate (Hz). */
+  positionReportHz?: number;
 }
 
 export interface SyncDebugInfo {
