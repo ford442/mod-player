@@ -290,6 +290,12 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
         }
       } else if (type === MT.setAudioLite) {
         this._audioLite = !!msg.lite;
+      } else if (type === MT.setProjectmPcm) {
+        this._projectmPcmEnabled = !!msg.enabled;
+        if (!this._projectmPcmEnabled) this.pcmAccumCount = 0;
+      } else if (type === MT.setAudioDiag) {
+        this._audioDiag = !!msg.enabled;
+        this._resetAudioDiag();
       } else if (!type && moduleData) {
         await this.loadModule(moduleData);
       }
@@ -306,6 +312,14 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
       : null;
     this.oscWritePtr = 0;
     this._audioLite = false;
+    // Project-M PCM blocks are only posted when a popup/iframe consumer exists
+    // (main thread enables them). Otherwise ~88 postMessage/s ran for nobody.
+    this._projectmPcmEnabled = false;
+    // ?audioDiag=1 — per-quantum process() timing, correlated with row wraps.
+    this._audioDiag = false;
+    this._resetAudioDiag();
+    this._lastChannelVU = [];
+    this._prevRowInt = -1;
     this._lpBass = 0;
     this._lpMid = 0;
     this._prevBass = 0;
@@ -318,6 +332,24 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
     if (this.oscBuffer) {
       this.port.postMessage({ type: WT.oscBuffer, buffer: this.oscBuffer });
     }
+  }
+
+  /** Clear the ?audioDiag=1 accumulators (called on enable/disable and after each report). */
+  _resetAudioDiag() {
+    this._diagQuanta = 0;
+    this._diagSumMs = 0;
+    this._diagMaxMs = 0;
+    this._diagOverruns = 0;
+    this._diagWrapMaxMs = 0;
+    this._diagWrapCount = 0;
+    this._diagWrapOverruns = 0;
+  }
+
+  /** High-resolution clock for diagnostics; `currentTime` is frozen per quantum. */
+  _diagNow() {
+    return typeof performance !== 'undefined' && typeof performance.now === 'function'
+      ? performance.now()
+      : 0;
   }
 
   /** Cheap 3-band energy + peak/RMS into audioMetaView (no main-thread AnalyserNode). */
@@ -532,6 +564,7 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
     // currentTime − outputLatency for speaker-aligned visuals.
     const lib = this.lib;
     const mod = this.modulePtr;
+    const diagStart = this._audioDiag ? this._diagNow() : 0;
     const audioTime = currentTime;
     const order = lib._openmpt_module_get_current_order(mod);
     const rowInt = lib._openmpt_module_get_current_row(mod);
@@ -539,8 +572,16 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
     const bpm = lib._openmpt_module_get_current_estimated_bpm(mod);
     const speed = lib._openmpt_module_get_current_speed(mod);
 
+    // Everything below that only feeds the position report runs at the report
+    // rate (~60 Hz), not once per quantum (~350 Hz). get_time_at_position costs
+    // up to 3 WASM calls and the VU sweep costs up to 32 more; paying that on
+    // every quantum ate into the ~2.9 ms budget and showed up as hitches at
+    // pattern boundaries, where libopenmpt's own DSP is heaviest.
+    const shouldReportPosition =
+      currentTime - this.lastPositionReportTime >= this.positionReportInterval;
+
     let rowFraction = rowInt;
-    if (typeof lib._openmpt_module_get_time_at_position === 'function') {
+    if (shouldReportPosition && typeof lib._openmpt_module_get_time_at_position === 'function') {
       const t0 = lib._openmpt_module_get_time_at_position(mod, order, rowInt);
       let t1 = lib._openmpt_module_get_time_at_position(mod, order, rowInt + 1);
       // End of pattern: try first row of next order
@@ -599,7 +640,7 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
     // callback rate (no RAF jitter) and delivers authentic PCM straight from
     // the WASM renderer, solving the timing issues of the legacy
     // requestAnimationFrame + AnalyserNode.getFloatTimeDomainData() path.
-    {
+    if (this._projectmPcmEnabled) {
       let src = 0;
       while (src < samplesWritten) {
         const space = this.pcmChunkSize - this.pcmAccumCount;
@@ -632,17 +673,24 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
       }
     }
 
-    const numCh = lib._openmpt_module_get_num_channels(mod);
-    const channelVU = [];
-    for (let i = 0; i < Math.min(numCh, 32); i++) {
-      channelVU.push(lib._openmpt_module_get_current_channel_vu_mono(mod, i));
+    // VU is only consumed by the position report and by the lite audio-reactive
+    // path (which smooths heavily); sample it at report rate and reuse the last
+    // snapshot in between.
+    let channelVU = this._lastChannelVU;
+    if (shouldReportPosition) {
+      const numCh = lib._openmpt_module_get_num_channels(mod);
+      channelVU = [];
+      for (let i = 0; i < Math.min(numCh, 32); i++) {
+        channelVU.push(lib._openmpt_module_get_current_channel_vu_mono(mod, i));
+      }
+      this._lastChannelVU = channelVU;
     }
 
     this._updateAudioReactive(outL, outR, samplesWritten, channelVU);
 
     // Position at ~60 Hz — main thread extrapolates with audio clock between reports.
     // Posting every audio quantum (~350 Hz) flooded the main thread and caused MOD hiccups.
-    if (currentTime - this.lastPositionReportTime >= this.positionReportInterval) {
+    if (shouldReportPosition) {
       this._lastReportedRowInt = rowInt;
       this.port.postMessage({
         type: WT.position,
@@ -662,6 +710,43 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
       });
       this.lastPositionReportTime = currentTime;
     }
+
+    if (this._audioDiag) {
+      const elapsedMs = this._diagNow() - diagStart;
+      // Deadline for this callback: one quantum of wall time.
+      const budgetMs = (numSamples / sampleRate) * 1000;
+      // Row went backwards (63→0) or the order advanced: a pattern boundary.
+      const wrapped = this._prevRowInt >= 0 && rowInt < this._prevRowInt;
+
+      this._diagQuanta++;
+      this._diagSumMs += elapsedMs;
+      if (elapsedMs > this._diagMaxMs) this._diagMaxMs = elapsedMs;
+      if (elapsedMs > budgetMs) this._diagOverruns++;
+      if (wrapped) {
+        this._diagWrapCount++;
+        if (elapsedMs > this._diagWrapMaxMs) this._diagWrapMaxMs = elapsedMs;
+        if (elapsedMs > budgetMs) this._diagWrapOverruns++;
+      }
+
+      if (shouldReportPosition && this._diagQuanta > 0) {
+        this.port.postMessage({
+          type: WT.audioDiag,
+          budgetMs,
+          quanta: this._diagQuanta,
+          avgProcessMs: this._diagSumMs / this._diagQuanta,
+          maxProcessMs: this._diagMaxMs,
+          overruns: this._diagOverruns,
+          wraps: this._diagWrapCount,
+          wrapMaxProcessMs: this._diagWrapMaxMs,
+          wrapOverruns: this._diagWrapOverruns,
+          order,
+          row: rowInt,
+          audioTime,
+        });
+        this._resetAudioDiag();
+      }
+    }
+    this._prevRowInt = rowInt;
 
     return true;
   }
