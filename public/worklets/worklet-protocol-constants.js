@@ -17,6 +17,7 @@
     seek: 'seek',
     getOscBuffer: 'getOscBuffer',
     setAudioLite: 'setAudioLite',
+    setPcmEmit: 'setPcmEmit',
   });
 
   var WORKLET_TO_MAIN = Object.freeze({
@@ -86,6 +87,13 @@
     if (type === MAIN_TO_WORKLET.setAudioLite) {
       if (typeof data.lite !== 'boolean') {
         return { ok: false, error: 'setAudioLite requires lite boolean' };
+      }
+      return { ok: true, message: data };
+    }
+
+    if (type === MAIN_TO_WORKLET.setPcmEmit) {
+      if (typeof data.enabled !== 'boolean') {
+        return { ok: false, error: 'setPcmEmit requires enabled boolean' };
       }
       return { ok: true, message: data };
     }

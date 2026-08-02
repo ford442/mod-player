@@ -15,6 +15,8 @@ export const MAIN_TO_WORKLET = {
   seek: 'seek',
   getOscBuffer: 'getOscBuffer',
   setAudioLite: 'setAudioLite',
+  /** Enable worklet→main projectm-pcm posts (off by default for XM stutter). */
+  setPcmEmit: 'setPcmEmit',
 } as const;
 
 /** AudioWorklet processor → main thread */

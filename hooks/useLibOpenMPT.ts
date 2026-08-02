@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, startTransition } from 'react';
 import { LibOpenMPT, ModuleInfo, PatternMatrix, ChannelShadowState, PlaybackState, SyncDebugInfo, PlayheadDebugSnapshot, WorkerParseError, WorkerParseResponse } from '../types';
 import type { InstrumentTable } from '../types/instruments';
 import { emptyInstrumentTable } from '../types/instruments';
@@ -677,7 +677,13 @@ export function useLibOpenMPT(initialVolume: number = 0.4, liteMode: boolean = f
 
     if (orderChanged) {
       const newMatrix = patternMatricesRef.current[order];
-      if (newMatrix) setSequencerMatrix(newMatrix);
+      // Defer GPU/React matrix swap off the critical RAF path — XM patterns
+      // are larger than MOD and a sync setState here competed with audio.
+      if (newMatrix) {
+        startTransition(() => {
+          setSequencerMatrix(newMatrix);
+        });
+      }
       lastUiOrderRef.current = order;
     }
 

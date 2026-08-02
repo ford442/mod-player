@@ -193,6 +193,11 @@ const setAudioLiteMessageSchema = z.object({
   lite: z.boolean(),
 });
 
+const setPcmEmitMessageSchema = z.object({
+  type: z.literal(MAIN_TO_WORKLET.setPcmEmit),
+  enabled: z.boolean(),
+});
+
 /** Legacy no-type load shim used by some callers. */
 const legacyLoadMessageSchema = z.object({
   type: z.undefined().optional(),
@@ -207,6 +212,7 @@ export const mainToWorkletMessageSchema = z.discriminatedUnion('type', [
   seekMessageSchema,
   getOscBufferMessageSchema,
   setAudioLiteMessageSchema,
+  setPcmEmitMessageSchema,
 ]);
 
 export type MainToWorkletMessage = z.infer<typeof mainToWorkletMessageSchema>;
@@ -268,6 +274,10 @@ export function postGetOscBuffer(): MainToWorkletMessage {
 
 export function postSetAudioLite(lite: boolean): MainToWorkletMessage {
   return { type: MAIN_TO_WORKLET.setAudioLite, lite };
+}
+
+export function postSetPcmEmit(enabled: boolean): MainToWorkletMessage {
+  return { type: MAIN_TO_WORKLET.setPcmEmit, enabled };
 }
 
 /** Runtime check for oscBuffer handler (replaces unchecked `as SharedArrayBuffer`). */

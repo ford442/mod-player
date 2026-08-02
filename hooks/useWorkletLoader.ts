@@ -47,8 +47,9 @@ export interface UseWorkletLoaderOptions {
 export const getWorkletUrl = (): string => {
   const base = detectRuntimeBase();
   // BUMP this version whenever openmpt-worklet.js changes to bust browser caches
-  // v8: typed/validated postMessage boundary (audio-worklet/protocol.ts)
-  const WORKLET_VERSION = '8';
+  // v9: XM pattern-boundary stutter — gate VU/time_at_position behind 60 Hz;
+  //     opt-in projectm-pcm; interpolation filter length 8→4
+  const WORKLET_VERSION = '9';
   const url = `${base}worklets/openmpt-worklet.js?v=${WORKLET_VERSION}`;
 
   return url;

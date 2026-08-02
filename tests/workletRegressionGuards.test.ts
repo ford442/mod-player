@@ -231,10 +231,38 @@ describe('#354 production source invariants', () => {
     expect(lifecycle).toContain('WORKLET_POSITION_REPORT_INTERVAL_SEC');
   });
 
-  it('WORKLET_VERSION stays cache-busted at ≥ 8 after typed protocol boundary', () => {
+  it('WORKLET_VERSION stays cache-busted at ≥ 9 after XM pattern-boundary worklet trim', () => {
     const m = useWorkletLoader.match(/WORKLET_VERSION\s*=\s*['"](\d+)['"]/);
     expect(m, 'WORKLET_VERSION must be defined').toBeTruthy();
-    expect(Number(m![1])).toBeGreaterThanOrEqual(8);
+    expect(Number(m![1])).toBeGreaterThanOrEqual(9);
+  });
+
+  it('gates get_time_at_position + channel VU behind the position throttle (XM stutter)', () => {
+    // Expensive helpers must not run every quantum — only inside the ~60 Hz report block.
+    const throttleIdx = workletSource.indexOf(
+      'currentTime - this.lastPositionReportTime >= this.positionReportInterval',
+    );
+    expect(throttleIdx).toBeGreaterThan(0);
+    const afterThrottle = workletSource.slice(throttleIdx);
+    expect(afterThrottle).toContain('_openmpt_module_get_time_at_position');
+    expect(afterThrottle).toContain('_openmpt_module_get_current_channel_vu_mono');
+
+    // Before the throttle check in process(), those calls must not appear in the
+    // cheap pre-render snapshot (only order/row/position_seconds).
+    const processIdx = workletSource.lastIndexOf('process(_inputs, outputs, _parameters)');
+    const processBody = workletSource.slice(processIdx, throttleIdx);
+    expect(processBody).not.toContain('_openmpt_module_get_time_at_position');
+    expect(processBody).not.toContain('_openmpt_module_get_current_channel_vu_mono');
+  });
+
+  it('keeps projectm-pcm emission opt-in (default off)', () => {
+    expect(workletSource).toMatch(/_pcmEmitEnabled\s*=\s*false/);
+    expect(workletSource).toMatch(/if\s*\(\s*this\._pcmEmitEnabled\s*\)/);
+  });
+
+  it('uses real-time-friendly interpolation filter length 4 (not 8)', () => {
+    expect(workletSource).toMatch(/_openmpt_module_set_render_param\(\s*this\.modulePtr\s*,\s*2\s*,\s*4\s*\)/);
+    expect(workletSource).not.toMatch(/_openmpt_module_set_render_param\(\s*this\.modulePtr\s*,\s*2\s*,\s*8\s*\)/);
   });
 });
 
