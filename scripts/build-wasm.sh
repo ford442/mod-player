@@ -350,14 +350,14 @@ emcc \
     -sWASM_WORKERS=1 \
     -sSINGLE_FILE=0 \
     -sALLOW_MEMORY_GROWTH=1 \
-    -sMAXIMUM_MEMORY=536870912 \
+    -sMAXIMUM_MEMORY=256mb \
     -sENVIRONMENT=web,worker \
     -sEXPORTED_RUNTIME_METHODS="['ccall','cwrap','UTF8ToString','getValue','setValue']" \
     -sEXPORTED_FUNCTIONS="$EXPORTED_FUNCTIONS_FLAT" \
     -sMODULARIZE=1 \
     -sEXPORT_NAME="createOpenMPTModule" \
-    -sINITIAL_MEMORY=33554432 \
-    -sSTACK_SIZE=131072 \
+    -sINITIAL_MEMORY=128mb \
+    #-sSTACK_SIZE=131072 \
     --pre-js "$CPP_DIR/pre.js" \
     \
     -o "$OUTPUT_DIR/${OUTPUT_BASENAME}.js"
