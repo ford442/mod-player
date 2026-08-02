@@ -10,7 +10,7 @@ function makeExtendedBindGroupState(overrides: Partial<BindGroupState> = {}): Bi
   const channelsBuffer = {} as GPUBuffer;
   const pipeline = {
     getBindGroupLayout: () => ({} as GPUBindGroupLayout),
-  } as GPURenderPipeline;
+  } as unknown as GPURenderPipeline;
   return {
     pipeline,
     cellsBuffer,

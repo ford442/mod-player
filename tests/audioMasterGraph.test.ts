@@ -35,7 +35,7 @@ describe('audioMasterGraph', () => {
       __name: name,
     });
 
-    const ctx = { destination: { __name: 'destination' } } as AudioContext;
+    const ctx = { destination: { __name: 'destination' } } as unknown as AudioContext;
     const analyser = makeNode('analyser') as unknown as AnalyserNode;
     const panner = makeNode('panner') as unknown as StereoPannerNode;
     const gain = makeNode('gain') as unknown as GainNode;
