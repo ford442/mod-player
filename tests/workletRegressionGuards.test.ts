@@ -197,13 +197,44 @@ describe('#354 production source invariants', () => {
   it('worklet throttles position posts at 1/60 s (not every quantum)', () => {
     expect(workletSource).toMatch(/positionReportInterval\s*=\s*1\s*\/\s*60/);
     expect(workletSource).toContain('lastPositionReportTime');
+    // The interval check is hoisted into shouldReportPosition so the report-only
+    // work (rowFraction, VU sweep) shares the same gate as the postMessage.
+    expect(workletSource).toMatch(
+      /shouldReportPosition\s*=\s*\n?\s*currentTime\s*-\s*this\.lastPositionReportTime\s*>=\s*this\.positionReportInterval/,
+    );
     // Guard condition must gate postMessage({ type: WT.position
     const throttleBlock = workletSource.match(
-      /if\s*\(\s*currentTime\s*-\s*this\.lastPositionReportTime\s*>=\s*this\.positionReportInterval\s*\)\s*\{[\s\S]*?type:\s*WT\.position/,
+      /if\s*\(\s*shouldReportPosition\s*\)\s*\{[\s\S]*?type:\s*WT\.position/,
     );
     expect(throttleBlock, 'position postMessage must sit inside the ~60 Hz throttle if').toBeTruthy();
     // Must not post position unconditionally every process() without the interval check nearby
     expect(workletSource).toMatch(/lastPositionReportTime\s*=\s*currentTime/);
+  });
+
+  it('report-only WASM queries stay behind the 60 Hz gate', () => {
+    // get_time_at_position (up to 3 WASM calls) only feeds rowFraction in the
+    // position post — it must not run on every quantum.
+    expect(workletSource).toMatch(
+      /if\s*\(\s*shouldReportPosition\s*&&\s*typeof lib\._openmpt_module_get_time_at_position/,
+    );
+    // Same for the up-to-32 per-channel VU queries.
+    const vuBlock = workletSource.match(
+      /if\s*\(\s*shouldReportPosition\s*\)\s*\{[\s\S]*?_openmpt_module_get_current_channel_vu_mono/,
+    );
+    expect(vuBlock, 'VU sweep must be sampled at report rate, not per quantum').toBeTruthy();
+  });
+
+  it('projectm-pcm blocks are opt-in, not posted unconditionally', () => {
+    expect(workletSource).toContain('this._projectmPcmEnabled = false;');
+    expect(workletSource).toMatch(/if\s*\(\s*this\._projectmPcmEnabled\s*\)/);
+    expect(useAudioGraph).toContain('postSetProjectmPcm(hasProjectMConsumer())');
+  });
+
+  it('audioDiag timing mode is opt-in and reports wrap overruns', () => {
+    expect(workletSource).toContain('this._audioDiag = false;');
+    expect(workletSource).toMatch(/type:\s*WT\.audioDiag/);
+    expect(useAudioGraph).toContain('postSetAudioDiag(isAudioDiagEnabled())');
+    expect(useAudioGraph).toContain('__AUDIO_DIAG__');
   });
 
   it('play path uses shouldForceWorkletModuleLoad + shouldAcceptWorkletLoadedAck', () => {
