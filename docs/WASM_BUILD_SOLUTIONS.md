@@ -85,4 +85,4 @@ Copy only `public/worklets/openmpt-native.*` out of the image — never replace 
 
 ## Historical footgun (fixed)
 
-Older root `build-wasm.sh` used `-o public/worklets/openmpt-worklet.js` and even `DELETE_PUBLIC_WORKLETS_DIR`, destroying the production JS processor. That path is retired; see `public/worklets/README.md` and `AGENTS.md`.
+Older root `build-wasm.sh` used `-o public/worklets/openmpt-worklet.js` and even `rm -rf public/worklets`, destroying the production JS processor. That path is retired; see `public/worklets/README.md` and `AGENTS.md`.

@@ -164,8 +164,8 @@ jobs:
           if grep -E -- '-o[[:space:]]+public/worklets/openmpt-worklet' build-wasm.sh; then
             echo "❌ root build-wasm.sh must not write openmpt-worklet.*"; false
           fi
-          if grep -E 'DELETE_PUBLIC_WORKLETS_DIR' build-wasm.sh scripts/build-wasm.sh; then
-            echo "❌ build scripts must not DELETE_PUBLIC_WORKLETS_DIR"; false
+          if grep -E 'rm[[:space:]]+-rf[[:space:]]+public/worklets' build-wasm.sh scripts/build-wasm.sh; then
+            echo "❌ build scripts must not rm -rf public/worklets"; false
           fi
           echo "✅ Native build scripts present and safe"
       

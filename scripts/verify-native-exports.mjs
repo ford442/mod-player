@@ -178,7 +178,7 @@ if (existsSync(rootBuild)) {
     errors.push('root build-wasm.sh still writes public/worklets/openmpt-worklet.* — must delegate only');
   }
   if (/rm\s+-rf\s+public\/worklets/.test(rootCode)) {
-    errors.push('root build-wasm.sh must not DELETE_PUBLIC_WORKLETS_DIR');
+    errors.push('root build-wasm.sh must not rm -rf public/worklets');
   }
   if (!/scripts\/build-wasm\.sh/.test(rootCode)) {
     errors.push('root build-wasm.sh should delegate to scripts/build-wasm.sh');
@@ -188,7 +188,7 @@ if (existsSync(rootBuild)) {
 // Canonical script must not wipe worklets dir
 const scriptsCode = stripShellComments(buildSh);
 if (/rm\s+-rf\s+.*public\/worklets/.test(scriptsCode)) {
-  errors.push('scripts/build-wasm.sh must not DELETE_PUBLIC_WORKLETS_DIR');
+  errors.push('scripts/build-wasm.sh must not rm -rf public/worklets');
 }
 
 console.log('verify-native-exports:');
