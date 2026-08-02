@@ -170,7 +170,8 @@ describe('audio hook source invariants', () => {
 
   it('play path skips disconnect on hot reload', () => {
     const jsDispatch = readFileSync(join(ROOT, 'audio-worklet/jsWorkletDispatch.ts'), 'utf8');
-    expect(useAudioGraph).toContain('Hot reload — keeping existing audio graph wiring');
+    expect(useAudioGraph).toContain('Hot reload — keeping existing worklet wiring');
+    expect(useAudioGraph).toContain('wireMasterOutput');
     expect(useAudioGraph).toContain('forceModuleLoad');
     expect(useAudioGraph).toContain('workletModuleTokenRef');
     expect(useAudioGraph).toContain('shouldForceWorkletModuleLoad');

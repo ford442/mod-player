@@ -14,6 +14,17 @@ const BUILD_DIR = process.env.BUILD_DIR || 'dist';
 const MAX_ENTRY_BYTES = Number(process.env.MAX_ENTRY_BYTES || 950 * 1024);
 const THREE_CHUNK_PREFIX = 'three-r3f';
 
+function resolveAssetHref(href) {
+  let path = (href || '').trim();
+  if (path.startsWith('./')) path = path.slice(2);
+  else if (path.startsWith('/')) path = path.slice(1);
+  const project = process.env.PROJECT_NAME || 'xm-player';
+  const pfx = `${project}/`;
+  if (path.startsWith(pfx)) path = path.slice(pfx.length);
+  if (path.startsWith('/')) path = path.slice(1);
+  return path;
+}
+
 const errors = [];
 
 const indexPath = join(BUILD_DIR, 'index.html');
@@ -38,7 +49,7 @@ if (!existsSync(assetsDir)) {
 let entryRel = '';
 let entryBytes = 0;
 if (entryMatch?.[1]) {
-  entryRel = entryMatch[1].replace(/^\//, '').replace(/^\.\//, '');
+  entryRel = resolveAssetHref(entryMatch[1]);
   const entryPath = join(BUILD_DIR, entryRel);
   if (!existsSync(entryPath)) {
     errors.push(`entry chunk missing on disk: ${entryRel}`);

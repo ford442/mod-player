@@ -36,6 +36,8 @@ interface ControlsProps {
   // CRT scanline/vignette effect
   crtEnabled?: boolean;
   onToggleCrt?: () => void;
+  /** Hide media upload, bloom, night, and chassis toggles (public / minimal build). */
+  minimalSurface?: boolean;
 }
 
 export const Controls: React.FC<ControlsProps> = ({
@@ -70,6 +72,7 @@ export const Controls: React.FC<ControlsProps> = ({
   // CRT effect
   crtEnabled = false,
   onToggleCrt,
+  minimalSurface = false,
 }) => {
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -99,6 +102,7 @@ export const Controls: React.FC<ControlsProps> = ({
         />
       </div>
 
+      {!minimalSurface && (
       <div className="flex items-center gap-2">
         <UploadIcon className="w-5 h-5 text-gray-400" />
         <input
@@ -109,8 +113,10 @@ export const Controls: React.FC<ControlsProps> = ({
           accept=".png,.jpg,.jpeg,.gif,.mp4"
         />
       </div>
+      )}
 
       {/* Remote Media Dropdown */}
+      {!minimalSurface && (
       <div className="flex items-center gap-2">
         <label className="text-sm text-gray-400 flex items-center gap-2">
           <span className="hidden md:inline">Server Media:</span>
@@ -135,6 +141,7 @@ export const Controls: React.FC<ControlsProps> = ({
           </select>
         </label>
       </div>
+      )}
 
       {/* Playback Controls */}
       <div className="flex items-center gap-2">
@@ -162,7 +169,7 @@ export const Controls: React.FC<ControlsProps> = ({
         >
           🔄 Loop
         </button>
-        {onToggleChassisDark !== undefined && (
+        {onToggleChassisDark !== undefined && !minimalSurface && (
           <button
             onClick={onToggleChassisDark}
             className={cn(
@@ -175,7 +182,7 @@ export const Controls: React.FC<ControlsProps> = ({
             {chassisDark ? '🌑 Dark Chassis' : '☀️ Light Chassis'}
           </button>
         )}
-        {onToggleCrt !== undefined && (
+        {onToggleCrt !== undefined && !minimalSurface && (
           <button
             onClick={onToggleCrt}
             title={crtEnabled ? 'Disable CRT scanline effect' : 'Enable CRT scanline effect'}
@@ -222,7 +229,7 @@ export const Controls: React.FC<ControlsProps> = ({
       )}
 
       {/* Bloom Preset Dropdown */}
-      {onBloomPresetChange && (
+      {onBloomPresetChange && !minimalSurface && (
         <div className="flex items-center gap-2">
           <label className="text-sm text-gray-400 flex items-center gap-2">
             <span className="hidden md:inline">💡 Bloom:</span>
@@ -245,7 +252,7 @@ export const Controls: React.FC<ControlsProps> = ({
       )}
 
       {/* Color Scheme Dropdown */}
-      {onColorSchemeChange && (
+      {onColorSchemeChange && !minimalSurface && (
         <div className="flex items-center gap-2">
           <label className="text-sm text-gray-400 flex items-center gap-2">
             <span className="hidden md:inline">🎨 Colors:</span>
@@ -278,6 +285,7 @@ export const Controls: React.FC<ControlsProps> = ({
             step="0.01"
             value={volume}
             onChange={(e) => setVolume(parseFloat(e.target.value))}
+            onInput={(e) => setVolume(parseFloat((e.target as HTMLInputElement).value))}
             className="w-20"
           />
         </div>
@@ -292,6 +300,7 @@ export const Controls: React.FC<ControlsProps> = ({
             step="0.01"
             value={pan}
             onChange={(e) => setPan(parseFloat(e.target.value))}
+            onInput={(e) => setPan(parseFloat((e.target as HTMLInputElement).value))}
             className="w-20"
           />
         </div>

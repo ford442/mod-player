@@ -82,6 +82,7 @@ export function MainLayout() {
   } = useShaderPrefsStore();
 
   const isDarkMode = !LIGHT_THEMES.has(theme);
+  const showDevSurface = !IS_PUBLIC_MODE;
   const {
     isReady,
     isModuleLoaded,
@@ -221,12 +222,14 @@ export function MainLayout() {
         {/* Global Controls */}
         <div className="mb-4 flex flex-wrap items-center justify-between gap-4">
             <div className="flex gap-2">
+                {showDevSurface && (
                 <button
                   onClick={() => setIs3DMode(true)}
                   className="px-4 py-2 bg-blue-600 text-white text-sm font-mono rounded-lg shadow-lg hover:bg-blue-700 transition-colors border border-blue-500"
                 >
                   🎬 3D Mode
                 </button>
+                )}
                 {/* Theme selector */}
                 <select
                   value={theme}
@@ -243,6 +246,7 @@ export function MainLayout() {
                     <option key={opt.value} value={opt.value}>{opt.label}</option>
                   ))}
                 </select>
+                {showDevSurface && (
                 <button
                   onClick={toggleAudioEngine}
                   disabled={!isWorkletSupported || !!workletLoadError}
@@ -259,6 +263,7 @@ export function MainLayout() {
                 >
                   {activeEngine === 'native-worklet' ? '🚀 Native' : activeEngine === 'worklet' ? '⚡ Worklet' : '🐌 Script'}
                 </button>
+                )}
                 <button
                   onClick={() => {
                     const next = !liteMode;
@@ -275,6 +280,7 @@ export function MainLayout() {
                 >
                   {liteMode ? '⚡ Lite' : '🖥️ Full'}
                 </button>
+                {showDevSurface && (
                 <button
                   onClick={() => setReactiveMode(!reactiveMode)}
                   className={cn(
@@ -287,7 +293,8 @@ export function MainLayout() {
                 >
                   {reactiveMode ? '🎛️ Reactive' : '🎛️ Static'}
                 </button>
-                {onCopyShareLink && (
+                )}
+                {showDevSurface && onCopyShareLink && (
                   <button
                     type="button"
                     onClick={onCopyShareLink}
@@ -303,7 +310,7 @@ export function MainLayout() {
                     🔗 Share
                   </button>
                 )}
-                {isModuleLoaded && (
+                {showDevSurface && isModuleLoaded && (
                   <button
                     type="button"
                     onClick={() => toggleEditMode()}
@@ -421,6 +428,7 @@ export function MainLayout() {
                         <option value={4}>Acid</option>
                         <option value={5}>Fifths</option>
                     </select>
+                    {showDevSurface && (
                     <button
                       onClick={() => setPaletteMode(paletteMode === 0 ? 1 : 0)}
                       disabled={!usesInstrumentPalette(shaderFile)}
@@ -438,6 +446,7 @@ export function MainLayout() {
                     >
                       {paletteMode === 1 ? 'By Instrument' : 'By Pitch'}
                     </button>
+                    )}
                 </div>
                 {isStepsShader && (
                   <>
@@ -490,9 +499,11 @@ export function MainLayout() {
               externalVideoSource={null}
               dimFactor={dimFactor}
               analyserNode={analyserNode}
-              debugPanelOpen={debugPanelOpen}
-              onCloseDebug={() => setDebugPanelOpen(false)}
-              onOpenDebug={() => setDebugPanelOpen(true)}
+              debugPanelOpen={showDevSurface ? debugPanelOpen : false}
+              {...(showDevSurface ? {
+                onCloseDebug: () => setDebugPanelOpen(false),
+                onOpenDebug: () => setDebugPanelOpen(true),
+              } : {})}
               syncDebug={syncDebug}
               // PERFORMANCE OPTIMIZATION: Pass ref for high-frequency updates
               playbackStateRef={playbackStateRef}
@@ -524,6 +535,7 @@ export function MainLayout() {
              {...(onSequencerCellEdit ? { onSequencerCellEdit } : {})}
            />
 
+           {showDevSurface && (
            <MediaOverlay
              item={mediaItem}
              visible={mediaVisible}
@@ -534,6 +546,7 @@ export function MainLayout() {
                  if (mediaItem) setMediaItem({ ...mediaItem, ...partial });
              }}
            />
+           )}
         </div>
 
         {/* Controls */}
@@ -550,26 +563,27 @@ export function MainLayout() {
           setVolume={setVolume}
           pan={pan}
           setPan={setPan}
-          onMediaAdd={handleMediaAdd}
-          onRemoteMediaSelect={handleRemoteMediaSelect}
-          remoteMediaList={[
-             { id: '1', kind: 'video', url: 'clouds.mp4', fileName: 'Clouds Demo (MP4)', mimeType: 'video/mp4' }
-          ]}
-          bloomPreset={bloomPreset}
-          onBloomPresetChange={setBloomPreset}
-          colorScheme={colorScheme}
-          onColorSchemeChange={setColorScheme}
-          chassisDark={chassisDark}
-          onToggleChassisDark={() => setChassisDark(!chassisDark)}
-          // Night Mode 2.0
-          nightModeEnabled={nightModeEnabled}
-          nightModePreset={nightModePreset}
-          onNightModeToggle={() => setNightModeEnabled(!nightModeEnabled)}
-          onNightPresetChange={setNightModePreset}
-          isNightShader={isNightShader}
-          // CRT effect
-          crtEnabled={crtEnabled}
-          onToggleCrt={() => setCrtEnabled(!crtEnabled)}
+          minimalSurface={IS_PUBLIC_MODE}
+          {...(showDevSurface ? {
+            onMediaAdd: handleMediaAdd,
+            onRemoteMediaSelect: handleRemoteMediaSelect,
+            remoteMediaList: [
+              { id: '1', kind: 'video', url: 'clouds.mp4', fileName: 'Clouds Demo (MP4)', mimeType: 'video/mp4' },
+            ],
+            bloomPreset,
+            onBloomPresetChange: setBloomPreset,
+            colorScheme,
+            onColorSchemeChange: setColorScheme,
+            chassisDark,
+            onToggleChassisDark: () => setChassisDark(!chassisDark),
+            nightModeEnabled,
+            nightModePreset,
+            onNightModeToggle: () => setNightModeEnabled(!nightModeEnabled),
+            onNightPresetChange: setNightModePreset,
+            isNightShader,
+            crtEnabled,
+            onToggleCrt: () => setCrtEnabled(!crtEnabled),
+          } : {})}
         />
 
         {/* Seek Bar */}
@@ -591,10 +605,14 @@ export function MainLayout() {
           {[
             { key: 'meters', label: '📊 VU Meters', state: showChannelMeters, toggle: setShowChannelMeters },
             { key: 'meta', label: 'ℹ️ Metadata', state: showMetadata, toggle: setShowMetadata },
-            { key: 'instruments', label: '🎹 Instruments', state: showInstruments, toggle: setShowInstruments },
+            ...(showDevSurface ? [
+              { key: 'instruments', label: '🎹 Instruments', state: showInstruments, toggle: setShowInstruments },
+            ] : []),
             { key: 'playlist', label: '📋 Playlist', state: showPlaylist, toggle: setShowPlaylist },
-            { key: 'library', label: '☁️ Browse Library', state: showLibraryBrowser, toggle: setShowLibraryBrowser },
-            { key: 'collection', label: '📁 Library', state: showLocalLibrary, toggle: setShowLocalLibrary },
+            ...(showDevSurface ? [
+              { key: 'library', label: '☁️ Browse Library', state: showLibraryBrowser, toggle: setShowLibraryBrowser },
+              { key: 'collection', label: '📁 Library', state: showLocalLibrary, toggle: setShowLocalLibrary },
+            ] : []),
           ].map(({ key, label, state, toggle }) => (
             <button
               key={key}
@@ -633,7 +651,7 @@ export function MainLayout() {
                 />
               </Panel>
             )}
-            {showInstruments && (
+            {showInstruments && showDevSurface && (
               <Panel variant="bezel" title="Instruments" titleAccent>
                 <InstrumentPanel
                   table={instrumentTable}
@@ -653,11 +671,12 @@ export function MainLayout() {
                 />
               </Panel>
             )}
-            {midiControls && (
+            {midiControls && showDevSurface && (
               <Panel variant="bezel" title="MIDI / Hardware" titleAccent>
                 <MidiControlsPanel midi={midiControls} isDarkMode={isDarkMode} />
               </Panel>
             )}
+            {showDevSurface && (
             <Panel variant="bezel" title="Export" titleAccent>
               <ExportPanel
                 isModuleLoaded={isModuleLoaded}
@@ -678,11 +697,12 @@ export function MainLayout() {
                 dualAudioContext={dualAudioContext}
               />
             </Panel>
+            )}
           </div>
         </div>
 
         {/* Pattern editor (edit mode) */}
-        {editMode && onPatternCellEdit && onPatternCellPatch && onPatternCellClear && (
+        {showDevSurface && editMode && onPatternCellEdit && onPatternCellPatch && onPatternCellClear && (
           <div className="mt-4">
             <Panel
               variant="raised"
@@ -740,6 +760,7 @@ export function MainLayout() {
           </div>
         )}
 
+        {showDevSurface && (
         <div className="mt-4">
           <Panel variant="raised" title="Media Overlay">
             <MediaPanel
@@ -761,6 +782,7 @@ export function MainLayout() {
             />
           </Panel>
         </div>
+        )}
 
         {/* Cloud Library */}
         {showLibraryBrowser && (

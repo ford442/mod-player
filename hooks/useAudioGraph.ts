@@ -6,6 +6,7 @@ import { LibOpenMPT, PatternMatrix, ChannelShadowState, ModuleInfo, PatternCell 
 import { OpenMPTWorkletEngine, NATIVE_RING_BUF_FRAMES } from '../audio-worklet/OpenMPTWorkletEngine';
 import type { WorkletPositionData } from '../audio-worklet/types';
 import { getWorkletUrl } from './useWorkletLoader';
+import { ensureMasterOutputChain } from '../utils/audioMasterGraph';
 import { broadcastPcmBlock } from '../utils/projectMBridge';
 import { logWorkletDiagnostics } from '../audio-worklet/diagnostics';
 import { detectRuntimeBase, withBase } from '../src/lib/paths';
@@ -99,6 +100,30 @@ export interface AudioGraphConfig {
 // AUDIO-001 FIX COMPLETE: Centralized worklet URL from useWorkletLoader
 const WORKLET_URL = getWorkletUrl();
 
+function masterGraphRefs(refs: AudioGraphRefs) {
+  return {
+    analyserRef: refs.analyserRef,
+    stereoPannerRef: refs.stereoPannerRef,
+    gainNodeRef: refs.gainNodeRef,
+  };
+}
+
+/** Re-assert analyser → panner → gain → destination and apply live levels. */
+function wireMasterOutput(
+  ctx: AudioContext,
+  refs: AudioGraphRefs,
+  volume: number,
+  pan: number,
+): void {
+  ensureMasterOutputChain(ctx, masterGraphRefs(refs));
+  if (refs.stereoPannerRef.current) {
+    refs.stereoPannerRef.current.pan.value = pan;
+  }
+  if (refs.gainNodeRef.current) {
+    refs.gainNodeRef.current.gain.value = volume;
+  }
+}
+
 /** Exact module bytes for worklet load — safe when Uint8Array is a subarray. */
 function moduleBytesFromFileData(fileData: Uint8Array | null): ArrayBuffer | null {
   if (!fileData || fileData.byteLength === 0) return null;
@@ -158,6 +183,12 @@ export async function startAudioPlayback(
     }
     if (refs.gainNodeRef.current) {
       refs.gainNodeRef.current.gain.value = config.volume;
+    }
+    if (refs.stereoPannerRef.current) {
+      refs.stereoPannerRef.current.pan.value = config.panValue;
+    }
+    if (existingCtx) {
+      wireMasterOutput(existingCtx, refs, config.volume, config.panValue);
     }
     if (!refs.animationFrameHandle.current && refs.updateUIRef.current) {
       refs.animationFrameHandle.current = requestAnimationFrame(refs.updateUIRef.current);
@@ -226,6 +257,7 @@ export async function startAudioPlayback(
       refs.analyserRef.current.fftSize = 2048;
       refs.analyserRef.current.smoothingTimeConstant = 0.8;
     }
+    wireMasterOutput(ctx, refs, config.volume, config.panValue);
 
     // Disconnect previous source unless we can hot-reload module data into the
     // existing JS worklet node (avoids re-init of shared-scope libopenmpt WASM).
@@ -300,9 +332,7 @@ export async function startAudioPlayback(
               },
             });
             bridgeNode.connect(refs.analyserRef.current!);
-            refs.analyserRef.current!.connect(refs.stereoPannerRef.current!);
-            refs.stereoPannerRef.current!.connect(refs.gainNodeRef.current!);
-            refs.gainNodeRef.current!.connect(ctx.destination);
+            wireMasterOutput(ctx, refs, config.volume, config.panValue);
             // Store bridge node so stopMusic() can disconnect it
             refs.audioWorkletNodeRef.current = bridgeNode;
             bridgeEstablished = true;
@@ -317,9 +347,7 @@ export async function startAudioPlayback(
           try {
             const mediaSrc = await engine.bridgeToAudioGraph(ctx, refs.analyserRef.current!);
             if (mediaSrc) {
-              refs.analyserRef.current!.connect(refs.stereoPannerRef.current!);
-              refs.stereoPannerRef.current!.connect(refs.gainNodeRef.current!);
-              refs.gainNodeRef.current!.connect(ctx.destination);
+              wireMasterOutput(ctx, refs, config.volume, config.panValue);
               bridgeEstablished = true;
               console.log('[PLAY] Native engine: MediaStream bridge active (Strategy B)');
             }
@@ -625,6 +653,9 @@ export async function startAudioPlayback(
               if (refs.gainNodeRef.current) {
                 refs.gainNodeRef.current.gain.value = config.volume;
               }
+              if (refs.stereoPannerRef.current) {
+                refs.stereoPannerRef.current.pan.value = config.panValue;
+              }
               if (ctx.state === 'suspended') {
                 try { await ctx.resume(); } catch { /* ignore */ }
               }
@@ -704,6 +735,7 @@ export async function startAudioPlayback(
                   };
 
                   spNode.connect(refs.analyserRef.current!);
+                  wireMasterOutput(ctx, refs, config.volume, config.panValue);
                   refs.scriptProcessorRef.current = spNode;
 
                   refs.isPlayingRef.current = true;
@@ -772,12 +804,10 @@ export async function startAudioPlayback(
         if (!reuseWorkletNode) {
           try { node.disconnect(); } catch { /* ignore stale edges */ }
           node.connect(refs.analyserRef.current!);
-          refs.analyserRef.current!.connect(refs.stereoPannerRef.current!);
-          refs.stereoPannerRef.current!.connect(refs.gainNodeRef.current!);
-          refs.gainNodeRef.current!.connect(ctx.destination);
         } else {
-          console.log('[PLAY] Hot reload — keeping existing audio graph wiring');
+          console.log('[PLAY] Hot reload — keeping existing worklet wiring; re-asserting master output chain');
         }
+        wireMasterOutput(ctx, refs, config.volume, config.panValue);
 
         refs.audioWorkletNodeRef.current = node;
         // Show a loading state while the 4.8 MB WASM finishes initialising.

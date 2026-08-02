@@ -25,6 +25,7 @@ import {
 } from '../../../utils/shaderVersion';
 import { GRID_RECT, getPolarRadii } from '../../../utils/geometryConstants';
 import { resolveWebGpuVisibleRows } from '../../../utils/overlayLayout';
+import { isV030bTimingDebugEnabled } from '../../../utils/timingDebug';
 import { configureCanvasContext } from '../../../utils/webgpuDevice';
 import {
   AUDIO_REACTIVE_UNIFORM_BYTES,
@@ -290,7 +291,9 @@ export function renderWebGPUFrame(ctx: FrameDrawContext): void {
       isModuleLoaded: p.isModuleLoaded,
       bloomIntensity: p.bloomIntensity,
       bloomThreshold: p.bloomThreshold,
-      invertChannels: p.invertChannels,
+      invertChannels: isV030bTimingDebugEnabled(shaderFile)
+        ? 2
+        : (p.invertChannels ? 1 : 0),
       dimFactor: p.dimFactor,
       innerRadius,
       outerRadius,

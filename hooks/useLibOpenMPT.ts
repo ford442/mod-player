@@ -53,6 +53,7 @@ import {
   type PlayheadLagTracker,
   type PositionReportTracker,
 } from '../utils/playheadLagMonitor';
+import { applyMasterLevels } from '../utils/audioMasterGraph';
 
 
 // Use Vite BASE_URL for correct resolution under subdirectory deployment
@@ -1283,23 +1284,24 @@ export function useLibOpenMPT(initialVolume: number = 0.4, liteMode: boolean = f
     _setVolume(initialVolume);
   }, [initialVolume]);
 
-  // Update panning when panValue changes
+  // Apply master volume/pan to live Web Audio nodes (and native engine volume).
   useEffect(() => {
-    if (stereoPannerRef.current) {
-      stereoPannerRef.current.pan.value = panValue;
-    }
-  }, [panValue]);
-
-  // Update volume
-  useEffect(() => {
-    if (gainNodeRef.current) {
-      gainNodeRef.current.gain.value = volume;
-    }
-    // Sync volume with native C++/Wasm engine
+    applyMasterLevels(
+      { gainNodeRef, stereoPannerRef },
+      volume,
+      panValue,
+    );
     if (nativeEngineRef.current) {
       nativeEngineRef.current.setVolume(volume);
     }
-  }, [volume]);
+  }, [volume, panValue]);
+
+  const applyMasterLevelsNow = useCallback((vol: number, pan: number) => {
+    applyMasterLevels({ gainNodeRef, stereoPannerRef }, vol, pan);
+    if (nativeEngineRef.current) {
+      nativeEngineRef.current.setVolume(vol);
+    }
+  }, []);
 
   const replacePatternMatrix = useCallback((matrix: PatternMatrix) => {
     const order = matrix.order;
@@ -1365,6 +1367,9 @@ export function useLibOpenMPT(initialVolume: number = 0.4, liteMode: boolean = f
     toggleChannelMute,
     getAudioContext: () => audioContextRef.current,
     getAudioTapNode: () => stereoPannerRef.current ?? gainNodeRef.current,
+    getMasterGainValue: () => gainNodeRef.current?.gain.value ?? null,
+    getMasterPanValue: () => stereoPannerRef.current?.pan.value ?? null,
+    applyMasterLevels: applyMasterLevelsNow,
     // PERFORMANCE OPTIMIZATION: Export ref for high-frequency updates
     // PatternDisplay reads directly from this to this ref - avoids React re-renders
     playbackStateRef,

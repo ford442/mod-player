@@ -1,7 +1,7 @@
 {
   "name": "react-libopenmpt-viewer",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.1.0",
   "type": "module",
   "scripts": {
     "sync:shaders": "node scripts/sync-shaders.mjs",
@@ -12,7 +12,8 @@
     "build:worklet": "echo '⚠️  build:worklet is deprecated — use npm run build:emcc (same script; outputs openmpt-native.* only)' >&2 && bash scripts/build-wasm.sh",
     "verify:native-exports": "node scripts/verify-native-exports.mjs",
     "build": "tsc && vite build",
-    "build:xm-player": "VITE_APP_BASE_PATH=/xm-player/ VITE_STORAGE_API_URL=https://storage.noahcohn.com npm run build",
+    "build:xm-player": "VITE_APP_BASE_PATH=/xm-player/ VITE_STORAGE_API_URL=https://storage.noahcohn.com VITE_PUBLIC_MODE=1 npm run build",
+    "build:public": "npm run build:xm-player:verify",
     "vendor:libmpt": "node scripts/vendor-libopenmpt.mjs",
     "verify:wasm": "node scripts/verify-wasm-assets.mjs",
     "verify:build": "node scripts/verify-build.mjs",
