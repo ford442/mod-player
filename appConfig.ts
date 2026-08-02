@@ -60,7 +60,7 @@ const _urlParams = new URLSearchParams(
 
 /** True for production xm-player deploy (`VITE_PUBLIC_MODE=1`) or `?public=1` / `?demo=1`. */
 export const IS_PUBLIC_MODE =
-  import.meta.env.VITE_PUBLIC_MODE === '1' ||
+  (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_PUBLIC_MODE === '1') ||
   _urlParams.get('public') === '1' ||
   _urlParams.get('demo') === '1';
 

@@ -54,7 +54,7 @@ jobs:
           echo "✅ Build artifacts verified"
       
       - name: Post-build verify (CSS + WASM magic)
-        run: npm run verify:build
+        run: EXPECTED_BASE='/' PROJECT_NAME='' npm run verify:build
 
       - name: Bundle budget (entry chunk + three-r3f split)
         run: npm run verify:bundle-budget

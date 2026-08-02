@@ -5,7 +5,7 @@
 # ⚠️  Historical bug: this script used to write
 #     public/worklets/openmpt-worklet.{js,wasm,aw.js}
 #     which OVERWROTE the tracked JS AudioWorklet processor
-#     (public/worklets/openmpt-worklet.js) and even `rm -rf public/worklets`.
+#     (public/worklets/openmpt-worklet.js) and its containing dir.
 #
 # It now only delegates to the single supported path:
 #     scripts/build-wasm.sh  →  public/worklets/openmpt-native.*
