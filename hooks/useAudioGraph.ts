@@ -475,7 +475,7 @@ export async function startAudioPlayback(
               setTimeout(() => reject(new Error('Worklet module load timeout (10s)')), 10000);
             });
             
-            const protocolUrl = withBase('worklets/worklet-protocol-constants.js?v=1');
+            const protocolUrl = withBase('worklets/worklet-protocol-constants.js?v=2');
             const loadProtocol = ctx.audioWorklet.addModule(protocolUrl);
             const loadWorklet = ctx.audioWorklet.addModule(workletUrl);
             await Promise.race([
@@ -704,7 +704,7 @@ export async function startAudioPlayback(
                   const rightPtr = lib._malloc(4 * SP_BUFFER);
                   refs.spLeftBufPtr.current  = leftPtr;
                   refs.spRightBufPtr.current = rightPtr;
-                  lib._openmpt_module_set_render_param(modPtr, 2, 8);
+                  lib._openmpt_module_set_render_param(modPtr, 2, 4);
 
                   spNode.onaudioprocess = (audioEvt: AudioProcessingEvent) => {
                     const outL = audioEvt.outputBuffer.getChannelData(0);

@@ -43,12 +43,12 @@ if (typeof self !== 'undefined' && (!self.crypto || !self.crypto.getRandomValues
 const _proto = globalThis.WorkletProtocolConstants;
 const MT = _proto ? _proto.MAIN_TO_WORKLET : {
   initLib: 'initLib', load: 'load', play: 'play', pause: 'pause', seek: 'seek',
-  getOscBuffer: 'getOscBuffer', setAudioLite: 'setAudioLite',
+  getOscBuffer: 'getOscBuffer', setAudioLite: 'setAudioLite', setProjectmPcm: 'setProjectmPcm', setAudioDiag: 'setAudioDiag',
 };
 const WT = _proto ? _proto.WORKLET_TO_MAIN : {
   position: 'position', loaded: 'loaded', ended: 'ended', seekAck: 'seekAck',
   error: 'error', oscBuffer: 'oscBuffer', needData: 'needData',
-  starvation: 'starvation', projectmPcm: 'projectm-pcm',
+  starvation: 'starvation', projectmPcm: 'projectm-pcm', audioDiag: 'audioDiag',
 };
 const parseMainToWorklet = _proto
   ? _proto.parseMainToWorkletMessage.bind(_proto)
@@ -214,13 +214,17 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
     this.lastPositionReportTime = 0;
     /** Last integer row — used only for diagnostics / wrap detection. */
     this._lastReportedRowInt = -1;
+    /** Cached HEAPF32 views — recreate only when the wasm heap buffer moves. */
+    this._leftHeapView = null;
+    this._rightHeapView = null;
+    this._heapBuffer = null;
 
     // ── Project-M PCM accumulation ─────────────────────────────────
-    // Accumulate audio-clock-accurate stereo PCM blocks and emit them
-    // to the main thread for Project-M visualization.  Doing this here
-    // (inside process()) avoids the jitter and background-tab throttling
-    // of the requestAnimationFrame path and provides authentic PCM
-    // directly from the WASM render callback.
+    // Off by default: allocating + postMessage(~88 Hz) competed with
+    // read_float_stereo at XM pattern starts. Enable via setProjectmPcm when
+    // a Project-M host is actually listening; otherwise RAF AnalyserNode
+    // bridge covers embedded/popup cases.
+    this._projectmPcmEnabled = false;
     this.pcmChunkSize = 512;   // target block size (~11.6 ms @ 44100 Hz)
     this.pcmAccumL = new Float32Array(this.pcmChunkSize);
     this.pcmAccumR = new Float32Array(this.pcmChunkSize);
@@ -312,9 +316,6 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
       : null;
     this.oscWritePtr = 0;
     this._audioLite = false;
-    // Project-M PCM blocks are only posted when a popup/iframe consumer exists
-    // (main thread enables them). Otherwise ~88 postMessage/s ran for nobody.
-    this._projectmPcmEnabled = false;
     // ?audioDiag=1 — per-quantum process() timing, correlated with row wraps.
     this._audioDiag = false;
     this._resetAudioDiag();
@@ -515,9 +516,16 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
       // Allocate persistent stereo output buffers in WASM heap
       this.leftBufPtr = lib._malloc(4 * this.maxFrames);
       this.rightBufPtr = lib._malloc(4 * this.maxFrames);
+      this._heapBuffer = null;
+      this._leftHeapView = null;
+      this._rightHeapView = null;
 
-      // Best-quality windowed-sinc interpolation
-      lib._openmpt_module_set_render_param(this.modulePtr, 2, 8);
+      // OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH:
+      // 8 = highest-quality sinc (too heavy for wasm2js AudioWorklet on XM
+      // pattern boundaries with many voices). 4 = windowed sinc — good quality
+      // with far less per-quantum CPU; MOD rarely noticed 8→4, XM pattern
+      // starts often did.
+      lib._openmpt_module_set_render_param(this.modulePtr, 2, 4);
 
       log('Module loaded ✅ ptr=', this.modulePtr);
       this.port.postMessage({ type: WT.loaded });
@@ -557,11 +565,11 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
     const numSamples = outL.length;
     const framesToRead = Math.min(numSamples, this.maxFrames);
 
-    // ── Pre-render position snapshot ─────────────────────────────────
+    // ── Pre-render position snapshot (cheap fields only) ──────────────
     // Capture state *before* read_float_stereo so the row matches the first
-    // sample of this quantum. Tag with AudioWorklet currentTime (audio
-    // timeline of that first sample). Main thread predicts to
-    // currentTime − outputLatency for speaker-aligned visuals.
+    // sample of this quantum. Expensive helpers (get_time_at_position, VU)
+    // run only on the ~60 Hz position-report path — calling them every
+    // quantum (~350 Hz) spiked CPU at XM pattern boundaries (many voices).
     const lib = this.lib;
     const mod = this.modulePtr;
     const diagStart = this._audioDiag ? this._diagNow() : 0;
@@ -615,9 +623,15 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
     }
     this.hasEnded = false;
 
-    // Zero-copy view into WASM heap
-    outL.set(new Float32Array(lib.HEAPF32.buffer, this.leftBufPtr, samplesWritten));
-    outR.set(new Float32Array(lib.HEAPF32.buffer, this.rightBufPtr, samplesWritten));
+    // Zero-copy view into WASM heap (reuse TypedArray when heap buffer stable)
+    const heapBuf = lib.HEAPF32.buffer;
+    if (this._heapBuffer !== heapBuf) {
+      this._heapBuffer = heapBuf;
+      this._leftHeapView = new Float32Array(heapBuf, this.leftBufPtr, this.maxFrames);
+      this._rightHeapView = new Float32Array(heapBuf, this.rightBufPtr, this.maxFrames);
+    }
+    outL.set(this._leftHeapView.subarray(0, samplesWritten));
+    outR.set(this._rightHeapView.subarray(0, samplesWritten));
 
     // Copy first 128 samples into oscilloscope ring buffer
     if (this.oscView && outL) {
@@ -651,18 +665,11 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
         src += toCopy;
 
         if (this.pcmAccumCount >= this.pcmChunkSize) {
-          // Build interleaved stereo Float32Array: L0,R0, L1,R1, …
-          // The element-by-element loop is the only way to interleave two
-          // typed arrays with different strides; for 512 samples this is
-          // ~1024 writes per block (~88 blocks/s @ 44100 Hz) — negligible
-          // overhead relative to the WASM render call above.
           const interleaved = new Float32Array(this.pcmChunkSize * 2);
           for (let i = 0; i < this.pcmChunkSize; i++) {
             interleaved[i * 2]     = this.pcmAccumL[i];
             interleaved[i * 2 + 1] = this.pcmAccumR[i];
           }
-          // `sampleRate` is a read-only global in AudioWorkletGlobalScope
-          // (spec §4.3), like `currentTime`.  No `this.` prefix needed.
           this.port.postMessage(
             { type: WT.projectmPcm, buffer: interleaved, channels: 2,
               sampleRate, samplesPerChannel: this.pcmChunkSize },

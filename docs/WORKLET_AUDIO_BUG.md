@@ -223,6 +223,36 @@ remain the source for pure lifecycle decisions (reuse node, throttle cadence, lo
 
 ---
 
+## XM pattern-boundary stutter (2026-08)
+
+### Problem
+
+After #354 fixed MOD hiccups (position flood), **XM** still glitched at **order/pattern changes**. XM typically has more channels and heavier row-0 voice activity; the worklet still ran every audio quantum (~350 Hz):
+
+- up to 3× `get_time_at_position` (only needed for fractional row in position posts)
+- up to 32× `get_current_channel_vu_mono`
+- full `_updateAudioReactive` sample scan
+- `projectm-pcm` allocate + `postMessage` (~88 Hz) even when no Project-M host listens
+- interpolation filter length **8** (max sinc) on wasm2js
+
+At pattern starts those extras tipped `process()` past the ~2.9 ms quantum budget → audible underrun. MOD (4ch) often stayed under budget.
+
+### Fix
+
+| Change | Detail |
+|--------|--------|
+| Gate helpers | `get_time_at_position`, VU, audio-reactive SAB update only on ~60 Hz position path |
+| Opt-in PCM | `_pcmEmitEnabled` default false; `setPcmEmit` enables Project-M worklet PCM |
+| Interpolation | render param length **8 → 4** (worklet + ScriptProcessor) |
+| Order UI | `startTransition` around `setSequencerMatrix` on order change |
+| Cache | `WORKLET_VERSION` → `9`; protocol constants `?v=2` |
+
+### Guards
+
+`tests/workletRegressionGuards.test.ts` asserts VU/time_at_position sit inside the throttle block, PCM default off, and filter length 4.
+
+---
+
 ## How to Verify the Fix Post-Deploy
 
 1. Open DevTools → Network → check "Disable cache".
