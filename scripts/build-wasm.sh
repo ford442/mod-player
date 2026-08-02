@@ -20,9 +20,12 @@
 #      bin/libopenmpt.a for linking with emcc.
 #
 # Usage:
-#   ./scripts/build-wasm.sh              # release (-O3)
+#   ./scripts/build-wasm.sh              # release (-O3 + SIMD/LTO/emmalloc/fixed heap)
 #   ./scripts/build-wasm.sh --debug      # -O0 -g -sASSERTIONS=2
 #   ./scripts/build-wasm.sh --safe-heap  # + SAFE_HEAP (slow; debug memory)
+#
+# Release opts (Phases 2–3): thin LTO, -msimd128, section GC, emmalloc, fixed heap.
+# After changing release flags, delete vendor/.../bin/libopenmpt.a to force rebuild.
 #   npm run build:emcc                   # preferred package.json entry
 #   npm run build:worklet                # deprecated alias → this script
 #
@@ -94,14 +97,42 @@ for arg in "$@"; do
     esac
 done
 
-DEBUG_FLAGS="-O3 -DNDEBUG"
+# ── Compile / link flags ─────────────────────────────────────────────
+# Phase 2: SIMD, thin LTO, WASM feature flags, section GC, emmalloc, no exceptions.
+# Phase 3: fixed heap (ALLOW_MEMORY_GROWTH=0) to avoid growth pauses during audio.
+COMPILE_FLAGS=()
+LINK_FLAGS=()
+EMSCRIPTEN_FLAGS=()
+
 if [[ "$DEBUG_MODE" -eq 1 ]]; then
     # ASSERTIONS=2: expensive runtime checks — CI/debug builds only
-    DEBUG_FLAGS="-O0 -g -DDEBUG -sASSERTIONS=2"
+    COMPILE_FLAGS=(-O0 -g -DDEBUG)
+    EMSCRIPTEN_FLAGS=(-sASSERTIONS=2 -sALLOW_MEMORY_GROWTH=1 -sINITIAL_MEMORY=128mb -sMAXIMUM_MEMORY=256mb)
     echo "🔧 Building in DEBUG mode (ASSERTIONS=2)"
 else
-    echo "🔧 Building in RELEASE mode"
+    COMPILE_FLAGS=(
+        -O3 -DNDEBUG
+        -flto=thin
+        -msimd128
+        -mbulk-memory -matomics -mnontrapping-fptoint -msign-ext
+        -mtune=wasm32
+        -ffunction-sections -fdata-sections
+        -fno-exceptions
+    )
+    LINK_FLAGS=(-Wl,--gc-sections)
+    EMSCRIPTEN_FLAGS=(
+        -sASSERTIONS=0
+        -sDISABLE_EXCEPTION_CATCHING=1
+        -sMALLOC=emmalloc
+        -sALLOW_MEMORY_GROWTH=0
+        -sINITIAL_MEMORY=128mb
+    )
+    echo "🔧 Building in RELEASE mode (SIMD + LTO + emmalloc + fixed 128mb heap)"
 fi
+
+# libopenmpt static lib must be built with matching release opts (LTO + SIMD).
+LIBOPENMPT_RELEASE_CXXFLAGS='-O3 -DNDEBUG -msimd128 -flto=thin'
+LIBOPENMPT_RELEASE_CFLAGS='-O3 -DNDEBUG -msimd128 -flto=thin'
 
 EXTRA_SANITIZER_FLAGS=()
 if [[ "$SAFE_HEAP" -eq 1 ]]; then
@@ -216,8 +247,13 @@ resolve_libopenmpt_paths() {
 
 build_libopenmpt_in_place() {
     echo "🔨 Building libopenmpt for Emscripten (STATIC_LIB=1; this takes a few minutes)…"
+    local make_extra=()
+    if [[ "$DEBUG_MODE" -eq 0 ]]; then
+        make_extra+=(CXXFLAGS="$LIBOPENMPT_RELEASE_CXXFLAGS" CFLAGS="$LIBOPENMPT_RELEASE_CFLAGS")
+        echo "   libopenmpt CXXFLAGS: $LIBOPENMPT_RELEASE_CXXFLAGS"
+    fi
     pushd "$LIBOPENMPT_DIR" >/dev/null
-    make "${LIBOPENMPT_MAKE_FLAGS[@]}" -j"$(nproc 2>/dev/null || echo 2)" bin/libopenmpt.a
+    make "${LIBOPENMPT_MAKE_FLAGS[@]}" "${make_extra[@]}" -j"$(nproc 2>/dev/null || echo 2)" bin/libopenmpt.a
     popd >/dev/null
 }
 
@@ -242,6 +278,9 @@ ensure_libopenmpt() {
     if resolve_libopenmpt_paths; then
         echo "✅ libopenmpt ready at $LIBOPENMPT_DIR (prebuilt .a — skipping make)"
         echo "   include=$LIBOPENMPT_INCLUDE  lib=$LIBOPENMPT_LIB"
+        if [[ "$DEBUG_MODE" -eq 0 ]]; then
+            echo "   ℹ️  Release build uses SIMD/LTO — rm bin/libopenmpt.a if you changed optimization flags"
+        fi
         return 0
     fi
 
@@ -335,7 +374,8 @@ EXPORTED_FUNCTIONS_FLAT="$(echo "$EXPORTED_FUNCTIONS" | tr -d '\n' | sed 's/  */
 echo "🔨 Compiling C++ → WebAssembly (openmpt-native)..."
 
 emcc \
-    $DEBUG_FLAGS \
+    "${COMPILE_FLAGS[@]}" \
+    "${LINK_FLAGS[@]+"${LINK_FLAGS[@]}"}" \
     "${EXTRA_SANITIZER_FLAGS[@]+"${EXTRA_SANITIZER_FLAGS[@]}"}" \
     -std=c++17 \
     \
@@ -349,14 +389,12 @@ emcc \
     -sAUDIO_WORKLET=1 \
     -sWASM_WORKERS=1 \
     -sSINGLE_FILE=0 \
-    -sALLOW_MEMORY_GROWTH=1 \
-    -sMAXIMUM_MEMORY=256mb \
     -sENVIRONMENT=web,worker \
+    "${EMSCRIPTEN_FLAGS[@]}" \
     -sEXPORTED_RUNTIME_METHODS="['ccall','cwrap','UTF8ToString','getValue','setValue']" \
     -sEXPORTED_FUNCTIONS="$EXPORTED_FUNCTIONS_FLAT" \
     -sMODULARIZE=1 \
     -sEXPORT_NAME="createOpenMPTModule" \
-    -sINITIAL_MEMORY=128mb \
     #-sSTACK_SIZE=131072 \
     --pre-js "$CPP_DIR/pre.js" \
     \
