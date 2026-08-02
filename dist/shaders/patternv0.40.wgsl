@@ -106,6 +106,11 @@ struct Uniforms {
   stepsLength: u32,     // 32 or 64 steps visible per page
 };
 
+// Note constants — must match TypeScript NOTE_MIN/NOTE_MAX/NOTE_OFF_MIN in gpuPacking.ts
+const NOTE_MIN: u32     = 1u;
+const NOTE_MAX: u32     = 119u;   // Full range: covers MOD/XM/IT notes (C-0 to B-9)
+const NOTE_OFF_MIN: u32 = 120u;   // Any note value >= this is note-off/cut/fade
+
 // === SUSTAIN TUNING CONSTANTS ===
 // Tuned slightly for square-grid aesthetics (vs the circular shader defaults).
 const SUSTAIN_GLOW: f32        = 0.42;  // Glow strength for sustain tail rows (0–1)
@@ -125,6 +130,14 @@ struct ChannelState { volume: f32, pan: f32, freq: f32, trigger: u32, noteAge: f
 @group(0) @binding(3) var<storage, read> channels: array<ChannelState>;
 @group(0) @binding(4) var buttonsSampler: sampler;
 @group(0) @binding(5) var buttonsTexture: texture_2d<f32>;
+
+// Duration info unpacked from high-precision cell packing (DURA-001 in gpuPacking.ts)
+struct NoteDurationInfo {
+  duration: u32,
+  rowOffset: u32,
+  isNoteOff: bool,
+  isTrigger: bool,  // TRIG-001: explicit note-on row (packedB bit 15)
+}
 
 struct VertexOut {
   @builtin(position) position: vec4<f32>,
@@ -160,7 +173,7 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
   }
 
   let effectiveChannel = f32(channel);
-  let hasHeader = uniforms.numChannels > 1u && uniforms.gridRect.y >= 0.15;
+  let hasHeader = uniforms.numChannels > 1u && uniforms.gridRect.y > 0.15;
   let dataChannels = f32(uniforms.numChannels) - select(0.0, 1.0, hasHeader);
   let channelIndex = select(effectiveChannel, effectiveChannel - 1.0, hasHeader && effectiveChannel > 0.0);
 
