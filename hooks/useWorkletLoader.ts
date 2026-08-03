@@ -49,7 +49,9 @@ export const getWorkletUrl = (): string => {
   // BUMP this version whenever openmpt-worklet.js changes to bust browser caches
   // v9: XM pattern-boundary stutter — gate VU/time_at_position behind 60 Hz;
   //     opt-in projectm-pcm; interpolation filter length 8→4
-  const WORKLET_VERSION = '9';
+  // v10: zero-alloc sample copy (no subarray/GC); skip position WASM queries on
+  //      non-report quanta; audio-reactive SAB only at ~60 Hz; reuse VU array
+  const WORKLET_VERSION = '10';
   const url = `${base}worklets/openmpt-worklet.js?v=${WORKLET_VERSION}`;
 
   return url;

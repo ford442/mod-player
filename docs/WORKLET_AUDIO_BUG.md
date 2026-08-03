@@ -235,21 +235,43 @@ After #354 fixed MOD hiccups (position flood), **XM** still glitched at **order/
 - `projectm-pcm` allocate + `postMessage` (~88 Hz) even when no Project-M host listens
 - interpolation filter length **8** (max sinc) on wasm2js
 
-At pattern starts those extras tipped `process()` past the ~2.9 ms quantum budget → audible underrun. MOD (4ch) often stayed under budget.
+At pattern starts those extras tipped `process()` past the ~2.9 ms quantum budget → audible underrun / **skip a few notes then crackle to catch up**. MOD (4ch) often stayed under budget.
 
-### Fix
+### Fix (v9)
 
 | Change | Detail |
 |--------|--------|
-| Gate helpers | `get_time_at_position`, VU, audio-reactive SAB update only on ~60 Hz position path |
-| Opt-in PCM | `_pcmEmitEnabled` default false; `setPcmEmit` enables Project-M worklet PCM |
+| Gate helpers | `get_time_at_position`, VU only on ~60 Hz position path |
+| Opt-in PCM | projectm-pcm default false |
 | Interpolation | render param length **8 → 4** (worklet + ScriptProcessor) |
 | Order UI | `startTransition` around `setSequencerMatrix` on order change |
-| Cache | `WORKLET_VERSION` → `9`; protocol constants `?v=2` |
+| Cache | `WORKLET_VERSION` → `9` |
+
+### Fix (v10 — remaining alloc / GC + leftover per-quantum work)
+
+Symptom still matched **memory allocation / underrun cascade**: a few skipped quanta, then crackle as the audio thread recovers. Remaining per-quantum costs after v9:
+
+| Work | Before v10 | Now |
+|------|------------|-----|
+| Sample copy | `_leftHeapView.subarray(0, n)` + `outL.set(...)` → **2 TypedArray allocs / quantum** (~700 GC objects/s) | Manual element copy from cached heap views (zero alloc) |
+| Position WASM | `order` / `row` / `posSec` / `bpm` / `speed` every quantum | Only on report quanta (or row when `?audioDiag=1`); last values reused |
+| Audio-reactive SAB | Full IIR band-split every quantum | Only on ~60 Hz report path (GPU samples SAB at display rate) |
+| Channel VU array | `channelVU = []` + `push` every report | Reused `_channelVuArr` grown once to `numChannels` |
+| Project-M interleave | `new Float32Array` every emit | Reused `pcmInterleaved` (clone only for transfer) |
+| Main thread | `computeNoteAges` allocated ages[] every RAF; order-change setState storm | Scratch ages buffer; `startTransition` batches order-change HUD + channel notify |
+| Cache bust | | `WORKLET_VERSION` → `10` |
 
 ### Guards
 
-`tests/workletRegressionGuards.test.ts` asserts VU/time_at_position sit inside the throttle block, PCM default off, and filter length 4.
+`tests/workletRegressionGuards.test.ts` asserts VU/time_at_position sit inside the throttle block, no `subarray` sample-copy path, audio-reactive gated, PCM default off, filter length 4, and `WORKLET_VERSION ≥ 10`.
+
+### Diagnose live
+
+```
+?audioDiag=1
+```
+
+Then watch `window.__AUDIO_DIAG__` — if `wrapOverruns` climbs at order changes, `process()` is still exceeding the ~2.9 ms quantum on pattern boundaries.
 
 ---
 

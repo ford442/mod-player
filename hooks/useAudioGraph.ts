@@ -706,6 +706,11 @@ export async function startAudioPlayback(
                   refs.spRightBufPtr.current = rightPtr;
                   lib._openmpt_module_set_render_param(modPtr, 2, 4);
 
+                  // Cached heap views — recreate only when Emscripten grows HEAPF32.
+                  let spHeapBuf: ArrayBuffer | null = null;
+                  let spLeftView: Float32Array | null = null;
+                  let spRightView: Float32Array | null = null;
+
                   spNode.onaudioprocess = (audioEvt: AudioProcessingEvent) => {
                     const outL = audioEvt.outputBuffer.getChannelData(0);
                     const outR = audioEvt.outputBuffer.getChannelData(1);
@@ -723,8 +728,16 @@ export async function startAudioPlayback(
                       );
                     }
                     if (written > 0) {
-                      outL.set(new Float32Array(mLib.HEAPF32.buffer, leftPtr, written));
-                      outR.set(new Float32Array(mLib.HEAPF32.buffer, rightPtr, written));
+                      const heap = mLib.HEAPF32.buffer as ArrayBuffer;
+                      if (spHeapBuf !== heap || !spLeftView || !spRightView) {
+                        spHeapBuf = heap;
+                        spLeftView = new Float32Array(heap, leftPtr, SP_BUFFER);
+                        spRightView = new Float32Array(heap, rightPtr, SP_BUFFER);
+                      }
+                      for (let i = 0; i < written; i++) {
+                        outL[i] = spLeftView[i]!;
+                        outR[i] = spRightView[i]!;
+                      }
                       if (written < SP_BUFFER) { outL.fill(0, written); outR.fill(0, written); }
                     } else {
                       outL.fill(0); outR.fill(0);

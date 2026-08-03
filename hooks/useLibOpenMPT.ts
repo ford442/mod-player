@@ -314,6 +314,8 @@ export function useLibOpenMPT(initialVolume: number = 0.4, liteMode: boolean = f
   const lastUiRowIntRef = useRef<number>(-1);
   const lastUiBpmRef = useRef<number>(-1);
   const lastSyncDebugUiMsRef = useRef<number>(0);
+  /** Reused by computeNoteAges — avoids allocating a new ages[] every RAF frame. */
+  const noteAgesScratchRef = useRef<number[]>([]);
 
   // Track if user has manually loaded a module (to prevent default from overwriting)
   const userModuleLoadedRef = useRef<boolean>(false);
@@ -677,32 +679,42 @@ export function useLibOpenMPT(initialVolume: number = 0.4, liteMode: boolean = f
 
     if (orderChanged) {
       const newMatrix = patternMatricesRef.current[order];
-      // Defer GPU/React matrix swap off the critical RAF path — XM patterns
-      // are larger than MOD and a sync setState here competed with audio.
-      if (newMatrix) {
-        startTransition(() => {
-          setSequencerMatrix(newMatrix);
-        });
-      }
-      lastUiOrderRef.current = order;
-    }
-
-    if (orderChanged || rowChanged || bpmChanged) {
-      setModuleInfo((prev: ModuleInfo) => ({ ...prev, order, row: rowIntUi, bpm: currentBpm }));
-      lastUiBpmRef.current = currentBpm;
-    }
-
-    if (rowChanged || orderChanged) {
-      setSequencerCurrentRow(rowIntUi);
-      setPlaybackSeconds(time);
-      setPlaybackRowFraction(smoothedPlayhead);
-      lastUiRowIntRef.current = rowIntUi;
-
+      // Defer GPU/React matrix swap + HUD batch off the critical RAF path —
+      // XM patterns are larger than MOD; a sync setState here competed with
+      // audio and amplified skip→crackle underrun cascades at order wraps.
       let globalRow = 0;
       for (let i = 0; i < order; i++) {
         globalRow += patternMatricesRef.current[i]?.numRows || 64;
       }
-      setSequencerGlobalRow(globalRow + rowIntUi);
+      startTransition(() => {
+        if (newMatrix) setSequencerMatrix(newMatrix);
+        setModuleInfo((prev: ModuleInfo) => ({ ...prev, order, row: rowIntUi, bpm: currentBpm }));
+        setSequencerCurrentRow(rowIntUi);
+        setPlaybackSeconds(time);
+        setPlaybackRowFraction(smoothedPlayhead);
+        setSequencerGlobalRow(globalRow + rowIntUi);
+      });
+      lastUiOrderRef.current = order;
+      lastUiRowIntRef.current = rowIntUi;
+      lastUiBpmRef.current = currentBpm;
+    } else {
+      if (rowChanged || bpmChanged) {
+        setModuleInfo((prev: ModuleInfo) => ({ ...prev, order, row: rowIntUi, bpm: currentBpm }));
+        lastUiBpmRef.current = currentBpm;
+      }
+
+      if (rowChanged) {
+        setSequencerCurrentRow(rowIntUi);
+        setPlaybackSeconds(time);
+        setPlaybackRowFraction(smoothedPlayhead);
+        lastUiRowIntRef.current = rowIntUi;
+
+        let globalRow = 0;
+        for (let i = 0; i < order; i++) {
+          globalRow += patternMatricesRef.current[i]?.numRows || 64;
+        }
+        setSequencerGlobalRow(globalRow + rowIntUi);
+      }
     }
 
     // Compute note ages for hardware choke / timed shader indicators (fractional playhead).
@@ -710,7 +722,12 @@ export function useLibOpenMPT(initialVolume: number = 0.4, liteMode: boolean = f
     const currentMatrix = patternMatricesRef.current[order];
     const numChannels = channelStatesRef.current.length;
     if (currentMatrix && numChannels > 0) {
-      const noteAges = computeNoteAges(currentMatrix, playheadRow);
+      let agesScratch = noteAgesScratchRef.current;
+      if (agesScratch.length !== numChannels) {
+        agesScratch = new Array(numChannels);
+        noteAgesScratchRef.current = agesScratch;
+      }
+      const noteAges = computeNoteAges(currentMatrix, playheadRow, agesScratch);
       let stateChanged = false;
 
       const spLib = (activeEngine !== 'worklet' && activeEngine !== 'native-worklet') ? lib : null;
@@ -734,7 +751,12 @@ export function useLibOpenMPT(initialVolume: number = 0.4, liteMode: boolean = f
       }
 
       if (stateChanged) {
-        setChannelStates([...channelStatesRef.current]);
+        // GPU/shaders read channelStatesRef; React notify can wait a frame so
+        // pattern-boundary age resets don't contend with matrix GPU upload.
+        const snapshot = channelStatesRef.current.slice();
+        startTransition(() => {
+          setChannelStates(snapshot);
+        });
       }
     }
 

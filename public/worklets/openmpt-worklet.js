@@ -71,7 +71,9 @@ if (typeof globalThis.setTimeout !== 'function') {
   };
 }
 
-const DEBUG = true;
+// Keep false in production: console I/O on the audio thread can cost real-time
+// budget at pattern boundaries (many voices + log spam → underruns/crackle).
+const DEBUG = false;
 function log(...args) { if (DEBUG) console.log('[Worklet]', ...args); }
 function error(...args) { console.error('[Worklet]', ...args); }
 
@@ -228,6 +230,8 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
     this.pcmChunkSize = 512;   // target block size (~11.6 ms @ 44100 Hz)
     this.pcmAccumL = new Float32Array(this.pcmChunkSize);
     this.pcmAccumR = new Float32Array(this.pcmChunkSize);
+    /** Reused interleaved PCM block — avoids new Float32Array on every emit. */
+    this.pcmInterleaved = new Float32Array(this.pcmChunkSize * 2);
     this.pcmAccumCount = 0;
 
     log('Constructor called, sampleRate:', sampleRate);
@@ -319,8 +323,13 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
     // ?audioDiag=1 — per-quantum process() timing, correlated with row wraps.
     this._audioDiag = false;
     this._resetAudioDiag();
-    this._lastChannelVU = [];
+    /** Reused channel VU snapshot (length grows once to numChannels, then stable). */
+    this._channelVuArr = [];
+    this._lastChannelVU = this._channelVuArr;
     this._prevRowInt = -1;
+    this._lastOrder = 0;
+    this._lastBpm = 125;
+    this._lastSpeed = 6;
     this._lpBass = 0;
     this._lpMid = 0;
     this._prevBass = 0;
@@ -353,15 +362,21 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
       : 0;
   }
 
-  /** Cheap 3-band energy + peak/RMS into audioMetaView (no main-thread AnalyserNode). */
+  /**
+   * Cheap 3-band energy + peak/RMS into audioMetaView (no main-thread AnalyserNode).
+   * Call at most ~60 Hz — GPU consumers sample SAB at display rate; running this every
+   * quantum (~350 Hz) stole budget from read_float_stereo at XM pattern starts.
+   */
   _updateAudioReactive(outL, outR, count, channelVU) {
     const meta = this.audioMetaView;
     if (!meta) return;
 
     if (this._audioLite) {
       let vuMax = 0;
-      for (let i = 0; i < channelVU.length; i++) {
-        if (channelVU[i] > vuMax) vuMax = channelVU[i];
+      const n = channelVU ? channelVU.length : 0;
+      for (let i = 0; i < n; i++) {
+        const v = channelVU[i];
+        if (v > vuMax) vuMax = v;
       }
       const coarse = Math.min(1, vuMax * 1.2);
       const smooth = 0.82;
@@ -565,41 +580,59 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
     const numSamples = outL.length;
     const framesToRead = Math.min(numSamples, this.maxFrames);
 
-    // ── Pre-render position snapshot (cheap fields only) ──────────────
-    // Capture state *before* read_float_stereo so the row matches the first
-    // sample of this quantum. Expensive helpers (get_time_at_position, VU)
-    // run only on the ~60 Hz position-report path — calling them every
-    // quantum (~350 Hz) spiked CPU at XM pattern boundaries (many voices).
+    // ── Pre-render position snapshot ─────────────────────────────────
+    // libopenmpt DSP is heaviest at pattern/row boundaries. Anything that is
+    // not required to *produce samples* must stay off the per-quantum path
+    // (~350 Hz / ~2.9 ms budget). Position, VU, fractional row, and audio-
+    // reactive SAB updates run at ~60 Hz only.
     const lib = this.lib;
     const mod = this.modulePtr;
-    const diagStart = this._audioDiag ? this._diagNow() : 0;
+    const diagOn = this._audioDiag;
+    const diagStart = diagOn ? this._diagNow() : 0;
     const audioTime = currentTime;
-    const order = lib._openmpt_module_get_current_order(mod);
-    const rowInt = lib._openmpt_module_get_current_row(mod);
-    const posSec = lib._openmpt_module_get_position_seconds(mod);
-    const bpm = lib._openmpt_module_get_current_estimated_bpm(mod);
-    const speed = lib._openmpt_module_get_current_speed(mod);
-
-    // Everything below that only feeds the position report runs at the report
-    // rate (~60 Hz), not once per quantum (~350 Hz). get_time_at_position costs
-    // up to 3 WASM calls and the VU sweep costs up to 32 more; paying that on
-    // every quantum ate into the ~2.9 ms budget and showed up as hitches at
-    // pattern boundaries, where libopenmpt's own DSP is heaviest.
     const shouldReportPosition =
       currentTime - this.lastPositionReportTime >= this.positionReportInterval;
 
+    // Default to last reported values so non-report quanta do zero WASM queries.
+    let order = this._lastOrder;
+    let rowInt = this._prevRowInt;
+    let posSec = 0;
+    let bpm = this._lastBpm;
+    let speed = this._lastSpeed;
     let rowFraction = rowInt;
-    if (shouldReportPosition && typeof lib._openmpt_module_get_time_at_position === 'function') {
-      const t0 = lib._openmpt_module_get_time_at_position(mod, order, rowInt);
-      let t1 = lib._openmpt_module_get_time_at_position(mod, order, rowInt + 1);
-      // End of pattern: try first row of next order
-      if (!(t1 > t0) && typeof lib._openmpt_module_get_time_at_position === 'function') {
-        t1 = lib._openmpt_module_get_time_at_position(mod, order + 1, 0);
-      }
-      if (t1 > t0 && Number.isFinite(t0) && Number.isFinite(t1) && Number.isFinite(posSec)) {
-        const frac = (posSec - t0) / (t1 - t0);
-        if (Number.isFinite(frac)) {
-          rowFraction = rowInt + Math.min(0.999, Math.max(0, frac));
+
+    if (shouldReportPosition || diagOn) {
+      // Capture *before* read_float_stereo so the row matches this quantum's
+      // first sample (main-thread prediction anchors on audioTime).
+      rowInt = lib._openmpt_module_get_current_row(mod);
+      if (shouldReportPosition) {
+        order = lib._openmpt_module_get_current_order(mod);
+        posSec = lib._openmpt_module_get_position_seconds(mod);
+        bpm = lib._openmpt_module_get_current_estimated_bpm(mod);
+        speed = lib._openmpt_module_get_current_speed(mod);
+        this._lastOrder = order;
+        this._lastBpm = bpm;
+        this._lastSpeed = speed;
+
+        if (typeof lib._openmpt_module_get_time_at_position === 'function') {
+          const t0 = lib._openmpt_module_get_time_at_position(mod, order, rowInt);
+          let t1 = lib._openmpt_module_get_time_at_position(mod, order, rowInt + 1);
+          // End of pattern: try first row of next order
+          if (!(t1 > t0)) {
+            t1 = lib._openmpt_module_get_time_at_position(mod, order + 1, 0);
+          }
+          if (t1 > t0 && Number.isFinite(t0) && Number.isFinite(t1) && Number.isFinite(posSec)) {
+            const frac = (posSec - t0) / (t1 - t0);
+            if (Number.isFinite(frac)) {
+              rowFraction = rowInt + Math.min(0.999, Math.max(0, frac));
+            } else {
+              rowFraction = rowInt;
+            }
+          } else {
+            rowFraction = rowInt;
+          }
+        } else {
+          rowFraction = rowInt;
         }
       }
     }
@@ -623,19 +656,25 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
     }
     this.hasEnded = false;
 
-    // Zero-copy view into WASM heap (reuse TypedArray when heap buffer stable)
+    // Zero-copy view into WASM heap (reuse TypedArray when heap buffer stable).
+    // Manual copy — NOT subarray()+set — avoids allocating 2 TypedArray views
+    // per quantum (~700 GC objects/s) which showed up as skip→crackle cascades.
     const heapBuf = lib.HEAPF32.buffer;
     if (this._heapBuffer !== heapBuf) {
       this._heapBuffer = heapBuf;
       this._leftHeapView = new Float32Array(heapBuf, this.leftBufPtr, this.maxFrames);
       this._rightHeapView = new Float32Array(heapBuf, this.rightBufPtr, this.maxFrames);
     }
-    outL.set(this._leftHeapView.subarray(0, samplesWritten));
-    outR.set(this._rightHeapView.subarray(0, samplesWritten));
+    const leftSrc = this._leftHeapView;
+    const rightSrc = this._rightHeapView;
+    for (let i = 0; i < samplesWritten; i++) {
+      outL[i] = leftSrc[i];
+      outR[i] = rightSrc[i];
+    }
 
     // Copy first 128 samples into oscilloscope ring buffer
-    if (this.oscView && outL) {
-      const framesToCopy = Math.min(128, outL.length);
+    if (this.oscView) {
+      const framesToCopy = Math.min(128, samplesWritten);
       for (let i = 0; i < framesToCopy; i++) {
         this.oscView[this.oscWritePtr] = outL[i];
         this.oscWritePtr = (this.oscWritePtr + 1) & (OSC_SAMPLE_COUNT - 1);
@@ -648,56 +687,58 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
       outR.fill(0, samplesWritten);
     }
 
-    // ── Project-M PCM accumulation ─────────────────────────────────
-    // Accumulate rendered stereo samples into a fixed-size block and emit
-    // a 'projectm-pcm' message when the block is full.  This runs at audio
-    // callback rate (no RAF jitter) and delivers authentic PCM straight from
-    // the WASM renderer, solving the timing issues of the legacy
-    // requestAnimationFrame + AnalyserNode.getFloatTimeDomainData() path.
+    // ── Project-M PCM (opt-in) ───────────────────────────────────────
+    // Off by default: interleave + postMessage competed with render at XM
+    // pattern starts. Reuses pcmInterleaved (no transfer list — transferring
+    // would detach the buffer and force reallocation every emit).
     if (this._projectmPcmEnabled) {
       let src = 0;
       while (src < samplesWritten) {
         const space = this.pcmChunkSize - this.pcmAccumCount;
         const toCopy = Math.min(samplesWritten - src, space);
-        this.pcmAccumL.set(outL.subarray(src, src + toCopy), this.pcmAccumCount);
-        this.pcmAccumR.set(outR.subarray(src, src + toCopy), this.pcmAccumCount);
+        for (let i = 0; i < toCopy; i++) {
+          this.pcmAccumL[this.pcmAccumCount + i] = outL[src + i];
+          this.pcmAccumR[this.pcmAccumCount + i] = outR[src + i];
+        }
         this.pcmAccumCount += toCopy;
         src += toCopy;
 
         if (this.pcmAccumCount >= this.pcmChunkSize) {
-          const interleaved = new Float32Array(this.pcmChunkSize * 2);
+          const interleaved = this.pcmInterleaved;
           for (let i = 0; i < this.pcmChunkSize; i++) {
             interleaved[i * 2]     = this.pcmAccumL[i];
             interleaved[i * 2 + 1] = this.pcmAccumR[i];
           }
+          // Clone for postMessage so the reusable buffer stays attached.
+          const payload = interleaved.slice();
           this.port.postMessage(
-            { type: WT.projectmPcm, buffer: interleaved, channels: 2,
+            { type: WT.projectmPcm, buffer: payload, channels: 2,
               sampleRate, samplesPerChannel: this.pcmChunkSize },
-            [interleaved.buffer]
+            [payload.buffer]
           );
           this.pcmAccumCount = 0;
         }
       }
     }
 
-    // VU is only consumed by the position report and by the lite audio-reactive
-    // path (which smooths heavily); sample it at report rate and reuse the last
-    // snapshot in between.
-    let channelVU = this._lastChannelVU;
+    // VU + audio-reactive SAB + position post only at report rate (~60 Hz).
+    // get_time_at_position / per-channel VU / IIR band split are the dominant
+    // extra cost on multi-channel XM at pattern starts when run every quantum.
     if (shouldReportPosition) {
       const numCh = lib._openmpt_module_get_num_channels(mod);
-      channelVU = [];
-      for (let i = 0; i < Math.min(numCh, 32); i++) {
-        channelVU.push(lib._openmpt_module_get_current_channel_vu_mono(mod, i));
+      const n = Math.min(numCh, 32);
+      let channelVU = this._channelVuArr;
+      if (channelVU.length !== n) {
+        channelVU = new Array(n);
+        this._channelVuArr = channelVU;
+      }
+      for (let i = 0; i < n; i++) {
+        channelVU[i] = lib._openmpt_module_get_current_channel_vu_mono(mod, i);
       }
       this._lastChannelVU = channelVU;
-    }
 
-    this._updateAudioReactive(outL, outR, samplesWritten, channelVU);
+      this._updateAudioReactive(outL, outR, samplesWritten, channelVU);
 
-    // Position at ~60 Hz — main thread extrapolates with audio clock between reports.
-    // Posting every audio quantum (~350 Hz) flooded the main thread and caused MOD hiccups.
-    if (shouldReportPosition) {
       this._lastReportedRowInt = rowInt;
       this.port.postMessage({
         type: WT.position,
@@ -718,11 +759,11 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
       this.lastPositionReportTime = currentTime;
     }
 
-    if (this._audioDiag) {
+    if (diagOn) {
       const elapsedMs = this._diagNow() - diagStart;
       // Deadline for this callback: one quantum of wall time.
       const budgetMs = (numSamples / sampleRate) * 1000;
-      // Row went backwards (63→0) or the order advanced: a pattern boundary.
+      // Row went backwards (63→0): a pattern boundary / wrap.
       const wrapped = this._prevRowInt >= 0 && rowInt < this._prevRowInt;
 
       this._diagQuanta++;
@@ -753,7 +794,9 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
         this._resetAudioDiag();
       }
     }
-    this._prevRowInt = rowInt;
+    if (shouldReportPosition || diagOn) {
+      this._prevRowInt = rowInt;
+    }
 
     return true;
   }

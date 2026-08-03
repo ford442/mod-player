@@ -215,13 +215,42 @@ describe('#354 production source invariants', () => {
     // get_time_at_position (up to 3 WASM calls) only feeds rowFraction in the
     // position post — it must not run on every quantum.
     expect(workletSource).toMatch(
-      /if\s*\(\s*shouldReportPosition\s*&&\s*typeof lib\._openmpt_module_get_time_at_position/,
+      /if\s*\(\s*shouldReportPosition\s*\)\s*\{[\s\S]*?typeof lib\._openmpt_module_get_time_at_position/,
     );
     // Same for the up-to-32 per-channel VU queries.
     const vuBlock = workletSource.match(
       /if\s*\(\s*shouldReportPosition\s*\)\s*\{[\s\S]*?_openmpt_module_get_current_channel_vu_mono/,
     );
     expect(vuBlock, 'VU sweep must be sampled at report rate, not per quantum').toBeTruthy();
+  });
+
+  it('avoids per-quantum TypedArray/GC allocs in the sample copy path', () => {
+    // subarray()+set allocated 2 views every quantum (~700 GC objects/s) and
+    // contributed to skip→crackle cascades at pattern boundaries.
+    expect(workletSource).not.toMatch(
+      /\.set\(\s*this\._leftHeapView\.subarray/,
+    );
+    expect(workletSource).not.toMatch(
+      /\.set\(\s*this\._rightHeapView\.subarray/,
+    );
+    // Manual element copy from cached heap views
+    expect(workletSource).toMatch(/outL\[i\]\s*=\s*leftSrc\[i\]/);
+    expect(workletSource).toMatch(/outR\[i\]\s*=\s*rightSrc\[i\]/);
+    // VU array is grown once then reused (not `channelVU = []` + push each report)
+    expect(workletSource).toContain('this._channelVuArr');
+    expect(workletSource).not.toMatch(/channelVU\s*=\s*\[\s*\]\s*;/);
+  });
+
+  it('gates full audio-reactive SAB update behind the 60 Hz report path', () => {
+    // Full IIR band-split every quantum ate into the ~2.9 ms budget at XM wraps.
+    const processIdx = workletSource.lastIndexOf('process(_inputs, outputs, _parameters)');
+    const processBody = workletSource.slice(processIdx);
+    // _updateAudioReactive must only be called inside shouldReportPosition block
+    const callIdx = processBody.indexOf('this._updateAudioReactive(');
+    expect(callIdx).toBeGreaterThan(0);
+    const beforeCall = processBody.slice(0, callIdx);
+    // Nearest preceding shouldReportPosition gate
+    expect(beforeCall).toMatch(/if\s*\(\s*shouldReportPosition\s*\)\s*\{[\s\S]*$/);
   });
 
   it('projectm-pcm blocks are opt-in, not posted unconditionally', () => {
@@ -262,10 +291,10 @@ describe('#354 production source invariants', () => {
     expect(lifecycle).toContain('WORKLET_POSITION_REPORT_INTERVAL_SEC');
   });
 
-  it('WORKLET_VERSION stays cache-busted at ≥ 9 after XM pattern-boundary worklet trim', () => {
+  it('WORKLET_VERSION stays cache-busted at ≥ 10 after zero-alloc process() trim', () => {
     const m = useWorkletLoader.match(/WORKLET_VERSION\s*=\s*['"](\d+)['"]/);
     expect(m, 'WORKLET_VERSION must be defined').toBeTruthy();
-    expect(Number(m![1])).toBeGreaterThanOrEqual(9);
+    expect(Number(m![1])).toBeGreaterThanOrEqual(10);
   });
 
   it('gates get_time_at_position + channel VU behind the position throttle (XM stutter)', () => {
@@ -278,12 +307,15 @@ describe('#354 production source invariants', () => {
     expect(afterThrottle).toContain('_openmpt_module_get_time_at_position');
     expect(afterThrottle).toContain('_openmpt_module_get_current_channel_vu_mono');
 
-    // Before the throttle check in process(), those calls must not appear in the
-    // cheap pre-render snapshot (only order/row/position_seconds).
+    // Before the throttle check in process(), those calls must not appear.
     const processIdx = workletSource.lastIndexOf('process(_inputs, outputs, _parameters)');
     const processBody = workletSource.slice(processIdx, throttleIdx);
     expect(processBody).not.toContain('_openmpt_module_get_time_at_position');
     expect(processBody).not.toContain('_openmpt_module_get_current_channel_vu_mono');
+    // Non-report quanta must also skip bpm/speed/order/position_seconds queries
+    // (only last-reported values are reused) so pattern-boundary quanta free budget.
+    expect(processBody).not.toContain('_openmpt_module_get_current_estimated_bpm');
+    expect(processBody).not.toContain('_openmpt_module_get_current_speed');
   });
 
   it('uses real-time-friendly interpolation filter length 4 (not 8)', () => {

@@ -71,11 +71,21 @@ export function getPatternMatrix(
 /** Compute per-channel noteAge: how many rows ago the most recent note-on occurred.
  *  Returns an array where each entry is the age in rows (0 = current row).
  *  If no recent note-on is found, age defaults to 1000 (effectively "no note").
+ *
+ *  Pass `out` to reuse a scratch array and avoid per-frame allocation (pattern
+ *  changes already thrash GC with matrix packing — this keeps the RAF path tight).
  */
-export function computeNoteAges(matrix: PatternMatrix, playheadRow: number): number[] {
+export function computeNoteAges(
+  matrix: PatternMatrix,
+  playheadRow: number,
+  out?: number[],
+): number[] {
   const numChannels = matrix.numChannels;
   const numRows = matrix.numRows;
-  const ages = new Array(numChannels).fill(1000);
+  const ages = out && out.length === numChannels ? out : new Array(numChannels);
+  for (let c = 0; c < numChannels; c++) {
+    ages[c] = 1000;
+  }
   const row = Math.floor(playheadRow);
 
   for (let c = 0; c < numChannels; c++) {
