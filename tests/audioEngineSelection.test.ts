@@ -58,8 +58,8 @@ describe('audioEngineSelection', () => {
     expect(shouldPromoteNativeEngine({ mode: 'force-js' }, true)).toBe(false);
   });
 
-  it('auto and prefer-native promote when glue present', () => {
-    expect(shouldPromoteNativeEngine({ mode: 'auto' }, true)).toBe(true);
+  it('auto stays on JS; only prefer-native promotes when glue present', () => {
+    expect(shouldPromoteNativeEngine({ mode: 'auto' }, true)).toBe(false);
     expect(shouldPromoteNativeEngine({ mode: 'prefer-native' }, true)).toBe(true);
     expect(shouldPromoteNativeEngine({ mode: 'prefer-native' }, false)).toBe(false);
   });

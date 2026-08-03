@@ -4,11 +4,12 @@
  * Precedence (high → low):
  * 1. `?engine=js|native` (session; does not auto-persist)
  * 2. `localStorage.xasm1_audio_engine` = `js` | `native` | `auto`
- * 3. Auto: probe `openmpt-native.js` via isNativeGlueAvailable
- * 4. Prefer native when override ≠ `js` and probe OK
+ * 3. Auto: probe native glue for UI toggle availability, but stay on JS
+ * 4. Promote native only when override is `native` / `?engine=native` and probe OK
  * 5. Else JS worklet → ScriptProcessor on failure
  *
- * Production default: `auto`. Without deployed native artifacts, always JS.
+ * Production default: `auto` → **JS worklet**. Native is opt-in until it
+ * clears reliability bars (`?engine=native` or localStorage `native`).
  */
 
 export const AUDIO_ENGINE_STORAGE_KEY = 'xasm1_audio_engine';
@@ -82,16 +83,17 @@ export function resolveAudioEnginePreference(
 }
 
 /**
- * Whether init should attempt / promote the native engine given preference + probe.
- * `prefer-native` still soft-fails when glue is missing (caller falls back to JS).
+ * Whether init should promote the native engine as the active engine.
+ * Glue may still be probed/initialized for UI toggle when not promoted.
+ * `prefer-native` soft-fails when glue is missing (caller falls back to JS).
+ * `auto` stays on JS (native is opt-in for now).
  */
 export function shouldPromoteNativeEngine(
   preference: ResolvedAudioEnginePreference,
   glueAvailable: boolean,
 ): boolean {
-  if (preference.mode === 'force-js') return false;
+  if (preference.mode !== 'prefer-native') return false;
   if (!glueAvailable) return false;
-  // auto and prefer-native both promote when probe OK
   return true;
 }
 

@@ -47,7 +47,7 @@ libopenmpt **0.8.4** is downloaded into `vendor/` automatically if missing. When
 
 ### Runtime engine override
 
-After building artifacts, the app may prefer native on probe. To force the production JS worklet while artifacts remain on disk:
+After building artifacts, the app still defaults to the JS worklet (`auto`). To opt into native, use `?engine=native` or the UI toggle. To force JS while a stored native preference exists:
 
 - URL: `?engine=js`
 - Storage: `localStorage.xasm1_audio_engine = 'js'` (or omit / `auto` for prefer-when-present)

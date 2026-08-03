@@ -41,21 +41,21 @@ Probed at runtime by `OpenMPTWorkletEngine` / `useWorkletLoader`. Root `./build-
 
 ### Engine selection precedence
 
-Production **default remains the JS worklet** until native artifacts are present and preference allows promotion.
+Production **default is the JS worklet**. Native is opt-in (`?engine=native` or localStorage / UI toggle).
 
 | Priority | Source | Values |
 |----------|--------|--------|
 | 1 (highest) | URL `?engine=` | `js` \| `native` (aliases: `worklet`, `native-worklet`) |
-| 2 | `localStorage.xasm1_audio_engine` | `js` \| `native` \| `auto` (unset = `auto`) |
-| 3 | Auto probe | Prefer native when `openmpt-native.js` + sibling `.wasm` pass `isNativeGlueAvailable` |
+| 2 | `localStorage.xasm1_audio_engine` | `js` \| `native` \| `auto` (unset = `auto` → **JS**) |
+| 3 | Auto probe | Detects glue for UI toggle only; does **not** auto-promote native |
 | 4 | Fallback | JS worklet → ScriptProcessor on WASM init failure |
 
-**Force JS for debugging** (artifacts may still be present):
+**Opt into native** (when artifacts are built):
 
 ```
-http://localhost:5173/?engine=js
+http://localhost:5173/?engine=native
 # or
-localStorage.setItem('xasm1_audio_engine', 'js')
+localStorage.setItem('xasm1_audio_engine', 'native')
 ```
 
 `?engine=native` without artifacts soft-fails to JS (console warning). The debug panel engine toggle persists `js` / `native` into localStorage.
