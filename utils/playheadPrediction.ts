@@ -161,7 +161,7 @@ export interface WorkletPositionRefs {
   workletSpeedRef: Ref<number>;
   workletRowsPerSecRef: Ref<number>;
   workletPositionSampleRef: Ref<WorkletPositionSample | null>;
-  patternMatricesRef: Ref<{ numRows?: number }[]>;
+  patternMatricesRef: Ref<({ numRows?: number } | null)[]>;
 }
 
 export interface WorkletPositionInput {

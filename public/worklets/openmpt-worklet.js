@@ -355,8 +355,13 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
     this._diagWrapOverruns = 0;
   }
 
-  /** High-resolution clock for diagnostics; `currentTime` is frozen per quantum. */
+  /** High-resolution clock for diagnostics.
+   *  Do NOT use performance.now() here — in AudioWorklet it is often polyfilled
+   *  from currentTime, which is frozen for the entire process() callback. */
   _diagNow() {
+    if (typeof Date !== 'undefined' && typeof Date.now === 'function') {
+      return Date.now();
+    }
     return typeof performance !== 'undefined' && typeof performance.now === 'function'
       ? performance.now()
       : 0;

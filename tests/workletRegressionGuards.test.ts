@@ -291,10 +291,10 @@ describe('#354 production source invariants', () => {
     expect(lifecycle).toContain('WORKLET_POSITION_REPORT_INTERVAL_SEC');
   });
 
-  it('WORKLET_VERSION stays cache-busted at ≥ 10 after zero-alloc process() trim', () => {
+  it('WORKLET_VERSION stays cache-busted at ≥ 11 after audioDiag Date.now fix', () => {
     const m = useWorkletLoader.match(/WORKLET_VERSION\s*=\s*['"](\d+)['"]/);
     expect(m, 'WORKLET_VERSION must be defined').toBeTruthy();
-    expect(Number(m![1])).toBeGreaterThanOrEqual(10);
+    expect(Number(m![1])).toBeGreaterThanOrEqual(11);
   });
 
   it('gates get_time_at_position + channel VU behind the position throttle (XM stutter)', () => {

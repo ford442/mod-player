@@ -51,7 +51,8 @@ export const getWorkletUrl = (): string => {
   //     opt-in projectm-pcm; interpolation filter length 8→4
   // v10: zero-alloc sample copy (no subarray/GC); skip position WASM queries on
   //      non-report quanta; audio-reactive SAB only at ~60 Hz; reuse VU array
-  const WORKLET_VERSION = '10';
+  // v11: audioDiag uses Date.now() (performance.now is frozen per quantum in worklet)
+  const WORKLET_VERSION = '11';
   const url = `${base}worklets/openmpt-worklet.js?v=${WORKLET_VERSION}`;
 
   return url;

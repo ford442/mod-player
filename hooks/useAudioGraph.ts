@@ -67,7 +67,7 @@ export interface AudioGraphRefs {
   animationFrameHandle: React.MutableRefObject<number>;
   currentModulePtr:    React.MutableRefObject<number>;
   channelStatesRef:    React.MutableRefObject<ChannelShadowState[]>;
-  patternMatricesRef:  React.MutableRefObject<PatternMatrix[]>;
+  patternMatricesRef:  React.MutableRefObject<(PatternMatrix | null)[]>;
   audioClockStartRef:  React.MutableRefObject<number>;
   workletTimeAtStartRef: React.MutableRefObject<number>;
   driftAccumulatorRef: React.MutableRefObject<number>;

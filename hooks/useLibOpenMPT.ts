@@ -5,7 +5,10 @@ import { emptyInstrumentTable } from '../types/instruments';
 import { extractInstrumentTable, mergeLibInstrumentNames } from '../utils/sampleExtract';
 import { OpenMPTWorkletEngine, NATIVE_RING_BUF_BYTES } from '../audio-worklet/OpenMPTWorkletEngine';
 import { computeNoteAges } from '../utils/patternExtractor';
-import { parseModuleWithLib } from '../utils/parseModuleWithLib';
+import {
+  backfillPatternMatrices,
+  parseModuleWithLib,
+} from '../utils/parseModuleWithLib';
 import { parserLog } from '../utils/parserDebug';
 import {
   createParserWorker,
@@ -104,17 +107,17 @@ function parseOnMainThread(
   fileData: Uint8Array,
   fileName: string,
 ): WorkerParseResponse {
-  parserLog('main-thread parse', fileName, fileData.byteLength);
-  const parsed = parseModuleWithLib(lib, fileData, fileName);
+  parserLog('main-thread parse (fast path: order 0)', fileName, fileData.byteLength);
+  const parsed = parseModuleWithLib(lib, fileData, fileName, { maxOrders: 1 });
   if (!parsed.patternMatrices.length) {
     throw new Error('No pattern data in module');
   }
   console.log(
-    `[Parser] main-thread parse OK (${fileName}):`,
+    `[Parser] main-thread fast parse OK (${fileName}):`,
     parsed.metadata.numOrders,
-    'orders,',
-    parsed.patternMatrices.length,
-    'matrices',
+    'orders (order 0 ready, backfill pending),',
+    parsed.metadata.numChannels,
+    'channels',
   );
   return {
     type: 'parsed',
@@ -287,7 +290,8 @@ export function useLibOpenMPT(initialVolume: number = 0.4, liteMode: boolean = f
   const pendingSeekRef = useRef<{ order: number; row: number; timestamp: number } | null>(null);
   const seekAcknowledgedRef = useRef<boolean>(true);
 
-  const patternMatricesRef = useRef<PatternMatrix[]>([]); // Cache for all patterns
+  const patternMatricesRef = useRef<(PatternMatrix | null)[]>([]); // Cache for all patterns (sparse until backfill)
+  const patternBackfillAbortRef = useRef<AbortController | null>(null);
   const channelStatesRef = useRef<ChannelShadowState[]>([]);
 
   // Stable refs to avoid stale closures across renders
@@ -481,10 +485,46 @@ export function useLibOpenMPT(initialVolume: number = 0.4, liteMode: boolean = f
       window.clearTimeout(slowHintTimer);
     }
 
-    if (!patternMatrices.length) {
+    if (!patternMatrices.length || !metadata.numOrders) {
       setStatus('Error: No pattern data in module');
       console.error('[Parser] empty patternMatrices after parse');
       return;
+    }
+
+    // Sparse array: order 0 is ready; remaining orders backfill without blocking play().
+    patternBackfillAbortRef.current?.abort();
+    const matrices: (PatternMatrix | null)[] = new Array(metadata.numOrders).fill(null);
+    matrices[0] = patternMatrices[0] ?? null;
+    for (let i = 1; i < patternMatrices.length; i++) {
+      matrices[i] = patternMatrices[i] ?? null;
+    }
+    patternMatricesRef.current = matrices;
+
+    const patternsComplete = patternMatrices.length >= metadata.numOrders;
+    if (!patternsComplete && isLibReadyForParse(lib)) {
+      const backfillAbort = new AbortController();
+      patternBackfillAbortRef.current = backfillAbort;
+      const backfillFileName = fileName;
+      void backfillPatternMatrices(
+        lib,
+        fileDataCopy,
+        metadata.numOrders,
+        matrices,
+        { startOrder: patternMatrices.length, signal: backfillAbort.signal },
+      )
+        .then(() => {
+          if (backfillAbort.signal.aborted) return;
+          console.log(
+            `[Parser] pattern backfill complete (${backfillFileName}):`,
+            metadata.numOrders,
+            'orders',
+          );
+        })
+        .catch((err) => {
+          if (!backfillAbort.signal.aborted) {
+            console.warn(`[Parser] pattern backfill failed (${backfillFileName}):`, err);
+          }
+        });
     }
 
     // TIMING FIX: Initialize BPM ref
@@ -502,8 +542,6 @@ export function useLibOpenMPT(initialVolume: number = 0.4, liteMode: boolean = f
     setModuleComments(metadata.comments ?? '');
     setModuleDurationSeconds(metadata.durationSeconds);
     setModuleFileName(fileName);
-
-    patternMatricesRef.current = patternMatrices;
     setTotalPatternRows(metadata.totalPatternRows);
 
     // Initial state
