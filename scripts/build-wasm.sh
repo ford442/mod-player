@@ -6,9 +6,9 @@
 #     JS AudioWorklet processor (production path). Native glue is openmpt-native.*.
 #
 # Prerequisites:
-#   1. Emscripten SDK — **pinned to 3.1.50** (matches CI `.github/workflows/ci.yml`):
+#   1. Emscripten SDK — **pinned to 3.1.51** (libopenmpt 0.8.4 minimum; matches CI):
 #        git clone https://github.com/emscripten-core/emsdk.git
-#        cd emsdk && ./emsdk install 3.1.50 && ./emsdk activate 3.1.50
+#        cd emsdk && ./emsdk install 3.1.51 && ./emsdk activate 3.1.51
 #        source ./emsdk_env.sh
 #      Newer emsdk often works; CI and docs treat 3.1.50 as the verified pin.
 #
@@ -40,8 +40,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 # ── Pinned emsdk version (must match CI) ─────────────────────────────
+# libopenmpt 0.8.4 requires Emscripten >= 3.1.51 (see src/mpt/base/detect_os.hpp).
 # Override only for local experiments: EMSDK_PIN=latest ./scripts/build-wasm.sh
-EMSDK_PIN="${EMSDK_PIN:-3.1.50}"
+EMSDK_PIN="${EMSDK_PIN:-3.1.51}"
 
 # Source Emscripten
 CANDIDATES=(
@@ -117,12 +118,10 @@ else
         -mbulk-memory -matomics -mnontrapping-fptoint -msign-ext
         -mtune=wasm32
         -ffunction-sections -fdata-sections
-        -fno-exceptions
     )
     LINK_FLAGS=(-Wl,--gc-sections)
     EMSCRIPTEN_FLAGS=(
         -sASSERTIONS=0
-        -sDISABLE_EXCEPTION_CATCHING=1
         -sMALLOC=emmalloc
         -sALLOW_MEMORY_GROWTH=0
         -sINITIAL_MEMORY=128mb
@@ -130,9 +129,9 @@ else
     echo "🔧 Building in RELEASE mode (SIMD + LTO + emmalloc + fixed 128mb heap)"
 fi
 
-# libopenmpt static lib must be built with matching release opts (LTO + SIMD).
-LIBOPENMPT_RELEASE_CXXFLAGS='-O3 -DNDEBUG -msimd128 -flto=thin'
-LIBOPENMPT_RELEASE_CFLAGS='-O3 -DNDEBUG -msimd128 -flto=thin'
+# libopenmpt static lib must be built with matching release opts (LTO + SIMD + atomics for WASM_WORKERS).
+LIBOPENMPT_RELEASE_CXXFLAGS='-O3 -DNDEBUG -msimd128 -flto=thin -mbulk-memory -matomics'
+LIBOPENMPT_RELEASE_CFLAGS='-O3 -DNDEBUG -msimd128 -flto=thin -mbulk-memory -matomics'
 
 EXTRA_SANITIZER_FLAGS=()
 if [[ "$SAFE_HEAP" -eq 1 ]]; then
@@ -201,6 +200,15 @@ is_valid_openmpt_source() {
     [[ -f "$dir/Makefile" ]] && find_libopenmpt_include_root "$dir" >/dev/null
 }
 
+# Native worklet C++ uses openmpt_module_get_time_at_position (added in libopenmpt 0.7+).
+libopenmpt_has_required_api() {
+    local dir="$1" header
+    local include_root
+    include_root="$(find_libopenmpt_include_root "$dir")" || return 1
+    header="$(libopenmpt_header_path "$include_root")"
+    grep -q 'openmpt_module_get_time_at_position' "$header" 2>/dev/null
+}
+
 download_libopenmpt_tarball() {
     local dest_parent="$1"
     local dest="$dest_parent/$LIBOPENMPT_VENDOR_NAME"
@@ -253,6 +261,9 @@ build_libopenmpt_in_place() {
         echo "   libopenmpt CXXFLAGS: $LIBOPENMPT_RELEASE_CXXFLAGS"
     fi
     pushd "$LIBOPENMPT_DIR" >/dev/null
+    # Drop stale .o/.d from prior emsdk versions (e.g. bits/stdint.h paths that moved).
+    echo "   make clean (CONFIG=emscripten)…"
+    make "${LIBOPENMPT_MAKE_FLAGS[@]}" clean
     make "${LIBOPENMPT_MAKE_FLAGS[@]}" "${make_extra[@]}" -j"$(nproc 2>/dev/null || echo 2)" bin/libopenmpt.a
     popd >/dev/null
 }
@@ -275,7 +286,7 @@ report_libopenmpt_failure() {
 ensure_libopenmpt() {
     # Cache-friendly: when vendor/.a already exists (CI actions/cache hit or prior
     # local make), skip download + multi-minute libopenmpt compile.
-    if resolve_libopenmpt_paths; then
+    if resolve_libopenmpt_paths && libopenmpt_has_required_api "$LIBOPENMPT_DIR"; then
         echo "✅ libopenmpt ready at $LIBOPENMPT_DIR (prebuilt .a — skipping make)"
         echo "   include=$LIBOPENMPT_INCLUDE  lib=$LIBOPENMPT_LIB"
         if [[ "$DEBUG_MODE" -eq 0 ]]; then
@@ -283,22 +294,33 @@ ensure_libopenmpt() {
         fi
         return 0
     fi
+    if resolve_libopenmpt_paths; then
+        echo "⚠️  Prebuilt libopenmpt.a found but headers lack native-worklet API — rebuilding from source"
+    fi
 
     if [[ -n "${LIBOPENMPT_DIR:-}" ]] && [[ "$LIBOPENMPT_DIR" != "$LIBOPENMPT_VENDOR_DIR" ]] && is_valid_openmpt_source "$LIBOPENMPT_DIR"; then
         echo "📦 Using LIBOPENMPT_DIR=$LIBOPENMPT_DIR"
-    elif is_valid_openmpt_source "$LIBOPENMPT_VENDOR_DIR"; then
+    elif is_valid_openmpt_source "$LIBOPENMPT_VENDOR_DIR" && libopenmpt_has_required_api "$LIBOPENMPT_VENDOR_DIR"; then
         LIBOPENMPT_DIR="$LIBOPENMPT_VENDOR_DIR"
         echo "📦 Using vendored libopenmpt at $LIBOPENMPT_DIR"
-    elif is_valid_openmpt_source "$LEGACY_VENDOR_DIR"; then
+    elif is_valid_openmpt_source "$LEGACY_VENDOR_DIR" && libopenmpt_has_required_api "$LEGACY_VENDOR_DIR"; then
         LIBOPENMPT_DIR="$LEGACY_VENDOR_DIR"
         echo "📦 Using legacy vendor checkout at $LIBOPENMPT_DIR"
     else
-        if [[ -d "$LEGACY_VENDOR_DIR" ]] && ! is_valid_openmpt_source "$LEGACY_VENDOR_DIR"; then
-            echo "⚠️  Removing incomplete legacy vendor tree at $LEGACY_VENDOR_DIR"
-            rm -rf "$LEGACY_VENDOR_DIR"
+        if [[ -d "$LEGACY_VENDOR_DIR" ]]; then
+            if ! is_valid_openmpt_source "$LEGACY_VENDOR_DIR"; then
+                echo "⚠️  Removing incomplete legacy vendor tree at $LEGACY_VENDOR_DIR"
+                rm -rf "$LEGACY_VENDOR_DIR"
+            elif ! libopenmpt_has_required_api "$LEGACY_VENDOR_DIR"; then
+                echo "⚠️  Removing outdated legacy vendor at $LEGACY_VENDOR_DIR (missing native-worklet C API)"
+                rm -rf "$LEGACY_VENDOR_DIR"
+            fi
         fi
         if [[ -d "$LIBOPENMPT_VENDOR_DIR" ]] && ! is_valid_openmpt_source "$LIBOPENMPT_VENDOR_DIR"; then
             echo "⚠️  Removing incomplete vendor tree at $LIBOPENMPT_VENDOR_DIR"
+            rm -rf "$LIBOPENMPT_VENDOR_DIR"
+        elif [[ -d "$LIBOPENMPT_VENDOR_DIR" ]] && ! libopenmpt_has_required_api "$LIBOPENMPT_VENDOR_DIR"; then
+            echo "⚠️  Removing outdated vendor tree at $LIBOPENMPT_VENDOR_DIR (missing native-worklet C API)"
             rm -rf "$LIBOPENMPT_VENDOR_DIR"
         fi
         download_libopenmpt_tarball "$VENDOR_ROOT"
@@ -395,7 +417,6 @@ emcc \
     -sEXPORTED_FUNCTIONS="$EXPORTED_FUNCTIONS_FLAT" \
     -sMODULARIZE=1 \
     -sEXPORT_NAME="createOpenMPTModule" \
-    #-sSTACK_SIZE=131072 \
     --pre-js "$CPP_DIR/pre.js" \
     \
     -o "$OUTPUT_DIR/${OUTPUT_BASENAME}.js"
