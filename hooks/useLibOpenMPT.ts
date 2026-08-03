@@ -1073,7 +1073,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4, liteMode: boolean = f
       newEngine = isNativeWorkletAvailable ? 'native-worklet' : 'worklet';
     }
 
-    // Persist durable override so prefer-when-present can be escaped across reloads.
+    // Persist durable override so reloads keep the chosen engine (js | native).
     writeStoredAudioEngineOverride(overrideFromActiveEngine(newEngine));
 
     console.log('[toggleEngine]', { 
@@ -1196,14 +1196,17 @@ export function useLibOpenMPT(initialVolume: number = 0.4, liteMode: boolean = f
         }
 
         // Probe for native C++/Wasm AudioWorklet engine.
-        // Precedence: ?engine= → localStorage.xasm1_audio_engine → auto probe.
+        // Precedence: ?engine= → (public: force JS) → localStorage → default JS.
         // Note: enabling this requires building the wasm engine using
         // ./scripts/build-wasm.sh (Emscripten SDK must be installed).
         const enginePref = resolveAudioEnginePreference();
         console.log('[INIT] Audio engine preference:', enginePref);
 
+        // Ensure active engine starts on JS unless we explicitly promote native below.
+        setActiveEngine('worklet');
+
         if (enginePref.mode === 'force-js') {
-          console.log('[INIT] force-JS override (?engine=js or localStorage) — skipping native promote');
+          console.log('[INIT] force-JS default — JS worklet is active engine');
         }
 
         try {
@@ -1214,8 +1217,8 @@ export function useLibOpenMPT(initialVolume: number = 0.4, liteMode: boolean = f
           if (glueIsSafe) {
             console.log('[INIT] Native C++/Wasm AudioWorklet glue detected');
 
-            // Always init when glue is present so the UI can toggle to native later,
-            // but only *promote* as active engine when preference allows.
+            // Init when glue is present so the UI can toggle to native later (dev),
+            // but only *promote* as active engine when preference is prefer-native.
             const sharedOutputBuffer: SharedArrayBuffer | undefined =
               window.crossOriginIsolated && typeof SharedArrayBuffer !== 'undefined'
                 ? new SharedArrayBuffer(NATIVE_RING_BUF_BYTES)
@@ -1240,18 +1243,26 @@ export function useLibOpenMPT(initialVolume: number = 0.4, liteMode: boolean = f
               setActiveEngine('native-worklet');
               console.log('[INIT] Native engine initialized and promoted (preference:', enginePref.mode, ')');
             } else {
-              console.log('[INIT] Native engine initialized but not promoted (force-JS or preference)');
+              // Keep JS; rewrite sticky localStorage away from native when defaulting to JS
+              // so a prior toggle cannot re-select native on the next public visit.
+              if (enginePref.mode === 'force-js') {
+                writeStoredAudioEngineOverride('js');
+              }
+              console.log('[INIT] Native engine initialized but not promoted — active engine is JS worklet');
             }
           } else if (enginePref.mode === 'prefer-native') {
             console.warn(
               '[INIT] ?engine=native / localStorage prefer-native but glue missing — soft-fail to JS worklet',
             );
+            setActiveEngine('worklet');
           } else {
-            console.log('[INIT] Native engine glue not available — using JS AudioWorklet fallback');
+            console.log('[INIT] Native engine glue not available — using JS AudioWorklet');
+            setActiveEngine('worklet');
           }
         } catch (nativeErr) {
           console.warn('[INIT] Native engine probe failed — using JS AudioWorklet fallback:', nativeErr);
           setIsNativeWorkletAvailable(false);
+          setActiveEngine('worklet');
         }
       } catch (e) {
         const error = e as Error;

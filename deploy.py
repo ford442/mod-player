@@ -46,12 +46,21 @@ CONTABO_BASE_URL: str = "https://storage.noahcohn.com"
 # Matches the original SFTP target: test.1ink.us/xm-player
 DEPLOY_FOLDER: str = ""
 
+# target_site for storage.noahcohn.com: "test" → test.1ink.us, "go" → go.1ink.us
+# Override with --site or DEPLOY_TARGET=go
+DEPLOY_TARGET: str = os.getenv("DEPLOY_TARGET", "test").strip().lower() or "test"
+
 # Set via environment: export DEPLOY_TOKEN="your_long_token_from_vps_env"
 DEPLOY_TOKEN: Optional[str] = os.getenv(
     "DEPLOY_TOKEN",
     "6de44dca5425348f2e2ef9456fc820bfe56a5ace68bddeb6da4a1c2a9d9cadc0",
 )
 # ============================================================
+
+
+def live_host_for_target(target: str) -> str:
+    """Map deploy target_site to the public hostname used for post-deploy checks."""
+    return "go.1ink.us" if target == "go" else "test.1ink.us"
 
 STYLESHEET_RE = re.compile(
     r'<link[^>]+rel=["\']stylesheet["\'][^>]*href=["\']([^"\']+)["\']',
@@ -259,7 +268,7 @@ def build_zip(build_path: Path) -> bytes:
     return buf.getvalue()
 
 
-def deploy_bundle(build_path: Path, *, clean: bool) -> bool:
+def deploy_bundle(build_path: Path, *, clean: bool, target_site: str) -> bool:
     """Zip the build and upload it as a single bundle."""
     target_folder = DEPLOY_FOLDER or PROJECT_NAME
     url = f"{CONTABO_BASE_URL}/api/deploy/{PROJECT_NAME}/bundle"
@@ -271,13 +280,17 @@ def deploy_bundle(build_path: Path, *, clean: bool) -> bool:
     zip_bytes = build_zip(build_path)
     print(f"Archive size: {len(zip_bytes) / 1024:.1f} KB\n")
 
-    data: dict[str, str] = {"target_folder": target_folder}
+    data: dict[str, str] = {
+        "target_folder": target_folder,
+        "target_site": target_site,
+    }
     if clean:
         data["clean"] = "1"
         data["prune_assets"] = "1"
         print("Requesting remote asset prune before extract (clean=1)\n")
 
-    print("Uploading bundle...")
+    host = live_host_for_target(target_site)
+    print(f"Uploading bundle (target_site={target_site} → {host}/{target_folder})...")
     try:
         response = requests.post(
             url,
@@ -323,11 +336,20 @@ def run_build() -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Deploy dist/ to test.1ink.us/xm-player")
+    parser = argparse.ArgumentParser(
+        description="Deploy dist/ to test.1ink.us/xm-player or go.1ink.us/xm-player"
+    )
     parser.add_argument(
         "--no-build",
         action="store_true",
         help="Skip npm run build:xm-player:verify (upload existing dist/ only)",
+    )
+    parser.add_argument(
+        "--site",
+        choices=("test", "go"),
+        default=None,
+        help="Deploy target site: test (test.1ink.us) or go (go.1ink.us). "
+        "Default from DEPLOY_TARGET env or 'test'.",
     )
     prune_group = parser.add_mutually_exclusive_group()
     prune_group.add_argument(
@@ -342,7 +364,13 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    print(f"\n=== Deploying '{PROJECT_NAME}' via Contabo -> test.1ink.us/xm-player ===\n")
+    target_site = (args.site or DEPLOY_TARGET).strip().lower()
+    if target_site not in ("test", "go"):
+        print(f"ERROR: invalid target site '{target_site}' (use test or go)")
+        sys.exit(1)
+    host = live_host_for_target(target_site)
+
+    print(f"\n=== Deploying '{PROJECT_NAME}' via Contabo -> {host}/xm-player ===\n")
 
     if not args.no_build:
         run_build()
@@ -380,7 +408,7 @@ def main() -> None:
     else:
         clean = os.getenv("DEPLOY_CLEAN", "1") != "0"
     print()
-    success = deploy_bundle(build_path, clean=clean)
+    success = deploy_bundle(build_path, clean=clean, target_site=target_site)
 
     if success:
         if clean:
@@ -395,11 +423,11 @@ def main() -> None:
 
     print(f"\n=== {'Deployment complete' if success else 'Deployment finished with errors'} ===")
     if success:
-        verify_live_directory_index(build_path)
+        verify_live_directory_index(build_path, target_site=target_site)
     sys.exit(0 if success else 1)
 
 
-def verify_live_directory_index(build_path: Path) -> None:
+def verify_live_directory_index(build_path: Path, *, target_site: str = "test") -> None:
     """Warn when the live directory URL serves a different bundle than index.html."""
     index_html = build_path / "index.html"
     if not index_html.is_file():
@@ -408,7 +436,8 @@ def verify_live_directory_index(build_path: Path) -> None:
     if not expected_scripts:
         return
     expected = expected_scripts[0]
-    live_url = "https://test.1ink.us/xm-player/"
+    host = live_host_for_target(target_site)
+    live_url = f"https://{host}/xm-player/"
     try:
         resp = requests.get(live_url, timeout=15, headers={"User-Agent": "mod-player-deploy-verify"})
         if resp.status_code != 200:
@@ -430,7 +459,7 @@ def verify_live_directory_index(build_path: Path) -> None:
             print(
                 f"\n⚠ LIVE MISMATCH: /xm-player/ references {found_name} "
                 f"but dist/index.html has {expected_name.group(0) if expected_name else expected}.\n"
-                f"  Users visiting test.1ink.us/xm-player/ get the OLD app until the server index is replaced."
+                f"  Users visiting {host}/xm-player/ get the OLD app until the server index is replaced."
             )
         else:
             print(f"\n✓ Live directory index references current bundle ({expected})")

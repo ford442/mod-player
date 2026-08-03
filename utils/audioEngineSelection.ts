@@ -3,13 +3,14 @@
  *
  * Precedence (high → low):
  * 1. `?engine=js|native` (session; does not auto-persist)
- * 2. `localStorage.xasm1_audio_engine` = `js` | `native` | `auto`
- * 3. Auto: probe native glue for UI toggle availability, but stay on JS
- * 4. Promote native only when override is `native` / `?engine=native` and probe OK
- * 5. Else JS worklet → ScriptProcessor on failure
+ * 2. Public builds (`VITE_PUBLIC_MODE=1`): always **JS** unless URL asks for native
+ *    (ignores sticky localStorage so demos never land on native by accident)
+ * 3. `localStorage.xasm1_audio_engine` = `js` | `native` | `auto` (dev / non-public)
+ * 4. Default: **JS worklet** (`force-js`)
+ * 5. Promote native only when override is `native` / `?engine=native` and probe OK
  *
- * Production default: `auto` → **JS worklet**. Native is opt-in until it
- * clears reliability bars (`?engine=native` or localStorage `native`).
+ * Production default: **JS worklet**. Native is opt-in
+ * (`?engine=native` or localStorage `native` outside public mode).
  */
 
 export const AUDIO_ENGINE_STORAGE_KEY = 'xasm1_audio_engine';
@@ -20,6 +21,19 @@ export type ResolvedAudioEnginePreference =
   | { mode: 'force-js' }
   | { mode: 'prefer-native' }
   | { mode: 'auto' };
+
+/** True when built with `VITE_PUBLIC_MODE=1` (xm-player production profile). */
+export function isPublicModeAudioBuild(): boolean {
+  try {
+    return (
+      typeof import.meta !== 'undefined' &&
+      !!import.meta.env &&
+      import.meta.env.VITE_PUBLIC_MODE === '1'
+    );
+  } catch {
+    return false;
+  }
+}
 
 function parseOverride(raw: string | null | undefined): AudioEngineOverride | null {
   if (raw == null) return null;
@@ -32,11 +46,11 @@ function parseOverride(raw: string | null | undefined): AudioEngineOverride | nu
 
 /** Read durable override from localStorage (plain string, not JSON). */
 export function readStoredAudioEngineOverride(): AudioEngineOverride {
-  if (typeof localStorage === 'undefined') return 'auto';
+  if (typeof localStorage === 'undefined') return 'js';
   try {
-    return parseOverride(localStorage.getItem(AUDIO_ENGINE_STORAGE_KEY)) ?? 'auto';
+    return parseOverride(localStorage.getItem(AUDIO_ENGINE_STORAGE_KEY)) ?? 'js';
   } catch {
-    return 'auto';
+    return 'js';
   }
 }
 
@@ -44,8 +58,14 @@ export function readStoredAudioEngineOverride(): AudioEngineOverride {
 export function writeStoredAudioEngineOverride(override: AudioEngineOverride): void {
   if (typeof localStorage === 'undefined') return;
   try {
-    if (override === 'auto') {
-      localStorage.removeItem(AUDIO_ENGINE_STORAGE_KEY);
+    if (override === 'auto' || override === 'js') {
+      // Default is JS — store explicitly as `js` so old sticky `native` is overwritten
+      // when the user (or public default path) chooses the JS engine.
+      if (override === 'auto') {
+        localStorage.removeItem(AUDIO_ENGINE_STORAGE_KEY);
+      } else {
+        localStorage.setItem(AUDIO_ENGINE_STORAGE_KEY, 'js');
+      }
     } else {
       localStorage.setItem(AUDIO_ENGINE_STORAGE_KEY, override);
     }
@@ -68,6 +88,7 @@ export function parseEngineQueryParam(
 /**
  * Resolve effective preference for init / probe gating.
  * URL wins over localStorage for the session (does not write storage).
+ * Unset / `auto` resolve to **force-js** (native is opt-in only).
  */
 export function resolveAudioEnginePreference(
   search?: string | URLSearchParams | null,
@@ -75,18 +96,28 @@ export function resolveAudioEnginePreference(
   const fromUrl = parseEngineQueryParam(
     search ?? (typeof window !== 'undefined' ? window.location.search : null),
   );
-  const override = fromUrl ?? readStoredAudioEngineOverride();
 
-  if (override === 'js') return { mode: 'force-js' };
+  // URL always wins for the session
+  if (fromUrl === 'js' || fromUrl === 'auto') return { mode: 'force-js' };
+  if (fromUrl === 'native') return { mode: 'prefer-native' };
+
+  // Public / xm-player deploy: ignore sticky localStorage so native is never the
+  // accidental default (toggle is hidden; only ?engine=native can opt in).
+  if (isPublicModeAudioBuild()) {
+    return { mode: 'force-js' };
+  }
+
+  const override = readStoredAudioEngineOverride();
   if (override === 'native') return { mode: 'prefer-native' };
-  return { mode: 'auto' };
+  // js | auto | unset → JS worklet
+  return { mode: 'force-js' };
 }
 
 /**
  * Whether init should promote the native engine as the active engine.
  * Glue may still be probed/initialized for UI toggle when not promoted.
  * `prefer-native` soft-fails when glue is missing (caller falls back to JS).
- * `auto` stays on JS (native is opt-in for now).
+ * Default / force-js never promotes.
  */
 export function shouldPromoteNativeEngine(
   preference: ResolvedAudioEnginePreference,

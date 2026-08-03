@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach, afterEach } from 'vitest';
+import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 import {
   parseEngineQueryParam,
   resolveAudioEnginePreference,
@@ -30,10 +30,13 @@ describe('audioEngineSelection', () => {
   beforeEach(() => {
     installMemoryLocalStorage();
     localStorage.removeItem(AUDIO_ENGINE_STORAGE_KEY);
+    // Tests run without VITE_PUBLIC_MODE unless a case sets it.
+    vi.stubEnv('VITE_PUBLIC_MODE', '');
   });
 
   afterEach(() => {
     localStorage.removeItem(AUDIO_ENGINE_STORAGE_KEY);
+    vi.unstubAllEnvs();
   });
 
   it('parses ?engine=js|native|auto', () => {
@@ -49,16 +52,22 @@ describe('audioEngineSelection', () => {
     expect(resolveAudioEnginePreference('?foo=1')).toEqual({ mode: 'prefer-native' });
   });
 
-  it('defaults to auto when unset', () => {
-    expect(resolveAudioEnginePreference('')).toEqual({ mode: 'auto' });
-    expect(readStoredAudioEngineOverride()).toBe('auto');
+  it('defaults to force-js when unset', () => {
+    expect(resolveAudioEnginePreference('')).toEqual({ mode: 'force-js' });
+    expect(readStoredAudioEngineOverride()).toBe('js');
+  });
+
+  it('treats auto as force-js (native is opt-in only)', () => {
+    expect(resolveAudioEnginePreference('?engine=auto')).toEqual({ mode: 'force-js' });
+    writeStoredAudioEngineOverride('auto');
+    expect(resolveAudioEnginePreference('')).toEqual({ mode: 'force-js' });
   });
 
   it('force-js never promotes native even when glue present', () => {
     expect(shouldPromoteNativeEngine({ mode: 'force-js' }, true)).toBe(false);
   });
 
-  it('auto stays on JS; only prefer-native promotes when glue present', () => {
+  it('only prefer-native promotes when glue present', () => {
     expect(shouldPromoteNativeEngine({ mode: 'auto' }, true)).toBe(false);
     expect(shouldPromoteNativeEngine({ mode: 'prefer-native' }, true)).toBe(true);
     expect(shouldPromoteNativeEngine({ mode: 'prefer-native' }, false)).toBe(false);
@@ -67,5 +76,20 @@ describe('audioEngineSelection', () => {
   it('maps active engine to durable override', () => {
     expect(overrideFromActiveEngine('worklet')).toBe('js');
     expect(overrideFromActiveEngine('native-worklet')).toBe('native');
+  });
+
+  it('public mode ignores sticky localStorage native (unless URL opts in)', () => {
+    vi.stubEnv('VITE_PUBLIC_MODE', '1');
+    writeStoredAudioEngineOverride('native');
+    expect(resolveAudioEnginePreference('')).toEqual({ mode: 'force-js' });
+    expect(resolveAudioEnginePreference('?engine=native')).toEqual({ mode: 'prefer-native' });
+    expect(resolveAudioEnginePreference('?engine=js')).toEqual({ mode: 'force-js' });
+  });
+
+  it('writeStoredAudioEngineOverride(js) clears sticky native', () => {
+    writeStoredAudioEngineOverride('native');
+    expect(localStorage.getItem(AUDIO_ENGINE_STORAGE_KEY)).toBe('native');
+    writeStoredAudioEngineOverride('js');
+    expect(localStorage.getItem(AUDIO_ENGINE_STORAGE_KEY)).toBe('js');
   });
 });
