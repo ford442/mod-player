@@ -31,6 +31,7 @@ import {
   shouldPromoteNativeEngine,
   writeStoredAudioEngineOverride,
   overrideFromActiveEngine,
+  isPublicModeAudioBuild,
 } from '../utils/audioEngineSelection';
 import {
   getAudioHeardTime,
@@ -1269,7 +1270,13 @@ export function useLibOpenMPT(initialVolume: number = 0.4, liteMode: boolean = f
           console.log('[INIT] force-JS default — JS worklet is active engine');
         }
 
-        try {
+        // Public deploys default to JS; skip native glue probe unless ?engine=native
+        // (avoids scary "probe failed" console noise when artifacts are present but broken).
+        const shouldProbeNative =
+          enginePref.mode === 'prefer-native' || !isPublicModeAudioBuild();
+
+        if (shouldProbeNative) {
+          try {
           const nativeGlueUrl = getNativeGlueUrl();
           console.log('[INIT] Probing for native engine at:', nativeGlueUrl);
           const glueIsSafe = await isNativeGlueAvailable(nativeGlueUrl);
@@ -1323,6 +1330,9 @@ export function useLibOpenMPT(initialVolume: number = 0.4, liteMode: boolean = f
           console.warn('[INIT] Native engine probe failed — using JS AudioWorklet fallback:', nativeErr);
           setIsNativeWorkletAvailable(false);
           setActiveEngine('worklet');
+        }
+        } else if (isPublicModeAudioBuild()) {
+          setIsNativeWorkletAvailable(false);
         }
       } catch (e) {
         const error = e as Error;

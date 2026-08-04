@@ -240,15 +240,6 @@ export function renderWebGPUFrame(ctx: FrameDrawContext): void {
     const liveTimeSec = refState?.timeSec ?? p.timeSec;
 
     state.renderFrameCount++;
-    if (state.renderFrameCount % 60 === 0) {
-      console.log(
-        '[PatternDisplay render] playheadRow=%s matrix=%s numRows=%d isPlaying=%s',
-        livePlayheadRow.toFixed(2),
-        p.matrix ? `order=${p.matrix.order} rows=${p.matrix.numRows} ch=${p.matrix.numChannels}` : 'null',
-        numRows,
-        p.isPlaying,
-      );
-    }
 
     const tickRow = clampPlayhead(livePlayheadRow, rowLimit);
     const computedTickOffset = tickRow - Math.floor(tickRow);

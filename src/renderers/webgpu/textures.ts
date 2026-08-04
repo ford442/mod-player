@@ -58,7 +58,9 @@ export async function ensureButtonTexture(
     resolveShaderMeta(shaderFile).patternTexture === 'button-v30'
       ? withBase('unlit-button-2.png')
       : withBase('unlit-button.png');
-  console.log('[WebGPU] Loading button texture:', textureUrl);
+  if (import.meta.env.DEV) {
+    console.log('[WebGPU] Loading button texture:', textureUrl);
+  }
   let bitmap: ImageBitmap;
   try {
     const img = new Image();

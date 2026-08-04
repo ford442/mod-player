@@ -323,7 +323,6 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
       canvas.width = bufferWidth;
       canvas.height = bufferHeight;
       canvasSizeRef.current = { width: bufferWidth, height: bufferHeight, dpr };
-      console.log(`🖥️ Canvas resized: ${displayWidth}x${displayHeight} (buffer: ${bufferWidth}x${bufferHeight}, DPR: ${dpr})`);
     }
     if (glCanvas) {
       if (glCanvas.width !== bufferWidth || glCanvas.height !== bufferHeight) {
