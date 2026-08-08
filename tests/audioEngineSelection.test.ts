@@ -8,6 +8,7 @@ import {
   overrideFromActiveEngine,
   AUDIO_ENGINE_STORAGE_KEY,
 } from '../utils/audioEngineSelection';
+import { markNativeParityPassed, clearNativeParityPassed } from '../utils/nativeParityGate';
 
 function installMemoryLocalStorage(): void {
   const store = new Map<string, string>();
@@ -30,6 +31,7 @@ describe('audioEngineSelection', () => {
   beforeEach(() => {
     installMemoryLocalStorage();
     localStorage.removeItem(AUDIO_ENGINE_STORAGE_KEY);
+    clearNativeParityPassed();
     // Tests run without VITE_PUBLIC_MODE unless a case sets it.
     vi.stubEnv('VITE_PUBLIC_MODE', '');
   });
@@ -52,15 +54,15 @@ describe('audioEngineSelection', () => {
     expect(resolveAudioEnginePreference('?foo=1')).toEqual({ mode: 'prefer-native' });
   });
 
-  it('defaults to force-js when unset', () => {
-    expect(resolveAudioEnginePreference('')).toEqual({ mode: 'force-js' });
-    expect(readStoredAudioEngineOverride()).toBe('js');
+  it('defaults to auto (JS active until parity gate)', () => {
+    expect(resolveAudioEnginePreference('')).toEqual({ mode: 'auto' });
+    expect(readStoredAudioEngineOverride()).toBe('auto');
   });
 
-  it('treats auto as force-js (native is opt-in only)', () => {
-    expect(resolveAudioEnginePreference('?engine=auto')).toEqual({ mode: 'force-js' });
+  it('treats ?engine=auto as auto mode (parity-gated promotion)', () => {
+    expect(resolveAudioEnginePreference('?engine=auto')).toEqual({ mode: 'auto' });
     writeStoredAudioEngineOverride('auto');
-    expect(resolveAudioEnginePreference('')).toEqual({ mode: 'force-js' });
+    expect(resolveAudioEnginePreference('')).toEqual({ mode: 'auto' });
   });
 
   it('force-js never promotes native even when glue present', () => {
@@ -71,6 +73,12 @@ describe('audioEngineSelection', () => {
     expect(shouldPromoteNativeEngine({ mode: 'auto' }, true)).toBe(false);
     expect(shouldPromoteNativeEngine({ mode: 'prefer-native' }, true)).toBe(true);
     expect(shouldPromoteNativeEngine({ mode: 'prefer-native' }, false)).toBe(false);
+  });
+
+  it('auto promotes only when parity gate is open', () => {
+    expect(shouldPromoteNativeEngine({ mode: 'auto' }, true)).toBe(false);
+    markNativeParityPassed();
+    expect(shouldPromoteNativeEngine({ mode: 'auto' }, true)).toBe(true);
   });
 
   it('maps active engine to durable override', () => {

@@ -10,6 +10,7 @@ import type {
 import type { InstrumentTable } from '../../types/instruments';
 import type { OpenMPTWorkletEngine } from '../../audio-worklet/OpenMPTWorkletEngine';
 import type { WorkletPositionSample } from '../../utils/playheadPrediction';
+import type { NativeClockAnchor } from '../../utils/nativeClockAnchor';
 import type {
   PlayheadLagTracker,
   PositionReportTracker,
@@ -71,6 +72,10 @@ export interface LibOpenMPTRefs {
   userModuleLoadedRef: React.MutableRefObject<boolean>;
   nativeEngineRef: React.MutableRefObject<OpenMPTWorkletEngine | null>;
   nativeSharedBufferRef: React.MutableRefObject<SharedArrayBuffer | null>;
+  /** Maps native frame clock → main heard-time for playhead prediction. */
+  nativeClockAnchorRef: React.MutableRefObject<NativeClockAnchor | null>;
+  /** Bridge latency estimate (ring vs MediaStream) for clock anchor. */
+  nativeBridgeLatencyRef: React.MutableRefObject<number>;
   oscBufferRef: React.MutableRefObject<Float32Array | null>;
   audioReactiveRef: React.MutableRefObject<Float32Array | null>;
   playbackStateRef: React.MutableRefObject<PlaybackState>;

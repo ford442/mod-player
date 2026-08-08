@@ -60,6 +60,7 @@ export function createProcessModuleData(deps: ModuleActionsDeps) {
     workletRowsPerSecRef,
     audioClockStartRef,
     workletTimeAtStartRef,
+    nativeClockAnchorRef,
     driftAccumulatorRef,
     lastCorrectedTimeRef,
     lastWorkletUpdateRef,
@@ -256,6 +257,7 @@ export function createProcessModuleData(deps: ModuleActionsDeps) {
 
     audioClockStartRef.current = 0;
     workletTimeAtStartRef.current = 0;
+    nativeClockAnchorRef.current = null;
     driftAccumulatorRef.current = 0;
     lastCorrectedTimeRef.current = 0;
     lastWorkletUpdateRef.current = 0;

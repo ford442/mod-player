@@ -1,6 +1,6 @@
 # Native C++ Engine Platform Epic
 
-**Status:** In progress (P2) — CI cache + engine flags + shared position adapter landed 2026-07-25  
+**Status:** In progress (P2) — native clock anchor + parity gate + CI native playhead smoke (2026-08)  
 **Depends on (done):** dual-build hygiene (`openmpt-native.*` vs `openmpt-worklet.js`), playhead prediction foundation  
 **Last audited:** 2026-07-25  
 
@@ -38,7 +38,7 @@ The C++/Emscripten engine exists end-to-end:
 |-----------|---------|--------|
 | CI publishes **or** verifies native build | Weekly schedule publishes artifacts; PR only script/export smoke | PR path: verify (cached rebuild when cpp/scripts change). Schedule: full build + artifact. Optional: debug ASSERTIONS job |
 | Feature flag / auto-detect documented | Auto-detect + prefer exists in code; weak docs; **no force-JS flag** | Document precedence + `localStorage` / URL / query override; update `public/worklets/README.md` + AGENTS |
-| A/V sync ≥ JS worklet (post-prediction) | Native has `rowFraction` / frame clock + prediction, but clock is **poll-tagged** with main `AudioContext.currentTime`, not quantum `audioTime` | Native samples carry sample-accurate clock; `test:playhead` + manual checklist pass on native |
+| A/V sync ≥ JS worklet (post-prediction) | Native frame clock + main-context anchor (`utils/nativeClockAnchor.ts`); native smoke in CI | Native samples carry sample-accurate clock; `smoke:playhead:native` + manual checklist pass on native |
 | No filename collision with JS worklet | **Done** — `openmpt-native.*` only; build refuses clobber | Keep guards + scheduled integrity check |
 
 ---

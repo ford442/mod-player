@@ -186,6 +186,55 @@ jobs:
         run: |
           if [ -f /tmp/preview-audio.pid ]; then kill $(cat /tmp/preview-audio.pid) 2>/dev/null || true; fi
 
+  playhead-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        run: npx playwright install chromium --with-deps
+
+      - name: Build
+        run: VITE_APP_BASE_PATH=/ npm run build
+
+      - name: Start preview server
+        run: |
+          npm run preview -- --port 4173 --host 127.0.0.1 &
+          echo $! > /tmp/preview-playhead.pid
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:4173/ >/dev/null; then echo "preview ready"; exit 0; fi
+            sleep 2
+          done
+          echo "preview failed to start"; exit 1
+
+      - name: Playhead acceptance (JS worklet)
+        run: BASE_URL=http://127.0.0.1:4173 OUTPUT_DIR=./artifacts/playhead-acceptance AUDIO_ENGINE=js npm run smoke:playhead
+
+      - name: Upload playhead artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playhead-smoke-failure
+          path: artifacts/playhead-acceptance/
+          retention-days: 5
+
+      - name: Stop preview server
+        if: always()
+        run: |
+          if [ -f /tmp/preview-playhead.pid ]; then kill $(cat /tmp/preview-playhead.pid) 2>/dev/null || true; fi
+
   wasm-smoke-test:
     runs-on: ubuntu-latest
     
@@ -271,7 +320,12 @@ jobs:
             native:
               - 'cpp/**'
               - 'scripts/build-wasm.sh'
+              - 'scripts/playhead-acceptance.mjs'
               - 'audio-worklet/**'
+              - 'hooks/useAudioGraph.ts'
+              - 'utils/nativeClockAnchor.ts'
+              - 'utils/nativeParityGate.ts'
+              - 'utils/workletPositionAdapter.ts'
               - 'public/worklets/native-bridge-processor.js'
               - '.github/workflows/ci.yml'
               - '.github/workflows/native-wasm-scheduled.yml'
@@ -344,6 +398,43 @@ jobs:
             public/worklets/openmpt-native.wasm
             public/worklets/openmpt-native.aw.js
           retention-days: 7
+
+      - name: Install Playwright Chromium
+        if: steps.filter.outputs.native == 'true'
+        run: npx playwright install chromium --with-deps
+
+      - name: Start preview for native playhead parity
+        if: steps.filter.outputs.native == 'true'
+        run: |
+          VITE_APP_BASE_PATH=/ npm run build
+          npm run preview -- --port 4173 --host 127.0.0.1 &
+          echo $! > /tmp/preview-native-playhead.pid
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:4173/ >/dev/null; then echo "preview ready"; exit 0; fi
+            sleep 2
+          done
+          echo "preview failed to start"; exit 1
+
+      - name: Playhead acceptance (native engine parity)
+        if: steps.filter.outputs.native == 'true'
+        run: |
+          BASE_URL=http://127.0.0.1:4173 \
+          OUTPUT_DIR=./artifacts/playhead-acceptance-native \
+          AUDIO_ENGINE=native \
+          npm run smoke:playhead
+
+      - name: Upload native playhead artifacts on failure
+        if: failure() && steps.filter.outputs.native == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: playhead-native-smoke-failure
+          path: artifacts/playhead-acceptance-native/
+          retention-days: 7
+
+      - name: Stop native preview server
+        if: always() && steps.filter.outputs.native == 'true'
+        run: |
+          if [ -f /tmp/preview-native-playhead.pid ]; then kill $(cat /tmp/preview-native-playhead.pid) 2>/dev/null || true; fi
 
       - name: Skip full build (no native paths changed)
         if: steps.filter.outputs.native != 'true'

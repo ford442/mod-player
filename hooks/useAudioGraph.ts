@@ -10,11 +10,16 @@ import { ensureMasterOutputChain } from '../utils/audioMasterGraph';
 import { broadcastPcmBlock } from '../utils/projectMBridge';
 import { logWorkletDiagnostics } from '../audio-worklet/diagnostics';
 import { detectRuntimeBase, withBase } from '../src/lib/paths';
-import { applyWorkletPositionSample } from '../utils/playheadPrediction';
+import { applyWorkletPositionSample, getAudioHeardTime } from '../utils/playheadPrediction';
 import {
   applyNormalizedPosition,
   nativePositionToInput,
 } from '../utils/workletPositionAdapter';
+import {
+  createNativeClockAnchor,
+  NATIVE_BRIDGE_LATENCY_MEDIASTREAM_SEC,
+  NATIVE_BRIDGE_LATENCY_RING_SEC,
+} from '../utils/nativeClockAnchor';
 import {
   canReuseWorkletNode,
   shouldDisconnectWorkletOnPlay,
@@ -74,6 +79,8 @@ export interface AudioGraphRefs {
   updateUIRef:         React.MutableRefObject<(() => void) | null>;
   /** SharedArrayBuffer provided to the native engine constructor (may be null in non-isolated contexts). */
   nativeSharedBuffer:  React.MutableRefObject<SharedArrayBuffer | null>;
+  nativeClockAnchorRef: React.MutableRefObject<import('../utils/nativeClockAnchor').NativeClockAnchor | null>;
+  nativeBridgeLatencyRef: React.MutableRefObject<number>;
   /** Callback to lazily create a main-thread libopenmpt module for ScriptProcessor fallback. */
   ensureMainThreadModuleRef: React.MutableRefObject<((data: Uint8Array) => Promise<void>) | null>;
   /** Incremented on each processModuleData — guards stale worklet `loaded` acks. */
@@ -320,6 +327,7 @@ export async function startAudioPlayback(
         //     Adds ~few-ms latency but works without WASM rebuild.
 
         let bridgeEstablished = false;
+        let bridgeLatencySec = NATIVE_BRIDGE_LATENCY_MEDIASTREAM_SEC;
 
         // Strategy A: WASM ring buffer
         const wasmSAB = engine.getWasmMemory();
@@ -343,6 +351,7 @@ export async function startAudioPlayback(
             // Store bridge node so stopMusic() can disconnect it
             refs.audioWorkletNodeRef.current = bridgeNode;
             bridgeEstablished = true;
+            bridgeLatencySec = NATIVE_BRIDGE_LATENCY_RING_SEC;
             console.log('[PLAY] Native engine: ring-buffer bridge active (Strategy A)');
           } catch (ringErr) {
             console.warn('[PLAY] Ring-buffer bridge failed, trying MediaStream bridge:', ringErr);
@@ -369,10 +378,17 @@ export async function startAudioPlayback(
             + 'or that emscriptenGetAudioObject is available.');
         }
 
+        refs.nativeBridgeLatencyRef.current = bridgeLatencySec;
+        refs.nativeClockAnchorRef.current = createNativeClockAnchor(ctx, bridgeLatencySec);
+
         // Shared-memory PositionInfo is refreshed every quantum (pre-render
         // snapshot + frame clock). Both engines use applyNormalizedPosition.
         engine.on('position', (data: WorkletPositionData) => {
-          const input = nativePositionToInput(data, ctx.currentTime);
+          const heardFallback = getAudioHeardTime(ctx);
+          const input = nativePositionToInput(data, heardFallback, {
+            clockAnchor: refs.nativeClockAnchorRef.current,
+            fallbackHeardTime: heardFallback,
+          });
           const applied = applyNormalizedPosition(refs, input, {
             channelStates: refs.channelStatesRef.current,
             channelVU: data.channelVU,

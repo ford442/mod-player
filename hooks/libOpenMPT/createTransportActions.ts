@@ -1,5 +1,6 @@
 import type { ModuleInfo } from '../../types';
 import { rowsPerSecondFromBpm } from '../../utils/playheadPrediction';
+import { createNativeClockAnchor } from '../../utils/nativeClockAnchor';
 import { getStopMusicWorkletActions } from '../../utils/workletAudioLifecycle';
 import {
   parseOscBufferMessage,
@@ -31,6 +32,7 @@ export function createStopMusic(deps: TransportActionsDeps) {
     animationFrameHandle,
     nativeEngineRef,
     audioWorkletNodeRef,
+    nativeClockAnchorRef,
     scriptProcessorRef,
     spLeftBufPtr,
     spRightBufPtr,
@@ -99,6 +101,7 @@ export function createStopMusic(deps: TransportActionsDeps) {
 
     audioClockStartRef.current = 0;
     workletTimeAtStartRef.current = 0;
+    nativeClockAnchorRef.current = null;
     driftAccumulatorRef.current = 0;
     lastCorrectedTimeRef.current = 0;
     pendingSeekRef.current = null;
@@ -153,6 +156,8 @@ export function createSeekToStep(deps: TransportActionsDeps) {
     lastUiRowIntRef,
     audioWorkletNodeRef,
     nativeEngineRef,
+    nativeClockAnchorRef,
+    nativeBridgeLatencyRef,
   } = refs;
   const {
     setModuleInfo,
@@ -211,6 +216,13 @@ export function createSeekToStep(deps: TransportActionsDeps) {
     lastWorkletUpdateRef.current = audioCtx ? audioCtx.currentTime : 0;
     audioClockStartRef.current = audioCtx ? audioCtx.currentTime : 0;
     workletTimeAtStartRef.current = workletTimeRef.current;
+
+    if (activeEngine === 'native-worklet' && audioCtx) {
+      nativeClockAnchorRef.current = createNativeClockAnchor(
+        audioCtx,
+        nativeBridgeLatencyRef.current,
+      );
+    }
 
     if (activeEngine === 'native-worklet' && nativeEngineRef.current) {
       nativeEngineRef.current.seek(targetOrder, targetRow);
