@@ -10,6 +10,7 @@ import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { readLibOpenMPTSources, readTransportActionsSource } from './helpers/libOpenMPTSource';
 import {
   WORKLET_POSITION_REPORT_HZ,
   WORKLET_POSITION_REPORT_INTERVAL_SEC,
@@ -190,7 +191,7 @@ describe('#354 hot-reload node reuse + load token (behavioral)', () => {
 describe('#354 production source invariants', () => {
   const workletSource = readFileSync(join(ROOT, 'public/worklets/openmpt-worklet.js'), 'utf8');
   const useAudioGraph = readFileSync(join(ROOT, 'hooks/useAudioGraph.ts'), 'utf8');
-  const useLibOpenMPT = readFileSync(join(ROOT, 'hooks/useLibOpenMPT.ts'), 'utf8');
+  const useLibOpenMPT = readLibOpenMPTSources(ROOT);
   const useWorkletLoader = readFileSync(join(ROOT, 'hooks/useWorkletLoader.ts'), 'utf8');
   const lifecycle = readFileSync(join(ROOT, 'utils/workletAudioLifecycle.ts'), 'utf8');
 
@@ -328,7 +329,7 @@ describe('#354 production source invariants', () => {
 
 describe('#354 ScriptProcessor fallback structural immunity', () => {
   const useAudioGraph = readFileSync(join(ROOT, 'hooks/useAudioGraph.ts'), 'utf8');
-  const useLibOpenMPT = readFileSync(join(ROOT, 'hooks/useLibOpenMPT.ts'), 'utf8');
+  const transportActions = readTransportActionsSource(ROOT);
 
   it('SP path updates position in-process (no worklet position postMessage flood)', () => {
     // ScriptProcessor onaudioprocess calls applyWorkletPositionSample directly —
@@ -340,8 +341,8 @@ describe('#354 ScriptProcessor fallback structural immunity', () => {
   });
 
   it('stopMusic tears down ScriptProcessor on every stop/reload', () => {
-    expect(useLibOpenMPT).toContain('scriptProcessorRef.current.disconnect()');
-    expect(useLibOpenMPT).toContain('scriptProcessorRef.current = null');
-    expect(useLibOpenMPT).toContain('spFallbackTriggered.current = false');
+    expect(transportActions).toContain('scriptProcessorRef.current.disconnect()');
+    expect(transportActions).toContain('scriptProcessorRef.current = null');
+    expect(transportActions).toContain('spFallbackTriggered.current = false');
   });
 });
