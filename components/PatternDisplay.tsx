@@ -1,4 +1,4 @@
-import React, { useEffect, useLayoutEffect, useRef, useState, useMemo, useCallback } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { ChannelShadowState, PatternMatrix, PlaybackState, SyncDebugInfo } from '../types';
 
 import { useWebGLOverlay } from '../hooks/useWebGLOverlay';
@@ -6,33 +6,23 @@ import { useWebGPURender } from '../hooks/useWebGPURender';
 import type { WebGPURenderParams, DebugInfo } from '../src/renderers/params';
 import { useWebGL2PatternRender } from '../src/renderers/webgl2/useWebGL2PatternRender';
 import { PatternHTMLFallback } from '../src/renderers/html/PatternHTMLFallback';
-import {
-  resolvePatternRenderer,
-  resolvePatternRendererAsync,
-  subscribeRendererPreference,
-  setRendererOverride,
-  applyWebGPUFallback,
-  hasWebGPUAutoFallbackApplied,
-} from '../src/renderers/rendererSelection';
 import { setCurrentPatternRenderer } from '../src/renderers/global';
-import type { PatternRendererBackend } from '../src/renderers/types';
 import { BloomPostProcessor } from '../utils/bloomPostProcessor';
 import {
   WEBGL_HYBRID_SHADERS,
   supportsStepsLength,
   usesPadTopChannel,
-  isHorizontalLayoutShader,
-  getShaderCanvasSize,
-  getHitTestProfile,
   usesBareCanvasChrome,
   showsChannelInvertButton,
-  usesVideoPatternTexture,
+  isHorizontalLayoutShader,
 } from '../utils/shaderVersion';
-import { defaultVideoPatternUrl } from '../utils/videoPatternSource';
-import { getShaderMeta } from '../utils/shaderRegistry';
-import { detectRuntimeBase } from '../src/lib/paths';
-import { getBloomProfile } from '../utils/bloomProfiles';
-import { configureCanvasContext } from '../utils/webgpuDevice';
+import { PatternDisplayDebugPanel } from './PatternDisplayDebugPanel';
+import { usePatternRendererBackend } from '../src/renderers/hooks/usePatternRendererBackend';
+import { usePatternCanvasMetrics } from '../src/renderers/hooks/usePatternCanvasMetrics';
+import { useVideoPatternSource } from '../src/renderers/hooks/useVideoPatternSource';
+import { usePatternBloom } from '../src/renderers/hooks/usePatternBloom';
+import { useShaderCanvasHitTest } from '../src/renderers/hooks/useShaderCanvasHitTest';
+import { usePatternRenderLoop } from '../src/renderers/hooks/usePatternRenderLoop';
 
 const DEFAULT_CHANNELS = 4;
 
@@ -79,24 +69,17 @@ interface PatternDisplayProps {
   syncDebug?: SyncDebugInfo;
   colorPalette?: number;
   paletteMode?: number;
-  /** 0 = off; 1-based instrument index for mid-LED highlight (v0.59). */
   highlightInstrument?: number;
   instrumentPalette?: Uint8Array;
   chassisDark?: boolean;
-  /** Controlled pattern steps count (32 or 64). When provided, overrides internal state.
-   *  Only meaningful for shaders that use slot [24] as stepsLength (v0.21, v0.39, v0.40). */
   stepsLength?: 32 | 64;
-  /** Called when user clicks the steps toggle inside the canvas overlay. */
   onStepsLengthToggle?: () => void;
-  // Night Mode 2.0
   nightModeEnabled?: boolean;
-  nightPreset?: number;        // 0=off, 1=dusk, 2=midnight, 3=deep
+  nightPreset?: number;
   vignetteStrength?: number;
   filmGrain?: number;
   invertMix?: number;
-  // CRT effect
   crtEnabled?: boolean;
-  // Lite mode
   liteMode?: boolean;
   editMode?: boolean;
   onSequencerCellEdit?: (row: number, channel: number) => void;
@@ -163,68 +146,25 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const glCanvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const bloomRef = useRef<BloomPostProcessor | null>(null);
-  // DEV: debug bloom layer isolation state (-1 = all layers, 0/1/2 = isolated)
-  const [debugBloomLayer, setDebugBloomLayer] = useState<number>(-1);
+  const gpuDeviceRef = useRef<GPUDevice | null>(null);
+  const gpuContextRef = useRef<GPUCanvasContext | null>(null);
 
-  // Night Mode — animated themeBlend (0=day, 1=night)
-  // Transition speed: 400ms for a smooth, perceptible feel (not jarring).
-  const THEME_TRANSITION_DURATION_MS = 400;
   const themeBlendRef = useRef<number>(nightModeEnabled ? 1.0 : 0.0);
-
-  const [webgpuAvailable, setWebgpuAvailable] = useState(true);
-  const [webgl2Available, setWebgl2Available] = useState(true);
-  const [activeBackend, setActiveBackend] = useState<PatternRendererBackend>(() => resolvePatternRenderer());
-
-  useEffect(() => subscribeRendererPreference(setActiveBackend), []);
-
-  // Async adapter probe — downgrade from optimistic webgpu before init when no adapter exists.
-  useEffect(() => {
-    let cancelled = false;
-    void resolvePatternRendererAsync().then((resolved) => {
-      if (cancelled) return;
-      setActiveBackend((current) => {
-        if (current === 'webgpu' && resolved !== 'webgpu') {
-          applyWebGPUFallback('no usable WebGPU adapter');
-          return resolved;
-        }
-        return current;
-      });
-    });
-    return () => { cancelled = true; };
-  }, []);
-
-  // Safety net: init-time WebGPU failure → WebGL2/HTML without manual URL params.
-  useLayoutEffect(() => {
-    if (activeBackend !== 'webgpu' || webgpuAvailable) return;
-    // Guard against applying the automatic fallback more than once per session.
-    if (hasWebGPUAutoFallbackApplied()) return;
-    const fallback = applyWebGPUFallback('WebGPU initialization or canvas presentation failed');
-    setActiveBackend(fallback);
-  }, [activeBackend, webgpuAvailable]);
-  const [localTime, setLocalTime] = useState(0);
-  const [invertChannels, setInvertChannels] = useState(false);
-  // Internal stepsLength state — used when the prop is not controlled by the parent.
-  // NOTE: This component supports both controlled (stepsLengthProp provided) and
-  // uncontrolled (prop absent) modes. The mode should not change after initial mount —
-  // App.tsx always provides the prop, while Studio3D does not (uncontrolled fallback).
-  const [localStepsLength, setLocalStepsLength] = useState<32 | 64>(32);
-  // Effective value: prefer controlled prop, fall back to local state
-  const stepsLength = stepsLengthProp ?? localStepsLength;
-  const [clickedButton, setClickedButton] = useState<number>(0);
-  const clickTimeoutRef = useRef<number | null>(null);
-  const animationFrameRef = useRef<number>();
-  const freqDataRef = useRef(new Uint8Array(256));
-  const canvasSizeRef = useRef({ width: 0, height: 0, dpr: 1 });
-  const resizeTimeoutRef = useRef<number | null>(null);
-  // Night mode target is read each frame from this ref to avoid stale closures
   const nightModeTargetRef = useRef<number>(nightModeEnabled ? 1.0 : 0.0);
   nightModeTargetRef.current = nightModeEnabled ? 1.0 : 0.0;
 
-  // CRT enabled flag — updated each render so the RAF loop reads the latest value
   const crtEnabledRef = useRef<boolean>(crtEnabled);
   crtEnabledRef.current = crtEnabled;
+
+  const [webgpuAvailable, setWebgpuAvailable] = useState(true);
+  const { activeBackend, setActiveBackend, webgl2Available, setWebgl2Available } =
+    usePatternRendererBackend(webgpuAvailable);
+
+  const [localTime, setLocalTime] = useState(0);
+  const [invertChannels, setInvertChannels] = useState(false);
+  const [localStepsLength, setLocalStepsLength] = useState<32 | 64>(32);
+  const stepsLength = stepsLengthProp ?? localStepsLength;
 
   const [debugInfo, setDebugInfo] = useState<DebugInfo>({
     layoutMode: 'NONE',
@@ -233,163 +173,55 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   });
 
   const numChannels = matrix?.numChannels ?? DEFAULT_CHANNELS;
+  const padTopChannel = usesPadTopChannel(shaderFile);
+  const isHorizontal = isHorizontalLayoutShader(shaderFile);
 
-  const needsDefaultVideo = usesVideoPatternTexture(shaderFile);
-  const defaultVideoRef = useRef<HTMLVideoElement | null>(null);
-  const [defaultVideoEl, setDefaultVideoEl] = useState<HTMLVideoElement | null>(null);
-
-  const bindDefaultVideoRef = useCallback((el: HTMLVideoElement | null) => {
-    defaultVideoRef.current = el;
-    setDefaultVideoEl(el);
-  }, []);
-
-  useEffect(() => {
-    const video = defaultVideoRef.current;
-    if (!video || !needsDefaultVideo) return;
-    video.src = defaultVideoPatternUrl();
-    video.loop = true;
-    video.muted = true;
-    video.playsInline = true;
-    video.crossOrigin = 'anonymous';
-    void video.load();
-  }, [needsDefaultVideo, shaderFile]);
-
-  useEffect(() => {
-    const video = defaultVideoRef.current;
-    if (!video || !needsDefaultVideo) return;
-    if (isPlaying) {
-      void video.play().catch(() => { /* autoplay blocked until gesture */ });
-    } else {
-      video.pause();
-    }
-  }, [isPlaying, needsDefaultVideo]);
-
-  const effectiveVideoSource =
-    externalVideoSource ?? (needsDefaultVideo ? defaultVideoEl : null);
+  const { needsDefaultVideo, bindDefaultVideoRef, effectiveVideoSource } = useVideoPatternSource({
+    shaderFile,
+    externalVideoSource,
+    isPlaying,
+  });
 
   const useWebGPU = activeBackend === 'webgpu';
   const useWebGL2 = activeBackend === 'webgl2';
   const useHTML = activeBackend === 'html';
   const isOverlayActive = useWebGPU && !liteMode && WEBGL_HYBRID_SHADERS.has(shaderFile);
 
-  const padTopChannel = usesPadTopChannel(shaderFile);
-  const isHorizontal = isHorizontalLayoutShader(shaderFile);
+  const { canvasMetrics, syncCanvasSize, handleResize } = usePatternCanvasMetrics({
+    containerRef,
+    canvasRef,
+    glCanvasRef,
+    shaderFile,
+    numChannels,
+    cellWidth,
+    liteMode,
+    bloomRef,
+    gpuDeviceRef,
+    gpuContextRef,
+  });
 
-  const canvasMetrics = useMemo(() => {
-    if (liteMode) return { width: 512, height: 512 };
-    // Registry is authoritative for all production shaders in SHADER_GROUPS.
-    if (getShaderMeta(shaderFile)) {
-      return getShaderCanvasSize(shaderFile);
-    }
-    // Unregistered / experimental: horizontal → square; else channel-scaled
-    if (isHorizontal) return { width: 1024, height: 1024 };
-    return { width: Math.max(800, numChannels * cellWidth), height: 600 };
-  }, [shaderFile, isHorizontal, numChannels, cellWidth, liteMode]);
+  const {
+    fileInputRef,
+    clickedButton,
+    handleCanvasClick,
+    handleFileChange,
+  } = useShaderCanvasHitTest({
+    shaderFile,
+    playheadRow,
+    ...(totalRows !== undefined ? { totalRows } : {}),
+    ...(onPlay ? { onPlay } : {}),
+    ...(onStop ? { onStop } : {}),
+    ...(onLoopToggle ? { onLoopToggle } : {}),
+    ...(onSeek ? { onSeek } : {}),
+    ...(onVolumeChange ? { onVolumeChange } : {}),
+    ...(onPanChange ? { onPanChange } : {}),
+    ...(onFileSelected ? { onFileSelected } : {}),
+  });
 
-  // Reset local step length when switching to a shader that doesn't support it
   useEffect(() => {
     if (!supportsStepsLength(shaderFile)) setLocalStepsLength(32);
   }, [shaderFile]);
 
-  // Track video source changes
-  useEffect(() => {
-    // externalVideoSource is read from renderParamsRef on each frame
-  }, [externalVideoSource]);
-
-  // Canvas resize handling
-  const syncCanvasSize = useCallback((canvas: HTMLCanvasElement, glCanvas: HTMLCanvasElement | null) => {
-    const dpr = liteMode ? 1 : Math.min(window.devicePixelRatio || 1, 2);
-    const container = containerRef.current;
-    if (!container) return;
-    const containerRect = container.getBoundingClientRect();
-    const containerWidth = containerRect.width;
-    const containerHeight = containerRect.height;
-    // Guard: container not yet laid out — don't resize to degenerate 1×1 dimensions
-    if (containerWidth <= 0 || containerHeight <= 0) return;
-    const aspectRatio = canvasMetrics.width / canvasMetrics.height;
-    let displayWidth = containerWidth;
-    let displayHeight = containerHeight;
-    const containerAspect = containerWidth / containerHeight;
-    if (containerAspect > aspectRatio) {
-      displayWidth = containerHeight * aspectRatio;
-    } else {
-      displayHeight = containerWidth / aspectRatio;
-    }
-    displayWidth = Math.floor(displayWidth);
-    displayHeight = Math.floor(displayHeight);
-    const bufferWidth = Math.max(1, Math.floor(displayWidth * dpr));
-    const bufferHeight = Math.max(1, Math.floor(displayHeight * dpr));
-    if (canvas.width !== bufferWidth || canvas.height !== bufferHeight) {
-      canvas.width = bufferWidth;
-      canvas.height = bufferHeight;
-      canvasSizeRef.current = { width: bufferWidth, height: bufferHeight, dpr };
-    }
-    if (glCanvas) {
-      if (glCanvas.width !== bufferWidth || glCanvas.height !== bufferHeight) {
-        glCanvas.width = bufferWidth;
-        glCanvas.height = bufferHeight;
-      }
-    }
-  }, [canvasMetrics, liteMode]);
-
-  const handleResize = useCallback(() => {
-    const canvas = canvasRef.current;
-    const glCanvas = glCanvasRef.current;
-    if (!canvas) return;
-    if (resizeTimeoutRef.current !== null) window.clearTimeout(resizeTimeoutRef.current);
-    resizeTimeoutRef.current = window.setTimeout(() => {
-      syncCanvasSize(canvas, glCanvas);
-      if (gpuContextRef.current && gpuDeviceRef.current) {
-        try {
-          configureCanvasContext({
-            device: gpuDeviceRef.current,
-            context: gpuContextRef.current,
-          });
-        } catch (e) {
-          console.error('❌ WebGPU context reconfiguration failed:', e);
-        }
-      }
-      bloomRef.current?.resize(canvas.width, canvas.height);
-      resizeTimeoutRef.current = null;
-    }, 100);
-  }, [syncCanvasSize]);
-
-  // Expose GPU device/context refs for resize reconfiguration
-  const gpuDeviceRef = useRef<GPUDevice | null>(null);
-  const gpuContextRef = useRef<GPUCanvasContext | null>(null);
-
-  // Best-effort early sync: attempt to read the container rect before the first
-  // paint so the canvas attrs are already correct if layout has settled by the
-  // time this effect fires.  If the container reports 0×0 (flex parent not yet
-  // sized), syncCanvasSize's guard skips the write — the initialization path in
-  // useWebGPURender will call syncCanvasSize again after the device is acquired,
-  // at which point layout is guaranteed stable, ensuring the WebGPU surface is
-  // configured at the correct DPR-scaled resolution for the very first frame.
-  useLayoutEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    syncCanvasSize(canvas, glCanvasRef.current);
-  }, [syncCanvasSize]);
-
-  // Set up ResizeObserver and window resize listener for all subsequent resizes.
-  useEffect(() => {
-    const container = containerRef.current;
-    const canvas = canvasRef.current;
-    if (!container || !canvas) return;
-    const resizeObserver = new ResizeObserver(() => {
-      requestAnimationFrame(() => handleResize());
-    });
-    resizeObserver.observe(container);
-    const handleWindowResize = () => handleResize();
-    window.addEventListener('resize', handleWindowResize);
-    return () => {
-      resizeObserver.disconnect();
-      window.removeEventListener('resize', handleWindowResize);
-      if (resizeTimeoutRef.current !== null) window.clearTimeout(resizeTimeoutRef.current);
-    };
-  }, [handleResize]);
-
-  // Build render params ref — updated every render, read by hooks without stale closures
   const renderParamsRef = useRef<WebGPURenderParams>({
     matrix, channels, padTopChannel, isPlaying, bpm, timeSec, tickOffset,
     beatPhase, grooveAmount, kickTrigger, activeChannels, isModuleLoaded,
@@ -435,7 +267,6 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     ...(oscBufferRef ? { oscBufferRef } : {}),
   };
 
-  // WebGL overlay hook (frosted caps)
   const { drawWebGL } = useWebGLOverlay(glCanvasRef, {
     shaderFile, matrix, padTopChannel, isOverlayActive,
     invertChannels, playheadRow, cellWidth, cellHeight,
@@ -444,8 +275,6 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     ...(channelStatesRef ? { channelStatesRef } : {}),
   }, setDebugInfo);
 
-  // WebGPU render hook — matrix and padTopChannel passed directly so React tracks them as
-  // explicit deps, guaranteeing the cells buffer is rebuilt when a new module is loaded.
   const oscTextureRef = useRef<GPUTexture | null>(null);
 
   const { gpuReady, render: renderWebGPU, deviceRef: gpuDevRef, deviceStatus, contextRef: gpuHookContextRef } = useWebGPURender(
@@ -465,37 +294,27 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     useWebGL2,
   );
 
+  const { debugBloomLayer } = usePatternBloom({
+    bloomRef,
+    canvasRef,
+    glCanvasRef,
+    shaderFile,
+    gpuReady,
+    useWebGPU,
+    liteMode,
+    gpuDevRef,
+    gpuHookContextRef,
+    syncCanvasSize,
+  });
+
   const gpuReadyEffective = useWebGPU ? gpuReady : useWebGL2 ? glReady : false;
   const render = useWebGPU ? renderWebGPU : useWebGL2 ? renderWebGL2 : () => {};
 
-  // Keep resize reconfiguration refs in sync with the live WebGPU device + canvas context.
-  // Without context, handleResize cannot re-configure after canvas width/height changes and
-  // Chrome leaves the swapchain invalid → permanent black frame for every shader.
   useEffect(() => {
     gpuDeviceRef.current = gpuDevRef.current;
     gpuContextRef.current = gpuHookContextRef.current;
   });
 
-  // When the WebGPU context first becomes ready, force a configure at the current
-  // canvas buffer size. ResizeObserver may have changed width/height after the
-  // init-time configure (Strict Mode remount + flex layout), which invalidates
-  // the swapchain until reconfigured — Chrome then shows a permanent black frame.
-  useEffect(() => {
-    if (!useWebGPU || !gpuReady) return;
-    const canvas = canvasRef.current;
-    const device = gpuDevRef.current;
-    const context = gpuHookContextRef.current;
-    if (!canvas || !device || !context) return;
-    syncCanvasSize(canvas, glCanvasRef.current);
-    try {
-      configureCanvasContext({ device, context });
-      bloomRef.current?.resize(canvas.width, canvas.height);
-    } catch (e) {
-      console.error('❌ WebGPU context configure-on-ready failed:', e);
-    }
-  }, [useWebGPU, gpuReady, syncCanvasSize, gpuDevRef, gpuHookContextRef]);
-
-  // Expose WebGPU renderer handle for agent/CI pixel tests
   useEffect(() => {
     if (!useWebGPU || !gpuReady) return;
     const canvas = canvasRef.current;
@@ -504,7 +323,6 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
       readPixels: () => {
         if (!canvas) return null;
         const gl = canvas.getContext('webgl2');
-        // WebGPU canvas — readback requires copyTextureToBuffer; return null for now
         void gl;
         return null;
       },
@@ -518,179 +336,29 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     return () => setCurrentPatternRenderer(null);
   }, [useWebGPU, gpuReady, handleResize]);
 
-  // The oscilloscope 1-D texture (binding 6) is owned by WebGPURenderer: created in shader
-  // init, uploaded each frame in frameDraw.uploadOscilloscopeTexture. Owning it in a separate
-  // PatternDisplay effect used to race pipeline rebuild on shader switch (#348).
-
-  // Initialize multi-layer bloom post-processor when GPU becomes ready
-  useEffect(() => {
-    const device = gpuDevRef.current;
-    const canvas = canvasRef.current;
-    if (!device || !canvas || !gpuReady || !useWebGPU) return;
-    if (liteMode) return;
-    const context = canvas.getContext('webgpu') as GPUCanvasContext | null;
-    if (!context) return;
-
-    let cancelled = false;
-    const meta = getShaderMeta(shaderFile);
-    const bloomLayers = meta?.bloomProfile
-      ? getBloomProfile(meta.bloomProfile)
-      : undefined;
-    const bloomOptions = bloomLayers
-      ? { layers: [...bloomLayers], finalFormat: navigator.gpu.getPreferredCanvasFormat() }
-      : { finalFormat: navigator.gpu.getPreferredCanvasFormat() };
-    const bloom = new BloomPostProcessor(device, canvas, context, bloomOptions);
-    bloom.setBaseUrl(detectRuntimeBase());
-    void bloom.init().then(() => {
-      if (cancelled) {
-        bloom.destroy();
-        return;
-      }
-      bloomRef.current = bloom;
-    }).catch((err: unknown) => {
-      if (!cancelled) {
-        console.warn('BloomPostProcessor init failed:', err);
-      }
-    });
-
-    return () => {
-      cancelled = true;
-      bloom.destroy();
-      if (bloomRef.current === bloom) {
-        bloomRef.current = null;
-      }
-    };
-  }, [gpuReady, shaderFile, liteMode, useWebGPU]);
-
-  // DEV: Alt+B cycles bloom layer isolation (trigger → sustain → expression/trace → all)
-  useEffect(() => {
-    if (!import.meta.env.DEV) return;
-    const handler = (e: KeyboardEvent) => {
-      if (!e.altKey || e.key !== 'b') return;
-      e.preventDefault();
-      const bloom = bloomRef.current;
-      if (!bloom) return;
-      // Cycle: -1 → 0 → 1 → 2 → -1
-      setDebugBloomLayer(prev => {
-        const next = prev >= 2 ? -1 : prev + 1;
-        bloom.setDebugLayer(next);
-        const label = bloom.getDebugLayerLabel();
-        console.log(`[Bloom debug] layer: ${label ?? 'all'}`);
-        return next;
-      });
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, []);
-
-  // Canvas click handler for shader-embedded UI interaction (registry hitTestProfile)
-  const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    const hitProfile = getHitTestProfile(shaderFile);
-    if (hitProfile === 'none') return;
-    const rect = e.currentTarget.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-    const pX = (x / rect.width) - 0.5;
-    const pY = 0.5 - (y / rect.height);
-
-    const isV40 = hitProfile === 'square-ui';
-
-    const flashButton = (buttonId: number) => {
-      if (clickTimeoutRef.current !== null) window.clearTimeout(clickTimeoutRef.current);
-      setClickedButton(buttonId);
-      clickTimeoutRef.current = window.setTimeout(() => { setClickedButton(0); clickTimeoutRef.current = null; }, 200) as number;
-    };
-
-    if (Math.abs(pX - 0.26) < 0.05 && Math.abs(pY - 0.42) < 0.05) {
-      flashButton(2); fileInputRef.current?.click(); return;
-    }
-    if (Math.abs(pX + 0.26) < 0.05 && Math.abs(pY - 0.42) < 0.05) {
-      flashButton(1); onLoopToggle?.(); return;
-    }
-    if (Math.abs(pY - 0.32) < 0.04) {
-      if (Math.abs(pX + 0.12) < 0.04) { flashButton(5); if (onSeek) onSeek(Math.max(0, playheadRow - 16)); return; }
-      if (Math.abs(pX - 0.12) < 0.04) { flashButton(6); if (onSeek) onSeek(playheadRow + 16); return; }
-    }
-    const volSliderX = isV40 ? 0.08 : 0.28;
-    const volSliderY = 0.415;
-    const volSliderW = 0.18;
-    const volSliderH = 0.05;
-    if (Math.abs(pX - volSliderX) < volSliderW * 0.5 && Math.abs(pY - volSliderY) < volSliderH * 0.5) {
-      const relX = (pX - volSliderX) / (volSliderW * 0.9);
-      onVolumeChange?.(Math.max(0, Math.min(1, relX + 0.5))); return;
-    }
-    const sliderRightX = 0.42, sliderY = -0.2, sliderH = 0.2, sliderClickRadius = 0.03;
-    if (Math.abs(pX - sliderRightX) < sliderClickRadius && Math.abs(pY - sliderY) < sliderH * 0.5) {
-      const panValue = (pY - sliderY) / (sliderH * 0.45);
-      onPanChange?.(Math.max(-1, Math.min(1, panValue))); return;
-    }
-    const barY = -0.45, barWidth = 0.6, barCenterX = 0.1, barHeight = 0.03;
-    if (Math.abs(pY - barY) < barHeight && Math.abs(pX - barCenterX) < barWidth / 2) {
-      const relX = pX - (barCenterX - barWidth / 2);
-      if (onSeek) onSeek(Math.floor(Math.max(0, Math.min(1, relX / barWidth)) * (totalRows || 64)));
-      return;
-    }
-    const btnRadius = 0.045;
-    const dist = (x1: number, y1: number, x2: number, y2: number) => Math.sqrt((x1 - x2) ** 2 + (y1 - y2) ** 2);
-    const playY = isV40 ? -0.45 : -0.40;
-    const stopY = isV40 ? -0.45 : -0.40;
-    if (dist(pX, pY, -0.44, playY) < btnRadius) { flashButton(3); onPlay?.(); return; }
-    if (dist(pX, pY, -0.35, stopY) < btnRadius) { flashButton(4); onStop?.(); return; }
-  };
-
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const selectedFile = e.target.files?.[0];
-    if (selectedFile) onFileSelected?.(selectedFile);
-  };
-
-  // Keep renderRef pointing to latest render so RAF loop never uses stale closure
   const renderRef = useRef<() => void>();
   useEffect(() => {
     renderRef.current = render;
   });
 
-  // Animation RAF loop
-  useEffect(() => {
-    let isActive = true;
-    let lastTime = 0;
-    const loop = (time: number) => {
-      if (!isActive) return;
-      animationFrameRef.current = requestAnimationFrame(loop);
-      // Cap dt at 100ms to prevent large jumps when the tab is backgrounded
-      const dt = Math.min((time - lastTime) / 1000, 0.1);
-      lastTime = time;
-      // Animate themeBlend toward night mode target at the defined transition rate
-      const target = nightModeTargetRef.current;
-      const current = themeBlendRef.current;
-      if (Math.abs(current - target) > 0.001) {
-        const speed = 1000 / THEME_TRANSITION_DURATION_MS; // units/sec
-        themeBlendRef.current = current + Math.sign(target - current) * Math.min(Math.abs(target - current), speed * dt);
-        renderParamsRef.current.themeBlend = themeBlendRef.current;
-      }
-      if (!isModuleLoaded && !isPlaying) setLocalTime(time / 1000.0);
-      if (analyserNode) {
-        if (freqDataRef.current.length !== analyserNode.frequencyBinCount) {
-          freqDataRef.current = new Uint8Array(analyserNode.frequencyBinCount);
-        }
-        analyserNode.getByteFrequencyData(freqDataRef.current);
-      }
-      if (gpuReadyEffective && !useHTML) {
-        if (useWebGPU) {
-          bloomRef.current?.updateCRT(crtEnabledRef.current ? 1.0 : 0.0);
-        }
-        renderRef.current?.();
-      }
-      // Hybrid frosted caps use WebGL2 — keep drawing when WebGPU is unavailable (e.g. headless CI).
-      if (isOverlayActive && isModuleLoaded && !useHTML) {
-        drawWebGL();
-      }
-    };
-    animationFrameRef.current = requestAnimationFrame(loop);
-    return () => {
-      isActive = false;
-      if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
-    };
-  }, [isModuleLoaded, isPlaying, gpuReadyEffective, drawWebGL, useWebGPU, useHTML, isOverlayActive]);
+  usePatternRenderLoop({
+    isModuleLoaded,
+    isPlaying,
+    gpuReadyEffective,
+    useWebGPU,
+    useHTML,
+    isOverlayActive,
+    nightModeEnabled,
+    ...(analyserNode !== undefined ? { analyserNode } : {}),
+    crtEnabledRef,
+    themeBlendRef,
+    nightModeTargetRef,
+    renderParamsRef,
+    bloomRef,
+    renderRef,
+    drawWebGL,
+    setLocalTime,
+  });
 
   return (
     <div
@@ -813,111 +481,17 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
         </div>
       )}
 
-      {!debugPanelOpen && (
-        <button
-          onClick={onOpenDebug}
-          className="fixed top-4 right-4 z-50 rounded-full border border-green-500/40 bg-black/80 px-3 py-1 text-sm text-green-300 shadow-lg hover:bg-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-400"
-          aria-label="Open debug panel"
-        >
-          🔍
-        </button>
-      )}
-
-      {debugPanelOpen && (
-        <div className="fixed top-4 right-4 bg-black/90 border border-green-500/50 rounded p-3 text-xs font-mono z-50 max-w-xs" style={{ backdropFilter: 'blur(4px)' }}>
-          <div className="flex justify-between items-center mb-2">
-            <span className="text-green-400 font-bold">🔍 PatternDisplay Debug</span>
-            <button onClick={onCloseDebug} className="text-gray-500 hover:text-white">✕</button>
-          </div>
-          <div className="mb-2">
-            <span className="text-gray-400">Renderer:</span>
-            <select
-              value={activeBackend}
-              onChange={(e) => {
-                const next = e.target.value as PatternRendererBackend;
-                setRendererOverride(next);
-                setActiveBackend(next);
-              }}
-              className="ml-2 bg-[#111] border border-green-500/40 text-green-300 rounded px-1 py-0.5 text-[10px]"
-            >
-              <option value="webgpu">webgpu</option>
-              <option value="webgl2">webgl2</option>
-              <option value="html">html</option>
-            </select>
-          </div>
-          <div className="mb-2">
-            <span className="text-gray-400">Layout:</span>
-            <span className={`ml-2 font-bold ${debugInfo.layoutMode.includes('32') ? 'text-blue-400' : debugInfo.layoutMode.includes('64') ? 'text-purple-400' : 'text-orange-400'}`}>
-              {debugInfo.layoutMode}
-            </span>
-          </div>
-          {import.meta.env.DEV && activeBackend === 'webgl2' && (
-            <div className="mb-2 text-[10px] text-yellow-300">
-              Alt+D cycles debug modes (wireframe, UV, playhead…)
-            </div>
-          )}
-          {debugInfo.errors.length > 0 && (
-            <div className="mb-2">
-              <div className="text-red-400 font-bold mb-1">Errors:</div>
-              {debugInfo.errors.map((err, i) => (
-                <div key={i} className="text-red-300 text-[10px] truncate">• {err}</div>
-              ))}
-            </div>
-          )}
-          <div className="border-t border-gray-700 pt-2 mt-2">
-            <div className="text-gray-500 text-[10px] mb-1">Uniforms:</div>
-            {Object.entries(debugInfo.uniforms).map(([key, val]) => (
-              <div key={key} className="flex justify-between text-[10px]">
-                <span className="text-gray-400">{key}:</span>
-                <span className="text-cyan-300 ml-2">{String(val)}</span>
-              </div>
-            ))}
-          </div>
-          {syncDebug && (syncDebug.sampleRow != null || syncDebug.driftMs !== 0) && (
-            <div className="border-t border-gray-700 pt-2 mt-2">
-              <div className="text-gray-500 text-[10px] mb-1">Playhead sync:</div>
-              <div className="flex justify-between text-[10px]">
-                <span className="text-gray-400">mode:</span>
-                <span className="text-cyan-300 ml-2">{syncDebug.mode}</span>
-              </div>
-              <div className="flex justify-between text-[10px]">
-                <span className="text-gray-400">driftMs:</span>
-                <span className="text-cyan-300 ml-2">{syncDebug.driftMs}</span>
-              </div>
-              {syncDebug.sampleRow != null && (
-                <>
-                  <div className="flex justify-between text-[10px]">
-                    <span className="text-gray-400">sampleRow:</span>
-                    <span className="text-cyan-300 ml-2">{syncDebug.sampleRow.toFixed(3)}</span>
-                  </div>
-                  <div className="flex justify-between text-[10px]">
-                    <span className="text-gray-400">predictedRow:</span>
-                    <span className="text-cyan-300 ml-2">{syncDebug.predictedRow?.toFixed(3) ?? '—'}</span>
-                  </div>
-                  <div className="flex justify-between text-[10px]">
-                    <span className="text-gray-400">smoothedRow:</span>
-                    <span className="text-cyan-300 ml-2">{syncDebug.smoothedRow?.toFixed(3) ?? '—'}</span>
-                  </div>
-                  <div className="flex justify-between text-[10px]">
-                    <span className="text-gray-400">lagRows:</span>
-                    <span className={`ml-2 ${Math.abs(syncDebug.predictionLagRows ?? 0) > 0.5 ? 'text-yellow-300' : 'text-green-300'}`}>
-                      {syncDebug.predictionLagRows?.toFixed(3) ?? '—'}
-                    </span>
-                  </div>
-                </>
-              )}
-            </div>
-          )}
-        </div>
-      )}
-      {import.meta.env.DEV && debugBloomLayer >= 0 && (
-        <div className="absolute top-2 right-2 z-50 pointer-events-none">
-          <div className="bg-black/80 text-yellow-300 font-mono text-[10px] px-2 py-1 rounded border border-yellow-500/60">
-            BLOOM: {bloomRef.current?.getDebugLayerLabel() ?? `layer ${debugBloomLayer}`} only
-            <span className="text-gray-500 ml-1">(Alt+B)</span>
-          </div>
-        </div>
-      )}
+      <PatternDisplayDebugPanel
+        debugPanelOpen={debugPanelOpen}
+        {...(onCloseDebug ? { onCloseDebug } : {})}
+        {...(onOpenDebug ? { onOpenDebug } : {})}
+        activeBackend={activeBackend}
+        setActiveBackend={setActiveBackend}
+        debugInfo={debugInfo}
+        {...(syncDebug ? { syncDebug } : {})}
+        debugBloomLayer={debugBloomLayer}
+        bloomLayerLabel={bloomRef.current?.getDebugLayerLabel() ?? null}
+      />
     </div>
   );
 };
