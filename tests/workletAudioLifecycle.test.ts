@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { readLibOpenMPTSources, readTransportActionsSource } from './helpers/libOpenMPTSource';
 import {
   canReuseWorkletNode,
   getStopMusicWorkletActions,
@@ -135,17 +136,19 @@ describe('workletLibSingleton (#329 shared-scope init)', () => {
 });
 
 describe('audio hook source invariants', () => {
-  const useLibOpenMPT = readFileSync(join(ROOT, 'hooks/useLibOpenMPT.ts'), 'utf8');
+  const useLibOpenMPT = readLibOpenMPTSources(ROOT);
+  const transportActions = readTransportActionsSource(ROOT);
   const useAudioGraph = readFileSync(join(ROOT, 'hooks/useAudioGraph.ts'), 'utf8');
   const workletSource = readFileSync(join(ROOT, 'public/worklets/openmpt-worklet.js'), 'utf8');
 
   it('stopMusic does not call audioContext.suspend()', () => {
-    const fnMatch = useLibOpenMPT.match(/const stopMusic = useCallback\([\s\S]*?\n {2}\}, \[\]\);/);
-    expect(fnMatch, 'stopMusic callback should exist').toBeTruthy();
+    const fnMatch = transportActions.match(/export function createStopMusic[\s\S]*?^}/m);
+    expect(fnMatch, 'createStopMusic should exist').toBeTruthy();
     const body = fnMatch![0];
     expect(body).not.toMatch(/audioContextRef\.current\.suspend\(/);
     expect(body).not.toMatch(/audioCtx\.suspend\(/);
     expect(body).toContain('getStopMusicWorkletActions');
+    expect(useLibOpenMPT).toContain('createStopMusic');
   });
 
   it('play path gates initLib via shouldPostInitLib / reuse helper', () => {
