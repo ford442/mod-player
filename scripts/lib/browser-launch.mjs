@@ -1,7 +1,8 @@
 /**
  * Shared Playwright / puppeteer launcher for headless visual smoke tests.
  */
-import { existsSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
 
 export const DEFAULT_CHROME_ARGS = [
   '--no-sandbox',
@@ -25,6 +26,31 @@ const CHROME_CANDIDATES = [
   '/usr/bin/chromium-browser',
 ].filter(Boolean);
 
+/** Resolve a Chromium binary when PLAYWRIGHT_BROWSERS_PATH layout differs from stock Playwright. */
+export function resolvePlaywrightChromiumExecutable() {
+  if (process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE && existsSync(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE)) {
+    return process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE;
+  }
+  const root = process.env.PLAYWRIGHT_BROWSERS_PATH;
+  if (!root || !existsSync(root)) return null;
+  const direct = join(root, 'chromium', 'chrome-linux', 'chrome');
+  if (existsSync(direct)) return direct;
+  try {
+    for (const entry of readdirSync(root)) {
+      if (!entry.startsWith('chromium')) continue;
+      const candidate = join(root, entry, 'chrome-linux', 'chrome');
+      if (existsSync(candidate)) return candidate;
+    }
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
+export function shouldUseBundledPlaywrightChromium() {
+  return resolvePlaywrightChromiumExecutable() != null;
+}
+
 export function resolveChromePath() {
   for (const p of CHROME_CANDIDATES) {
     if (p && existsSync(p)) return p;
@@ -41,11 +67,19 @@ export async function launchBrowser(options = {}) {
 
   try {
     const { chromium } = await import('playwright');
-    const browser = await chromium.launch({
-      channel: process.env.PLAYWRIGHT_CHANNEL || 'chrome',
+    const bundledExecutable = resolvePlaywrightChromiumExecutable();
+    const useBundled = shouldUseBundledPlaywrightChromium();
+    /** @type {import('playwright').LaunchOptions} */
+    const launchOptions = {
       headless,
       args: chromeArgs.filter((a) => a !== '--headless=new'),
-    });
+    };
+    if (bundledExecutable) {
+      launchOptions.executablePath = bundledExecutable;
+    } else if (!useBundled) {
+      launchOptions.channel = process.env.PLAYWRIGHT_CHANNEL || 'chrome';
+    }
+    const browser = await chromium.launch(launchOptions);
     return {
       browser,
       engine: 'playwright',

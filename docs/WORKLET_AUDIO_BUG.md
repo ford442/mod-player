@@ -99,6 +99,32 @@ Headless CI cannot assert speaker output. After audio-path changes, verify **wit
 5. **MOD ↔ XM switch** — load MOD, play, switch to XM (or vice versa); no silent output, no runaway `ended → seek 0` loop in console.
 6. **Stop → play** — `stopMusic(false)` then `play()` without extra user gesture beyond the initial unlock.
 
+### Real-browser product-flow smoke (#380 — automated)
+
+`npm run smoke:audio` / `npm run smoke:audio:ci` (`scripts/audio-smoke.mjs`) exercises a **live**
+`AudioWorkletNode` + libopenmpt session against `npm run preview` with
+`?renderer=webgl2&engine=js&audioDiag=1`. CI job: `audio-smoke` in `.github/workflows/ci.yml`
+(uses preinstalled Chromium via `PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers`).
+
+| Check | Automated? | How |
+|-------|------------|-----|
+| Default `4-mat_madness.mod` auto-load | ✅ | `__TEST_HOOKS__.isModuleLoaded()` |
+| Play → counters advance ≥2 s | ✅ | SeekBar time + `__AUDIO_DIAG__` order/row + `getPlaybackRowFraction()` |
+| MOD → XM mid-playback (`test.xm`) | ✅ | `loadModuleFromUrl` while playing; counters keep advancing |
+| Stop → Play | ✅ | Real Stop/Play clicks; counters advance again |
+| Worklet/protocol console errors | ✅ | `page.on('console')` tripwires (`[PLAY] Worklet error`, rejected protocol messages) |
+| Runaway `ended → seek 0` loop | ✅ | >2 `[PLAY] Worklet reported module ended` logs per phase fails |
+| Pattern-boundary quantum overruns | ✅ | `wrapOverruns` must not **increase** during each ≥2 s steady-playback window (`?audioDiag=1`; module-switch boundary may log once without failing steady-play phases) |
+| JS engine forced (no native artifacts) | ✅ | `?engine=js` + engine probe |
+| **Speakers actually output sound** | ❌ manual | Headless has no PCM/loudness assertion — use PHASE1 audible checklist |
+| File picker UX | ❌ manual | Smoke uses programmatic `loadModuleFromUrl` |
+| Storage playlist / share URL deep links | ❌ manual | Not covered by smoke URL matrix |
+| Native C++ engine path | ❌ out of scope | Smoke forces JS worklet (`?engine=js`) |
+
+Vitest helpers in `tests/audioSmokeCounters.test.ts` lock counter/diag parsing logic.
+The smoke **compounds** with `tests/workletAudioLifecycle.test.ts` and
+`tests/workletRegressionGuards.test.ts` — it does not replace them.
+
 ---
 
 ## Worklet asset path (wasm2js) — 2026-07 fix
