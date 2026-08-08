@@ -297,8 +297,15 @@ export function renderWebGPUFrame(ctx: FrameDrawContext): void {
       invertMix: p.invertMix ?? 0.0,
       paletteMode: p.paletteMode ?? 0,
       highlightInstrument: p.highlightInstrument ?? 0,
-      motionScale: p.reducedMotion ? 0.0 : 1.0,
-      highContrast: p.highContrast ? 1 : 0,
+      // Only pass accessibility uniforms (slots 34/35) for shaders that declare support.
+      // Shaders without supportsReducedMotion keep neutral defaults (motionScale=1.0,
+      // highContrast=0) so the extra buffer bytes are written but semantically inert.
+      motionScale: resolveShaderMeta(shaderFile).supportsReducedMotion
+        ? (p.reducedMotion ? 0.0 : 1.0)
+        : 1.0,
+      highContrast: resolveShaderMeta(shaderFile).supportsReducedMotion
+        ? (p.highContrast ? 1 : 0)
+        : 0,
       ...(supportsStepsLength(shaderFile)
         ? { stepsLength: p.stepsLength ?? 32 }
         : {}),

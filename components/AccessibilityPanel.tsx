@@ -9,13 +9,14 @@
  * All settings persist to localStorage via useShaderPrefsStore.
  */
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { cn } from '../utils/cn';
 import { useShaderPrefsStore } from '../store/shaderPrefsStore';
 import { CVD_PALETTE_NAMES } from '../utils/accessiblePalettes';
 
 export function AccessibilityPanel() {
   const [open, setOpen] = useState(false);
+  const dialogRef = useRef<HTMLDivElement>(null);
 
   const reducedMotion = useShaderPrefsStore((s) => s.reducedMotion);
   const setReducedMotion = useShaderPrefsStore((s) => s.setReducedMotion);
@@ -23,6 +24,18 @@ export function AccessibilityPanel() {
   const setHighContrast = useShaderPrefsStore((s) => s.setHighContrast);
   const cvdPalette = useShaderPrefsStore((s) => s.cvdPalette);
   const setCvdPalette = useShaderPrefsStore((s) => s.setCvdPalette);
+
+  // Close on Escape and move focus back to trigger
+  useEffect(() => {
+    if (!open) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setOpen(false);
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [open]);
 
   return (
     <div className="relative">
@@ -45,8 +58,10 @@ export function AccessibilityPanel() {
 
       {open && (
         <div
+          ref={dialogRef}
           role="dialog"
           aria-label="Accessibility settings panel"
+          aria-modal="true"
           className={cn(
             'absolute z-50 right-0 mt-1 w-64 rounded border border-panel bg-[#0d0d0d]',
             'shadow-lg p-3 flex flex-col gap-3',

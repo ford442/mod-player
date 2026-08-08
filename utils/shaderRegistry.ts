@@ -29,7 +29,7 @@
  * instrumentPalette   – binding 7 palette texture (v0.52–54, v0.56, v0.59)
  * instrumentHighlight – highlightInstrument uniform slot 33 (v0.59)
  * motionScale         – slot [34] f32; 0.0=reduced-motion, 1.0=normal; shader damps animation
- * highContrastMode    – slot [35] u32; 1=raise LED on/off contrast
+ * highContrast        – slot [35] u32; 1=raise LED on/off contrast
  * audioReactive       – binding 8 AudioReactive uniform + bezel_audio background (v0.58+)
  * highPrecisionPacking– PackedA/PackedB + DURA/TRIG packing
  * playheadRowAsFloat  – uniform slot [2] is f32 (not u32)
