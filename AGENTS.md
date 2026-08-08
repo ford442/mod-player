@@ -243,6 +243,8 @@ python3 deploy.py
 7. **Shader-Uniform coupling:** Shaders are tightly coupled to TypeScript host code. Changing a shader's `struct Uniforms` requires a matching change to `createUniformPayload()` in `PatternDisplay.tsx`. Adding a new shader often requires manually updating version checks in `PatternDisplay.tsx` for layout, packing, canvas size, and input handling.
 8. **Symlink watcher infinite loop:** The CodeQL scanner leaves a self-referential symlink (`_codeql_detected_source_root` → `.`). The Vite config mitigates this with `watch.followSymlinks: false`. Do not remove this setting.
 9. **MOD/XM silent playback / hiccups:** Do not re-init libopenmpt per `play()`, do not `suspend()` the `AudioContext` on module reload, do not post worklet `position` every audio quantum, and do not `disconnect()` the worklet node on hot reload. See `docs/WORKLET_AUDIO_BUG.md` and `tests/workletAudioLifecycle.test.ts`.
+10. **Emscripten output names:** Never commit `a.out` / `a.out.*` (Emscripten default names). The only native engine artifacts are `public/worklets/openmpt-native.{js,wasm,aw.js}` from `npm run build:emcc` — and those are gitignored build outputs.
+11. **Agent planning scratch:** Do not commit `.swarm-state.md` or `weekly_plan.md` (gitignored). Use GitHub issues and `docs/planning/ROADMAP.md` for tracked planning.
 
 ## Cursor Cloud specific instructions
 This is a **frontend-only** app; there is no backend to run for local dev. `libopenmpt` is self-hosted under `public/libmpt/` and sample modules (`4-mat_madness.mod`, `test.xm`, `libopenmpt-test.mod`) ship in `public/`, so the player works fully offline with no CDN or storage API. `VITE_STORAGE_API_URL` (proxied `/api`, `/songs`) is optional and only needed for the remote song browser.
