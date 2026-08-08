@@ -65,6 +65,28 @@ describe('playheadPrediction', () => {
     expect(frac).toBeCloseTo(12.5, 3);
   });
 
+  it('native-anchored samples extrapolate like JS quantum tags', () => {
+    const anchor = {
+      frameSecondsAtAnchor: 0,
+      mainHeardTimeAtAnchor: 100,
+      bridgeLatencySec: 0,
+    };
+    const sample: WorkletPositionSample = {
+      order: 0,
+      row: 10,
+      rowInt: 10,
+      positionSeconds: 5,
+      workletTime: 100.05,
+      bpm: 125,
+      speed: 6,
+    };
+    const heardTime = 100.1;
+    const predicted = predictPlayheadFromSample(sample, heardTime, 8);
+    expect(predicted.dtSec).toBeCloseTo(0.05, 3);
+    expect(predicted.playheadRow).toBeCloseTo(10.4, 3);
+    expect(anchor.mainHeardTimeAtAnchor + 0.05).toBeCloseTo(sample.workletTime, 3);
+  });
+
   it('keeps quantum prediction step well under one row at 125 BPM', () => {
     const rps125 = rowsPerSecondFromBpm(125);
     const rowSec = 1 / rps125;

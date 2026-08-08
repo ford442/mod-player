@@ -136,10 +136,14 @@ export async function runLibOpenMPTInit(deps: InitDeps): Promise<void> {
 
     if (enginePref.mode === 'force-js') {
       console.log('[INIT] force-JS default — JS worklet is active engine');
+    } else if (enginePref.mode === 'auto') {
+      console.log('[INIT] auto mode — native promotes only when parity gate is open and glue is present');
     }
 
     const shouldProbeNative =
-      enginePref.mode === 'prefer-native' || !isPublicModeAudioBuild();
+      enginePref.mode === 'prefer-native'
+      || enginePref.mode === 'auto'
+      || !isPublicModeAudioBuild();
 
     if (shouldProbeNative) {
       try {
@@ -178,6 +182,9 @@ export async function runLibOpenMPTInit(deps: InitDeps): Promise<void> {
           } else {
             if (enginePref.mode === 'force-js') {
               writeStoredAudioEngineOverride('js');
+            }
+            if (enginePref.mode === 'auto') {
+              console.log('[INIT] Native glue present but parity gate closed — staying on JS worklet');
             }
             console.log('[INIT] Native engine initialized but not promoted — active engine is JS worklet');
           }

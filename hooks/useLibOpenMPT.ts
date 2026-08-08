@@ -143,6 +143,8 @@ export function useLibOpenMPT(initialVolume: number = 0.4, liteMode: boolean = f
       driftAccumulatorRef: refs.driftAccumulatorRef,
       updateUIRef: refs.updateUIRef,
       nativeSharedBuffer: refs.nativeSharedBufferRef,
+      nativeClockAnchorRef: refs.nativeClockAnchorRef,
+      nativeBridgeLatencyRef: refs.nativeBridgeLatencyRef,
       ensureMainThreadModuleRef: refs.ensureMainThreadModuleRef,
       workletModuleTokenRef: refs.workletModuleTokenRef,
       lastWorkletModuleTokenSentRef: refs.lastWorkletModuleTokenSentRef,

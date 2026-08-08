@@ -9,6 +9,11 @@
 import type { ChannelShadowState } from '../types';
 import type { WorkletPositionData } from '../audio-worklet/types';
 import {
+  type NativeClockAnchor,
+  mapNativeFrameClockToHeardTime,
+  nativeFrameSecondsFromData,
+} from './nativeClockAnchor';
+import {
   applyWorkletPositionSample,
   type WorkletPositionInput,
   type WorkletPositionRefs,
@@ -57,16 +62,33 @@ export function nativeWorkletTimeFromFrames(
   return fallbackTime;
 }
 
+export interface NativePositionMapOptions {
+  /** Maps frame clock onto main AudioContext heard-time (native engine). */
+  clockAnchor?: NativeClockAnchor | null;
+  /** Heard-time fallback when frame clock or anchor is unavailable. */
+  fallbackHeardTime?: number;
+}
+
 /** Map native `WorkletPositionData` → canonical position input. */
 export function nativePositionToInput(
   data: WorkletPositionData,
   fallbackWorkletTime: number,
+  options: NativePositionMapOptions = {},
 ): WorkletPositionInput {
-  const workletTime = data.workletTime ?? nativeWorkletTimeFromFrames(
-    data.audioFramesRendered,
-    data.sampleRate,
-    fallbackWorkletTime,
-  );
+  const heardFallback = options.fallbackHeardTime ?? fallbackWorkletTime;
+  const frameSec = nativeFrameSecondsFromData(data.audioFramesRendered, data.sampleRate);
+  let workletTime: number;
+  if (frameSec != null && options.clockAnchor) {
+    workletTime = mapNativeFrameClockToHeardTime(frameSec, options.clockAnchor, heardFallback);
+  } else if (frameSec != null) {
+    workletTime = data.workletTime ?? frameSec;
+  } else {
+    workletTime = data.workletTime ?? nativeWorkletTimeFromFrames(
+      data.audioFramesRendered,
+      data.sampleRate,
+      heardFallback,
+    );
+  }
   const input: WorkletPositionInput = {
     order: data.currentOrder,
     row: data.currentRow,

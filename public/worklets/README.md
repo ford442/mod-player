@@ -41,14 +41,16 @@ Probed at runtime by `OpenMPTWorkletEngine` / `useWorkletLoader`. Root `./build-
 
 ### Engine selection precedence
 
-Production **default is the JS worklet**. Native is opt-in (`?engine=native` or localStorage / UI toggle).
+Production **default is the JS worklet** until native A/V parity is verified. Native is explicit opt-in (`?engine=native`) or auto-promoted when the parity gate is open.
 
 | Priority | Source | Values |
 |----------|--------|--------|
-| 1 (highest) | URL `?engine=` | `js` \| `native` (aliases: `worklet`, `native-worklet`) |
-| 2 | `localStorage.xasm1_audio_engine` | `js` \| `native` \| `auto` (unset = `auto` → **JS**) |
-| 3 | Auto probe | Detects glue for UI toggle only; does **not** auto-promote native |
+| 1 (highest) | URL `?engine=` | `js` \| `native` \| `auto` |
+| 2 | `localStorage.xasm1_audio_engine` | `js` \| `native` \| `auto` (unset = `auto`) |
+| 3 | Auto + parity gate | `VITE_NATIVE_PARITY_GATE=1` or CI native smoke — promotes when glue present |
 | 4 | Fallback | JS worklet → ScriptProcessor on WASM init failure |
+
+**Parity gate:** `auto` mode (default) stays on JS until `npm run smoke:playhead:native` passes in CI or deploy sets `VITE_NATIVE_PARITY_GATE=1`. Explicit `?engine=native` is never blocked.
 
 **Opt into native** (when artifacts are built):
 

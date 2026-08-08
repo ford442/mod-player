@@ -6,6 +6,7 @@ import {
   createPlayheadLagTracker,
   createPositionReportTracker,
 } from '../../utils/playheadLagMonitor';
+import type { NativeClockAnchor } from '../../utils/nativeClockAnchor';
 import type { LibOpenMPTRefs } from './types';
 
 export function useLibOpenMPTRefs(): LibOpenMPTRefs {
@@ -63,6 +64,8 @@ export function useLibOpenMPTRefs(): LibOpenMPTRefs {
   const userModuleLoadedRef = useRef<boolean>(false);
   const nativeEngineRef = useRef<OpenMPTWorkletEngine | null>(null);
   const nativeSharedBufferRef = useRef<SharedArrayBuffer | null>(null);
+  const nativeClockAnchorRef = useRef<NativeClockAnchor | null>(null);
+  const nativeBridgeLatencyRef = useRef<number>(0);
   const oscBufferRef = useRef<Float32Array | null>(null);
   const audioReactiveRef = useRef<Float32Array | null>(null);
   const playbackStateRef = useRef<PlaybackState>({
@@ -130,6 +133,8 @@ export function useLibOpenMPTRefs(): LibOpenMPTRefs {
     userModuleLoadedRef,
     nativeEngineRef,
     nativeSharedBufferRef,
+    nativeClockAnchorRef,
+    nativeBridgeLatencyRef,
     oscBufferRef,
     audioReactiveRef,
     playbackStateRef,

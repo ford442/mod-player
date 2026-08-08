@@ -100,6 +100,28 @@ describe('workletPositionAdapter', () => {
     expect(states[1]!.trigger).toBe(0);
   });
 
+  it('maps native PositionInfo with clock anchor onto heard-time', () => {
+    const data: WorkletPositionData = {
+      positionMs: 5000,
+      currentRow: 10,
+      currentPattern: 0,
+      currentOrder: 0,
+      bpm: 125,
+      numChannels: 2,
+      channelVU: new Float32Array(2),
+      rowFraction: 10.2,
+      audioFramesRendered: 48000,
+      sampleRate: 48000,
+    };
+    const anchor = {
+      frameSecondsAtAnchor: 0,
+      mainHeardTimeAtAnchor: 50,
+      bridgeLatencySec: 0,
+    };
+    const input = nativePositionToInput(data, 99, { clockAnchor: anchor, fallbackHeardTime: 99 });
+    expect(input.workletTime).toBeCloseTo(51, 6);
+  });
+
   it('feeds native-shaped samples through shared apply path', () => {
     const refs = makeRefs();
     const data: WorkletPositionData = {
