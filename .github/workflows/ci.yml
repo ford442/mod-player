@@ -154,6 +154,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Install Playwright Chromium
+        run: npx playwright install chromium --with-deps
+
       - name: Build
         run: VITE_APP_BASE_PATH=/ npm run build
 
@@ -168,9 +171,6 @@ jobs:
           echo "preview failed to start"; exit 1
 
       - name: Audio smoke (JS worklet product flow)
-        env:
-          PLAYWRIGHT_BROWSERS_PATH: /opt/pw-browsers
-          PLAYWRIGHT_USE_BUNDLED: '1'
         run: BASE_URL=http://127.0.0.1:4173 OUTPUT_DIR=./artifacts/audio-smoke npm run smoke:audio:ci
 
       - name: Upload audio smoke artifacts on failure

@@ -48,7 +48,6 @@ export function resolvePlaywrightChromiumExecutable() {
 }
 
 export function shouldUseBundledPlaywrightChromium() {
-  if (process.env.PLAYWRIGHT_USE_BUNDLED === '1') return true;
   return resolvePlaywrightChromiumExecutable() != null;
 }
 

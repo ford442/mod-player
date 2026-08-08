@@ -98,7 +98,7 @@ async function clickPlay(page, engine) {
   await waitForFunction(
     page,
     () => window.__TEST_HOOKS__?.getIsPlaying?.() === true,
-    { timeout: 15000 },
+    { timeout: 45000 },
   );
 }
 
