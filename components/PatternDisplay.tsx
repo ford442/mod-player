@@ -80,6 +80,10 @@ interface PatternDisplayProps {
   filmGrain?: number;
   invertMix?: number;
   crtEnabled?: boolean;
+  /** Damp bloom pulse and playhead animation (honours prefers-reduced-motion). */
+  reducedMotion?: boolean;
+  /** Raise LED on/off luminance contrast (brighter cores, darker chassis floor). */
+  highContrast?: boolean;
   liteMode?: boolean;
   editMode?: boolean;
   onSequencerCellEdit?: (row: number, channel: number) => void;
@@ -139,6 +143,8 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   filmGrain = 0.0,
   invertMix = 0.0,
   crtEnabled = false,
+  reducedMotion = false,
+  highContrast = false,
   liteMode = false,
   editMode = false,
   onSequencerCellEdit,
@@ -238,6 +244,8 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     vignetteStrength, filmGrain, invertMix, nightPreset,
     themeBlend: themeBlendRef.current,
     reactiveMode,
+    reducedMotion,
+    highContrast,
     ...(audioReactiveRef ? { audioReactiveRef } : {}),
     ...(totalRows !== undefined ? { totalRows } : {}),
     ...(playbackStateRef ? { playbackStateRef } : {}),
@@ -260,6 +268,8 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     vignetteStrength, filmGrain, invertMix, nightPreset,
     themeBlend: themeBlendRef.current,
     reactiveMode,
+    reducedMotion,
+    highContrast,
     ...(audioReactiveRef ? { audioReactiveRef } : {}),
     ...(totalRows !== undefined ? { totalRows } : {}),
     ...(playbackStateRef ? { playbackStateRef } : {}),

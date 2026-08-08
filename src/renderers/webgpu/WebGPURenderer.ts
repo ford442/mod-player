@@ -444,7 +444,7 @@ export class WebGPURenderer {
       });
     }
 
-    const uniformSize = layoutType === 'extended' ? 136 : (layoutType === 'texture' ? 64 : 32);
+    const uniformSize = layoutType === 'extended' ? 144 : (layoutType === 'texture' ? 64 : 32);
     this.uniformBuffer = pool.track(
       device.createBuffer({ size: alignTo(uniformSize, 256), usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST }),
       'shader',
