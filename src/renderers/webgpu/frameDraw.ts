@@ -297,6 +297,8 @@ export function renderWebGPUFrame(ctx: FrameDrawContext): void {
       invertMix: p.invertMix ?? 0.0,
       paletteMode: p.paletteMode ?? 0,
       highlightInstrument: p.highlightInstrument ?? 0,
+      motionScale: p.reducedMotion ? 0.0 : 1.0,
+      highContrast: p.highContrast ? 1 : 0,
       ...(supportsStepsLength(shaderFile)
         ? { stepsLength: p.stepsLength ?? 32 }
         : {}),

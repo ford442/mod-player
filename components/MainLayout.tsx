@@ -16,6 +16,7 @@ import { PatternEditor } from './PatternEditor';
 import { MidiControlsPanel } from './MidiControlsPanel';
 import { ExportPanel } from './ExportPanel';
 import { InstrumentPanel } from './InstrumentPanel';
+import { AccessibilityPanel } from './AccessibilityPanel';
 import { cn } from '../utils/cn';
 import { setLiteOverride } from '../utils/deviceCapabilities';
 import { usesInstrumentPalette } from '../utils/shaderVersion';
@@ -79,6 +80,9 @@ export function MainLayout() {
     setNightModePreset,
     crtEnabled,
     setCrtEnabled,
+    reducedMotion,
+    highContrast,
+    cvdPalette,
   } = useShaderPrefsStore();
 
   const isDarkMode = !LIGHT_THEMES.has(theme);
@@ -465,6 +469,8 @@ export function MainLayout() {
                     </button>
                   </>
                 )}
+                {/* Accessibility settings — always visible */}
+                <AccessibilityPanel />
             </div>
         </div>
 
@@ -514,7 +520,7 @@ export function MainLayout() {
              // Bloom settings from preset
              bloomIntensity={(isNightShader && nightModeEnabled) ? nightConfig.bloomIntensity : bloomPreset.intensity}
              bloomThreshold={bloomPreset.threshold}
-             colorPalette={colorPalette}
+             colorPalette={cvdPalette > 0 ? cvdPalette : colorPalette}
              paletteMode={paletteMode}
              highlightInstrument={selectedInstrumentIndex ?? 0}
              instrumentPalette={instrumentPalette}
@@ -529,6 +535,9 @@ export function MainLayout() {
              invertMix={nightConfig.invertMix}
              // CRT effect
              crtEnabled={crtEnabled}
+             // Accessibility
+             reducedMotion={reducedMotion}
+             highContrast={highContrast}
              // Lite mode
              liteMode={liteMode}
              editMode={editMode}

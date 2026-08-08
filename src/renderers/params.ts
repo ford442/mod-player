@@ -60,6 +60,12 @@ export interface WebGPURenderParams {
   reactiveMode?: boolean;
   /** Worklet oscilloscope ring buffer (mono); uploaded to GPU binding 6 when present. */
   oscBufferRef?: React.MutableRefObject<Float32Array | null>;
+  /** Damp bloom pulse and playhead animation (honours prefers-reduced-motion). */
+  reducedMotion?: boolean;
+  /** Raise LED on/off luminance contrast (brighter cores, darker floor). */
+  highContrast?: boolean;
+  /** CVD-safe palette id (0=default pitch-hue, 1=deutan/protan, 2=tritan, 3=mono). */
+  cvdPalette?: number;
 }
 
 /** Shared per-frame parameters — all GPU backends read the same ref. */

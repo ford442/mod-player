@@ -51,6 +51,12 @@ export interface ShaderPrefsState {
   nightModeEnabled: boolean;
   nightModePreset: NightPreset;
   crtEnabled: boolean;
+  /** Honour prefers-reduced-motion: damps bloom pulse / playhead animation. */
+  reducedMotion: boolean;
+  /** Raise LED on/off contrast: brighter cores, darker chassis floor. */
+  highContrast: boolean;
+  /** CVD-safe palette id (0=default, 1=deutan/protan, 2=tritan, 3=mono). */
+  cvdPalette: number;
   setModuleHash: (hash: string | null, options?: { skipShaderRestore?: boolean }) => void;
   restoreModuleShader: () => void;
   selectShader: (shader: string) => void;
@@ -65,6 +71,9 @@ export interface ShaderPrefsState {
   setNightModeEnabled: (enabled: boolean) => void;
   setNightModePreset: (preset: NightPreset) => void;
   setCrtEnabled: (enabled: boolean) => void;
+  setReducedMotion: (enabled: boolean) => void;
+  setHighContrast: (enabled: boolean) => void;
+  setCvdPalette: (id: number) => void;
   markSkipModuleShaderRestore: () => void;
 }
 
@@ -83,6 +92,13 @@ export const useShaderPrefsStore = create<ShaderPrefsState>((set, get) => ({
   nightModeEnabled: readLocalStorage<boolean>('xasm1_nightMode_enabled', false),
   nightModePreset: readLocalStorage<NightPreset>('xasm1_nightMode_preset', DEFAULT_NIGHT_PRESET),
   crtEnabled: readLocalStorage<boolean>('xasm1-crt-enabled', false),
+  reducedMotion: readLocalStorage<boolean>('xasm1-reduced-motion',
+    typeof window !== 'undefined'
+      ? window.matchMedia('(prefers-reduced-motion: reduce)').matches
+      : false,
+  ),
+  highContrast: readLocalStorage<boolean>('xasm1-high-contrast', false),
+  cvdPalette: readLocalStorage<number>('xasm1-cvd-palette', 0),
   setModuleHash: (moduleHash, options) => {
     set({
       moduleHash,
@@ -183,6 +199,18 @@ export const useShaderPrefsStore = create<ShaderPrefsState>((set, get) => ({
   setCrtEnabled: (crtEnabled) => {
     writeLocalStorage('xasm1-crt-enabled', crtEnabled);
     set({ crtEnabled });
+  },
+  setReducedMotion: (reducedMotion) => {
+    writeLocalStorage('xasm1-reduced-motion', reducedMotion);
+    set({ reducedMotion });
+  },
+  setHighContrast: (highContrast) => {
+    writeLocalStorage('xasm1-high-contrast', highContrast);
+    set({ highContrast });
+  },
+  setCvdPalette: (cvdPalette) => {
+    writeLocalStorage('xasm1-cvd-palette', cvdPalette);
+    set({ cvdPalette });
   },
   markSkipModuleShaderRestore: () => set({ skipNextModuleShaderRestore: true }),
 }));
