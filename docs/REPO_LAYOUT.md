@@ -19,11 +19,11 @@ What is **production** vs **supporting** vs **ignored/experimental**.
 | Area | Role |
 |------|------|
 | `docs/` | Guides (`VISUAL_SMOKE.md`, `DEPLOY.md`, planning notes) |
+| `docs/planning/ROADMAP.md` | Short living roadmap (GitHub issues); not agent run diaries |
 | `scripts/` | Build, smoke tests, shader sync |
 | `.github/workflows/` | CI |
 | `archive/` | Demoted experiments — **not imported** |
 | `shaders-enhanced/` | WGSL prototypes; promote via registry when ready |
-| `weekly_plan.md` | Human planning scratchpad |
 
 ## Gitignored / download at build time
 
@@ -31,7 +31,9 @@ What is **production** vs **supporting** vs **ignored/experimental**.
 |------|------|
 | `vendor/` | libopenmpt tarball extracted by `scripts/build-wasm.sh` |
 | `node_modules/`, `dist/` | npm / Vite output |
-| `public/worklets/openmpt-native.*` | Emscripten build artifacts |
+| `public/worklets/openmpt-native.*` | Emscripten build artifacts (from `npm run build:emcc`) |
+| `a.out`, `a.out.*` | Emscripten default-name leftovers — **never commit** |
+| `.swarm-state.md`, `weekly_plan.md` | Local agent planning scratch — use issues + `docs/planning/ROADMAP.md` |
 
 **Do not** commit `libopenmpt-0.8.4+release/` at repo root — use `vendor/` only.
 
@@ -43,6 +45,9 @@ These were deleted or archived to reduce agent confusion:
 - `kimi_agents/`, `mod-player-shaders/` — parallel scratch / historical fork
 - Root `libopenmpt-0.8.4+release/` — duplicate of vendor download
 - `deploy_old.py`, `finish_linting*.sh`, `kimi-fix-modplayer.sh`, `plan_test.md`
+- `a.out.js`, `a.out.wasm`, `a.out.aw.js`, `a.out.ww.js` — untracked Emscripten default-name leftovers (not `openmpt-native.*`)
+- `weekly_plan.md`, `.swarm-state.md`, `docs/.swarm-state.md` — agent run diaries replaced by `docs/planning/ROADMAP.md` + gitignore
+- Root one-offs: `benchmark_pattern.cjs`, `test_perf.cjs`, `test.ts`, `verify_ui.py` — superseded by `scripts/` smoke tests
 
 ## Sparse checkout hint
 
