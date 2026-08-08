@@ -41,6 +41,8 @@
     "smoke:visual": "node scripts/visual-smoke.mjs",
     "smoke:visual:ci": "SMOKE_PROFILE=ci node scripts/visual-smoke.mjs",
     "smoke:playhead": "node scripts/playhead-acceptance.mjs",
+    "smoke:audio": "node scripts/audio-smoke.mjs",
+    "smoke:audio:ci": "AUDIO_SMOKE_HEADLESS=1 node scripts/audio-smoke.mjs",
     "check:cycles": "madge --circular --extensions ts,tsx src/renderers hooks/useWebGPURender.ts"
   },
   "dependencies": {
