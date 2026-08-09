@@ -92,6 +92,8 @@ export const fillUniformPayload = (
     invertMix?: number;         // [31] luminance-inversion blend (0–1)
     paletteMode?: number;       // [32] 0=pitch-hue, 1=per-instrument
     highlightInstrument?: number; // [33] 0=off, else 1-based instrument index
+    motionScale?: number;         // [34] 1.0=normal, 0.0=reduced-motion (damps animation terms)
+    highContrast?: number;        // [35] 0=off, 1=on (raises LED on/off contrast)
   },
   uint: Uint32Array,
   float: Float32Array
@@ -138,7 +140,9 @@ export const fillUniformPayload = (
     float[31] = params.invertMix ?? 0.0;
     uint[32] = Math.max(0, params.paletteMode ?? 0) >>> 0;
     uint[33] = Math.max(0, params.highlightInstrument ?? 0) >>> 0;
-    return 136;
+    float[34] = Math.min(1, Math.max(0, params.motionScale ?? 1.0));
+    uint[35] = (params.highContrast ?? 0) ? 1 : 0;
+    return 144;
   }
 
   uint[0] = Math.max(0, params.numRows) >>> 0;
