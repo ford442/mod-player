@@ -776,6 +776,7 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
       if (elapsedMs > this._diagMaxMs) this._diagMaxMs = elapsedMs;
       if (elapsedMs > budgetMs) this._diagOverruns++;
       if (wrapped) {
+        console.log(`[Worklet] WRAPPED: rowInt=${rowInt} < _prevRowInt=${this._prevRowInt}, elapsedMs=${elapsedMs.toFixed(2)}, budgetMs=${budgetMs.toFixed(2)}`);
         this._diagWrapCount++;
         if (elapsedMs > this._diagWrapMaxMs) this._diagWrapMaxMs = elapsedMs;
         if (elapsedMs > budgetMs) this._diagWrapOverruns++;

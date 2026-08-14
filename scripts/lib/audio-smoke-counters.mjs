@@ -67,16 +67,28 @@ export function countersAdvanced(before, after) {
 
 /**
  * Fail when pattern-boundary quanta exceeded budget during a playback window.
+ * Supports tolerating a bounded warmup transient.
  * @param {number} baseline
  * @param {{ wrapOverruns?: number }|null|undefined} after
+ * @param {{ isWarmup?: boolean, maxWarmup?: number }} [options]
  * @returns {{ ok: boolean, reason: string, delta: number }}
  */
-export function checkWrapOverrunDelta(baseline, after) {
+export function checkWrapOverrunDelta(baseline, after, options = {}) {
+  const isWarmup = options.isWarmup ?? false;
+  const maxWarmup = options.maxWarmup ?? 1;
   const delta = (after?.wrapOverruns ?? 0) - baseline;
-  if (delta > 0) {
-    return { ok: false, reason: `wrapOverruns +${delta} (baseline=${baseline})`, delta };
+  
+  if (isWarmup) {
+    if (delta > maxWarmup) {
+      return { ok: false, reason: `warmup wrapOverruns +${delta} exceeds max ${maxWarmup} (baseline=${baseline})`, delta };
+    }
+    return { ok: true, reason: `warmup wrapOverruns +${delta} within budget (baseline=${baseline})`, delta };
+  } else {
+    if (delta > 0) {
+      return { ok: false, reason: `steady-state wrapOverruns +${delta} (baseline=${baseline})`, delta };
+    }
+    return { ok: true, reason: `wrapOverruns stable at ${after?.wrapOverruns ?? baseline}`, delta };
   }
-  return { ok: true, reason: `wrapOverruns stable at ${after?.wrapOverruns ?? baseline}`, delta };
 }
 
 /**

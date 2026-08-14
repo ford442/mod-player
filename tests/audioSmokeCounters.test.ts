@@ -38,9 +38,16 @@ describe('audioSmokeCounters', () => {
     expect(checkAudioDiag({ wrapOverruns: 1 }).ok).toBe(false);
   });
 
-  it('checkWrapOverrunDelta only fails on increases during a window', () => {
+  it('checkWrapOverrunDelta only fails on increases during a window (steady state)', () => {
     expect(checkWrapOverrunDelta(1, { wrapOverruns: 1 }).ok).toBe(true);
     expect(checkWrapOverrunDelta(1, { wrapOverruns: 2 }).ok).toBe(false);
+  });
+
+  it('checkWrapOverrunDelta tolerates bounded increases during warmup', () => {
+    // 1 overrun allowed
+    expect(checkWrapOverrunDelta(1, { wrapOverruns: 2 }, { isWarmup: true, maxWarmup: 1 }).ok).toBe(true);
+    // >1 overrun fails
+    expect(checkWrapOverrunDelta(1, { wrapOverruns: 3 }, { isWarmup: true, maxWarmup: 1 }).ok).toBe(false);
   });
 });
 

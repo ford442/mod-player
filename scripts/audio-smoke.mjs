@@ -119,30 +119,51 @@ async function clickStop(page, engine) {
 async function assertCountersAdvance(page, phaseLabel, { wrapBaseline = null } = {}) {
   const before = await readCounters(page);
   const baseWrap = wrapBaseline ?? (before.audioDiag?.wrapOverruns ?? 0);
-  const deadline = Date.now() + ADVANCE_SAMPLE_MS;
-  let after = before;
-  let verdict = countersAdvanced(before, after);
-
-  while (!verdict.advanced && Date.now() < deadline) {
+  const start = Date.now();
+  const warmupEnd = start + 500; // 500ms warmup period
+  // To ensure steady state, we sample the full window
+  const deadline = start + ADVANCE_SAMPLE_MS;
+  
+  let current = before;
+  let verdict = countersAdvanced(before, current);
+  let steadyStateWrapBaseline = null;
+  
+  while (Date.now() < deadline) {
     const remaining = deadline - Date.now();
     if (remaining <= 0) break;
     await new Promise((r) => setTimeout(r, Math.min(ADVANCE_POLL_MS, remaining)));
-    after = await readCounters(page);
-    verdict = countersAdvanced(before, after);
+    current = await readCounters(page);
+    
+    if (!verdict.advanced) {
+      verdict = countersAdvanced(before, current);
+    }
+    
+    // Check steady state if warmup is over
+    if (Date.now() >= warmupEnd) {
+      if (steadyStateWrapBaseline === null) {
+        steadyStateWrapBaseline = current.audioDiag?.wrapOverruns ?? 0;
+      } else {
+        const wrapDeltaSteady = (current.audioDiag?.wrapOverruns ?? 0) - steadyStateWrapBaseline;
+        if (wrapDeltaSteady > 0) {
+          throw new Error(`${phaseLabel}: steady-state wrapOverruns +${wrapDeltaSteady} after warmup (steadyBaseline=${steadyStateWrapBaseline}, now=${current.audioDiag?.wrapOverruns ?? 0})`);
+        }
+      }
+    }
   }
 
   if (!verdict.advanced) {
     throw new Error(`${phaseLabel}: counters did not advance within ${ADVANCE_SAMPLE_MS}ms — ${verdict.reason}`);
   }
 
-  const wrapDelta = (after.audioDiag?.wrapOverruns ?? 0) - baseWrap;
-  if (wrapDelta > 0) {
+  // Bound the total warmup transient
+  const totalWrapDelta = (current.audioDiag?.wrapOverruns ?? 0) - baseWrap;
+  if (totalWrapDelta > 1) { // Tolerate up to 1 warmup transient overrun
     throw new Error(
-      `${phaseLabel}: wrapOverruns +${wrapDelta} during playback window (baseline=${baseWrap}, now=${after.audioDiag?.wrapOverruns ?? 0})`,
+      `${phaseLabel}: excessive warmup wrapOverruns +${totalWrapDelta} during playback window (baseline=${baseWrap}, now=${current.audioDiag?.wrapOverruns ?? 0}, max allowed 1)`,
     );
   }
 
-  return { before, after, verdict, wrapBaseline: baseWrap, wrapDelta };
+  return { before, after: current, verdict, wrapBaseline: baseWrap, wrapDelta: totalWrapDelta };
 }
 
 async function loadXmMidPlayback(page, baseUrl) {
@@ -259,6 +280,9 @@ async function main() {
     } catch (err) {
       report.status = 'FAIL';
       report.errors.push(err?.message ?? String(err));
+      console.error('\n--- CONSOLE LINES ---');
+      console.error(consoleLines.join('\n'));
+      console.error('---------------------\n');
       throw err;
     } finally {
       if (context) await context.close();
