@@ -1,8 +1,8 @@
 # Native C++ Engine Platform Epic
 
-**Status:** In progress (P2) — native clock anchor + parity gate + CI native playhead smoke (2026-08)  
-**Depends on (done):** dual-build hygiene (`openmpt-native.*` vs `openmpt-worklet.js`), playhead prediction foundation  
-**Last audited:** 2026-07-25  
+**Status:** Nearly complete (P2) — clock reset + hard parity smoke + scheduled native playhead (2026-08)  
+**Depends on (done):** dual-build hygiene (`openmpt-native.*` vs `openmpt-worklet.js`), playhead prediction foundation, PR #393 clock anchor/gate  
+**Last audited:** 2026-08-15  
 
 ---
 
@@ -12,13 +12,13 @@ The C++/Emscripten engine exists end-to-end:
 
 | Layer | Path | Notes |
 |-------|------|--------|
-| C++ core | `cpp/openmpt_wrapper.*`, `cpp/worklet_processor.cpp` | libopenmpt render + `PositionInfo` shared memory |
+| C++ core | `cpp/openmpt_wrapper.*`, `cpp/worklet_processor.cpp` | libopenmpt render + `PositionInfo` shared memory; **zeros frame clock on load/seek** |
 | Build | `scripts/build-wasm.sh` → `npm run build:emcc` | emsdk **3.1.50**, outputs `openmpt-native.{js,wasm,aw.js}` |
 | TS wrapper | `audio-worklet/OpenMPTWorkletEngine.ts` | Dynamic import of glue; polls `_poll_position` |
 | Ring bridge | `public/worklets/native-bridge-processor.js` | SAB ring → main-thread graph |
-| Main hook | `hooks/useLibOpenMPT.ts` + `useAudioGraph.ts` | Probe → prefer native when glue present |
+| Main hook | `hooks/useLibOpenMPT.ts` + `hooks/audioGraph/*` | Probe; auto-prefer only if parity gate open |
 
-**Production default remains the JS worklet** (`openmpt-worklet.js` + wasm2js `libopenmpt-audioworklet.js`). Native artifacts are **gitignored** and only appear after a local or CI build.
+**Production default remains the JS worklet** (`openmpt-worklet.js` + wasm2js `libopenmpt-audioworklet.js`). Native artifacts are **gitignored** and only appear after a local or CI build. Auto-prefer requires `VITE_NATIVE_PARITY_GATE=1` (or local parity marker) — never ship gate without green `smoke:playhead:native`.
 
 ---
 
@@ -36,10 +36,11 @@ The C++/Emscripten engine exists end-to-end:
 
 | Criterion | Current | Target |
 |-----------|---------|--------|
-| CI publishes **or** verifies native build | Weekly schedule publishes artifacts; PR only script/export smoke | PR path: verify (cached rebuild when cpp/scripts change). Schedule: full build + artifact. Optional: debug ASSERTIONS job |
-| Feature flag / auto-detect documented | Auto-detect + prefer exists in code; weak docs; **no force-JS flag** | Document precedence + `localStorage` / URL / query override; update `public/worklets/README.md` + AGENTS |
-| A/V sync ≥ JS worklet (post-prediction) | Native frame clock + main-context anchor (`utils/nativeClockAnchor.ts`); native smoke in CI | Native samples carry sample-accurate clock; `smoke:playhead:native` + manual checklist pass on native |
+| CI publishes **or** verifies native build | **Done** — path-filtered full build + weekly schedule + libopenmpt cache | Optional: debug ASSERTIONS matrix (PR6 polish) |
+| Feature flag / auto-detect documented | **Done** — `?engine=` / localStorage / public-mode force-JS / parity gate | Keep README + AGENTS in sync |
+| A/V sync ≥ JS worklet (post-prediction) | Frame clock + anchor + **load/seek frame reset**; smoke hard-requires `native-worklet` | Green `report-native.json` on scheduled + path CI; fill measured lag in `accurate_playback.md` |
 | No filename collision with JS worklet | **Done** — `openmpt-native.*` only; build refuses clobber | Keep guards + scheduled integrity check |
+| Export dual-context | **Documented** — MediaRecorder blocked on native (`docs/EXPORT.md`) | Dual-context capture still out of scope |
 
 ---
 
@@ -66,18 +67,18 @@ Gap: every scheduled run rebuilds libopenmpt from source (~minutes). PR never pr
 ### 4.3 Progressive enhancement today
 
 ```
-INIT:
-  isNativeGlueAvailable(openmpt-native.js)
-    → createOpenMPTModule factory present
-    → not an AudioWorkletProcessor script
-  if ok: OpenMPTWorkletEngine.init() → setActiveEngine('native-worklet')
-  else: JS worklet path
+INIT (utils/audioEngineSelection.ts):
+  URL ?engine=js|native|auto
+  → public mode: force-js (unless URL native)
+  → localStorage override
+  → auto: shouldAutoPreferNative (parity gate) if glue OK
+  → else JS worklet
 ```
 
-- **Prefer-when-present is already implemented.**
-- Engine toggle exists at runtime (`toggleAudioEngine`: native ↔ JS).
-- Missing: durable **force JS** (`?engine=js` / `localStorage.xasm1_audio_engine=js`) for debugging without deleting artifacts.
-- Missing: single source of truth doc for precedence (probe → flag → fallback).
+- **Force JS / force native / auto + parity gate: done.**
+- Public builds never sticky-native.
+- Engine toggle persists override.
+- Docs: `public/worklets/README.md`.
 
 ### 4.4 Position / VU / PCM schema (not unified)
 
@@ -106,11 +107,11 @@ Implication: two adapters in `useAudioGraph` (message handler vs `engine.on('pos
 |------------|------------|--------|
 | Pre-render row snapshot | Yes | fillPositionInfo each quantum (post-render row is still current) |
 | `rowFraction` via time-at-position | Yes | Yes (`openmpt_wrapper.cpp`) |
-| Quantum `audioTime` | Yes (`currentTime` in process) | **Missing** — poll uses main ctx time |
-| Frame clock | `samplesWritten` + rate | `audioFramesRendered` + `sampleRate` |
-| Main prediction | `playheadPrediction.ts` | Same apply path once sample is shaped |
+| Quantum `audioTime` | Yes (`currentTime` in process) | Frame clock mapped via `nativeClockAnchor` (main heard-time domain) |
+| Frame clock | `samplesWritten` + rate | `audioFramesRendered` + `sampleRate`; **reset on load/seek** |
+| Main prediction | `playheadPrediction.ts` | Same `applyNormalizedPosition` path |
 
-Acceptance requires tagging native samples with a clock that prediction can trust (prefer `audioFramesRendered/sampleRate` as primary, or stash quantum audio time in `PositionInfo`).
+Acceptance: `smoke:playhead:native` asserts active engine `native-worklet` and median \|predictionLagRows\| &lt; 1.
 
 ### 4.6 emcc flags (as of `scripts/build-wasm.sh`)
 

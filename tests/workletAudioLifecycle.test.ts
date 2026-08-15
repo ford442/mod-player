@@ -3,6 +3,7 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { readLibOpenMPTSources, readTransportActionsSource } from './helpers/libOpenMPTSource';
+import { readAudioGraphSources } from './helpers/audioGraphSource';
 import {
   canReuseWorkletNode,
   getStopMusicWorkletActions,
@@ -138,7 +139,7 @@ describe('workletLibSingleton (#329 shared-scope init)', () => {
 describe('audio hook source invariants', () => {
   const useLibOpenMPT = readLibOpenMPTSources(ROOT);
   const transportActions = readTransportActionsSource(ROOT);
-  const useAudioGraph = readFileSync(join(ROOT, 'hooks/useAudioGraph.ts'), 'utf8');
+  const useAudioGraph = readAudioGraphSources(ROOT);
   const workletSource = readFileSync(join(ROOT, 'public/worklets/openmpt-worklet.js'), 'utf8');
 
   it('stopMusic does not call audioContext.suspend()', () => {

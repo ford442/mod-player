@@ -20,7 +20,7 @@
 - **`vite.config.ts`** — Base path from `VITE_APP_BASE_PATH`; React plugin; COOP/COEP headers (`same-origin` / `credentialless`); `watch.followSymlinks: false` (guards against CodeQL self-referential symlink); `optimizeDeps.exclude: ['openmpt-native']`; `assetsInclude: ['**/*.wasm']`.
 - **`tailwind.config.js`** — Explicit `content` paths only (no broad globs) to prevent build OOM. Custom theme extensions for `panel`, `edge`, `accent`, `glow`, `borderColor`, and `boxShadow`.
 - **`postcss.config.js`** — TailwindCSS + Autoprefixer.
-- **`eslint.config.js`** — Ignores `dist`, `public`, `vendor`, `archive`, `node_modules`, `jules_patch`, `subdir`, `scripts`, `cpp`. CI: `npm run lint` (max 100 warnings).
+- **`eslint.config.js`** — Ignores `dist`, `public`, `vendor`, `archive`, `node_modules`, `jules_patch`, `subdir`, `scripts`, `cpp`. CI: `npm run lint` (max 43 warnings; ratchet down as debt is paid).
 - **`package-lock.json`** — Committed for reproducible installs. CI uses `npm ci`.
 
 ## Audio Architecture (Three Tiers + Fallback)
@@ -149,7 +149,7 @@ npm run dev        # Vite dev server (needs WebGPU-enabled browser, e.g., Chrome
 ```bash
 npm run build           # tsc && vite build (uses 4GB max-old-space-size)
 npm run typecheck       # tsc --noEmit
-npm run lint            # eslint . --max-warnings 100 (hard CI gate)
+npm run lint            # eslint . --max-warnings 43 (hard CI gate; ratchet down over time)
 npm run preview         # Preview the production build locally
 ```
 
@@ -204,7 +204,7 @@ python3 deploy.py
 - **Fix comments:** The codebase prefixes engineering fixes with identifiers like `AUDIO-001 FIX` and `TIMING FIX`.
 - **Base URL awareness:** Almost all asset URLs are constructed with `import.meta.env.BASE_URL` so the app works when deployed under a subdirectory.
 - **React patterns:** Functional components with hooks only; no class components. State for UI logic; mutable refs for high-frequency audio data. Props are preferred over context except for deeply nested state.
-- **ESLint:** Configured in `eslint.config.js` (typescript-eslint + react-hooks + react-refresh). `npm run lint` runs `eslint . --max-warnings 100` and is a **hard CI gate**. Remaining warnings are tracked for a follow-up cleanup PR (ratchet the budget down over time).
+- **ESLint:** Configured in `eslint.config.js` (typescript-eslint + react-hooks + react-refresh). `npm run lint` runs `eslint . --max-warnings 43` and is a **hard CI gate**. Remaining warnings (~41) are tracked for a follow-up cleanup PR (ratchet the budget down over time).
 
 ## Testing
 - **Unit tests (Vitest):** `npm test` runs the full suite (61+ tests in `tests/**/*.test.ts`) — packing, duration parity, trigger tails, shader includes, share state, pattern edit, WAV encoder, and more. Use `npm run test:watch` during development. Focused scripts: `test:shader-includes`, `test:duration-parity`, `test:trigger-tail`, `test:octave-brightness`.
@@ -243,8 +243,8 @@ python3 deploy.py
 7. **Shader-Uniform coupling:** Shaders are tightly coupled to TypeScript host code. Changing a shader's `struct Uniforms` requires a matching change to `createUniformPayload()` in `PatternDisplay.tsx`. Adding a new shader often requires manually updating version checks in `PatternDisplay.tsx` for layout, packing, canvas size, and input handling.
 8. **Symlink watcher infinite loop:** The CodeQL scanner leaves a self-referential symlink (`_codeql_detected_source_root` → `.`). The Vite config mitigates this with `watch.followSymlinks: false`. Do not remove this setting.
 9. **MOD/XM silent playback / hiccups:** Do not re-init libopenmpt per `play()`, do not `suspend()` the `AudioContext` on module reload, do not post worklet `position` every audio quantum, and do not `disconnect()` the worklet node on hot reload. See `docs/WORKLET_AUDIO_BUG.md` and `tests/workletAudioLifecycle.test.ts`.
-10. **Emscripten output names:** Never commit `a.out` / `a.out.*` (Emscripten default names). The only native engine artifacts are `public/worklets/openmpt-native.{js,wasm,aw.js}` from `npm run build:emcc` — and those are gitignored build outputs.
-11. **Agent planning scratch:** Do not commit `.swarm-state.md` or `weekly_plan.md` (gitignored). Use GitHub issues and `docs/planning/ROADMAP.md` for tracked planning.
+10. **Emscripten output names:** Never commit `a.out` / `a.out.*` (Emscripten default names; gitignored). The only native engine artifacts are `public/worklets/openmpt-native.{js,wasm,aw.js}` from `npm run build:emcc` — and those are gitignored build outputs. Do not confuse leftover `a.out.*` in a dirty tree with production engine files.
+11. **Agent planning scratch:** Do not commit `.swarm-state.md` or `weekly_plan.md` (gitignored). Use GitHub issues and `docs/planning/ROADMAP.md` for tracked planning. Do not re-add root `git.sh` “push fix” helpers.
 
 ## Cursor Cloud specific instructions
 This is a **frontend-only** app; there is no backend to run for local dev. `libopenmpt` is self-hosted under `public/libmpt/` and sample modules (`4-mat_madness.mod`, `test.xm`, `libopenmpt-test.mod`) ship in `public/`, so the player works fully offline with no CDN or storage API. `VITE_STORAGE_API_URL` (proxied `/api`, `/songs`) is optional and only needed for the remote song browser.

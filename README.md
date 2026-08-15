@@ -57,7 +57,7 @@ npm run preview
 
 Assets load from site root (`/`). For the live subpath deploy at `test.1ink.us/xm-player/`, use `npm run build:xm-player` (sets `VITE_APP_BASE_PATH=/xm-player/`).
 
-Lint (ESLint, hard CI gate; max 100 warnings budget)
+Lint (ESLint, hard CI gate; max 43 warnings budget)
 
 ```bash
 npm run lint

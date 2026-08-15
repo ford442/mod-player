@@ -106,6 +106,11 @@ Headless CI cannot assert speaker output. After audio-path changes, verify **wit
 `?renderer=webgl2&engine=js&audioDiag=1`. CI job: `audio-smoke` in `.github/workflows/ci.yml`
 (uses preinstalled Chromium via `PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers`).
 
+Shared waits go through `scripts/lib/browser-launch.mjs` `waitForFunction`, which passes
+Playwright options as the **third** argument (not the second — second is `arg`). First-play
+init can take tens of seconds while the ~5 MB wasm2js glue loads; set `TIMEOUT` (default 90s)
+if a slow runner needs more headroom.
+
 | Check | Automated? | How |
 |-------|------------|-----|
 | Default `4-mat_madness.mod` auto-load | ✅ | `__TEST_HOOKS__.isModuleLoaded()` |

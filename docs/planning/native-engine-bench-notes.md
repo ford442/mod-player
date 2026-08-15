@@ -56,6 +56,18 @@ Fill in after a local run (example placeholders):
 ## Acceptance for epic #09
 
 - [x] Methodology documented
-- [ ] Numbers filled from at least one large-IT local run (operator)
+- [x] Harness: `npm run bench:engine` → `artifacts/engine-bench/`
+- [ ] Numbers filled from at least one large-IT local run (operator) — **not a release gate**
 
-CI does **not** gate on this benchmark. Scheduled/path native builds prove linkability; this note is DX/perf awareness only.
+CI does **not** gate on this benchmark. A/V parity is gated by `smoke:playhead:native` (path-filtered + scheduled). This note is DX/perf awareness only; do not flip defaults on vibes alone.
+
+### Quick harness (default module)
+
+```bash
+npm run build:emcc   # when comparing native
+npm run preview -- --port 4173 &
+npm run bench:engine
+# → artifacts/engine-bench/report.json (median getPlayheadDebug ms per engine)
+```
+
+Paste results into the table above after a local run on a large IT when available.

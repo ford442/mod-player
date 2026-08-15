@@ -82,3 +82,39 @@ jobs:
             public/worklets/openmpt-native.wasm
             public/worklets/openmpt-native.aw.js
           retention-days: 14
+
+      # ── A/V parity gate (same budget as JS playhead-smoke) ──────────
+      - name: Install Playwright Chromium
+        run: npx playwright install chromium --with-deps
+
+      - name: Build app + start preview for native playhead parity
+        run: |
+          VITE_APP_BASE_PATH=/ npm run build
+          npm run preview -- --port 4173 --host 127.0.0.1 &
+          echo $! > /tmp/preview-native-playhead.pid
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:4173/ >/dev/null; then echo "preview ready"; exit 0; fi
+            sleep 2
+          done
+          echo "preview failed to start"; exit 1
+
+      - name: Playhead acceptance (native engine parity)
+        run: |
+          BASE_URL=http://127.0.0.1:4173 \
+          OUTPUT_DIR=./artifacts/playhead-acceptance-native \
+          AUDIO_ENGINE=native \
+          npm run smoke:playhead
+
+      - name: Upload native playhead report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playhead-native-scheduled
+          path: artifacts/playhead-acceptance-native/
+          retention-days: 14
+          if-no-files-found: ignore
+
+      - name: Stop preview server
+        if: always()
+        run: |
+          if [ -f /tmp/preview-native-playhead.pid ]; then kill $(cat /tmp/preview-native-playhead.pid) 2>/dev/null || true; fi

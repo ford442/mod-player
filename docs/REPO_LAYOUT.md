@@ -34,8 +34,21 @@ What is **production** vs **supporting** vs **ignored/experimental**.
 | `public/worklets/openmpt-native.*` | Emscripten build artifacts (from `npm run build:emcc`) |
 | `a.out`, `a.out.*` | Emscripten default-name leftovers — **never commit** |
 | `.swarm-state.md`, `weekly_plan.md` | Local agent planning scratch — use issues + `docs/planning/ROADMAP.md` |
+| `_codeql_detected_source_root` | CodeQL self-symlink (scanner may recreate; gitignored) |
 
 **Do not** commit `libopenmpt-0.8.4+release/` at repo root — use `vendor/` only.
+
+**Native engine naming:** production build outputs are only `public/worklets/openmpt-native.{js,wasm,aw.js}` from `npm run build:emcc`. Never rename those to `a.out.*` or commit Emscripten defaults.
+
+## Agent / planning scratch policy
+
+| Tracked | Untracked (gitignored) |
+|---------|------------------------|
+| `docs/planning/ROADMAP.md` — short living roadmap | `.swarm-state.md`, `weekly_plan.md` — run diaries |
+| `docs/planning/*.md` — feature specs (e.g. FT2 comparison) | Root agent dump files |
+| GitHub issues / PRs for status | Private weekly dispatch artifacts |
+
+Do **not** append multi-session ops diaries to tracked files. Point agents at issues + `ROADMAP.md`.
 
 ## Removed (P1 cleanup)
 
@@ -48,6 +61,9 @@ These were deleted or archived to reduce agent confusion:
 - `a.out.js`, `a.out.wasm`, `a.out.aw.js`, `a.out.ww.js` — untracked Emscripten default-name leftovers (not `openmpt-native.*`)
 - `weekly_plan.md`, `.swarm-state.md`, `docs/.swarm-state.md` — agent run diaries replaced by `docs/planning/ROADMAP.md` + gitignore
 - Root one-offs: `benchmark_pattern.cjs`, `test_perf.cjs`, `test.ts`, `verify_ui.py` — superseded by `scripts/` smoke tests
+- Root `git.sh` — unsafe “add/commit/push fix” helper; use normal git workflow
+- Root `plan.md` → `docs/planning/ft2-feature-comparison.md`
+- Tracked `_codeql_detected_source_root` symlink — gitignored (Vite still uses `watch.followSymlinks: false`)
 
 ## Sparse checkout hint
 

@@ -84,7 +84,7 @@ npm run dev          # Start Vite dev server at http://localhost:5173
 npm run build        # tsc + Vite production build → dist/ (uses 4 GB heap)
 npm run preview      # Preview production build locally
 npm run typecheck    # TypeScript type-check only (no emit)
-npm run lint         # ESLint (max 100 warnings budget; hard CI gate)
+npm run lint         # ESLint (max 43 warnings budget; hard CI gate)
 npm run build:emcc   # Native C++ worklet → openmpt-native.* (scripts/build-wasm.sh, emsdk 3.1.50)
 npm run build:worklet # Alias of build:emcc (never overwrites openmpt-worklet.js)
 python3 deploy.py    # Build + SFTP upload to production server

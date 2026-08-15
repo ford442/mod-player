@@ -323,6 +323,7 @@ jobs:
               - 'scripts/playhead-acceptance.mjs'
               - 'audio-worklet/**'
               - 'hooks/useAudioGraph.ts'
+              - 'hooks/audioGraph/**'
               - 'utils/nativeClockAnchor.ts'
               - 'utils/nativeParityGate.ts'
               - 'utils/workletPositionAdapter.ts'

@@ -22,7 +22,7 @@
     "deploy": "python3 deploy.py",
     "deploy:upload-only": "python3 deploy.py --no-build",
     "preview": "vite preview",
-    "lint": "eslint . --max-warnings 45",
+    "lint": "eslint . --max-warnings 43",
     "typecheck": "tsc --noEmit",
     "typecheck:tests": "tsc --noEmit -p tsconfig.test.json",
     "test": "vitest run",

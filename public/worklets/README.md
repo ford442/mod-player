@@ -41,16 +41,26 @@ Probed at runtime by `OpenMPTWorkletEngine` / `useWorkletLoader`. Root `./build-
 
 ### Engine selection precedence
 
-Production **default is the JS worklet** until native A/V parity is verified. Native is explicit opt-in (`?engine=native`) or auto-promoted when the parity gate is open.
+Production **default is the JS worklet**. Native is explicit opt-in (`?engine=native`) or auto-promoted only when the parity gate is open **and** glue is present. Never flip deploy defaults without a green native playhead report.
 
 | Priority | Source | Values |
 |----------|--------|--------|
 | 1 (highest) | URL `?engine=` | `js` \| `native` \| `auto` |
-| 2 | `localStorage.xasm1_audio_engine` | `js` \| `native` \| `auto` (unset = `auto`) |
-| 3 | Auto + parity gate | `VITE_NATIVE_PARITY_GATE=1` or CI native smoke — promotes when glue present |
-| 4 | Fallback | JS worklet → ScriptProcessor on WASM init failure |
+| 2 | Public builds (`VITE_PUBLIC_MODE=1`) | Always **force-JS** (ignores sticky localStorage; only URL `native` opts in) |
+| 3 | `localStorage.xasm1_audio_engine` | `js` \| `native` \| `auto` (unset = `auto`) |
+| 4 | Auto + parity gate | `VITE_NATIVE_PARITY_GATE=1` or `localStorage.xasm1_native_parity_passed=1` — promotes when glue present |
+| 5 | Fallback | JS worklet → ScriptProcessor on WASM init failure |
 
-**Parity gate:** `auto` mode (default) stays on JS until `npm run smoke:playhead:native` passes in CI or deploy sets `VITE_NATIVE_PARITY_GATE=1`. Explicit `?engine=native` is never blocked.
+**Parity gate:** `auto` stays on JS until deploy sets `VITE_NATIVE_PARITY_GATE=1` (or local smoke marks `xasm1_native_parity_passed`). Run:
+
+```bash
+npm run build:emcc   # emsdk 3.1.50
+npm run preview -- --port 4173 &
+npm run smoke:playhead:native
+# → artifacts/playhead-acceptance/report-native.json + native-parity.ok when green
+```
+
+Only then set `VITE_NATIVE_PARITY_GATE=1` **and** ship matching `openmpt-native.*`. Explicit `?engine=native` is never blocked by the gate. Force JS with `?engine=js` / `localStorage.xasm1_audio_engine=js`.
 
 **Opt into native** (when artifacts are built):
 
@@ -73,8 +83,8 @@ npm run verify:wasm          # every *.wasm under public/ and dist/ must have \0
 npm run verify:native-exports
 ```
 
-- **Every PR:** script clobber greps + export audit (`ci.yml` → `wasm-smoke-test`).
-- **Path-filtered PR / push:** full `build:emcc` when `cpp/**`, `scripts/build-wasm.sh`, `audio-worklet/**`, or `native-bridge-processor.js` change — caches `vendor/libopenmpt-0.8.4+release` (`libopenmpt.a`).
-- **Weekly schedule:** `native-wasm-scheduled.yml` full build + artifact upload (same cache).
+- **Every PR:** script clobber greps + export audit (`ci.yml` → `wasm-smoke-test`); JS `playhead-smoke`.
+- **Path-filtered PR / push:** full `build:emcc` when `cpp/**`, `scripts/build-wasm.sh`, `audio-worklet/**`, `hooks/audioGraph/**`, or `native-bridge-processor.js` change — caches `vendor/libopenmpt-0.8.4+release` (`libopenmpt.a`) — then **`smoke:playhead` with `AUDIO_ENGINE=native`** (requires active engine `native-worklet`, lag median &lt; 1 row).
+- **Weekly schedule:** `native-wasm-scheduled.yml` full build + artifact upload + **native playhead parity** (same cache).
 
-Never commit failed download bodies (404 HTML) as `.wasm`.
+Never commit failed download bodies (404 HTML) as `.wasm`. Never commit `openmpt-native.*` into git.

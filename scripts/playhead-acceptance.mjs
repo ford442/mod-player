@@ -222,6 +222,24 @@ async function runScenario(browser, engine, scenario) {
 
     result.audioEngine = await evaluate(page, () => window.__TEST_HOOKS__?.getAudioEngine?.() ?? null);
 
+    // Fail closed: never green native parity after soft-fail to JS worklet.
+    if (audioEngine === 'native' && result.audioEngine !== 'native-worklet') {
+      result.status = 'FAIL';
+      result.errors.push(
+        `requested native engine but active engine is ${JSON.stringify(result.audioEngine)} `
+        + '(expected "native-worklet"). Soft-fail to JS does not count as parity.',
+      );
+      return result;
+    }
+    if (audioEngine === 'js' && result.audioEngine === 'native-worklet') {
+      result.status = 'FAIL';
+      result.errors.push(
+        `requested js engine but active engine is native-worklet `
+        + '(force-JS escape hatch failed)',
+      );
+      return result;
+    }
+
     if (scenario.lagCheck !== false) {
       const samples = await samplePlayheadDuringPlayback(page, engine);
       result.lag = analyzeLagSamples(samples);
@@ -313,10 +331,25 @@ async function main() {
   };
 
   const reportPath = join(OUTPUT_DIR, engineLabel === 'native' ? 'report-native.json' : 'report.json');
-  if (engineLabel === 'native' && report.summary.pass) {
-    console.log('Native parity gate: set VITE_NATIVE_PARITY_GATE=1 in deploy after this job passes.');
-  }
   writeFileSync(reportPath, JSON.stringify(report, null, 2));
+
+  if (engineLabel === 'native' && report.summary.pass) {
+    const okPath = join(OUTPUT_DIR, 'native-parity.ok');
+    writeFileSync(
+      okPath,
+      [
+        `native-parity-pass ${report.generatedAt}`,
+        `fixture=${MODULE_URL}`,
+        `lagThreshold=${LAG_THRESHOLD}`,
+        `report=${reportPath}`,
+        'Deploy: set VITE_NATIVE_PARITY_GATE=1 only when openmpt-native.* is shipped with this green report.',
+        '',
+      ].join('\n'),
+    );
+    console.log('Native parity gate: set VITE_NATIVE_PARITY_GATE=1 in deploy after this job passes.');
+    console.log(`Parity marker: ${okPath}`);
+  }
+
   console.log(`\nReport: ${reportPath}`);
   console.log(`Summary: ${report.summary.passed}/${report.summary.total} PASS`);
 

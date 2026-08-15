@@ -138,10 +138,31 @@ export async function goto(page, engine, url, timeout) {
   await page.goto(url, { waitUntil, timeout });
 }
 
-/** @param {import('playwright').Page | import('puppeteer').Page} page */
+/**
+ * Wait until `fn` is truthy in the page.
+ *
+ * Playwright: `page.waitForFunction(fn, arg?, options?)` — options are the **third** arg.
+ * Puppeteer:  `page.waitForFunction(fn, options?)` — options are the **second** arg.
+ * Passing `{ timeout }` as the second arg under Playwright treats it as the pageFunction
+ * argument and silently keeps the default 30s timeout (flaky audio/visual smokes).
+ *
+ * @param {import('playwright').Page | import('puppeteer').Page} page
+ * @param {Function} fn
+ * @param {{ timeout?: number, polling?: number|string }} [options]
+ */
 export async function waitForFunction(page, fn, options = {}) {
   const timeout = options.timeout ?? 60000;
-  await page.waitForFunction(fn, { timeout, polling: options.polling });
+  /** @type {{ timeout: number, polling?: number|string }} */
+  const opts = { timeout };
+  if (options.polling != null) opts.polling = options.polling;
+
+  // Playwright Page exposes context(); Puppeteer does not.
+  const isPlaywright = typeof page.context === 'function';
+  if (isPlaywright) {
+    await page.waitForFunction(fn, undefined, opts);
+  } else {
+    await page.waitForFunction(fn, opts);
+  }
 }
 
 /** @param {import('playwright').Page | import('puppeteer').Page} page */

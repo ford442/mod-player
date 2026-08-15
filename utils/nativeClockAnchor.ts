@@ -2,10 +2,14 @@
  * Map native engine frame clock (audioFramesRendered / sampleRate) onto the
  * main AudioContext heard-time domain used by playheadPrediction.
  *
- * Native renders on a separate AudioContext; its frame counter starts at zero
- * on play. JS worklet tags samples with shared AudioContext currentTime.
- * Anchoring at play/seek pairs (frame=0, heardTime) so prediction sees the
- * same dt semantics as the JS path.
+ * Native renders on a separate AudioContext. Contract with C++
+ * (`cpp/worklet_processor.cpp`):
+ * - `g_audioFramesRendered` is zeroed on **module load** and **seek**.
+ * - Main thread calls `createNativeClockAnchor` with `frameSecondsAtAnchor = 0`
+ *   on play start and seek so prediction dt matches the JS quantum path.
+ *
+ * JS worklet tags samples with shared AudioContext currentTime instead.
+ * Do not re-anchor with frameSeconds=0 unless C++ also reset the counter.
  */
 
 import { getAudioHeardTime } from './playheadPrediction';

@@ -44,4 +44,21 @@ describe('nativeClockAnchor', () => {
     expect(nativeFrameSecondsFromData(48000, 48000)).toBeCloseTo(1, 6);
     expect(nativeFrameSecondsFromData(undefined, 48000)).toBeNull();
   });
+
+  /**
+   * Contract: C++ zeros g_audioFramesRendered on load/seek while TS re-anchors
+   * at frameSecondsAtAnchor=0. If frames keep accumulating without reset,
+   * mapped workletTime jumps ahead of heard-time by the leftover frame seconds.
+   */
+  it('documents seek re-zero contract (stale frames break prediction)', () => {
+    const anchorAfterSeek = {
+      frameSecondsAtAnchor: 0,
+      mainHeardTimeAtAnchor: 50,
+      bridgeLatencySec: 0,
+    };
+    // Correct: C++ reset → frames near 0 right after seek
+    expect(mapNativeFrameClockToHeardTime(0, anchorAfterSeek, 50)).toBeCloseTo(50, 6);
+    // Broken: C++ did not reset → 10 s of leftover frames maps 10 s into the future
+    expect(mapNativeFrameClockToHeardTime(10, anchorAfterSeek, 50)).toBeCloseTo(60, 6);
+  });
 });

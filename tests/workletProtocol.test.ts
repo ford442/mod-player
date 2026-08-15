@@ -3,6 +3,7 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { readLibOpenMPTSources } from './helpers/libOpenMPTSource';
+import { readAudioGraphSources } from './helpers/audioGraphSource';
 import {
   MAIN_TO_WORKLET,
   WORKLET_TO_MAIN,
@@ -54,9 +55,9 @@ describe('workletProtocol constants parity', () => {
   });
 
   it('hooks import protocol helpers instead of raw type literals', () => {
-    const useAudioGraph = readFileSync(join(ROOT, 'hooks/useAudioGraph.ts'), 'utf8');
+    const useAudioGraph = readAudioGraphSources(ROOT);
     const useLibOpenMPT = readLibOpenMPTSources(ROOT);
-    expect(useAudioGraph).toContain("from '../audio-worklet/protocol'");
+    expect(useAudioGraph).toMatch(/from ['"].*audio-worklet\/protocol['"]/);
     expect(useAudioGraph).toContain('parseWorkletToMainMessageOrWarn');
     expect(useAudioGraph).toContain('dispatchWorkletToMainMessage');
     expect(useLibOpenMPT).toContain('parseOscBufferMessage');

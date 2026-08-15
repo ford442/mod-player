@@ -11,6 +11,7 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { readLibOpenMPTSources, readTransportActionsSource } from './helpers/libOpenMPTSource';
+import { readAudioGraphSources } from './helpers/audioGraphSource';
 import {
   WORKLET_POSITION_REPORT_HZ,
   WORKLET_POSITION_REPORT_INTERVAL_SEC,
@@ -190,7 +191,7 @@ describe('#354 hot-reload node reuse + load token (behavioral)', () => {
 
 describe('#354 production source invariants', () => {
   const workletSource = readFileSync(join(ROOT, 'public/worklets/openmpt-worklet.js'), 'utf8');
-  const useAudioGraph = readFileSync(join(ROOT, 'hooks/useAudioGraph.ts'), 'utf8');
+  const useAudioGraph = readAudioGraphSources(ROOT);
   const useLibOpenMPT = readLibOpenMPTSources(ROOT);
   const useWorkletLoader = readFileSync(join(ROOT, 'hooks/useWorkletLoader.ts'), 'utf8');
   const lifecycle = readFileSync(join(ROOT, 'utils/workletAudioLifecycle.ts'), 'utf8');
@@ -328,7 +329,7 @@ describe('#354 production source invariants', () => {
 // ── ScriptProcessor fallback structural immunity ────────────────────────────
 
 describe('#354 ScriptProcessor fallback structural immunity', () => {
-  const useAudioGraph = readFileSync(join(ROOT, 'hooks/useAudioGraph.ts'), 'utf8');
+  const useAudioGraph = readAudioGraphSources(ROOT);
   const transportActions = readTransportActionsSource(ROOT);
 
   it('SP path updates position in-process (no worklet position postMessage flood)', () => {

@@ -95,10 +95,11 @@ async function clickPlay(page, engine) {
       play?.click();
     });
   }
+  // Worklet must fetch ~5 MB wasm2js glue on first play — allow full TIMEOUT.
   await waitForFunction(
     page,
     () => window.__TEST_HOOKS__?.getIsPlaying?.() === true,
-    { timeout: 45000 },
+    { timeout: TIMEOUT },
   );
 }
 

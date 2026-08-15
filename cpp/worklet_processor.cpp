@@ -52,7 +52,9 @@ static std::atomic<int> g_positionReady{0}; // 1 = new data available
 static EMSCRIPTEN_WEBAUDIO_T g_audioCtx = 0;
 static EMSCRIPTEN_AUDIO_WORKLET_NODE_T g_workletNode = 0;
 
-// Cumulative frames rendered since last load/play (sample-accurate clock)
+// Cumulative frames rendered since last load/seek (sample-accurate clock).
+// MUST reset on load and seek so main-thread anchors with frameSecondsAtAnchor=0
+// (see utils/nativeClockAnchor.ts) stay valid across stop→play / seek / reload.
 static double g_audioFramesRendered = 0.0;
 static int    g_renderSampleRate    = 48000;
 
@@ -99,7 +101,12 @@ EM_BOOL audio_process_cb(
             free(g_moduleData);
             g_moduleData = nullptr;
             g_moduleDataSize = 0;
-            if (!ok) {
+            if (ok) {
+                // Pair with TS createNativeClockAnchor(..., frameSecondsAtAnchor=0)
+                g_audioFramesRendered = 0.0;
+                g_lastReportedRow = -1;
+                g_lastReportTimeS = 0.0;
+            } else {
                 std::fprintf(stderr, "[worklet] Failed to load module\n");
             }
         }
@@ -111,6 +118,9 @@ EM_BOOL audio_process_cb(
         int row   = g_cmdSeekRow.exchange(-1, std::memory_order_acq_rel);
         if (order >= 0 && row >= 0) {
             g_module.seekOrderRow(order, row);
+            // Re-zero frame clock so seek re-anchor (frameSecondsAtAnchor=0) matches
+            g_audioFramesRendered = 0.0;
+            g_lastReportedRow = -1;
         }
     }
 

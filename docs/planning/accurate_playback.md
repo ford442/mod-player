@@ -27,7 +27,7 @@ AudioWorklet process()                    Main thread RAF (updateUI)
 
 **ScriptProcessor path is unchanged**: still queries `_openmpt_module_get_current_*` on the SP/render path with no prediction.
 
-**Native C++ worklet** (optional rebuild): `PositionInfo` includes `audioFramesRendered`, `rowFraction`, `speed`, `sampleRate` for shared-memory sample clocks. Sample-accurate `workletTime` from frames is tracked separately (issue 09).
+**Native C++ worklet** (optional rebuild): `PositionInfo` includes pre-render `audioFramesRendered`, `rowFraction`, `speed`, `sampleRate`. Main thread maps the frame clock onto heard-time via `utils/nativeClockAnchor.ts` (C++ zeros frames on load/seek; TS re-anchors at `frameSecondsAtAnchor=0`). Same `playheadPrediction` path as JS.
 
 ## Root causes addressed
 
@@ -124,8 +124,28 @@ Console sampler:
 | Mode | How | Expected |
 |------|-----|----------|
 | ScriptProcessor | Force SP fallback or disable worklet | Sync already tight; **must not regress** |
-| JS Worklet | Default path | Lag **≤ ~1 row** at 125 BPM / speed 6 |
-| Native worklet | After `npm run build:emcc` | Same prediction path + frame clock fields (poll clock: issue 09) |
+| JS Worklet | Default path (`?engine=js` or no native artifacts) | Lag **≤ ~1 row** at 125 BPM / speed 6; measured median ≈ **0.44** (2026-07-25) |
+| Native worklet | After `npm run build:emcc`, `?engine=native` / `npm run smoke:playhead:native` | Same prediction path + frame clock + main-context anchor; **same lag budget** (median \|lagRows\| &lt; 1). Soft-fail to JS does **not** count as parity. |
+
+**Native acceptance commands:**
+
+```bash
+npm run build:emcc
+npm run preview -- --port 4173 &
+npm run smoke:playhead:native
+# report → artifacts/playhead-acceptance/report-native.json
+# CI: path-filtered native-full-build + weekly native-wasm-scheduled.yml
+```
+
+Record measured native median/max from the latest green `report-native.json` below when available (do not invent numbers):
+
+| Metric | JS (reference) | Native |
+|--------|----------------|--------|
+| Fixture | `4-mat_madness.mod` @ 125 BPM | same |
+| Shader / renderer | `patternv0.44.wgsl` / webgl2 | same |
+| Median \|lagRows\| | ≈ 0.44 (2026-07-25) | *(fill from CI/local report-native.json)* |
+| Max \|lagRows\| | ≈ 1.09 | *(fill from report)* |
+| Active engine asserted | `worklet` | **must be** `native-worklet` |
 
 **Rule of thumb at 125 BPM** (4 rows/beat):  
 `rows/sec ≈ 8.33` → **1 row ≈ 120 ms**.  
@@ -148,7 +168,9 @@ Acceptance: visual lag ≤ ~120 ms (≤ 1 row), typically **< 0.5 row** after pr
 | `tests/playheadPrediction.test.ts` | Vitest math regression (CI via `npm test`) |
 | `scripts/playhead-acceptance.mjs` | Browser lag + paging acceptance (`npm run smoke:playhead`) |
 | `utils/gpuPacking.ts` + `shaderVersion.ts` | f32 playhead uniform for paged/circular shaders |
-| `cpp/openmpt_wrapper.*` / `worklet_processor.cpp` | Shared-memory frame clock + rowFraction (native rebuild) |
+| `cpp/openmpt_wrapper.*` / `worklet_processor.cpp` | Shared-memory frame clock + rowFraction; reset frames on load/seek |
+| `utils/nativeClockAnchor.ts` / `nativeParityGate.ts` | Map native frames → heard-time; gate auto-prefer |
+| `utils/workletPositionAdapter.ts` | Unified JS + native → `applyWorkletPositionSample` |
 
 ## Prevention
 
