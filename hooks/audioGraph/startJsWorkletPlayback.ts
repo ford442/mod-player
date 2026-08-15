@@ -53,14 +53,15 @@ export async function startJsWorkletPlayback(
       try {
         // AUDIO-001 FIX COMPLETE: Add timeout for worklet loading to detect hanging
         const loadTimeout = new Promise<never>((_, reject) => {
-          setTimeout(() => reject(new Error('Worklet module load timeout (10s)')), 10000);
+          setTimeout(() => reject(new Error('Worklet module load timeout (30s)')), 30000);
         });
 
         const protocolUrl = withBase('worklets/worklet-protocol-constants.js?v=2');
-        const loadProtocol = ctx.audioWorklet.addModule(protocolUrl);
-        const loadWorklet = ctx.audioWorklet.addModule(workletUrl);
         await Promise.race([
-          Promise.all([loadProtocol, loadWorklet]),
+          (async () => {
+            await ctx.audioWorklet.addModule(protocolUrl);
+            await ctx.audioWorklet.addModule(workletUrl);
+          })(),
           loadTimeout,
         ]);
 

@@ -32,6 +32,8 @@ export interface JsWorkletPositionMessage {
   rowFraction?: number;
   audioTime?: number;
   workletTime?: number;
+  samplesWritten?: number;
+  sampleRate?: number;
   channelVU?: Float32Array | number[] | null;
 }
 
@@ -121,6 +123,12 @@ export function jsWorkletPositionToInput(
     positionSeconds: data.positionSeconds,
     workletTime,
   };
+  if (data.samplesWritten != null && data.samplesWritten > 0) {
+    input.samplesWritten = data.samplesWritten;
+  }
+  if (data.sampleRate != null && data.sampleRate > 0) {
+    input.sampleRate = data.sampleRate;
+  }
   if (typeof data.rowFraction === 'number' && Number.isFinite(data.rowFraction)) {
     input.rowFraction = data.rowFraction;
   }

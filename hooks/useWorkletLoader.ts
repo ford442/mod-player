@@ -52,7 +52,8 @@ export const getWorkletUrl = (): string => {
   // v10: zero-alloc sample copy (no subarray/GC); skip position WASM queries on
   //      non-report quanta; audio-reactive SAB only at ~60 Hz; reuse VU array
   // v11: audioDiag uses Date.now() (performance.now is frozen per quantum in worklet)
-  const WORKLET_VERSION = '11';
+  // v12: auto audio-lite for >16ch modules; playhead quantum compensation on main thread
+  const WORKLET_VERSION = '12';
   const url = `${base}worklets/openmpt-worklet.js?v=${WORKLET_VERSION}`;
 
   return url;
@@ -177,7 +178,7 @@ export function useWorkletLoader(options: UseWorkletLoaderOptions = {}) {
         // Add a timeout to detect hanging loads
         const loadPromise = audioContext.audioWorklet.addModule(workletUrl);
         const timeoutPromise = new Promise<never>((_, reject) => {
-          setTimeout(() => reject(new Error('Worklet load timeout (10s)')), 10000);
+          setTimeout(() => reject(new Error('Worklet load timeout (30s)')), 30000);
         });
 
         await Promise.race([loadPromise, timeoutPromise]);

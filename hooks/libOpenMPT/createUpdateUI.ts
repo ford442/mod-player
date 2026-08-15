@@ -58,6 +58,7 @@ export function createUpdateUI({
     lastUiBpmRef,
     lastSyncDebugUiMsRef,
     noteAgesScratchRef,
+    lastChannelStatePublishMsRef,
     playbackStateRef,
     animationFrameHandle,
     lastUpdateTimeRef,
@@ -81,6 +82,8 @@ export function createUpdateUI({
     if (!isPlayingRef.current) return;
 
     uiLoopActiveRef.current = true;
+
+    const wallNowMs = performance.now();
 
     const lib = libopenmptRef.current;
     const modPtr = currentModulePtr.current;
@@ -168,7 +171,10 @@ export function createUpdateUI({
 
     const targetPlayhead = row;
     const prevPlayhead = playbackStateRef.current.playheadRow;
-    let smoothedPlayhead = prevPlayhead + (targetPlayhead - prevPlayhead) * rowSmoothing;
+    // Worklet path: prediction already tracks the audio clock — skip EMA lag.
+    let smoothedPlayhead = usingWorkletEngine
+      ? targetPlayhead
+      : prevPlayhead + (targetPlayhead - prevPlayhead) * rowSmoothing;
 
     const orderUnchanged = order === lastUiOrderRef.current;
     const snapThreshold = orderUnchanged ? 0.5 : 1.0;
@@ -231,6 +237,10 @@ export function createUpdateUI({
       }
       const noteAges = computeNoteAges(currentMatrix, playheadRow, agesScratch);
       let stateChanged = false;
+      const publishChannelUi =
+        rowChanged ||
+        orderChanged ||
+        wallNowMs - lastChannelStatePublishMsRef.current >= 100;
 
       const spLib = activeEngine !== 'worklet' && activeEngine !== 'native-worklet' ? lib : null;
       const spPtr = spLib && modPtr !== 0 ? modPtr : 0;
@@ -252,8 +262,9 @@ export function createUpdateUI({
         }
       }
 
-      if (stateChanged) {
+      if (stateChanged && publishChannelUi) {
         const snapshot = channelStatesRef.current.slice();
+        lastChannelStatePublishMsRef.current = wallNowMs;
         startTransition(() => {
           setChannelStates(snapshot);
         });
@@ -271,8 +282,6 @@ export function createUpdateUI({
       grooveAmount,
       lastUpdateTimestamp: now,
     };
-
-    const wallNowMs = performance.now();
 
     if (isPlayheadDebugEnabled()) {
       const sampleRow = playheadDebugSampleRow ?? smoothedPlayhead;

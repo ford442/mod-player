@@ -61,6 +61,8 @@ export function dispatchWorkletToMainMessage(
       if (message.rowFraction != null) posInput.rowFraction = message.rowFraction;
       if (message.audioTime != null) posInput.audioTime = message.audioTime;
       if (message.workletTime != null) posInput.workletTime = message.workletTime;
+      if (message.samplesWritten != null) posInput.samplesWritten = message.samplesWritten;
+      if (message.sampleRate != null) posInput.sampleRate = message.sampleRate;
       if (message.channelVU != null) posInput.channelVU = message.channelVU;
 
       const input = jsWorkletPositionToInput(posInput, audioContextCurrentTime);

@@ -6,6 +6,7 @@ import {
   getAudioHeardTime,
   fractionalRowFromTimeMarkers,
   expectedLatencyRows,
+  compensateWorkletSampleTime,
   TARGET_MAX_LAG_ROWS,
   type WorkletPositionSample,
 } from '../utils/playheadPrediction';
@@ -85,6 +86,12 @@ describe('playheadPrediction', () => {
     expect(predicted.dtSec).toBeCloseTo(0.05, 3);
     expect(predicted.playheadRow).toBeCloseTo(10.4, 3);
     expect(anchor.mainHeardTimeAtAnchor + 0.05).toBeCloseTo(sample.workletTime, 3);
+  });
+
+  it('compensates worklet sample time by half a quantum', () => {
+    const t = compensateWorkletSampleTime(100, 128, 44100);
+    expect(t).toBeCloseTo(100 + (128 / 44100) * 0.5, 6);
+    expect(compensateWorkletSampleTime(100)).toBe(100);
   });
 
   it('keeps quantum prediction step well under one row at 125 BPM', () => {

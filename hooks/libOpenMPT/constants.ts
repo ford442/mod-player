@@ -28,7 +28,6 @@ export const DIRECT_ROW_SMOOTHING = 0.99;
 export const SYNC_DEBUG_UI_INTERVAL_MS = 250;
 
 export function isPlayheadDebugEnabled(): boolean {
-  if (import.meta.env.DEV) return true;
   try {
     const params = new URLSearchParams(window.location.search);
     if (params.get('playheadDebug') === '1') return true;

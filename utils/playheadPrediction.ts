@@ -174,6 +174,29 @@ export interface WorkletPositionInput {
   workletTime: number;
   bpm?: number;
   speed?: number;
+  /** Samples rendered in the quantum tagged by workletTime (pre-render snapshot). */
+  samplesWritten?: number;
+  sampleRate?: number;
+}
+
+/**
+ * Shift workletTime from pre-render quantum start toward mid-buffer so
+ * extrapolation matches what is currently at the speakers.
+ */
+export function compensateWorkletSampleTime(
+  workletTime: number,
+  samplesWritten?: number,
+  sampleRate?: number,
+): number {
+  if (
+    samplesWritten != null &&
+    samplesWritten > 0 &&
+    sampleRate != null &&
+    sampleRate > 0
+  ) {
+    return workletTime + (samplesWritten / sampleRate) * 0.5;
+  }
+  return workletTime;
 }
 
 /** Apply a worklet/native position report and update rolling row-rate estimate. */
@@ -192,7 +215,11 @@ export function applyWorkletPositionSample(
     row: rowFrac,
     rowInt,
     positionSeconds: data.positionSeconds,
-    workletTime: data.workletTime,
+    workletTime: compensateWorkletSampleTime(
+      data.workletTime,
+      data.samplesWritten,
+      data.sampleRate,
+    ),
     bpm: (data.bpm != null && data.bpm > 0) ? data.bpm : refs.workletBpmRef.current,
     speed: (data.speed != null && data.speed > 0) ? data.speed : refs.workletSpeedRef.current,
   };

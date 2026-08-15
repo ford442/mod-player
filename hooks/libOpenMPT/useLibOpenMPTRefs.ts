@@ -60,6 +60,7 @@ export function useLibOpenMPTRefs(): LibOpenMPTRefs {
   const lastUiRowIntRef = useRef<number>(-1);
   const lastUiBpmRef = useRef<number>(-1);
   const lastSyncDebugUiMsRef = useRef<number>(0);
+  const lastChannelStatePublishMsRef = useRef<number>(0);
   const noteAgesScratchRef = useRef<number[]>([]);
   const userModuleLoadedRef = useRef<boolean>(false);
   const nativeEngineRef = useRef<OpenMPTWorkletEngine | null>(null);
@@ -129,6 +130,7 @@ export function useLibOpenMPTRefs(): LibOpenMPTRefs {
     lastUiRowIntRef,
     lastUiBpmRef,
     lastSyncDebugUiMsRef,
+    lastChannelStatePublishMsRef,
     noteAgesScratchRef,
     userModuleLoadedRef,
     nativeEngineRef,

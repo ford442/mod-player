@@ -297,6 +297,7 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
           this.port.postMessage({ type: WT.oscBuffer, buffer: this.oscBuffer });
         }
       } else if (type === MT.setAudioLite) {
+        this._audioLiteExplicit = true;
         this._audioLite = !!msg.lite;
       } else if (type === MT.setProjectmPcm) {
         this._projectmPcmEnabled = !!msg.enabled;
@@ -320,6 +321,7 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
       : null;
     this.oscWritePtr = 0;
     this._audioLite = false;
+    this._audioLiteExplicit = false;
     // ?audioDiag=1 — per-quantum process() timing, correlated with row wraps.
     this._audioDiag = false;
     this._resetAudioDiag();
@@ -546,6 +548,14 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
       // with far less per-quantum CPU; MOD rarely noticed 8→4, XM pattern
       // starts often did.
       lib._openmpt_module_set_render_param(this.modulePtr, 2, 4);
+
+      const numCh = lib._openmpt_module_get_num_channels(this.modulePtr);
+      // Heavy XM/IT modules: full-band audio-reactive scan at 60 Hz still tips
+      // process() over budget at pattern starts — auto-lite unless host opted in.
+      if (numCh > 16 && !this._audioLiteExplicit) {
+        this._audioLite = true;
+        log('Auto audio-lite for', numCh, 'channels');
+      }
 
       log('Module loaded ✅ ptr=', this.modulePtr);
       this.port.postMessage({ type: WT.loaded });

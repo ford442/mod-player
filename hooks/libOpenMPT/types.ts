@@ -68,6 +68,7 @@ export interface LibOpenMPTRefs {
   lastUiRowIntRef: React.MutableRefObject<number>;
   lastUiBpmRef: React.MutableRefObject<number>;
   lastSyncDebugUiMsRef: React.MutableRefObject<number>;
+  lastChannelStatePublishMsRef: React.MutableRefObject<number>;
   noteAgesScratchRef: React.MutableRefObject<number[]>;
   userModuleLoadedRef: React.MutableRefObject<boolean>;
   nativeEngineRef: React.MutableRefObject<OpenMPTWorkletEngine | null>;
