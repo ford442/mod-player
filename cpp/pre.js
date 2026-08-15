@@ -16,13 +16,13 @@ globalThis.clearTimeout = function() {};
 // Ensure Module exists
 if (typeof Module === 'undefined') Module = {};
 
-// Configure module locator for WASM files served from /xm-player/worklets/
-Module['locateFile'] = function(path, prefix) {
-    // In production, files are served from the base URL + worklets/
-    // The TypeScript engine sets Module.locateFile before instantiation,
-    // so this is a fallback for direct loading.
-    if (typeof Module['wasmBasePath'] === 'string') {
-        return Module['wasmBasePath'] + path;
-    }
-    return prefix + path;
-};
+// Configure module locator for WASM / .aw.js / .ww.js next to the glue.
+// Do not clobber a locateFile the host already set (OpenMPTWorkletEngine).
+if (typeof Module['locateFile'] !== 'function') {
+    Module['locateFile'] = function(path, prefix) {
+        if (typeof Module['wasmBasePath'] === 'string') {
+            return Module['wasmBasePath'] + path;
+        }
+        return prefix + path;
+    };
+}

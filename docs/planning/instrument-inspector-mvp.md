@@ -1,6 +1,10 @@
 # Instrument Inspector MVP — Implementation Plan
 
-> P2 feature: turn XASM-1 from pattern viewer into module inspector with instrument/sample tables, waveforms, and LED correlation on v0.56+.
+> **Current ship target (slim slice):** read-only instrument/sample **names** list in Module Info
+> (`components/InstrumentInspector.tsx`), with MOD/S3M sample fallback and format badge.
+> No live highlight, waveforms, or GPU correlation in that slice.
+>
+> P2 epic below remains the longer-range plan: waveforms, file parsers, LED correlation on v0.56+.
 
 ## Current foundation
 

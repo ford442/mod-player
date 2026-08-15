@@ -143,9 +143,9 @@ Record measured native median/max from the latest green `report-native.json` bel
 |--------|----------------|--------|
 | Fixture | `4-mat_madness.mod` @ 125 BPM | same |
 | Shader / renderer | `patternv0.44.wgsl` / webgl2 | same |
-| Median \|lagRows\| | ≈ 0.44 (2026-07-25) | *(fill from CI/local report-native.json)* |
-| Max \|lagRows\| | ≈ 1.09 | *(fill from report)* |
-| Active engine asserted | `worklet` | **must be** `native-worklet` |
+| Median \|lagRows\| | ≈ 0.44 (2026-07-25) | Pending first green `report-native.json` after worklet-thread start (fail-closed if playhead frozen) |
+| Max \|lagRows\| | ≈ 1.09 | Pending green report |
+| Active engine asserted | `worklet` | **must be** `native-worklet` (soft-fail to JS is FAIL) |
 
 **Rule of thumb at 125 BPM** (4 rows/beat):  
 `rows/sec ≈ 8.33` → **1 row ≈ 120 ms**.  

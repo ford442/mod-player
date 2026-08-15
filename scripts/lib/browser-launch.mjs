@@ -15,6 +15,7 @@ export const DEFAULT_CHROME_ARGS = [
   '--enable-unsafe-webgpu',
   '--no-first-run',
   '--no-default-browser-check',
+  '--autoplay-policy=no-user-gesture-required',
   '--window-size=1280,720',
 ];
 

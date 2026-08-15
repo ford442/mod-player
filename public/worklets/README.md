@@ -72,6 +72,10 @@ localStorage.setItem('xasm1_audio_engine', 'native')
 
 `?engine=native` without artifacts soft-fails to JS (console warning). The debug panel engine toggle persists `js` / `native` into localStorage.
 
+**Main-thread wasm2js vs native WASM:** `libmpt/libopenmptjs.js` replaces `globalThis.WebAssembly` with a wasm2js stub. The app snapshots the real API in `index.html` (`window.__NATIVE_WEBASSEMBLY__`) and `OpenMPTWorkletEngine` reinstalls it before instantiate — otherwise shared-memory AudioWorklet threads fail (`bad memory`).
+
+**Emscripten 3.1.51 AudioWorklet bootstrap:** `addModule('openmpt-native.aw.js')` is resolved against the **page URL**, not `locateFile`. The engine rewrites that path to `worklets/openmpt-native.aw.js`. C++ must pass a 16-byte-aligned worklet stack into `emscripten_start_wasm_audio_worklet_thread_async` (null stack fails).
+
 **projectM PCM chunks** (`type: 'projectm-pcm'`) are JS-worklet-only. Native uses the ring buffer / AnalyserNode path.
 
 **Performance capture (MediaRecorder)** requires the JS worklet — native uses a separate AudioContext. Use `?engine=js` or the UI toggle before Record clip. See `docs/EXPORT.md`.

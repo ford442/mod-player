@@ -19,7 +19,17 @@ export interface TransportActionsDeps {
   refs: LibOpenMPTRefs;
   setters: Pick<
     LibOpenMPTSetters,
-    'setIsPlaying' | 'setStatus' | 'setIsModuleLoaded' | 'setModuleInfo' | 'setInstrumentNames' | 'setModuleComments' | 'setSequencerCurrentRow' | 'setSequencerGlobalRow' | 'setPlaybackRowFraction'
+    | 'setIsPlaying'
+    | 'setStatus'
+    | 'setIsModuleLoaded'
+    | 'setModuleInfo'
+    | 'setInstrumentNames'
+    | 'setSampleNames'
+    | 'setModuleFormat'
+    | 'setModuleComments'
+    | 'setSequencerCurrentRow'
+    | 'setSequencerGlobalRow'
+    | 'setPlaybackRowFraction'
   >;
   activeEngine: 'worklet' | 'native-worklet';
 }
@@ -55,7 +65,15 @@ export function createStopMusic(deps: TransportActionsDeps) {
     workletBpmRef,
     currentModulePtr,
   } = refs;
-  const { setIsPlaying, setStatus, setIsModuleLoaded, setInstrumentNames, setModuleComments } = setters;
+  const {
+    setIsPlaying,
+    setStatus,
+    setIsModuleLoaded,
+    setInstrumentNames,
+    setSampleNames,
+    setModuleFormat,
+    setModuleComments,
+  } = setters;
 
   return (destroy: boolean = false) => {
     isPlayingRef.current = false;
@@ -119,6 +137,8 @@ export function createStopMusic(deps: TransportActionsDeps) {
     workletBpmRef.current = 125;
     if (destroy) {
       setInstrumentNames([]);
+      setSampleNames([]);
+      setModuleFormat('');
       setModuleComments('');
     }
 

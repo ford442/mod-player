@@ -18,6 +18,8 @@ export function useLibOpenMPTState(initialVolume: number) {
   const [patternData, _setPatternData] = useState<Uint8Array | null>(null);
   const [sequencerMatrix, setSequencerMatrix] = useState<PatternMatrix | null>(null);
   const [instrumentNames, setInstrumentNames] = useState<string[]>([]);
+  const [sampleNames, setSampleNames] = useState<string[]>([]);
+  const [moduleFormat, setModuleFormat] = useState<string>('');
   const [instrumentTable, setInstrumentTable] = useState<InstrumentTable>(emptyInstrumentTable());
   const [moduleComments, setModuleComments] = useState<string>('');
   const [moduleDurationSeconds, setModuleDurationSeconds] = useState<number>(0);
@@ -75,6 +77,10 @@ export function useLibOpenMPTState(initialVolume: number) {
     setSequencerMatrix,
     instrumentNames,
     setInstrumentNames,
+    sampleNames,
+    setSampleNames,
+    moduleFormat,
+    setModuleFormat,
     instrumentTable,
     setInstrumentTable,
     moduleComments,

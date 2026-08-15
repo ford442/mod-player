@@ -39,6 +39,12 @@
     A promise is used to signal readiness to the React application.
   -->
   <script>
+    // wasm2js libopenmptjs.js replaces global WebAssembly with a stub whose
+    // Memory() always returns a non-shared ArrayBuffer. Snapshot the real API
+    // so the optional native C++ engine can instantiate shared wasm workers.
+    if (typeof WebAssembly !== 'undefined' && !WebAssembly.isWasm2js) {
+      window.__NATIVE_WEBASSEMBLY__ = WebAssembly;
+    }
     window.libopenmptReady = new Promise((resolve, reject) => {
       window.libopenmpt = {
         onRuntimeInitialized: function () {

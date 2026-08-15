@@ -88,6 +88,8 @@ export interface LibOpenMPTSetters {
   setModuleInfo: React.Dispatch<React.SetStateAction<ModuleInfo>>;
   setSequencerMatrix: React.Dispatch<React.SetStateAction<PatternMatrix | null>>;
   setInstrumentNames: React.Dispatch<React.SetStateAction<string[]>>;
+  setSampleNames: React.Dispatch<React.SetStateAction<string[]>>;
+  setModuleFormat: React.Dispatch<React.SetStateAction<string>>;
   setInstrumentTable: React.Dispatch<React.SetStateAction<InstrumentTable>>;
   setModuleComments: React.Dispatch<React.SetStateAction<string>>;
   setModuleDurationSeconds: React.Dispatch<React.SetStateAction<number>>;

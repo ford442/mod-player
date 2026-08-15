@@ -95,7 +95,7 @@ Production silent-playback and MOD/XM switch failures were fixed in PRs **#329**
   - **Video:** v0.23 (Clouds), v0.24 (Tunnel)
 - **Pipeline:** Shaders are fetched as raw text strings (often via `fetch()` or bundled strings) and passed into the WebGPU render pipeline in components like `PatternDisplay.tsx` and `Studio3D.tsx`.
 - **Bloom:** Post-processing bloom passes live in `utils/bloomPostProcessor.ts`; presets are defined in `types/bloomPresets.ts`.
-- **Compatibility:** Three-tier renderer chain: WebGPU → WebGL2 → HTML. Select with `?renderer=webgpu|webgl2|html`, debug panel, or `window.DEBUG_RENDERER`. HTML fallback: `src/renderers/html/PatternHTMLFallback.tsx` (wraps `PatternSequencer.tsx`).
+- **Compatibility:** GPU viz requires **WebGPU** this phase (hard-fail on probe/device failure — no auto WebGL2/HTML **shader** session). `?renderer=webgl2` is a no-op (deferred). Explicit `?renderer=html` still selects the DOM pattern grid (`PatternHTMLFallback` / `PatternSequencer`) as tracker UI. Debug: `window.__WEBGPU_PROBE__`, `window.DEBUG_RENDERER`.
 - **Agent/CI:** `window.currentPatternRenderer` exposes `readPixels()`, `setDebugMode()`, `getCanvas()` on WebGL2/HTML backends.
 - **Critical Coupling:** Shaders are not pure assets. `PatternDisplay.tsx` parses the shader **filename** (e.g., `patternv0.37.wgsl`) to determine layout type, buffer packing strategy, canvas size, and whether shader-embedded UI controls exist. Changing a shader's uniform struct requires a matching update to `createUniformPayload()` in TypeScript.
 

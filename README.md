@@ -112,7 +112,7 @@ Usage
 - Use the playback controls to play/stop and toggle looping.
 - Switch pattern renderers via URL param, debug panel, or devtools:
   - `?renderer=webgpu` (default when available)
-  - `?renderer=webgl2` — GLSL 3.00 ES reference renderer for debugging and CI screenshots
+  - `?renderer=webgl2` — deferred this phase (no-op → WebGPU; GLSL path not auto-started)
   - `?renderer=html` — lightweight DOM grid (`PatternSequencer`)
   - `window.DEBUG_RENDERER = 'webgl2'` or `localStorage.setItem('xasm1_pattern_renderer', 'webgl2')`
 - Add media files via the media panel to display them in the overlay while a module plays.
@@ -132,8 +132,8 @@ Notes and configuration
 
 - libopenmpt: Self-hosted under `public/libmpt/` (libopenmpt **0.8.4**). Loaded via `index.html` with BASE_URL-aware paths; optional CDN override with `VITE_LIBOPENMPT_CDN_URL`. See `public/libmpt/README.md`.
 - Tailwind: A CDN helper script is present in `index.html` to bring in utility styles quickly in development. For production builds you may want to use the PostCSS/Tailwind config in the repo.
-- **Pattern renderers:** WebGPU → WebGL2 → HTML automatic fallback chain. Use WebGL2 (`?renderer=webgl2`) to iterate on shader/effect logic with GLSL and `window.currentPatternRenderer.readPixels()` for Playwright pixel tests. Alt+D (dev) cycles WebGL2 debug modes (wireframe, UV, playhead heatmap).
-- **WebGPU → WebGL2 porting:** Shared packing lives in `utils/gpuPacking.ts`; WebGL2 GLSL mirrors `hooks/webGLShaders.ts` (three-emitter lens caps). Chassis/night mode/bloom approximations are in `src/renderers/webgl2/shaders/`.
+- **Pattern renderers:** GPU viz requires **WebGPU** (hard-fail on probe/device failure — no auto WebGL2/HTML **shader** session). Explicit `?renderer=html` selects the DOM pattern grid. WebGL2 GLSL reference remains in-tree but is deferred for viz sessions. Probe breadcrumb: `window.__WEBGPU_PROBE__`.
+- **WebGPU → WebGL2 porting (deferred viz):** Shared packing lives in `utils/gpuPacking.ts`; WebGL2 GLSL mirrors `hooks/webGLShaders.ts`. Chassis/night mode/bloom approximations are in `src/renderers/webgl2/shaders/`.
 
 Contributing
 

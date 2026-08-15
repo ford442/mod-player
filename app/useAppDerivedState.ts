@@ -21,6 +21,8 @@ export interface UseAppDerivedStateParams {
   activeEngine: string;
   totalPatternRows: number;
   instrumentNames: string[];
+  sampleNames: string[];
+  moduleFormat: string;
   moduleComments: string;
   moduleDurationSeconds: number;
   moduleFileName: string;
@@ -55,6 +57,8 @@ export function useAppDerivedState(params: UseAppDerivedStateParams) {
     activeEngine,
     totalPatternRows,
     instrumentNames,
+    sampleNames,
+    moduleFormat,
     moduleComments,
     moduleDurationSeconds,
     moduleFileName,
@@ -99,12 +103,26 @@ export function useAppDerivedState(params: UseAppDerivedStateParams) {
       numOrders: totalPatternRows > 0 ? Math.ceil(totalPatternRows / (sequencerMatrix?.numRows || 64)) : 0,
       numPatterns: 0,
       numInstruments: instrumentNames.length,
+      instruments: instrumentNames,
+      numSamples: sampleNames.length,
+      samples: sampleNames,
+      format: moduleFormat,
       durationSeconds: moduleDurationSeconds,
       currentBpm: 125,
-      instruments: instrumentNames,
       comments: moduleComments,
     };
-  }, [isModuleLoaded, sequencerMatrix, status, activeEngine, totalPatternRows, instrumentNames, moduleComments, moduleDurationSeconds]);
+  }, [
+    isModuleLoaded,
+    sequencerMatrix,
+    status,
+    activeEngine,
+    totalPatternRows,
+    instrumentNames,
+    sampleNames,
+    moduleFormat,
+    moduleComments,
+    moduleDurationSeconds,
+  ]);
 
   // Clear instrument/sample selection when a new module is loaded.
   useEffect(() => {

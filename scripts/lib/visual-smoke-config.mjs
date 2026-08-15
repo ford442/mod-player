@@ -133,12 +133,10 @@ export const FULL_SHADER_FILES = [
 //   v0.56 Instrument Palette (#347)
 //   v0.57 Velocity LEDs
 //
-// NOTE: CI runs the webgl2 GLSL reference renderer, which does not fully exercise
-// the WGSL-only night-theme / oscilloscope (binding 6) / instrument-palette (binding 7)
-// paths — those are fully verified only under the webgpu (SMOKE_PROFILE=full) profile.
-// v0.23/v0.24 are video shaders; they render via the WebGL2 reference path which may
-// produce different content than WebGPU, but the structural checks (bbox, centroid) still
-// catch severe misalignment regressions.
+// NOTE: CI uses HTML pattern grid (WebGL2 shader viz deferred this phase).
+// WGSL night-theme / oscilloscope / instrument-palette paths are verified under
+// SMOKE_PROFILE=full with WebGPU (--enable-unsafe-webgpu). HTML smoke still
+// catches severe mount/play regressions without starting a GLSL session.
 export const CI_SHADER_FILES = [
   'patternv0.30b.wgsl',
   'patternv0.46.wgsl',
@@ -178,8 +176,9 @@ export function renderersForProfile(profile) {
   if (process.env.RENDERERS) {
     return process.env.RENDERERS.split(',').map((s) => s.trim()).filter(Boolean);
   }
-  if (profile === 'ci') return ['webgl2', 'html'];
-  return ['webgl2', 'html', 'webgpu'];
+  // WebGL2 shader viz is deferred: GPU sessions require WebGPU; HTML is DOM tracker UI.
+  if (profile === 'ci') return ['html'];
+  return ['html', 'webgpu'];
 }
 
 export function liteModesForProfile(profile) {

@@ -222,6 +222,19 @@ async function runScenario(browser, engine, scenario) {
 
     result.audioEngine = await evaluate(page, () => window.__TEST_HOOKS__?.getAudioEngine?.() ?? null);
 
+    if (audioEngine === 'native' && result.audioEngine !== 'native-worklet') {
+      try {
+        await waitForFunction(
+          page,
+          () => window.__TEST_HOOKS__?.getAudioEngine?.() === 'native-worklet',
+          { timeout: 15000 },
+        );
+        result.audioEngine = await evaluate(page, () => window.__TEST_HOOKS__?.getAudioEngine?.() ?? null);
+      } catch {
+        /* keep observed engine */
+      }
+    }
+
     // Fail closed: never green native parity after soft-fail to JS worklet.
     if (audioEngine === 'native' && result.audioEngine !== 'native-worklet') {
       result.status = 'FAIL';
@@ -244,6 +257,14 @@ async function runScenario(browser, engine, scenario) {
       const samples = await samplePlayheadDuringPlayback(page, engine);
       result.lag = analyzeLagSamples(samples);
       result.lagSamples = samples.length;
+      const rows = samples
+        .map((s) => s.predictedRow ?? s.smoothedRow ?? s.sampleRow)
+        .filter((n) => typeof n === 'number' && Number.isFinite(n));
+      const span = rows.length ? Math.max(...rows) - Math.min(...rows) : 0;
+      result.playheadSpanRows = span;
+      if (span < 0.5) {
+        result.lag = { ...(result.lag ?? {}), ok: false, frozen: true, span };
+      }
     } else {
       result.lag = { ok: true, skipped: true, reason: 'paging-only-scenario' };
     }
@@ -257,9 +278,15 @@ async function runScenario(browser, engine, scenario) {
     result.status = lagPass && pagingPass ? 'PASS' : 'FAIL';
 
     if (!lagPass && !result.lag?.skipped) {
-      result.errors.push(
-        `lag ratio ${(result.lag?.ratio ?? 0).toFixed(3)} < ${PASS_RATIO} or median ${result.lag?.medianAbsLagRows?.toFixed(3)}`,
-      );
+      if (result.lag?.frozen) {
+        result.errors.push(
+          `playhead frozen (span=${Number(result.playheadSpanRows ?? 0).toFixed(3)} rows) — engine not advancing`,
+        );
+      } else {
+        result.errors.push(
+          `lag ratio ${(result.lag?.ratio ?? 0).toFixed(3)} < ${PASS_RATIO} or median ${result.lag?.medianAbsLagRows?.toFixed(3)}`,
+        );
+      }
     }
     if (scenario.paging && !pagingPass) {
       result.errors.push(`circular paging mismatches: ${result.paging?.mismatchCount ?? '?'}`);

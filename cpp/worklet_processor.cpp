@@ -20,6 +20,7 @@
 #include <cstring>
 #include <cstdio>
 #include <cstdlib>
+#include <malloc.h>
 #include <atomic>
 
 #include "openmpt_wrapper.h"
@@ -81,6 +82,17 @@ static int               g_ringCapacity  = 0;       // in stereo frames
 
 // Flag: 1 = caller owns the AudioContext (skip auto-connect to destination)
 static int g_externalContext = 0;
+
+// AudioWorklet thread stack (required by emscripten_start_wasm_audio_worklet_thread_async)
+static uint8_t* g_workletStack = nullptr;
+constexpr uint32_t WORKLET_STACK_SIZE = 128 * 1024;
+
+static uint8_t* ensureWorkletStack() {
+    if (!g_workletStack) {
+        g_workletStack = static_cast<uint8_t*>(memalign(16, WORKLET_STACK_SIZE));
+    }
+    return g_workletStack;
+}
 
 // ── AudioWorklet process callback (runs on worklet thread) ──────────
 
@@ -298,12 +310,18 @@ int init_audio(int sampleRate) {
         return 0;
     }
 
-    // Start the worklet thread with a stack size of 128KB
+    // Start the worklet thread with a 128KB 16-byte-aligned stack (required).
+    uint8_t* stack = ensureWorkletStack();
+    if (!stack) {
+        std::fprintf(stderr, "[C++] Failed to allocate AudioWorklet stack\n");
+        return 0;
+    }
     emscripten_start_wasm_audio_worklet_thread_async(
         g_audioCtx,
-        nullptr, 0,  // no custom shared memory (Emscripten manages it)
+        stack,
+        WORKLET_STACK_SIZE,
         worklet_thread_initialized,
-        nullptr       // userData
+        nullptr
     );
 
     std::printf("[C++] Audio context created (handle=%d)\n", g_audioCtx);
@@ -372,9 +390,15 @@ int init_audio_with_context(int ctxHandle) {
     g_audioCtx        = ctxHandle;
     g_externalContext = 1; // skip auto-connect in worklet_thread_initialized
 
+    uint8_t* stack = ensureWorkletStack();
+    if (!stack) {
+        std::fprintf(stderr, "[C++] Failed to allocate AudioWorklet stack\n");
+        return 0;
+    }
     emscripten_start_wasm_audio_worklet_thread_async(
         g_audioCtx,
-        nullptr, 0,
+        stack,
+        WORKLET_STACK_SIZE,
         worklet_thread_initialized,
         nullptr
     );

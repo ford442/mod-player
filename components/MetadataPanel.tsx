@@ -1,5 +1,7 @@
 import { useMemo } from 'react';
 import type { PatternMatrix } from '../types';
+import { selectInspectorList } from '../utils/inspectorListKind';
+import { InstrumentInspector } from './InstrumentInspector';
 
 export interface ModuleMetadata {
   title: string;
@@ -9,9 +11,12 @@ export interface ModuleMetadata {
   numOrders: number;
   numPatterns: number;
   numInstruments: number;
+  instruments: string[];
+  numSamples: number;
+  samples: string[];
+  format: string;
   durationSeconds: number;
   currentBpm: number;
-  instruments: string[];
   comments?: string;
 }
 
@@ -40,10 +45,14 @@ export const MetadataPanel: React.FC<MetadataPanelProps> = ({
   isPlaying,
   playbackSeconds,
 }) => {
-  const instruments = useMemo(() => {
-    if (!metadata?.instruments) return [];
-    return metadata.instruments.filter(name => name.trim().length > 0);
-  }, [metadata?.instruments]);
+  const inspectorList = useMemo(() => {
+    if (!metadata) return null;
+    return selectInspectorList(
+      metadata.numInstruments,
+      metadata.instruments,
+      metadata.samples,
+    );
+  }, [metadata]);
 
   if (!metadata) {
     return (
@@ -52,6 +61,10 @@ export const MetadataPanel: React.FC<MetadataPanelProps> = ({
       </section>
     );
   }
+
+  const listKind = inspectorList?.kind ?? 'samples';
+  const listNames = inspectorList?.names ?? [];
+  const showInspector = listNames.length > 0;
 
   return (
     <section className="bg-gray-900 rounded-xl border border-white/5 shadow-lg overflow-hidden text-xs font-mono">
@@ -78,26 +91,23 @@ export const MetadataPanel: React.FC<MetadataPanelProps> = ({
         <InfoRow label="Position" value={formatTime(playbackSeconds)} span2 />
       </div>
 
-      {/* Instruments */}
-      {instruments.length > 0 && (
-        <div className="border-t border-white/5">
-          <div className="px-3 py-1.5 bg-black/20 text-gray-500 text-[10px] uppercase tracking-wider">
-            Instruments ({instruments.length})
-          </div>
-          <div className="max-h-32 overflow-y-auto pattern-scrollbar">
-            {instruments.map((name, i) => (
-              <div
-                key={i}
-                className="px-3 py-0.5 text-gray-400 hover:bg-white/5 flex gap-2"
-              >
-                <span className="text-gray-600 w-5 text-right shrink-0">
-                  {(i + 1).toString(16).toUpperCase().padStart(2, '0')}
-                </span>
-                <span className="truncate">{name}</span>
-              </div>
-            ))}
-          </div>
-        </div>
+      {/* Instruments / samples — collapsed by default; keep unnamed slots */}
+      {showInspector && (
+        <details className="border-t border-white/5 group">
+          <summary className="px-3 py-1.5 bg-black/20 text-gray-500 text-[10px] uppercase tracking-wider cursor-pointer select-none list-none [&::-webkit-details-marker]:hidden flex items-center justify-between">
+            <span>
+              {listKind === 'instruments' ? 'Instruments' : 'Samples'} ({listNames.length})
+            </span>
+            <span className="text-gray-600 group-open:rotate-180 transition-transform text-[9px]" aria-hidden>
+              ▾
+            </span>
+          </summary>
+          <InstrumentInspector
+            kind={listKind}
+            names={listNames}
+            format={metadata.format}
+          />
+        </details>
       )}
     </section>
   );

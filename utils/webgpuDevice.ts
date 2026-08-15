@@ -21,6 +21,12 @@
  *
  * Bloom uses `rgba16float` intermediates — filterable without float32-filterable.
  *
+ * ## Viz policy (this phase)
+ *
+ * WebGPU is required for the GPU visualizer. Probe / init failure is a **hard
+ * fail** for viz — do not auto-start WebGL2/HTML shader backends. After a
+ * session hard-fail, this module refuses further `requestDevice()` calls (#395).
+ *
  * ## Limits
  *
  * We soft-request a storage-buffer binding size large enough for dense patterns
@@ -33,6 +39,14 @@
  * Lite mode (`?lite=1`, mobile detection, user toggle) → `low-power`.
  * Desktop / full mode → `high-performance`.
  */
+
+import {
+  isWebGPUSessionBlocked,
+  getWebGPUSessionBlockReason,
+  markWebGPUSessionFailed,
+  publishWebGPUProbeReady,
+  readAdapterInfo,
+} from './webgpuProbe';
 
 /** Optional features that production code may enable when the adapter supports them. */
 export const OPTIONAL_PRODUCTION_FEATURES: readonly GPUFeatureName[] = [
@@ -206,7 +220,18 @@ export function buildSoftRequiredLimits(
 export async function requestWebGPUDevice(
   options: RequestWebGPUDeviceOptions = {},
 ): Promise<WebGPUDeviceResult> {
+  // #395 — after a hard probe fail, never call requestDevice again this session.
+  if (isWebGPUSessionBlocked()) {
+    const reason = getWebGPUSessionBlockReason() ?? 'WebGPU session blocked';
+    throw new WebGPUInitError(
+      `WebGPU session blocked (no further requestDevice): ${reason}`,
+      'device-failed',
+      false,
+    );
+  }
+
   if (!isWebGPUApiAvailable()) {
+    markWebGPUSessionFailed('api', 'WebGPU API not available in this browser');
     throw new WebGPUInitError(
       'WebGPU API not available in this browser',
       'unsupported',
@@ -223,22 +248,20 @@ export async function requestWebGPUDevice(
     throw new WebGPUInitError('WebGPU init cancelled', 'device-failed', true);
   }
   if (!adapter) {
-    throw new WebGPUInitError(
-      `requestAdapter returned null (powerPreference=${powerPreference})`,
-      'no-adapter',
-      true,
-    );
+    const msg = `requestAdapter returned null (powerPreference=${powerPreference})`;
+    markWebGPUSessionFailed('adapter', msg);
+    throw new WebGPUInitError(msg, 'no-adapter', false);
   }
+
+  const adapterInfo = await readAdapterInfo(adapter);
 
   // Hard-required features (rare — prefer optional for Safari/Firefox compatibility).
   const hardRequired = options.requiredFeatures ?? [];
   const missingRequired = hardRequired.filter((f) => !adapter.features.has(f));
   if (missingRequired.length > 0) {
-    throw new WebGPUInitError(
-      `Required GPU features not available: ${missingRequired.join(', ')}`,
-      'device-failed',
-      false,
-    );
+    const msg = `Required GPU features not available: ${missingRequired.join(', ')}`;
+    markWebGPUSessionFailed('device', msg, adapterInfo);
+    throw new WebGPUInitError(msg, 'device-failed', false);
   }
 
   const optionalEnabled = selectOptionalFeatures(
@@ -276,10 +299,11 @@ export async function requestWebGPUDevice(
         device = await adapter.requestDevice();
       } catch (err3) {
         const msg = err3 instanceof Error ? err3.message : String(err3);
+        markWebGPUSessionFailed('device', `requestDevice failed: ${msg}`, adapterInfo);
         throw new WebGPUInitError(
           `requestDevice failed: ${msg}`,
           'device-failed',
-          true,
+          false,
         );
       }
     }
@@ -295,6 +319,8 @@ export async function requestWebGPUDevice(
   }
 
   const enabledFeatures = requiredFeatures.filter((f) => device.features.has(f));
+
+  publishWebGPUProbeReady(adapterInfo);
 
   if (import.meta.env.DEV) {
     console.info(
@@ -319,7 +345,7 @@ export async function requestWebGPUDevice(
  * device, but swapchain contents never composite (createImageBitmap reads as
  * transparent black). Pattern shaders then look "broken" for every file even
  * though pipelines and submit succeed. Call after requestDevice; returns false
- * when we should fall back to WebGL2/HTML.
+ * when presentation is unusable (hard-fail viz; do not start WebGL2 shaders).
  */
 export async function probeWebGPUCanvasPresentation(
   device: GPUDevice,

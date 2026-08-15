@@ -85,6 +85,8 @@ export function createProcessModuleData(deps: ModuleActionsDeps) {
     setPlaybackRowFraction,
     setModuleInfo,
     setInstrumentNames,
+    setSampleNames,
+    setModuleFormat,
     setInstrumentTable,
     setModuleComments,
     setModuleDurationSeconds,
@@ -233,6 +235,8 @@ export function createProcessModuleData(deps: ModuleActionsDeps) {
       numChannels: metadata.numChannels,
     });
     setInstrumentNames(metadata.instruments ?? []);
+    setSampleNames(metadata.samples ?? []);
+    setModuleFormat(metadata.format ?? '');
     setInstrumentTable(loadedInstrumentTable);
     setModuleComments(metadata.comments ?? '');
     setModuleDurationSeconds(metadata.durationSeconds);

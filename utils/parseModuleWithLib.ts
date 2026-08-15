@@ -58,6 +58,23 @@ function createModulePtr(lib: LibOpenMPT, fileData: Uint8Array): number {
   return modPtr;
 }
 
+/** Read a libopenmpt name list (0-based indices). Soft-fails if getters are missing. */
+export function readOpenMPTNameList(
+  lib: LibOpenMPT,
+  modPtr: number,
+  count: number,
+  getName: ((modPtr: number, index: number) => number) | undefined,
+): string[] {
+  if (typeof getName !== 'function' || count <= 0) return [];
+  const names: string[] = [];
+  for (let i = 0; i < count; i++) {
+    const namePtr = getName(modPtr, i);
+    names.push(lib.UTF8ToString(namePtr));
+    lib._openmpt_free_string(namePtr);
+  }
+  return names;
+}
+
 function readModuleMetadata(
   lib: LibOpenMPT,
   modPtr: number,
@@ -69,19 +86,32 @@ function readModuleMetadata(
   const commentsPtr = lib._openmpt_module_get_metadata(modPtr, lib.stringToUTF8('message'));
   const comments = lib.UTF8ToString(commentsPtr);
   lib._openmpt_free_string(commentsPtr);
+  const formatPtr = lib._openmpt_module_get_metadata(modPtr, lib.stringToUTF8('type'));
+  const format = lib.UTF8ToString(formatPtr);
+  lib._openmpt_free_string(formatPtr);
 
   const numOrders = lib._openmpt_module_get_num_orders(modPtr);
   const numChannels = lib._openmpt_module_get_num_channels(modPtr);
   const initialBpm = lib._openmpt_module_get_current_estimated_bpm(modPtr);
   const durationSeconds = lib._openmpt_module_get_duration_seconds(modPtr);
   const numInstruments = lib._openmpt_module_get_num_instruments(modPtr);
+  const instruments = readOpenMPTNameList(
+    lib,
+    modPtr,
+    numInstruments,
+    lib._openmpt_module_get_instrument_name,
+  );
 
-  const instruments: string[] = [];
-  for (let i = 0; i < numInstruments; i++) {
-    const namePtr = lib._openmpt_module_get_instrument_name(modPtr, i);
-    instruments.push(lib.UTF8ToString(namePtr));
-    lib._openmpt_free_string(namePtr);
-  }
+  const numSamples =
+    typeof lib._openmpt_module_get_num_samples === 'function'
+      ? lib._openmpt_module_get_num_samples(modPtr)
+      : 0;
+  const samples = readOpenMPTNameList(
+    lib,
+    modPtr,
+    numSamples,
+    lib._openmpt_module_get_sample_name,
+  );
 
   let totalPatternRows = 0;
   for (let i = 0; i < numOrders; i++) {
@@ -98,6 +128,9 @@ function readModuleMetadata(
     totalPatternRows,
     numInstruments,
     instruments,
+    numSamples,
+    samples,
+    format,
     comments,
   };
 }

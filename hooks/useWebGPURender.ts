@@ -12,6 +12,11 @@ export { resolveLiveChannels } from '../src/renderers/params';
 import type { BloomPostProcessor } from '../utils/bloomPostProcessor';
 import { getLayoutType } from '../utils/shaderVersion';
 import { WebGPUInitError, type WebGPUDeviceStatus } from '../utils/webgpuDevice';
+import {
+  detectBrowserBrand,
+  markWebGPUSessionFailed,
+  publishWebGPUProbeReport,
+} from '../utils/webgpuProbe';
 import { WebGPURenderer } from '../src/renderers/webgpu/WebGPURenderer';
 
 /** Lifecycle status for the shared WebGPU device (surfaced to UI). */
@@ -71,14 +76,29 @@ export function useWebGPURender(
     const canvas = canvasRef.current;
     if (!canvas) return;
     if (!('gpu' in navigator)) {
-      console.log('[Renderer] WebGPU API not available');
+      const brand = detectBrowserBrand();
+      console.error(`[Renderer] WebGPU API not available (${brand}) — viz hard-fail (no WebGL2 shader fallback)`);
+      markWebGPUSessionFailed('api', 'WebGPU API not available in this browser');
       setWebgpuAvailable(false);
       setDeviceStatus('unsupported');
+      setDebugInfo((prev) => ({
+        ...prev,
+        errors: [
+          ...prev.errors.filter((e) => !e.startsWith('DEVICE-INIT')),
+          `DEVICE-INIT: WebGPU API missing (${brand})`,
+        ],
+        uniforms: {
+          ...prev.uniforms,
+          webgpuProbe: 'api-missing',
+          browserBrand: brand,
+        },
+      }));
       return;
     }
 
     let cancelled = false;
     const initDevice = async () => {
+      publishWebGPUProbeReport({ ok: false, stage: 'api' });
       try {
         await renderer.initDevice(canvas, glCanvasRef.current, syncCanvasSize, {
           liteMode: !!liteMode,
@@ -94,8 +114,21 @@ export function useWebGPURender(
           return;
         }
         const reason = error instanceof Error ? error.message : String(error);
-        console.error('[Renderer] WebGPU device init failed:', reason);
+        const brand = detectBrowserBrand();
+        console.error(
+          `[Renderer] WebGPU device init failed (${brand}):`,
+          reason,
+          '— viz hard-fail (no WebGL2 shader fallback)',
+        );
         const status = error instanceof WebGPUInitError ? error.status : 'device-failed';
+        const stage =
+          status === 'unsupported'
+            ? 'api'
+            : status === 'no-adapter'
+              ? 'adapter'
+              : 'device';
+        // Session gate for #395 (idempotent if already marked in requestWebGPUDevice).
+        markWebGPUSessionFailed(stage, reason);
         setDeviceStatus(status);
         setDeviceAcquired(false);
         setWebgpuAvailable(false);
@@ -103,8 +136,13 @@ export function useWebGPURender(
           ...prev,
           errors: [
             ...prev.errors.filter((e) => !e.startsWith('DEVICE-INIT')),
-            `DEVICE-INIT: ${reason}`,
+            `DEVICE-INIT: ${reason} (${brand})`,
           ],
+          uniforms: {
+            ...prev.uniforms,
+            webgpuProbe: status,
+            browserBrand: brand,
+          },
         }));
       }
     };

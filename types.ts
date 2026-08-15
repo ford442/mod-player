@@ -56,9 +56,12 @@ export interface ModuleMetadata {
   numOrders: number;
   numPatterns: number;
   numInstruments: number;
+  instruments: string[];
+  numSamples: number;
+  samples: string[];
+  format: string;
   durationSeconds: number;
   currentBpm: number;
-  instruments: string[];
 }
 
 export interface LibOpenMPT {
@@ -98,6 +101,8 @@ export interface LibOpenMPT {
   _openmpt_module_get_current_channel_vu_mono: (modPtr: number, channel: number) => number;
   _openmpt_module_get_num_instruments: (modPtr: number) => number;
   _openmpt_module_get_instrument_name: (modPtr: number, index: number) => number;
+  _openmpt_module_get_num_samples: (modPtr: number) => number;
+  _openmpt_module_get_sample_name: (modPtr: number, index: number) => number;
   _openmpt_module_set_position_order_row: (
     modPtr: number,
     order: number,
@@ -141,6 +146,10 @@ export interface WorkerParseMetadata {
   totalPatternRows: number;
   numInstruments: number;
   instruments: string[];
+  numSamples: number;
+  samples: string[];
+  /** libopenmpt metadata key `type` (e.g. "mod", "xm"). */
+  format: string;
   comments: string;
 }
 

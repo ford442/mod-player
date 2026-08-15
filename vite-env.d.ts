@@ -40,6 +40,11 @@ interface MIDIMessageEvent extends Event {
   readonly data: Uint8Array;
 }
 
+interface Window {
+  /** Real WebAssembly API snapshotted before wasm2js libopenmptjs.js loads. */
+  __NATIVE_WEBASSEMBLY__?: typeof WebAssembly;
+}
+
 interface ImportMetaEnv {
   readonly VITE_STORAGE_API_URL?: string;
   /** Optional CDN override for libopenmpt JS/WASM (dev / experiments). */

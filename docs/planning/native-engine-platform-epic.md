@@ -38,7 +38,7 @@ The C++/Emscripten engine exists end-to-end:
 |-----------|---------|--------|
 | CI publishes **or** verifies native build | **Done** — path-filtered full build + weekly schedule + libopenmpt cache | Optional: debug ASSERTIONS matrix (PR6 polish) |
 | Feature flag / auto-detect documented | **Done** — `?engine=` / localStorage / public-mode force-JS / parity gate | Keep README + AGENTS in sync |
-| A/V sync ≥ JS worklet (post-prediction) | Frame clock + anchor + **load/seek frame reset**; smoke hard-requires `native-worklet` | Green `report-native.json` on scheduled + path CI; fill measured lag in `accurate_playback.md` |
+| A/V sync ≥ JS worklet (post-prediction) | Frame clock + anchor + **load/seek frame reset**; smoke hard-requires `native-worklet` + non-frozen playhead | Green `report-native.json` after AudioWorklet thread start (aligned stack + `aw.js` path rewrite + real `WebAssembly`). Fill measured lag in `accurate_playback.md` |
 | No filename collision with JS worklet | **Done** — `openmpt-native.*` only; build refuses clobber | Keep guards + scheduled integrity check |
 | Export dual-context | **Documented** — MediaRecorder blocked on native (`docs/EXPORT.md`) | Dual-context capture still out of scope |
 

@@ -503,7 +503,7 @@ async function main() {
     // Browser-level isolation (SharedArrayBuffer / native ring-buffer path)
     const { page: isoPage, context: isoContext } = await openPage(browser, engine);
     try {
-      await goto(isoPage, engine, `${appRoot}/?renderer=webgl2`, TIMEOUT);
+      await goto(isoPage, engine, `${appRoot}/?renderer=html`, TIMEOUT);
       await assertBrowserCrossOriginIsolated(isoPage);
     } finally {
       if (isoContext) await isoContext.close();

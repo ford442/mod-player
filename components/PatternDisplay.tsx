@@ -164,7 +164,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   crtEnabledRef.current = crtEnabled;
 
   const [webgpuAvailable, setWebgpuAvailable] = useState(true);
-  const { activeBackend, setActiveBackend, webgl2Available, setWebgl2Available } =
+  const { activeBackend, setActiveBackend, setWebgl2Available } =
     usePatternRendererBackend(webgpuAvailable);
 
   const [localTime, setLocalTime] = useState(0);
@@ -465,12 +465,6 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
         </div>
       )}
 
-      {!useHTML && useWebGL2 && !webgl2Available && (
-        <div className="error absolute inset-0 flex items-center justify-center bg-black/80 text-red-400 text-sm font-mono p-4">
-          WebGL2 not available — use <code className="mx-1">?renderer=html</code>
-        </div>
-      )}
-
       {useWebGPU && deviceStatus === 'lost' && (
         <div
           className="absolute inset-0 z-10 flex items-center justify-center bg-black/75 text-amber-300 text-sm font-mono p-4 pointer-events-none"
@@ -481,13 +475,30 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
         </div>
       )}
 
-      {useWebGPU && deviceStatus === 'device-failed' && !webgpuAvailable && (
+      {useWebGPU && !webgpuAvailable && (
+        deviceStatus === 'device-failed'
+        || deviceStatus === 'unsupported'
+        || deviceStatus === 'no-adapter'
+      ) && (
         <div
-          className="absolute inset-0 z-10 flex items-center justify-center bg-black/80 text-red-400 text-sm font-mono p-4 text-center"
+          className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-black/85 text-red-400 text-sm font-mono p-4 text-center"
           role="alert"
+          data-webgpu-viz-hard-fail="true"
         >
-          WebGPU device unavailable — falling back or use{' '}
-          <code className="mx-1">?renderer=webgl2</code>
+          <div className="font-bold text-red-300">WebGPU visualizer unavailable</div>
+          <div className="text-red-400/90 max-w-md">
+            GPU viz requires WebGPU. WebGL2 shader fallback is deferred — tracker
+            audio can still play. See console / debug panel for probe details
+            (<code className="mx-1">window.__WEBGPU_PROBE__</code>).
+          </div>
+          {(deviceStatus === 'unsupported' || deviceStatus === 'no-adapter') && (
+            <div className="text-[11px] text-gray-400 mt-1">
+              Status: {deviceStatus}
+              {typeof window !== 'undefined' && window.__WEBGPU_PROBE__?.browserBrand
+                ? ` · ${window.__WEBGPU_PROBE__.browserBrand}`
+                : ''}
+            </div>
+          )}
         </div>
       )}
 

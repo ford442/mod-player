@@ -34,6 +34,7 @@ import {
   WebGPUInitError,
   type WebGPUDeviceStatus,
 } from '../../../utils/webgpuDevice';
+import { markWebGPUSessionFailed } from '../../../utils/webgpuProbe';
 import { AUDIO_REACTIVE_UNIFORM_BYTES, OSC_SAMPLE_COUNT } from '../../../utils/audioReactive';
 import { fetchShaderSource } from './shaderSource';
 import {
@@ -293,10 +294,14 @@ export class WebGPURenderer {
     }
     if (!presents) {
       try { device.destroy(); } catch { /* ignore */ }
+      markWebGPUSessionFailed(
+        'canvas',
+        'WebGPU canvas presentation failed (swapchain does not composite)',
+      );
       throw new WebGPUInitError(
         'WebGPU canvas presentation failed (swapchain does not composite)',
         'device-failed',
-        true,
+        false,
       );
     }
 
@@ -329,6 +334,10 @@ export class WebGPURenderer {
         this.nullOscTexture();
 
         if (this.recoveryAttempts >= this.maxDeviceLostRecoveries) {
+          markWebGPUSessionFailed(
+            'lost',
+            `DEVICE-LOST: ${info.reason} — recovery exhausted after ${this.maxDeviceLostRecoveries} attempts`,
+          );
           this.callbacks.onDeviceStatus?.('device-failed');
           this.callbacks.onWebgpuAvailable?.(false);
           this.callbacks.onDebugInfo?.((prev) => ({

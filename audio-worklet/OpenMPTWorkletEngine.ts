@@ -23,10 +23,14 @@ import type {
     EngineState,
     EngineEventMap,
     EmscriptenOpenMPTModule,
-    CreateOpenMPTModule,
 } from './types';
 import { withBase } from '../src/lib/paths';
 import { decodePositionInfo } from './positionInfoLayout';
+import {
+    installNativeAwJsModuleRewrite,
+    resolveCreateOpenMPTModule,
+    withNativeWebAssembly,
+} from './resolveNativeFactory';
 
 // ── Public constants ─────────────────────────────────────────────────
 
@@ -156,21 +160,37 @@ export class OpenMPTWorkletEngine extends MiniEventEmitter<EngineEventMap> {
             // and cannot be imported on the main thread. Only try the native Emscripten glue.
             const nativeUrl = withBase('worklets/openmpt-native.js');
             const glueModule = await import(/* @vite-ignore */ nativeUrl) as Record<string, unknown>;
-            const createModule = (glueModule.default || glueModule['createOpenMPTModule']) as CreateOpenMPTModule;
+            const createModule = resolveCreateOpenMPTModule(glueModule);
 
-            if (typeof createModule !== 'function') {
+            if (!createModule) {
                 throw new Error('Failed to load Emscripten module factory');
             }
 
-            // Instantiate with WASM file path override
-            this.module = await createModule({
-                locateFile: (path: string) => `${this.basePath}${path}`,
-            } as Partial<EmscriptenOpenMPTModule>);
+            // Instantiate with WASM file path override.
+            // Must use the real WebAssembly API — main-thread wasm2js stubs Memory().
+            this.module = await withNativeWebAssembly(() =>
+                createModule({
+                    // pre.js overwrites locateFile; it honors wasmBasePath when set.
+                    wasmBasePath: this.basePath,
+                    locateFile: (path: string) => `${this.basePath}${path}`,
+                } as Partial<EmscriptenOpenMPTModule>),
+            );
+
+            // Emscripten addModule('openmpt-native.aw.js') is page-relative.
+            installNativeAwJsModuleRewrite(this.basePath);
 
             // Initialize audio context and worklet thread
             const result = this.module._init_audio(sampleRate);
             if (!result) {
                 throw new Error('Failed to initialize AudioContext');
+            }
+
+            const readyDeadline = Date.now() + 8000;
+            while (Date.now() < readyDeadline && this.module._get_worklet_node() === 0) {
+                await new Promise((r) => setTimeout(r, 50));
+            }
+            if (this.module._get_worklet_node() === 0) {
+                throw new Error('Native AudioWorklet thread failed to start');
             }
 
             // If a shared output buffer was requested AND the WASM module supports

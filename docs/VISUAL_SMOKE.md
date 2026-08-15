@@ -145,7 +145,7 @@ npm run capture:trigger-tail # v0.30b / sustain tail capture
 
 Run against **`npm run dev`** (DURA parity only logs in dev builds).
 
-1. Open `http://localhost:5173/?renderer=webgpu`
+1. Open `http://localhost:5173/?renderer=webgpu` (WebGPU is required for GPU viz; WebGL2 auto-fallback is deferred — see `window.__WEBGPU_PROBE__` on failure)
 2. Load `/4-mat_madness.mod` and `/test.xm` (or any `.it` if available)
 3. DevTools console:
    - [ ] `[DURA-PARITY] ✓` for both MOD and IT (high-precision shaders)

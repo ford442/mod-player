@@ -4,15 +4,23 @@ const STORAGE_KEY = 'xasm1_pattern_renderer';
 const WEBGPU_PROBE_CACHE_KEY = 'xasm1_webgpu_adapter_ok';
 const VALID_BACKENDS: ReadonlySet<PatternRendererBackend> = new Set(['webgpu', 'webgl2', 'html']);
 
-/** Global runtime override — set from devtools or tests: `window.DEBUG_RENDERER = 'webgl2'`. */
+/**
+ * Phase policy: GPU viz requires WebGPU. Automatic WebGPU → WebGL2/HTML
+ * shader fallback is disabled. `?renderer=webgl2` is a no-op (stays WebGPU).
+ * Explicit `?renderer=html` still selects the DOM pattern grid (tracker UI).
+ */
+export const WEBGPU_VIZ_REQUIRED = true;
+
+/** Global runtime override — set from devtools or tests: `window.DEBUG_RENDERER = 'webgpu'`. */
 declare global {
   interface Window {
     DEBUG_RENDERER?: PatternRendererBackend;
   }
 }
 
-let webgpuAutoFallbackApplied = false;
 let webgpuAdapterProbePromise: Promise<boolean> | null = null;
+/** @deprecated Auto WebGL2 fallback removed — kept for test reset / legacy callers. */
+let webgpuAutoFallbackApplied = false;
 
 function parseBackend(value: string | null | undefined): PatternRendererBackend | null {
   if (!value) return null;
@@ -39,10 +47,6 @@ function writeWebGPUProbeCache(ok: boolean): void {
   } catch {
     /* ignore */
   }
-}
-
-function fallbackAfterWebGPU(): PatternRendererBackend {
-  return isWebGL2Available() ? 'webgl2' : 'html';
 }
 
 /** Read preferred backend from URL `?renderer=`, localStorage, or `window.DEBUG_RENDERER`. */
@@ -123,12 +127,11 @@ export async function probeWebGPUAdapter(): Promise<boolean> {
 }
 
 /**
- * Resolve the effective backend with automatic fallback:
- * webgpu → webgl2 → html
+ * Resolve pattern renderer backend.
  *
- * Uses a cached adapter probe for the implicit default path only. Explicit
- * `?renderer=webgpu` (or stored preference) still selects webgpu synchronously
- * so init can run and runtime fallback handles failures.
+ * - Default / `webgpu` → WebGPU (required for GPU viz this phase)
+ * - `html` → DOM pattern grid (tracker UI; not a GLSL shader session)
+ * - `webgl2` → **no-op**: stays WebGPU (WebGL2 shader path deferred)
  */
 export function resolvePatternRenderer(
   preference: PatternRendererBackend | null = readRendererPreference(),
@@ -138,70 +141,38 @@ export function resolvePatternRenderer(
   if (want === 'html') return 'html';
 
   if (want === 'webgl2') {
-    return isWebGL2Available() ? 'webgl2' : 'html';
-  }
-
-  // Default / explicit webgpu
-  if (!isWebGPUAvailable()) {
-    return fallbackAfterWebGPU();
-  }
-
-  if (preference === null) {
-    const cachedProbe = readWebGPUProbeCache();
-    if (cachedProbe === false) {
-      return fallbackAfterWebGPU();
-    }
-  }
-
-  return 'webgpu';
-}
-
-/** Async resolver — probes adapter for implicit default; explicit webgpu skips probe downgrade. */
-export async function resolvePatternRendererAsync(
-  preference: PatternRendererBackend | null = readRendererPreference(),
-): Promise<PatternRendererBackend> {
-  const want = preference ?? 'webgpu';
-
-  if (want === 'html') return 'html';
-
-  if (want === 'webgl2') {
-    return isWebGL2Available() ? 'webgl2' : 'html';
-  }
-
-  if (!isWebGPUAvailable()) {
-    return fallbackAfterWebGPU();
-  }
-
-  // Explicit webgpu request — attempt init; runtime fallback handles adapter/init failure.
-  if (preference !== null) {
+    console.warn(
+      '[Renderer] ?renderer=webgl2 is deferred this phase — GPU viz requires WebGPU '
+        + '(WebGL2 shader path will not auto-start). Using webgpu.',
+    );
     return 'webgpu';
   }
 
-  const adapterOk = await probeWebGPUAdapter();
-  if (!adapterOk) {
-    return fallbackAfterWebGPU();
-  }
-
   return 'webgpu';
 }
 
-/**
- * Runtime fallback when WebGPU init fails after webgpu was selected.
- * Persists the fallback once per session unless the user explicitly picks webgpu again.
- */
-export function applyWebGPUFallback(reason: string): PatternRendererBackend {
-  const fallback = fallbackAfterWebGPU();
-  if (!webgpuAutoFallbackApplied) {
-    webgpuAutoFallbackApplied = true;
-    console.warn(`[Renderer] WebGPU unavailable (${reason}); falling back to ${fallback}`);
-    persistRendererPreference(fallback);
-    window.DEBUG_RENDERER = fallback;
-    notifyRendererPreferenceChanged();
-  }
-  return fallback;
+/** Async resolver — same policy as sync; no adapter-based downgrade to WebGL2. */
+export async function resolvePatternRendererAsync(
+  preference: PatternRendererBackend | null = readRendererPreference(),
+): Promise<PatternRendererBackend> {
+  return resolvePatternRenderer(preference);
 }
 
-/** Returns true if the automatic WebGPU → WebGL2/HTML fallback has already run this session. */
+/**
+ * @deprecated Auto WebGL2/HTML shader fallback removed. Records a warning only;
+ * always returns `webgpu` so callers cannot silently start WebGL2 shaders.
+ */
+export function applyWebGPUFallback(reason: string): PatternRendererBackend {
+  if (!webgpuAutoFallbackApplied) {
+    webgpuAutoFallbackApplied = true;
+    console.warn(
+      `[Renderer] WebGPU unavailable (${reason}); auto WebGL2/HTML shader fallback is disabled — viz hard-fail.`,
+    );
+  }
+  return 'webgpu';
+}
+
+/** Returns true if applyWebGPUFallback has been invoked this session. */
 export function hasWebGPUAutoFallbackApplied(): boolean {
   return webgpuAutoFallbackApplied;
 }
@@ -224,19 +195,23 @@ export function subscribeRendererPreference(
 }
 
 export function notifyRendererPreferenceChanged(): void {
+  if (typeof window === 'undefined' || typeof window.dispatchEvent !== 'function') return;
   window.dispatchEvent(new Event('xasm1-renderer-change'));
 }
 
 export function setRendererOverride(backend: PatternRendererBackend): void {
-  if (backend === 'webgpu') {
-    webgpuAutoFallbackApplied = false;
+  if (backend === 'webgl2') {
+    console.warn(
+      '[Renderer] WebGL2 shader override deferred — selecting webgpu. Use html for DOM pattern grid only.',
+    );
+    backend = 'webgpu';
   }
   window.DEBUG_RENDERER = backend;
   persistRendererPreference(backend);
   notifyRendererPreferenceChanged();
 }
 
-/** Test helper — reset session fallback guard. */
+/** Test helper — reset session probe cache / legacy fallback guard. */
 export function resetWebGPUFallbackStateForTests(): void {
   webgpuAutoFallbackApplied = false;
   webgpuAdapterProbePromise = null;
