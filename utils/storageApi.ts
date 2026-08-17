@@ -189,30 +189,53 @@ async function fetchJsonGraceful(url: string, label: string): Promise<unknown | 
   }
 }
 
-export async function fetchRemoteSongs(): Promise<RemoteSong[]> {
-  const url = toApiUrl('/api/songs');
-  const payload = await fetchJsonGraceful(url, '/api/songs');
-  if (payload === null) return [];
+const TRACKER_EXT_RE =
+  /\.(mod|xm|s3m|it|mptm|stm|669|amf|ams|dbm|dmf|dsm|far|gdm|j2b|mdl|med|mtm|okt|psm|ptm|ult|umx|mt2|mo3)(?:[?#].*)?$/i;
 
+const MODS_DOWNLOAD_RE = /\/api\/mods\/[^/]+\/download(?:[?#]|$)/i;
+
+/** Endpoints that list tracker modules. `/api/songs` (no type) is the flac_player library. */
+const TRACKER_LIBRARY_PATHS = ['/api/mods', '/api/songs?type=mod'] as const;
+
+function unwrapSongList(parsed: z.infer<typeof SongListSchema>): z.infer<typeof SongSchema>[] {
+  if (Array.isArray(parsed)) return parsed;
+  if ('songs' in parsed) return parsed.songs;
+  if ('items' in parsed) return parsed.items;
+  return parsed.results;
+}
+
+export function isTrackerLibrarySong(song: RemoteSong): boolean {
+  if (TRACKER_EXT_RE.test(song.fileName) || TRACKER_EXT_RE.test(song.downloadUrl)) {
+    return true;
+  }
+  return MODS_DOWNLOAD_RE.test(song.downloadUrl);
+}
+
+function parseRemoteSongList(payload: unknown, label: string): RemoteSong[] | null {
   const parsed = SongListSchema.safeParse(payload);
   if (!parsed.success) {
-    console.warn('[storageApi] invalid /api/songs response — degraded mode active.');
-    return [];
+    console.warn(`[storageApi] invalid ${label} response — degraded mode active.`);
+    return null;
   }
-  const songs = Array.isArray(parsed.data)
-    ? parsed.data
-    : 'songs' in parsed.data
-      ? parsed.data.songs
-      : 'items' in parsed.data
-        ? parsed.data.items
-        : parsed.data.results;
-
   try {
-    return songs.map(normalizeSong);
+    return unwrapSongList(parsed.data).map(normalizeSong);
   } catch (error) {
     console.warn('[storageApi] song normalization failed — degraded mode active:', error);
-    return [];
+    return null;
   }
+}
+
+export async function fetchRemoteSongs(): Promise<RemoteSong[]> {
+  // Prefer /api/mods (full downloadUrl + fileName). Never fall back to bare
+  // /api/songs — that is the FLAC/MP3 catalog and libopenmpt cannot load it.
+  for (const path of TRACKER_LIBRARY_PATHS) {
+    const payload = await fetchJsonGraceful(toApiUrl(path), path);
+    if (payload === null) continue;
+    const songs = parseRemoteSongList(payload, path);
+    if (songs === null) continue;
+    return songs.filter(isTrackerLibrarySong);
+  }
+  return [];
 }
 
 export async function fetchShaders(): Promise<ShaderMeta[]> {

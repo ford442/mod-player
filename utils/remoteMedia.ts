@@ -178,8 +178,16 @@ export const fetchRemoteMedia = async (): Promise<MediaItem[]> => {
 
 export function inferFileNameFromUrl(downloadUrl: string): string {
   try {
-    const parsed = new URL(downloadUrl, window.location.href);
-    return decodeURIComponent(parsed.pathname.split('/').pop() || 'remote.mod');
+    const base = typeof window !== 'undefined' ? window.location.href : 'http://localhost/';
+    const parsed = new URL(downloadUrl, base);
+    const parts = parsed.pathname.split('/').filter(Boolean);
+    const last = parts[parts.length - 1] || 'remote.mod';
+    // CORS proxy: /api/mods/{id}/download — last segment is not a filename.
+    if (last.toLowerCase() === 'download' && parts.length >= 2) {
+      const id = decodeURIComponent(parts[parts.length - 2] ?? 'remote');
+      return id.includes('.') ? id : `${id}.mod`;
+    }
+    return decodeURIComponent(last);
   } catch {
     return decodeURIComponent(downloadUrl.split('?')[0]?.split('/').pop() || 'remote.mod');
   }
