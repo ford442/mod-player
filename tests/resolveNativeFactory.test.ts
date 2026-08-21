@@ -1,7 +1,6 @@
 import { describe, expect, it, afterEach } from 'vitest';
 import {
   getNativeWebAssembly,
-  installNativeAwJsModuleRewrite,
   resolveCreateOpenMPTModule,
   withNativeWebAssembly,
 } from '../audio-worklet/resolveNativeFactory';
@@ -50,7 +49,7 @@ describe('getNativeWebAssembly / withNativeWebAssembly', () => {
     const real = WebAssembly;
     g.__NATIVE_WEBASSEMBLY__ = real;
     const stub = { isWasm2js: true, Memory: function Memory() { return {}; } };
-    (globalThis as { WebAssembly: unknown }).WebAssembly = stub as typeof WebAssembly;
+    (globalThis as { WebAssembly: unknown }).WebAssembly = stub as unknown as typeof WebAssembly;
     try {
       const seen = await withNativeWebAssembly(async () => globalThis.WebAssembly);
       expect(seen).toBe(real);

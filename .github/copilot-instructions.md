@@ -22,7 +22,7 @@ npm run build:emcc             # Canonical — scripts/build-wasm.sh → openmpt
 # npm run build:worklet        # Deprecated alias (same script)
 # ./build-wasm.sh              # Deprecated root wrapper (forwards to scripts/build-wasm.sh)
 ```
-**Prerequisite:** Emscripten SDK **3.1.50** (pinned in CI and `scripts/build-wasm.sh`). Never overwrites tracked `public/worklets/openmpt-worklet.js` (production JS processor). libopenmpt 0.8.4 is auto-downloaded into `vendor/` if missing.
+**Prerequisite:** Emscripten SDK **3.1.51** (pinned in CI and `scripts/build-wasm.sh`). Never overwrites tracked `public/worklets/openmpt-worklet.js` (production JS processor). libopenmpt 0.8.4 is auto-downloaded into `vendor/` if missing.
 
 ```bash
 npm run verify:native-exports  # Audit EXPORTED_FUNCTIONS vs C++/OpenMPTWorkletEngine.ts
