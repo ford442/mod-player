@@ -246,7 +246,7 @@ jobs:
       - name: Setup Emscripten
         uses: mymindstorm/setup-emsdk@v14
         with:
-          version: '3.1.50'
+          version: '3.1.51'
       
       - name: Verify emcc
         run: emcc --version
@@ -335,7 +335,7 @@ jobs:
         if: steps.filter.outputs.native == 'true'
         uses: mymindstorm/setup-emsdk@v14
         with:
-          version: '3.1.50'
+          version: '3.1.51'
 
       - name: Setup Node.js
         if: steps.filter.outputs.native == 'true'
@@ -353,9 +353,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: vendor/libopenmpt-0.8.4+release
-          key: libopenmpt-a-${{ runner.os }}-emsdk-3.1.50-v0.8.4-static1-${{ hashFiles('scripts/build-wasm.sh') }}
+          key: libopenmpt-a-${{ runner.os }}-emsdk-3.1.51-v0.8.4-static1-${{ hashFiles('scripts/build-wasm.sh') }}
           restore-keys: |
-            libopenmpt-a-${{ runner.os }}-emsdk-3.1.50-v0.8.4-static1-
+            libopenmpt-a-${{ runner.os }}-emsdk-3.1.51-v0.8.4-static1-
 
       - name: Snapshot tracked JS worklet
         if: steps.filter.outputs.native == 'true'
@@ -393,7 +393,7 @@ jobs:
         if: steps.filter.outputs.native == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: openmpt-native-pr-emsdk-3.1.50
+          name: openmpt-native-pr-emsdk-3.1.51
           path: |
             public/worklets/openmpt-native.js
             public/worklets/openmpt-native.wasm
