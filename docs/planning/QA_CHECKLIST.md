@@ -80,7 +80,7 @@ npm run typecheck
 npm run build
 npm run verify:build  # post-build CSS + wasm checks
 
-# Native C++ worklet (requires emsdk 3.1.50)
+# Native C++ worklet (requires emsdk 3.1.51)
 source /opt/emsdk/emsdk_env.sh
 npm run build:emcc
 npm run verify:native-exports

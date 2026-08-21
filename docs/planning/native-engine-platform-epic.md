@@ -13,7 +13,7 @@ The C++/Emscripten engine exists end-to-end:
 | Layer | Path | Notes |
 |-------|------|--------|
 | C++ core | `cpp/openmpt_wrapper.*`, `cpp/worklet_processor.cpp` | libopenmpt render + `PositionInfo` shared memory; **zeros frame clock on load/seek** |
-| Build | `scripts/build-wasm.sh` → `npm run build:emcc` | emsdk **3.1.50**, outputs `openmpt-native.{js,wasm,aw.js}` |
+| Build | `scripts/build-wasm.sh` → `npm run build:emcc` | emsdk **3.1.51**, outputs `openmpt-native.{js,wasm,aw.js}` |
 | TS wrapper | `audio-worklet/OpenMPTWorkletEngine.ts` | Dynamic import of glue; polls `_poll_position` |
 | Ring bridge | `public/worklets/native-bridge-processor.js` | SAB ring → main-thread graph |
 | Main hook | `hooks/useLibOpenMPT.ts` + `hooks/audioGraph/*` | Probe; auto-prefer only if parity gate open |
@@ -59,7 +59,7 @@ The C++/Emscripten engine exists end-to-end:
 
 | Workflow | What runs |
 |----------|-----------|
-| `ci.yml` → `wasm-smoke-test` | emsdk 3.1.50, script safety greps, `verify:native-exports`, `bash -n`, JS worklet guard. **No full emcc link.** |
+| `ci.yml` → `wasm-smoke-test` | emsdk 3.1.51, script safety greps, `verify:native-exports`, `bash -n`, JS worklet guard. **No full emcc link.** |
 | `native-wasm-scheduled.yml` | Full `npm run build:emcc`, artifact upload (14d), JS integrity. **No libopenmpt.a cache.** |
 
 Gap: every scheduled run rebuilds libopenmpt from source (~minutes). PR never proves the full link succeeds.
@@ -147,7 +147,7 @@ Acceptance: `smoke:playhead:native` asserts active engine `native-worklet` and m
 Cache key (suggested):
 
 ```
-libopenmpt-a-${{ runner.os }}-emsdk-3.1.50-v0.8.4-static1-${{ hashFiles('scripts/build-wasm.sh') }}
+libopenmpt-a-${{ runner.os }}-emsdk-3.1.51-v0.8.4-static1-${{ hashFiles('scripts/build-wasm.sh') }}
 ```
 
 Cached paths:
@@ -257,7 +257,7 @@ Fixtures: one large `.it` in `public/` or downloadable test asset (do not bloat 
 | Release CI: no ASSERTIONS | Perf / size |
 | Weekly or path CI: optional `--debug` matrix | Catches heap errors without slowing every PR |
 | EXPORT list | Maintain via `verify:native-exports` only — no duplicate hand lists in docs |
-| Runtime methods | Audit bridge path for `emscriptenGetAudioObject` / `emscriptenRegisterAudioObject`; add to `EXPORTED_RUNTIME_METHODS` if missing in 3.1.50 |
+| Runtime methods | Audit bridge path for `emscriptenGetAudioObject` / `emscriptenRegisterAudioObject`; add to `EXPORTED_RUNTIME_METHODS` if missing in 3.1.51 |
 
 ---
 
@@ -278,7 +278,7 @@ Fixtures: one large `.it` in `public/` or downloadable test asset (do not bloat 
 - Replacing the JS worklet in production without explicit deploy of native artifacts.
 - Shipping libopenmpt source or `.a` in the app repo.
 - Full ProjectM feature parity on native in the first PR.
-- Changing emsdk pin without a dedicated upgrade PR (stay on **3.1.50**).
+- Changing emsdk pin without a dedicated upgrade PR (stay on **3.1.51**).
 
 ---
 

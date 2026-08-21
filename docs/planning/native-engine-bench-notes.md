@@ -10,7 +10,7 @@ Compare **main-thread** cost of the native C++ engine vs the production JS Audio
 
 ## Method (manual)
 
-1. Build native artifacts: `npm run build:emcc` (emsdk 3.1.50).
+1. Build native artifacts: `npm run build:emcc` (emsdk 3.1.51).
 2. `npm run preview` (or `dev`) with COOP/COEP so SharedArrayBuffer works.
 3. Load the same large IT twice in separate sessions:
    - Native: `?engine=native` (or leave `auto` with artifacts present)

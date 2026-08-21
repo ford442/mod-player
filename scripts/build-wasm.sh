@@ -10,7 +10,7 @@
 #        git clone https://github.com/emscripten-core/emsdk.git
 #        cd emsdk && ./emsdk install 3.1.51 && ./emsdk activate 3.1.51
 #        source ./emsdk_env.sh
-#      Newer emsdk often works; CI and docs treat 3.1.50 as the verified pin.
+#      Newer emsdk often works; CI and docs treat 3.1.51 as the verified pin.
 #
 #   2. libopenmpt source (auto-downloaded if missing):
 #        vendor/libopenmpt-0.8.4+release  (from lib.openmpt.org tarball)
