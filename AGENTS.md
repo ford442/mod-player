@@ -165,12 +165,12 @@ npm run preview         # Preview the production build locally
 Do **not** add `package-lock.json` to `.gitignore`.
 
 ### Native Audio Engine Build (single supported path)
-Requires Emscripten **emsdk 3.1.50** (CI pin; override with `EMSDK_PIN` only for experiments):
+Requires Emscripten **emsdk 3.1.51** (CI pin; override with `EMSDK_PIN` only for experiments):
 
 ```bash
 # Install pin (once)
 git clone https://github.com/emscripten-core/emsdk.git && cd emsdk
-./emsdk install 3.1.50 && ./emsdk activate 3.1.50
+./emsdk install 3.1.51 && ./emsdk activate 3.1.51
 source ./emsdk_env.sh
 
 # From repo root — only supported native build:
@@ -220,7 +220,7 @@ python3 deploy.py
 - **GitHub Actions** (`.github/workflows/ci.yml`) runs PR jobs plus a scheduled native build:
   1. `lint-and-build` – `npm ci` → `verify:wasm` → `npm run lint` (hard fail) → `npm run typecheck` → `npm run typecheck:tests` → **`npm test`** → `npm run test:shader-registry` → `npm run build` → artifact + `verify:build` checks.
   2. `visual-smoke` – Build, preview server, Playwright smoke (`smoke:visual:ci`) on WebGL2 + HTML renderers.
-  3. `wasm-smoke-test` – Installs Emscripten **3.1.50**, verifies safe native build scripts, `verify:native-exports`, `bash -n`, and that tracked `openmpt-worklet.js` still looks like the JS processor.
+  3. `wasm-smoke-test` – Installs Emscripten **3.1.51**, verifies safe native build scripts, `verify:native-exports`, `bash -n`, and that tracked `openmpt-worklet.js` still looks like the JS processor.
   4. `native-full-build` – Path-filtered full `npm run build:emcc` when `cpp/**`, `scripts/build-wasm.sh`, `audio-worklet/**`, or `native-bridge-processor.js` change; caches `vendor/libopenmpt-0.8.4+release`.
   5. `native-wasm-scheduled.yml` – Weekly (and manual) full `npm run build:emcc` with the same libopenmpt cache; uploads `openmpt-native.*` artifacts and asserts the JS worklet is unchanged.
 
@@ -237,7 +237,7 @@ python3 deploy.py
 1. **Worklet Caching:** Browsers cache AudioWorklet files aggressively. If you edit `openmpt-worklet.js` or any worklet asset, hard-refresh or disable cache in DevTools.
 2. **Shader Imports:** If you rename a shader file in `/shaders`, you **must** update the reference in `App.tsx` (the `SHADER_GROUPS` constant) and in any component that fetches the file by name (e.g., `PatternDisplay.tsx`). WGSL files must also be kept in sync between `/shaders` (source) and `/public/shaders` (served).
 3. **Base Path Mismatch:** Deploying to a subdirectory without setting `VITE_APP_BASE_PATH` will break shader fetches, worklet loads, and the default module fetch. Use `deploy.py` or set the env var manually before building.
-4. **Missing Native Engine:** `openmpt-native.js` does not exist in the repo by default. Run `npm run build:emcc` after activating emsdk **3.1.50**. Force JS while debugging with artifacts present: `?engine=js` or `localStorage.xasm1_audio_engine=js` (see `public/worklets/README.md`).
+4. **Missing Native Engine:** `openmpt-native.js` does not exist in the repo by default. Run `npm run build:emcc` after activating emsdk **3.1.51**. Force JS while debugging with artifacts present: `?engine=js` or `localStorage.xasm1_audio_engine=js` (see `public/worklets/README.md`).
 5. **Node OOM during build:** The Tailwind config was intentionally narrowed to explicit paths. Do not broaden the `content` glob to `"./**/*.{js,ts,jsx,tsx}"` or production builds may run out of heap memory.
 6. **Native vs JS worklet names:** Native glue is always `openmpt-native.*`. The tracked production processor is `openmpt-worklet.js`. Both `npm run build:emcc` and `npm run build:worklet` call `scripts/build-wasm.sh` and refuse to clobber the JS processor.
 7. **Shader-Uniform coupling:** Shaders are tightly coupled to TypeScript host code. Changing a shader's `struct Uniforms` requires a matching change to `createUniformPayload()` in `PatternDisplay.tsx`. Adding a new shader often requires manually updating version checks in `PatternDisplay.tsx` for layout, packing, canvas size, and input handling.

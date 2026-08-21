@@ -26,7 +26,7 @@ Classic (non–wasm2js) Emscripten builds may add a real `libopenmpt.wasm`. In t
 **Single supported build path** (never overwrites this directory’s JS processor):
 
 ```bash
-# emsdk 3.1.50 (CI pin)
+# emsdk 3.1.51 (CI pin)
 source /path/to/emsdk/emsdk_env.sh
 npm run build:emcc
 # → openmpt-native.js / .wasm / .aw.js (gitignored until built)
@@ -54,7 +54,7 @@ Production **default is the JS worklet**. Native is explicit opt-in (`?engine=na
 **Parity gate:** `auto` stays on JS until deploy sets `VITE_NATIVE_PARITY_GATE=1` (or local smoke marks `xasm1_native_parity_passed`). Run:
 
 ```bash
-npm run build:emcc   # emsdk 3.1.50
+npm run build:emcc   # emsdk 3.1.51
 npm run preview -- --port 4173 &
 npm run smoke:playhead:native
 # → artifacts/playhead-acceptance/report-native.json + native-parity.ok when green

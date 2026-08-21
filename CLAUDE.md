@@ -85,7 +85,7 @@ npm run build        # tsc + Vite production build → dist/ (uses 4 GB heap)
 npm run preview      # Preview production build locally
 npm run typecheck    # TypeScript type-check only (no emit)
 npm run lint         # ESLint (max 43 warnings budget; hard CI gate)
-npm run build:emcc   # Native C++ worklet → openmpt-native.* (scripts/build-wasm.sh, emsdk 3.1.50)
+npm run build:emcc   # Native C++ worklet → openmpt-native.* (scripts/build-wasm.sh, emsdk 3.1.51)
 npm run build:worklet # Alias of build:emcc (never overwrites openmpt-worklet.js)
 python3 deploy.py    # Build + SFTP upload to production server
 ```
@@ -275,7 +275,7 @@ All shared canvas layout values live here:
 - Production build requires `node --max-old-space-size=4096` (set in `package.json`)
 - WASM `.wasm` files are included as Vite assets (`assetsInclude: ['**/*.wasm']`)
 - `openmpt-native` is excluded from Vite's pre-bundling optimization
-- Emscripten native worklet: `npm run build:emcc` → `public/worklets/openmpt-native.*` only (emsdk **3.1.50**)
+- Emscripten native worklet: `npm run build:emcc` → `public/worklets/openmpt-native.*` only (emsdk **3.1.51**)
 
 ---
 

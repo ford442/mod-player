@@ -70,9 +70,9 @@ Production audio uses the tracked **JS** AudioWorklet at `public/worklets/openmp
 The optional native engine is built with a **single** supported path:
 
 ```bash
-# Prerequisites: emsdk 3.1.50 (matches CI)
+# Prerequisites: emsdk 3.1.51 (matches CI)
 git clone https://github.com/emscripten-core/emsdk.git && cd emsdk
-./emsdk install 3.1.50 && ./emsdk activate 3.1.50
+./emsdk install 3.1.51 && ./emsdk activate 3.1.51
 source ./emsdk_env.sh
 
 cd /path/to/mod-player

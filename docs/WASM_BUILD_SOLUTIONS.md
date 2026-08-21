@@ -12,13 +12,13 @@
 
 ## Emscripten pin
 
-CI and docs use **emsdk 3.1.50**:
+CI and docs use **emsdk 3.1.51**:
 
 ```bash
 git clone https://github.com/emscripten-core/emsdk.git
 cd emsdk
-./emsdk install 3.1.50
-./emsdk activate 3.1.50
+./emsdk install 3.1.51
+./emsdk activate 3.1.51
 source ./emsdk_env.sh
 ```
 
@@ -68,7 +68,7 @@ Checks `EXPORTED_FUNCTIONS` in `scripts/build-wasm.sh` against:
 ## Docker (optional)
 
 ```dockerfile
-FROM emscripten/emsdk:3.1.50
+FROM emscripten/emsdk:3.1.51
 WORKDIR /build
 COPY . .
 RUN bash scripts/build-wasm.sh
@@ -80,7 +80,7 @@ Copy only `public/worklets/openmpt-native.*` out of the image — never replace 
 
 | Workflow | When | What |
 |----------|------|------|
-| `ci.yml` → `wasm-smoke-test` | Every PR/push | Script safety, `verify:native-exports`, emsdk **3.1.50** pin |
+| `ci.yml` → `wasm-smoke-test` | Every PR/push | Script safety, `verify:native-exports`, emsdk **3.1.51** pin |
 | `native-wasm-scheduled.yml` | Weekly + manual | Full `npm run build:emcc`, artifact upload, JS worklet integrity check |
 
 ## Historical footgun (fixed)
