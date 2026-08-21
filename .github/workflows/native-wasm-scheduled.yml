@@ -15,7 +15,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       # Pin must match scripts/build-wasm.sh EMSDK_PIN and docs
       - name: Setup Emscripten
@@ -27,9 +27,9 @@ jobs:
         run: emcc --version
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
 
       - name: Install dependencies
@@ -38,7 +38,7 @@ jobs:
       # Cache expensive libopenmpt.a / vendor tree; C++ relink stays cheap.
       # Invalidates when build-wasm.sh changes (LIBOPENMPT_MAKE_FLAGS / version).
       - name: Cache libopenmpt static library
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: vendor/libopenmpt-0.8.4+release
           key: libopenmpt-a-${{ runner.os }}-emsdk-3.1.51-v0.8.4-static1-${{ hashFiles('scripts/build-wasm.sh') }}
@@ -74,7 +74,7 @@ jobs:
           echo "✅ openmpt-native.* artifacts present"
 
       - name: Upload native artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: openmpt-native-emsdk-3.1.51
           path: |
@@ -107,7 +107,7 @@ jobs:
 
       - name: Upload native playhead report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: playhead-native-scheduled
           path: artifacts/playhead-acceptance-native/

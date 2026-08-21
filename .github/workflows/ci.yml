@@ -12,12 +12,12 @@ jobs:
     
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
       
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
       
       - name: Install dependencies
@@ -65,12 +65,12 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
 
       - name: Install dependencies
@@ -97,7 +97,7 @@ jobs:
 
       - name: Upload smoke artifacts on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: visual-smoke-failure
           path: artifacts/visual-smoke/
@@ -125,7 +125,7 @@ jobs:
 
       - name: Upload WebGPU coverage artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: visual-smoke-webgpu-coverage
           path: artifacts/visual-smoke-webgpu/
@@ -143,12 +143,12 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
 
       - name: Install dependencies
@@ -175,7 +175,7 @@ jobs:
 
       - name: Upload audio smoke artifacts on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: audio-smoke-failure
           path: artifacts/audio-smoke/
@@ -192,12 +192,12 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
 
       - name: Install dependencies
@@ -224,7 +224,7 @@ jobs:
 
       - name: Upload playhead artifacts on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: playhead-smoke-failure
           path: artifacts/playhead-acceptance/
@@ -240,7 +240,7 @@ jobs:
     
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
       
       # Pin must match scripts/build-wasm.sh EMSDK_PIN and docs
       - name: Setup Emscripten
@@ -268,9 +268,9 @@ jobs:
           echo "✅ Native build scripts present and safe"
       
       - name: Setup Node.js (for dependencies)
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
       
       - name: Install dependencies
@@ -308,7 +308,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -339,9 +339,9 @@ jobs:
 
       - name: Setup Node.js
         if: steps.filter.outputs.native == 'true'
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
 
       - name: Install dependencies
@@ -350,7 +350,7 @@ jobs:
 
       - name: Cache libopenmpt static library
         if: steps.filter.outputs.native == 'true'
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: vendor/libopenmpt-0.8.4+release
           key: libopenmpt-a-${{ runner.os }}-emsdk-3.1.51-v0.8.4-static1-${{ hashFiles('scripts/build-wasm.sh') }}
@@ -391,7 +391,7 @@ jobs:
 
       - name: Upload native artifacts
         if: steps.filter.outputs.native == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: openmpt-native-pr-emsdk-3.1.51
           path: |
@@ -426,7 +426,7 @@ jobs:
 
       - name: Upload native playhead artifacts on failure
         if: failure() && steps.filter.outputs.native == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: playhead-native-smoke-failure
           path: artifacts/playhead-acceptance-native/
