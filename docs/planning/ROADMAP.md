@@ -6,11 +6,11 @@ Living pointer to active work. **Do not** append agent run diaries here — use 
 
 ## Active (do now)
 
-Foundation first: CI is red on `main` (`lint-and-build` / `typecheck:tests`) and the weekly native build cannot compile libopenmpt 0.8.4 against emsdk 3.1.50. Do not start P2 studio/stage work on top of that.
+Foundation first: CI has been red on `main` (`lint-and-build` / `typecheck:tests`) and the weekly native build could not compile libopenmpt 0.8.4 against emsdk 3.1.50. Fix is up in [PR #406](https://github.com/ford442/mod-player/pull/406) — do not start P2 studio/stage work until it merges and CI is confirmed green.
 
 | Priority | Issue | Summary |
 |----------|-------|---------|
-| **P0 — Fix First** | [#400](https://github.com/ford442/mod-player/issues/400) | Restore green CI: `typecheck:tests` (`resolveNativeFactory.test.ts`), pin emsdk **3.1.51** everywhere (scheduled native is red on 3.1.50), delete `git.sh`, rewrite this table. |
+| **P0 — Fix First** | [#400](https://github.com/ford442/mod-player/issues/400) | Restore green CI: `typecheck:tests` (`resolveNativeFactory.test.ts`), pin emsdk **3.1.51** everywhere. Fixed in [#406](https://github.com/ford442/mod-player/pull/406); pending CI confirmation before close-out. |
 | P1 | [#401](https://github.com/ford442/mod-player/issues/401) | Native engine production path: single `AudioContext`, authentic PCM tap, `EXPORT_ES6` / heap contract, `--debug` CI cell. Blocked on #400's pin. |
 | P1 | [#402](https://github.com/ford442/mod-player/issues/402) | GPU compute analysis: spectrum + waveform extrema + `timestamp-query`. Tracker engine stays CPU/WASM. Replaces AnalyserNode for chassis bands. |
 
