@@ -100,6 +100,14 @@ export const usesAudioReactive = (shaderFile: string): boolean =>
 export const usesAudioReactiveBezel = (shaderFile: string): boolean =>
   resolveShaderMeta(shaderFile).background === 'bezel_audio.wgsl';
 
+/**
+ * Shader prefers GPU compute audio analysis (compute_analysis.wgsl) over the
+ * AnalyserNode / CPU oscilloscope walk. Additive — the CPU path stays the
+ * fallback whenever the compute pipeline or PCM stream is unavailable.
+ */
+export const usesGpuSpectrum = (shaderFile: string): boolean =>
+  resolveShaderMeta(shaderFile).usesGpuSpectrum ?? false;
+
 export const usesBareCanvasChrome = (shaderFile: string): boolean =>
   resolveShaderMeta(shaderFile).bareCanvasChrome;
 

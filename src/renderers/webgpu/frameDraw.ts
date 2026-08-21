@@ -21,6 +21,7 @@ import {
   needsChassisControlFields,
   resolveShaderMeta,
   usesOscilloscope,
+  usesGpuSpectrum,
   WEBGL_HYBRID_SHADERS,
 } from '../../../utils/shaderVersion';
 import { GRID_RECT, getPolarRadii } from '../../../utils/geometryConstants';
@@ -43,6 +44,11 @@ import type { GpuLifecycle } from '../../../utils/gpuLifecycle';
 import type { LayoutType } from '../../../utils/shaderVersion';
 import type React from 'react';
 import { updateVideoTexture, type VideoTextureState } from './textures';
+import type { ComputeAnalysis } from './computeAnalysis';
+import type { GpuTimestampRecorder } from './timestampQuery';
+
+/** Timestamp label for the main pattern render pass. */
+export const PATTERN_PASS_LABEL = 'pattern';
 
 /** Upload worklet oscilloscope ring buffer into the 1D GPU texture (binding 6). */
 export function uploadOscilloscopeTexture(
@@ -107,6 +113,10 @@ export interface FrameDrawContext {
   scratch: FrameDrawScratch;
   bloomProcessor: BloomPostProcessor | null | undefined;
   oscTextureRef?: React.MutableRefObject<GPUTexture | null> | undefined;
+  /** GPU audio analysis, or null when unavailable / lite mode (CPU path used). */
+  computeAnalysis?: ComputeAnalysis | null | undefined;
+  /** Optional GPU pass timing, null when the adapter lacks `timestamp-query`. */
+  timestamps?: GpuTimestampRecorder | null | undefined;
   onRefreshBindGroup: () => void;
   onDebugInfo: (updater: (prev: DebugInfo) => DebugInfo) => void;
 }
@@ -125,6 +135,8 @@ export function renderWebGPUFrame(ctx: FrameDrawContext): void {
     scratch,
     bloomProcessor,
     oscTextureRef,
+    computeAnalysis,
+    timestamps,
     onRefreshBindGroup,
     onDebugInfo,
   } = ctx;
@@ -158,16 +170,27 @@ export function renderWebGPUFrame(ctx: FrameDrawContext): void {
     }
   }
 
+  // One encoder for the whole frame: the analysis compute pass has to be
+  // recorded before the pattern pass that samples its output.
+  const encoder = device.createCommandEncoder();
+
+  // GPU audio analysis runs only for shaders that opted in via ShaderMeta.
+  // Everything below degrades to the CPU AnalyserNode / oscilloscope walk when
+  // this is false — a missing compute kernel is never a hard failure.
+  const gpuAnalysisActive =
+    usesGpuSpectrum(shaderFile) && (computeAnalysis?.encode(encoder, timestamps) ?? false);
+  const gpuBands = gpuAnalysisActive ? computeAnalysis?.readBands() ?? null : null;
+
   if (
     state.audioReactiveUniformBuffer &&
     (usesAudioReactive(shaderFile) || usesAudioReactiveBezel(shaderFile))
   ) {
     const meta = p.audioReactiveRef?.current;
-    const bands = meta ? readAudioBands(meta) : {
+    const bands = gpuBands ?? (meta ? readAudioBands(meta) : {
       bass: 0, mid: 0, high: 0, amplitude: 0, beat: 0,
       peakL: 0, peakR: 0, rmsL: 0, rmsR: 0,
-    };
-    const enabled = !!(p.reactiveMode && meta);
+    });
+    const enabled = !!(p.reactiveMode && (meta || gpuBands));
     packAudioReactiveUniform(
       bands,
       enabled,
@@ -215,13 +238,13 @@ export function renderWebGPUFrame(ctx: FrameDrawContext): void {
     onRefreshBindGroup();
   }
 
-  uploadOscilloscopeTexture(
-    device,
-    pool,
-    shaderFile,
-    oscTextureRef?.current,
-    p.oscBufferRef,
-  );
+  const oscTexture = oscTextureRef?.current;
+  if (gpuAnalysisActive && usesOscilloscope(shaderFile) && oscTexture && pool.isAlive(oscTexture)) {
+    // Compute wrote per-texel min/max tiles this frame — blit them straight in.
+    computeAnalysis?.blitOscilloscope(encoder, oscTexture);
+  } else {
+    uploadOscilloscopeTexture(device, pool, shaderFile, oscTexture, p.oscBufferRef);
+  }
 
   if (state.uniformBuffer) {
     const numRows = p.matrix?.numRows ?? DEFAULT_ROWS;
@@ -428,23 +451,35 @@ export function renderWebGPUFrame(ctx: FrameDrawContext): void {
     }
   };
 
-  const encoder = device.createCommandEncoder();
   if (!lifecycle.isCurrent(frameGen)) return;
   if (bloomProcessor) {
+    // Bloom owns its own multi-pass encoding; timing it would mean threading
+    // timestampWrites through every one of its passes.
     bloomProcessor.render(encoder, renderScene);
   } else {
+    const patternTimestamps = timestamps?.timestampWrites(PATTERN_PASS_LABEL);
     const pass = encoder.beginRenderPass({
+      label: PATTERN_PASS_LABEL,
       colorAttachments: [{
         view: context.getCurrentTexture().createView(),
         loadOp: 'clear',
         clearValue: { r: 0, g: 0, b: 0, a: 1 },
         storeOp: 'store',
       }],
+      ...(patternTimestamps ? { timestampWrites: patternTimestamps } : {}),
     });
     renderScene(pass);
     pass.end();
   }
+  if (gpuAnalysisActive) {
+    computeAnalysis?.encodeReadback(encoder);
+  }
+  timestamps?.resolve(encoder);
   device.queue.submit([encoder.finish()]);
+  timestamps?.poll();
+  if (gpuAnalysisActive) {
+    computeAnalysis?.poll();
+  }
 
   if (import.meta.env.DEV && state.renderFrameCount % 600 === 0) {
     pool.logStats('WebGPU render');
@@ -453,9 +488,11 @@ export function renderWebGPUFrame(ctx: FrameDrawContext): void {
   const isOverlayActive = WEBGL_HYBRID_SHADERS.has(shaderFile);
   const layoutModeName = isCircularLayoutShader(shaderFile) ? 'CIRCULAR (WebGPU)' :
     p.isHorizontal ? 'HORIZONTAL (WebGPU)' : 'STANDARD (WebGPU)';
+  const gpuTimings = timestamps?.report();
   onDebugInfo((prev: DebugInfo) => ({
     ...prev,
     layoutMode: layoutModeName,
+    ...(gpuTimings ? { gpuTimings } : {}),
     uniforms: {
       shader: shaderFile,
       overlay: isOverlayActive ? 'ACTIVE' : 'NONE',
@@ -463,6 +500,7 @@ export function renderWebGPUFrame(ctx: FrameDrawContext): void {
       numChannels,
       totalInstances,
       playheadRow: (p.playbackStateRef?.current?.playheadRow ?? p.playheadRow).toFixed(2),
+      audioAnalysis: gpuAnalysisActive ? (gpuBands ? 'gpu' : 'gpu (warming)') : 'cpu',
     },
     errors: prev.errors.filter(
       (e) => e.startsWith('DEVICE-LOST') || e.startsWith('DEVICE-INIT'),

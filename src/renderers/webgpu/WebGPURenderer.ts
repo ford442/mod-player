@@ -10,6 +10,7 @@ import {
   usesInstrumentPalette,
   usesAudioReactive,
   usesAudioReactiveBezel,
+  usesGpuSpectrum,
   usesVideoPatternTexture,
   type LayoutType,
 } from '../../../utils/shaderVersion';
@@ -51,7 +52,14 @@ import {
   CELLS_USAGE,
   type ExtendedBuffersState,
 } from './matrixBuffers';
-import { renderWebGPUFrame, type FrameDrawScratch, type FrameDrawState } from './frameDraw';
+import {
+  renderWebGPUFrame,
+  PATTERN_PASS_LABEL,
+  type FrameDrawScratch,
+  type FrameDrawState,
+} from './frameDraw';
+import { ComputeAnalysis, COMPUTE_ANALYSIS_PASS_LABEL } from './computeAnalysis';
+import { GpuTimestampRecorder, deviceHasTimestampQuery } from './timestampQuery';
 
 export interface WebGPURendererCallbacks {
   onDeviceStatus?: (status: WebGPUDeviceStatus) => void;
@@ -105,6 +113,11 @@ export class WebGPURenderer {
   private readonly maxDeviceLostRecoveries = 3;
   private oscTextureGeneration = 0;
   private boundOscTextureGeneration = -1;
+  private computeAnalysis: ComputeAnalysis | null = null;
+  private computeAnalysisInit: Promise<void> | null = null;
+  /** Whether the active shader opted into GPU audio analysis (ShaderMeta flag). */
+  private gpuSpectrumWanted = false;
+  private timestamps: GpuTimestampRecorder | null = null;
 
   private readonly scratch: FrameDrawScratch = {
     uniformBufferData: new ArrayBuffer(144),
@@ -325,6 +338,7 @@ export class WebGPURenderer {
         this.lifecycle.bump();
         this.pool?.disposeAll();
         this.pool = null;
+        this.disposeAnalysis();
         disposeNoteDurationCompute(this.device);
         this.computeState = null;
         this.device = null;
@@ -369,6 +383,34 @@ export class WebGPURenderer {
     this.device = device;
     this.context = context;
     this.recoveryAttempts = 0;
+
+    // Lite mode stays on the AnalyserNode path and never asks for timestamps.
+    this.disposeAnalysis();
+    this.callbacks.onDebugInfo?.((prev) => ({
+      ...prev,
+      gpuTimingStatus: liteMode
+        ? 'lite'
+        : (deviceHasTimestampQuery(device) ? 'ok' : 'unavailable'),
+    }));
+    if (!liteMode) {
+      this.timestamps = GpuTimestampRecorder.create(device, [
+        COMPUTE_ANALYSIS_PASS_LABEL,
+        PATTERN_PASS_LABEL,
+      ]);
+      // Async, and deliberately not awaited: the first few frames run on the
+      // CPU path while the compute pipeline compiles.
+      this.computeAnalysisInit = ComputeAnalysis.create(device).then((analysis) => {
+        if (this.device !== device) {
+          analysis?.dispose();
+          return;
+        }
+        this.computeAnalysis = analysis;
+        // A shader may already have been selected while this was compiling.
+        analysis?.setEnabled(this.gpuSpectrumWanted);
+      });
+      void this.computeAnalysisInit;
+    }
+
     this.callbacks.onDeviceStatus?.('ready');
     this.callbacks.onDeviceAcquired?.(true);
     this.callbacks.onDebugInfo?.((prev) => ({
@@ -377,11 +419,22 @@ export class WebGPURenderer {
     }));
   }
 
+  /** Release the analysis compute pass and timestamp query set. */
+  private disposeAnalysis(): void {
+    this.computeAnalysisInit = null;
+    this.gpuSpectrumWanted = false;
+    this.computeAnalysis?.dispose();
+    this.computeAnalysis = null;
+    this.timestamps?.dispose();
+    this.timestamps = null;
+  }
+
   disposeDevice(): void {
     this.markLostIntentional?.();
     this.markLostIntentional = null;
     this.lifecycle.bump();
     this.releaseShaderResources();
+    this.disposeAnalysis();
     disposeNoteDurationCompute(this.device);
     this.computeState = null;
     this.pool?.disposeAll();
@@ -482,6 +535,11 @@ export class WebGPURenderer {
     if (usesOscilloscope(activeShaderFile)) {
       this.createOscTexture(device, pool);
     }
+
+    // Only subscribe to the PCM bus while a shader that consumes GPU analysis
+    // is on screen — subscribing is what turns on the worklet's PCM stream.
+    this.gpuSpectrumWanted = usesGpuSpectrum(activeShaderFile);
+    this.computeAnalysis?.setEnabled(this.gpuSpectrumWanted);
 
     if (usesAudioReactive(activeShaderFile) || usesAudioReactiveBezel(activeShaderFile)) {
       this.audioReactiveUniformBuffer = pool.track(
@@ -722,6 +780,8 @@ export class WebGPURenderer {
       scratch: this.scratch,
       bloomProcessor: this.deps.bloomProcessorRef?.current ?? null,
       oscTextureRef: this.deps.oscTextureRef,
+      computeAnalysis: this.computeAnalysis,
+      timestamps: this.timestamps,
       onRefreshBindGroup: () => {
         this.instrumentPaletteTexture = frameState.instrumentPaletteTexture;
         this.refreshBindGroup();

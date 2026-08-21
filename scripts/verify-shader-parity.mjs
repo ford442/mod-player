@@ -21,9 +21,19 @@ const PICKER_IDS = [
   'patternv0.30b.wgsl', 'patternv0.23.wgsl', 'patternv0.24.wgsl',
 ];
 
+/**
+ * Non-picker entry shaders that are still fetched at runtime and must match
+ * their expanded source (compute passes, chassis backgrounds are covered by the
+ * residual-include sweep below).
+ */
+const ENTRY_IDS = [
+  'compute_analysis.wgsl',
+  'compute_note_duration.wgsl',
+];
+
 const failures = [];
 
-for (const id of PICKER_IDS) {
+for (const id of [...PICKER_IDS, ...ENTRY_IDS]) {
   const srcPath = join(SRC, id);
   const pubPath = join(DEST, id);
   if (!existsSync(srcPath) || !existsSync(pubPath)) {
@@ -37,7 +47,8 @@ for (const id of PICKER_IDS) {
   }
 }
 
-for (const name of readdirSync(SRC).filter((f) => f.startsWith('patternv') && f.endsWith('.wgsl'))) {
+// Residual-include sweep over every root entry shader, not just patternv*.
+for (const name of readdirSync(SRC).filter((f) => f.endsWith('.wgsl'))) {
   try {
     const { flat } = expandShader(join(SRC, name));
     if (/^\s*\/\/\s*#include\s+"/m.test(flat)) {
@@ -53,4 +64,6 @@ if (failures.length) {
   for (const f of failures) console.error(`  ${f.id}: ${f.error}`);
   process.exit(1);
 }
-console.log(`[verify-shader-parity] OK — ${PICKER_IDS.length} picker shaders`);
+console.log(
+  `[verify-shader-parity] OK — ${PICKER_IDS.length} picker shaders, ${ENTRY_IDS.length} entry shaders`,
+);

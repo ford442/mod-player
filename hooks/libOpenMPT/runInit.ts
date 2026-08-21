@@ -13,6 +13,7 @@ import {
 import { verifyParserWorkerUrl } from '../../utils/parserWorker';
 import type { LibOpenMPTRefs, LibOpenMPTSetters } from './types';
 import { WORKLET_URL } from './constants';
+import { setPcmDemandListener } from '../../utils/pcmBus';
 
 export interface InitDeps {
   refs: LibOpenMPTRefs;
@@ -218,6 +219,9 @@ export async function runLibOpenMPTInit(deps: InitDeps): Promise<void> {
 
 export function cleanupLibOpenMPT(refs: LibOpenMPTRefs) {
   console.log('Cleaning up libopenmpt resources.');
+  // Drop the PCM demand listener before the node goes away; the next
+  // startJsWorkletPlayback installs a fresh one bound to the new node.
+  setPcmDemandListener(null);
   if (refs.nativeEngineRef.current) {
     refs.nativeEngineRef.current.destroy();
     refs.nativeEngineRef.current = null;

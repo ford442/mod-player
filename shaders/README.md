@@ -59,6 +59,19 @@ The root directory contains **30 actively-used shaders** that are production-rea
 - `bloom_threshold.wgsl` — Threshold extraction for single-layer bloom
 - `bloom_threshold_layered.wgsl` — Threshold extraction for multi-layer bloom
 
+#### **Compute Shaders** (No vertex/fragment stages)
+
+- `compute_note_duration.wgsl` — DURA-001: raw-packed cells → high-precision
+  duration/sustain/trigger packing. One invocation per channel,
+  `@workgroup_size(64, 1, 1)`; host dispatch must divide the channel count by
+  the same constant (`NOTE_DURATION_WORKGROUP_SIZE` in `utils/computeNoteDuration.ts`).
+- `compute_analysis.wgsl` — GPU audio analysis. Two entry points sharing one
+  bind group: `waveform_main` (PCM → oscilloscope min/max tiles) and
+  `spectrum_main` (Hann → radix-2 FFT → 4 bands + 32 log bins). Host is
+  `src/renderers/webgpu/computeAnalysis.ts`; opted into per shader via the
+  `usesGpuSpectrum` flag on `ShaderMeta`. Reads rendered PCM only — the tracker
+  engine stays on CPU/WASM.
+
 ### `legacy/` Subfolder (Archived & Experimental)
 
 The `legacy/` subdirectory contains **33 older or experimental shaders** that are no longer in active use but preserved for reference and potential restoration:
@@ -125,6 +138,24 @@ Shared WGSL fragments live in `shaders/lib/`. **Canonical composition libs** (pr
 | `lib/emitters_playhead.wgsl` / `lib/lens_cap_playhead.wgsl` | v0.51 playhead variant |
 | `lib/velocity_led.wgsl` | VEL-001 `normalizedCellVolume` |
 | `lib/audio_reactive.wgsl` | REACT-001 multi-band chassis helpers |
+
+**GPU audio analysis libs** (compute only — no bindings, no entry points):
+
+| Lib | Role |
+|-----|------|
+| `lib/fft.wgsl` | Radix-2 in-place FFT in workgroup storage, Hann window, `fftMagnitude` |
+| `lib/spectrum_bands.wgsl` | 4-band energy reduce + 32 log-spaced display bins (needs `lib/fft.wgsl` first) |
+| `lib/waveform_minmax.wgsl` | Oscilloscope tile extrema + envelope collapse |
+
+`lib/waveform_minmax.wgsl` calls `waveformSampleMono(frame)`, which the
+including entry shader must declare **before** the include — WGSL resolves
+functions in declaration order. `lib/spectrum_bands.wgsl` likewise has to come
+after `lib/fft.wgsl`.
+
+Sizing constants are duplicated in TypeScript (`MAX_FFT_SIZE`,
+`SPECTRUM_BIN_COUNT`, workgroup sizes). `tests/computeAnalysis.test.ts` pins
+them against the WGSL source — a mismatch there is a silent runtime bug, so it
+fails the suite instead.
 
 Supporting fragments:
 

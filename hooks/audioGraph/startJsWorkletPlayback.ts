@@ -1,6 +1,11 @@
 import { getWorkletUrl } from '../useWorkletLoader';
 import { detectRuntimeBase, withBase } from '../../src/lib/paths';
 import { broadcastPcmBlock } from '../../utils/projectMBridge';
+import {
+  pcmBusHasSubscribers,
+  publishPcmBlock,
+  setPcmDemandListener,
+} from '../../utils/pcmBus';
 import { shouldPostInitLib } from '../../utils/workletAudioLifecycle';
 import {
   parseWorkletToMainMessageOrWarn,
@@ -285,6 +290,7 @@ export async function startJsWorkletPlayback(
           const ch = result.channels;
           if (buf instanceof Float32Array && (ch === 1 || ch === 2)) {
             broadcastPcmBlock(buf, ch);
+            publishPcmBlock(buf, ch, ctx.sampleRate);
           }
           break;
         }
@@ -327,7 +333,19 @@ export async function startJsWorkletPlayback(
 
     // Opt-in per-quantum extras. Both default to off inside the worklet, so
     // these must be re-sent for a reused node as well.
-    node.port.postMessage(postSetProjectmPcm(hasProjectMConsumer()));
+    //
+    // PCM blocks stay off unless something consumes them: a Project-M
+    // popup/iframe, or a pcmBus subscriber (the WebGPU compute analysis pass).
+    // The bus can gain its first subscriber after playback starts, so also
+    // install a demand listener that flips the stream on and off live.
+    node.port.postMessage(postSetProjectmPcm(hasProjectMConsumer() || pcmBusHasSubscribers()));
+    setPcmDemandListener((wanted) => {
+      try {
+        node.port.postMessage(postSetProjectmPcm(hasProjectMConsumer() || wanted));
+      } catch {
+        /* node torn down — the next start re-installs the listener */
+      }
+    });
     node.port.postMessage(postSetAudioDiag(isAudioDiagEnabled()));
 
     const moduleBuf = moduleBytesFromFileData(refs.fileDataRef.current);

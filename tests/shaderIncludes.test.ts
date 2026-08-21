@@ -164,3 +164,57 @@ describe('shader include expansion (tier-A utility includes)', () => {
     }
   });
 });
+
+describe('shader include expansion (GPU audio analysis)', () => {
+  const ENTRY = 'compute_analysis.wgsl';
+  const LIBS = ['lib/waveform_minmax.wgsl', 'lib/fft.wgsl', 'lib/spectrum_bands.wgsl'] as const;
+
+  it('entry shader pulls every analysis lib through //#include', () => {
+    const src = readFileSync(join(SRC, ENTRY), 'utf8');
+    for (const lib of LIBS) {
+      expect(src).toContain(`//#include "${lib}"`);
+    }
+
+    const { flat, includes } = expandShader(join(SRC, ENTRY));
+    expect(flat).not.toMatch(/^\s*\/\/\s*#include\s+"/m);
+    for (const lib of LIBS) {
+      expect(includes).toContain(lib);
+    }
+  });
+
+  it('expands to both compute entry points and the kernels they call', () => {
+    const { flat } = expandShader(join(SRC, ENTRY));
+    expect(flat).toContain('fn waveform_main(');
+    expect(flat).toContain('fn spectrum_main(');
+    expect(flat).toContain('fn fftRunStages');
+    expect(flat).toContain('fn fftBitReverse');
+    expect(flat).toContain('fn spectrumAccumulateBands');
+    expect(flat).toContain('fn spectrumFillBins');
+    expect(flat).toContain('fn waveformTileExtrema');
+  });
+
+  it('libs stay include-only — no bindings, no entry points of their own', () => {
+    for (const lib of LIBS) {
+      const src = readFileSync(join(SRC, lib), 'utf8');
+      expect(src).not.toMatch(/@group\(/);
+      expect(src).not.toMatch(/@compute/);
+    }
+  });
+
+  it('waveform lib documents its forward-declaration contract', () => {
+    // lib/waveform_minmax.wgsl calls waveformSampleMono, which the entry shader
+    // must declare *before* the include (WGSL resolves in declaration order).
+    const entry = readFileSync(join(SRC, ENTRY), 'utf8');
+    const declIndex = entry.indexOf('fn waveformSampleMono');
+    const includeIndex = entry.indexOf('//#include "lib/waveform_minmax.wgsl"');
+    expect(declIndex).toBeGreaterThan(-1);
+    expect(includeIndex).toBeGreaterThan(declIndex);
+  });
+
+  it('the analysis entry is published to public/ as flat WGSL', () => {
+    const published = join(DEST, ENTRY);
+    expect(existsSync(published)).toBe(true);
+    const { flat } = expandShader(join(SRC, ENTRY));
+    expect(readFileSync(published, 'utf8').replace(/\s+$/, '')).toBe(flat.replace(/\s+$/, ''));
+  });
+});

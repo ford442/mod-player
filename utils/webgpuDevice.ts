@@ -14,10 +14,19 @@
  * |----------------------|----------------------------------------------|----------------------------|
  * | `float32-filterable` | Video/button textures as `rgba32float` with  | Use `rgba8unorm` textures  |
  * |                      | linear filtering (useWebGPURender)           |                            |
+ * | `timestamp-query`    | GPU compute / render pass durations in the   | Skip queries; debug panel  |
+ * |                      | debug panel (renderers/webgpu/timestampQuery)| reports "unavailable"      |
+ *
+ * `timestamp-query` is requested for full mode only — lite mode is running on a
+ * power budget and has no debug panel to show the numbers in.
  *
  * Explicitly NOT requested (no production shader or bloom usage):
  *   float32-blendable, clip-distances, depth32float-stencil8,
  *   dual-source-blending, subgroups, texture-component-swizzle, shader-f16
+ *
+ * `subgroups` / `shader-f16` stay off the list until a *measured* FFT kernel
+ * needs them and Safari/Firefox still boot without them — the compute analysis
+ * pass (shaders/lib/fft.wgsl) is written to core WGSL for that reason.
  *
  * Bloom uses `rgba16float` intermediates — filterable without float32-filterable.
  *
@@ -51,6 +60,17 @@ import {
 /** Optional features that production code may enable when the adapter supports them. */
 export const OPTIONAL_PRODUCTION_FEATURES: readonly GPUFeatureName[] = [
   'float32-filterable',
+] as const;
+
+/**
+ * Optional features requested only in full (non-lite) mode.
+ *
+ * Same policy as OPTIONAL_PRODUCTION_FEATURES — enabled when the adapter has
+ * them, silently skipped when it does not. Never move an entry here into the
+ * hard-required list.
+ */
+export const OPTIONAL_FULL_MODE_FEATURES: readonly GPUFeatureName[] = [
+  'timestamp-query',
 ] as const;
 
 /**
@@ -264,10 +284,10 @@ export async function requestWebGPUDevice(
     throw new WebGPUInitError(msg, 'device-failed', false);
   }
 
-  const optionalEnabled = selectOptionalFeatures(
-    adapter,
-    options.extraOptionalFeatures ?? [],
-  );
+  const optionalEnabled = selectOptionalFeatures(adapter, [
+    ...(options.extraOptionalFeatures ?? []),
+    ...(liteMode ? [] : OPTIONAL_FULL_MODE_FEATURES),
+  ]);
   const requiredFeatures: GPUFeatureName[] = [
     ...hardRequired,
     ...optionalEnabled.filter((f) => !hardRequired.includes(f)),
