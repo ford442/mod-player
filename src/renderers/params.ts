@@ -5,6 +5,19 @@ export type DebugInfo = {
   layoutMode: string;
   errors: string[];
   uniforms: Record<string, number | string>;
+  /**
+   * GPU pass durations in milliseconds, keyed by pass label, when the adapter
+   * supports `timestamp-query`. Absent (undefined) when the feature is
+   * unavailable — the debug panel says so rather than showing zeros.
+   */
+  gpuTimings?: Record<string, number>;
+  /**
+   * Why `gpuTimings` is or is not populated:
+   *   'ok'          — timestamp-query enabled, numbers are live
+   *   'unavailable' — adapter does not expose timestamp-query
+   *   'lite'        — lite mode; the feature is deliberately not requested
+   */
+  gpuTimingStatus?: 'ok' | 'unavailable' | 'lite';
 };
 
 /** All per-frame render parameters — updated every React render via ref assignment. */

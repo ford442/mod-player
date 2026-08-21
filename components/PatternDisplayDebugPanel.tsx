@@ -26,6 +26,14 @@ export function PatternDisplayDebugPanel({
   debugBloomLayer,
   bloomLayerLabel,
 }: PatternDisplayDebugPanelProps) {
+  const gpuTimingEntries = Object.entries(debugInfo.gpuTimings ?? {});
+  const gpuTimingNote =
+    debugInfo.gpuTimingStatus === 'lite'
+      ? 'timestamp-query skipped (lite mode)'
+      : debugInfo.gpuTimingStatus === 'ok'
+        ? 'waiting for first resolved query…'
+        : 'timestamp-query unavailable on this adapter';
+
   return (
     <>
       {!debugPanelOpen && (
@@ -87,6 +95,21 @@ export function PatternDisplayDebugPanel({
               ))}
             </div>
           )}
+          <div className="border-t border-gray-700 pt-2 mt-2">
+            <div className="text-gray-500 text-[10px] mb-1">GPU passes:</div>
+            {debugInfo.gpuTimingStatus === 'ok' && gpuTimingEntries.length > 0 ? (
+              gpuTimingEntries.map(([pass, ms]) => (
+                <div key={pass} className="flex justify-between text-[10px]">
+                  <span className="text-gray-400">{pass}:</span>
+                  <span className="text-cyan-300 ml-2">{ms.toFixed(3)} ms</span>
+                </div>
+              ))
+            ) : (
+              <div className="text-[10px] text-yellow-300">
+                {gpuTimingNote}
+              </div>
+            )}
+          </div>
           <div className="border-t border-gray-700 pt-2 mt-2">
             <div className="text-gray-500 text-[10px] mb-1">Uniforms:</div>
             {Object.entries(debugInfo.uniforms).map(([key, val]) => (

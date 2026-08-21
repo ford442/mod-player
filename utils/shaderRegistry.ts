@@ -31,6 +31,8 @@
  * motionScale         – slot [34] f32; 0.0=reduced-motion, 1.0=normal; shader damps animation
  * highContrast        – slot [35] u32; 1=raise LED on/off contrast
  * audioReactive       – binding 8 AudioReactive uniform + bezel_audio background (v0.58+)
+ * usesGpuSpectrum     – prefer the WebGPU compute analysis pass (compute_analysis.wgsl)
+ *                       over the AnalyserNode / CPU oscilloscope walk when PCM is flowing
  * highPrecisionPacking– PackedA/PackedB + DURA/TRIG packing
  * playheadRowAsFloat  – uniform slot [2] is f32 (not u32)
  * strictPlayheadSustain – playhead-scrolled sustain (v0.45b / v0.30b)
@@ -87,6 +89,17 @@ export interface ShaderMeta {
   supportsReducedMotion: boolean;
   /** Multi-band chassis reactivity — binding 8 uniform + bezel_audio.wgsl. */
   audioReactive: boolean;
+  /**
+   * Opt in to the WebGPU compute audio-analysis pass
+   * (src/renderers/webgpu/computeAnalysis.ts): oscilloscope tiles and the
+   * 4-band spectrum are produced on the GPU instead of by the CPU walk.
+   *
+   * Optional and additive — the shader's WGSL is unchanged either way, only the
+   * source of `audio.frequencies` / the oscilloscope texture differs. Every
+   * consumer falls back to the CPU path when the compute pipeline is
+   * unavailable, PCM is not flowing, or lite mode is on.
+   */
+  usesGpuSpectrum?: boolean;
   highPrecisionPacking: boolean;
   playheadRowAsFloat: boolean;
   strictPlayheadSustain: boolean;
@@ -480,6 +493,7 @@ export const SHADER_REGISTRY: Readonly<Record<string, ShaderMeta>> = {
   'patternv0.55.wgsl': circularLed({
     bloomProfile: 'three-emitter-osc',
     oscilloscope: true,
+    usesGpuSpectrum: true,
     stepsDrivenVisibleRows: true,
   }),
 
@@ -527,6 +541,7 @@ export const SHADER_REGISTRY: Readonly<Record<string, ShaderMeta>> = {
     bloomProfile: 'three-emitter',
     stepsDrivenVisibleRows: true,
     audioReactive: true,
+    usesGpuSpectrum: true,
     background: 'bezel_audio.wgsl',
   }),
 };

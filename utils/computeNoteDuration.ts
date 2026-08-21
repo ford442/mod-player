@@ -6,6 +6,22 @@ import { withBase } from '../src/lib/paths';
 
 const MAX_SHADER_ROWS = 1024; // Must match MAX_ROWS in compute_note_duration.wgsl
 
+/**
+ * Invocations per workgroup in compute_note_duration.wgsl.
+ *
+ * MUST match `WORKGROUP_SIZE` in that shader. The kernel runs one invocation
+ * per tracker channel (the per-channel row scan is sequential), so the dispatch
+ * is `ceil(channels / NOTE_DURATION_WORKGROUP_SIZE)` — not `channels`, which is
+ * what it was while the shader declared `@workgroup_size(1, 1, 1)` and left
+ * 63 of every 64 lanes idle.
+ */
+export const NOTE_DURATION_WORKGROUP_SIZE = 64;
+
+/** Workgroup count for a given raw (unpadded) channel count. */
+export function noteDurationWorkgroupCount(rawChannels: number): number {
+  return Math.max(1, Math.ceil(rawChannels / NOTE_DURATION_WORKGROUP_SIZE));
+}
+
 export interface NoteDurationComputeState {
   pipeline: GPUComputePipeline;
   bindGroupLayout: GPUBindGroupLayout;
@@ -130,7 +146,7 @@ export function runNoteDurationCompute(
   pass.setBindGroup(0, bindGroup);
 
   const rawChannels = padTopChannel ? numChannels - 1 : numChannels;
-  pass.dispatchWorkgroups(Math.max(1, rawChannels), 1, 1);
+  pass.dispatchWorkgroups(noteDurationWorkgroupCount(rawChannels), 1, 1);
   pass.end();
   device.queue.submit([encoder.finish()]);
 

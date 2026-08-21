@@ -258,7 +258,20 @@ describe('#354 production source invariants', () => {
   it('projectm-pcm blocks are opt-in, not posted unconditionally', () => {
     expect(workletSource).toContain('this._projectmPcmEnabled = false;');
     expect(workletSource).toMatch(/if\s*\(\s*this\._projectmPcmEnabled\s*\)/);
-    expect(useAudioGraph).toContain('postSetProjectmPcm(hasProjectMConsumer())');
+    // Enablement is always derived from a live consumer check — a Project-M
+    // popup/iframe, or a pcmBus subscriber (the GPU compute analysis pass).
+    // Never `postSetProjectmPcm(true)`.
+    expect(useAudioGraph).toMatch(
+      /postSetProjectmPcm\(\s*hasProjectMConsumer\(\)\s*\|\|\s*(pcmBusHasSubscribers\(\)|wanted)\s*\)/,
+    );
+    expect(useAudioGraph).not.toMatch(/postSetProjectmPcm\(\s*true\s*\)/);
+  });
+
+  it('pcmBus demand toggles the worklet stream instead of leaving it on', () => {
+    expect(useAudioGraph).toContain('setPcmDemandListener(');
+    expect(useAudioGraph).toContain('publishPcmBlock(');
+    const runInit = readFileSync(join(ROOT, 'hooks/libOpenMPT/runInit.ts'), 'utf8');
+    expect(runInit).toContain('setPcmDemandListener(null)');
   });
 
   it('audioDiag timing mode is opt-in and reports wrap overruns', () => {

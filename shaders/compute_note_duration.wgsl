@@ -32,6 +32,33 @@ const EFFECT_E_LOWER: u32   = 101u;
 // If a pattern exceeds this, the CPU fallback must be used.
 const MAX_ROWS: u32 = 1024u;
 
+// One invocation per tracker channel; the per-channel scan below is inherently
+// sequential over rows, so the workgroup packs channels, not rows.
+//
+// This used to be @workgroup_size(1,1,1) with dispatchWorkgroups(numChannels) —
+// one live lane per wave, 63/64 of every wave idle. Same total invocations,
+// same per-lane scratch, ~64x fewer waves. Host dispatch must divide the
+// channel count by this constant (see NOTE_DURATION_WORKGROUP_SIZE in
+// utils/computeNoteDuration.ts).
+const WORKGROUP_SIZE: u32 = 64u;
+
+// Per-row scratch, packed into one u32 instead of three parallel arrays.
+// Each invocation holds MAX_ROWS entries in private storage, so this takes the
+// per-lane scratch from 12 KiB to 4 KiB — which is what makes a 64-wide
+// workgroup affordable.
+//
+//   bits 24..31 — duration  (already clamped to 255 by the scan)
+//   bits 14..23 — rowOffset (0..MAX_ROWS-1, so 10 bits; the render packing
+//                 clamps it to 63 later, but DURA-003 needs the untruncated
+//                 value to walk back to the trigger row)
+//   bit  0      — isNoteOff
+fn packRowMeta(duration: u32, rowOffset: u32, noteOff: u32) -> u32 {
+    return ((duration & 0xFFu) << 24u) | ((rowOffset & 0x3FFu) << 14u) | (noteOff & 1u);
+}
+fn metaDuration(m: u32) -> u32  { return (m >> 24u) & 0xFFu; }
+fn metaRowOffset(m: u32) -> u32 { return (m >> 14u) & 0x3FFu; }
+fn metaNoteOff(m: u32) -> u32   { return m & 1u; }
+
 fn getNote(packedA: u32) -> u32   { return (packedA >> 24u) & 0xFFu; }
 fn getInst(packedA: u32) -> u32   { return (packedA >> 16u) & 0xFFu; }
 fn getVolCmd(packedA: u32) -> u32 { return (packedA >> 8u) & 0xFFu; }
@@ -44,7 +71,7 @@ fn isEffectCut(effCmd: u32, effVal: u32) -> bool {
            && (effVal & 0xF0u) == 0xC0u;
 }
 
-@compute @workgroup_size(1, 1, 1)
+@compute @workgroup_size(WORKGROUP_SIZE, 1, 1)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let ch = gid.x;
     let numRows = params.numRows;
@@ -60,16 +87,13 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     // Guard: pattern too large for shader arrays
     if (numRows > MAX_ROWS) { return; }
 
-    // Per-row temporaries (sequential scan per channel)
-    var durations: array<u32, 1024>;
-    var rowOffsets: array<u32, 1024>;
-    var noteOffFlags: array<u32, 1024>;
+    // Per-row temporaries (sequential scan per channel), packed 3-in-1.
+    var rowMeta: array<u32, 1024>;
 
-    // Initialize defaults
+    // Initialize defaults: duration=1, rowOffset=0, noteOff=0
+    let defaultMeta = packRowMeta(1u, 0u, 0u);
     for (var row: u32 = 0u; row < numRows; row = row + 1u) {
-        durations[row] = 1u;
-        rowOffsets[row] = 0u;
-        noteOffFlags[row] = 0u;
+        rowMeta[row] = defaultMeta;
     }
 
     // -----------------------------------------------------------------
@@ -99,9 +123,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
                 let start = u32(noteStartRow);
                 let dur   = min(row - start, 255u);
                 for (var r = start; r < row; r = r + 1u) {
-                    durations[r]    = dur;
-                    rowOffsets[r]   = r - start;
-                    noteOffFlags[r] = 0u;
+                    rowMeta[r] = packRowMeta(dur, r - start, 0u);
                 }
             }
             // Start new note at current row
@@ -117,14 +139,12 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
                 let start = u32(noteStartRow);
                 let dur   = min(row - start + 1u, 255u);
                 for (var r = start; r <= row; r = r + 1u) {
-                    durations[r]    = dur;
-                    rowOffsets[r]   = r - start;
-                    noteOffFlags[r] = select(0u, 1u, r == row);
+                    rowMeta[r] = packRowMeta(dur, r - start, select(0u, 1u, r == row));
                 }
                 noteStartRow = -1;
             } else {
                 // Standalone note-off without preceding note
-                noteOffFlags[row] = 1u;
+                rowMeta[row] = packRowMeta(1u, 0u, 1u);
             }
         }
         // else: empty cell while note is active — do nothing, will be filled at end or next event
@@ -135,9 +155,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         let start = u32(noteStartRow);
         let dur   = min(numRows - start, 255u);
         for (var r = start; r < numRows; r = r + 1u) {
-            durations[r]    = dur;
-            rowOffsets[r]   = r - start;
-            noteOffFlags[r] = 0u;
+            rowMeta[r] = packRowMeta(dur, r - start, 0u);
         }
     }
 
@@ -157,9 +175,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         let effVal = getEffVal(pb);
 
         // DURA-003: copy note from trigger row into sustain tail rows
-        let dur    = durations[row];
-        let offset = rowOffsets[row];
-        let noff   = noteOffFlags[row];
+        let meta   = rowMeta[row];
+        let dur    = metaDuration(meta);
+        let offset = metaRowOffset(meta);
+        let noff   = metaNoteOff(meta);
         if (note == 0u && dur > 1u && offset > 0u && noff == 0u) {
             let startRow = row - offset;
             if (startRow < numRows) {
