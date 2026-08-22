@@ -69,9 +69,11 @@ jobs:
           for f in public/worklets/openmpt-native.js public/worklets/openmpt-native.wasm public/worklets/openmpt-native.aw.js; do
             if [ ! -f "$f" ]; then echo "❌ missing $f"; false; fi
           done
-          # WASM magic
           head -c 4 public/worklets/openmpt-native.wasm | od -An -tx1 | grep -q '00 61 73 6d'
           echo "✅ openmpt-native.* artifacts present"
+
+      - name: Verify native SIMD survived the link
+        run: npm run verify:native-simd
 
       - name: Upload native artifacts
         uses: actions/upload-artifact@v7
@@ -118,3 +120,45 @@ jobs:
         if: always()
         run: |
           if [ -f /tmp/preview-native-playhead.pid ]; then kill $(cat /tmp/preview-native-playhead.pid) 2>/dev/null || true; fi
+
+  build-native-debug:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Emscripten
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: '3.1.51'
+
+      - name: Verify emcc
+        run: emcc --version
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Cache libopenmpt static library
+        uses: actions/cache@v6
+        with:
+          path: vendor/libopenmpt-0.8.4+release
+          key: libopenmpt-a-${{ runner.os }}-emsdk-3.1.51-v0.8.4-static1-${{ hashFiles('scripts/build-wasm.sh') }}
+          restore-keys: |
+            libopenmpt-a-${{ runner.os }}-emsdk-3.1.51-v0.8.4-static1-
+
+      - name: Build native engine (ASSERTIONS=2 debug)
+        run: npm run build:emcc -- --debug
+
+      - name: Verify debug artifacts
+        run: |
+          test -f public/worklets/openmpt-native.wasm
+          head -c 4 public/worklets/openmpt-native.wasm | od -An -tx1 | grep -q '00 61 73 6d'
+          echo "✅ debug openmpt-native.wasm present"
+

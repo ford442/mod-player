@@ -51,7 +51,7 @@ Files: `audio-worklet/OpenMPTWorkletEngine.ts`, `cpp/openmpt_wrapper.cpp`, `cpp/
 - **Engine selection** (`utils/audioEngineSelection.ts`): `?engine=js|native` → `localStorage.xasm1_audio_engine` (`js`\|`native`\|`auto`) → auto (default **JS**). Native only when explicitly preferred (`?engine=native` / storage `native`) and glue is present. Soft-fail to JS if `?engine=native` without artifacts. UI toggle persists override. See `public/worklets/README.md`.
 - `useLibOpenMPT.ts` probes for `openmpt-native.js` at startup; if present and preference allows, it instantiates `OpenMPTWorkletEngine`, which creates its own `AudioContext` + worklet thread in C++ land.
 - The native engine polls a shared-memory `PositionInfo` struct for row/BPM/channel VU data; main thread applies via shared `utils/workletPositionAdapter.ts` (same path as JS worklet).
-- **Capture:** MediaRecorder is blocked on native (dual AudioContext) — switch to JS (`?engine=js`) for recording (`docs/EXPORT.md`).
+- **Capture:** MediaRecorder taps the shared main graph on default native (same as JS). Dual-context capture is only blocked for `?nativeCtx=legacy`. See `docs/EXPORT.md`.
 
 ### Fallback Path
 If the JS AudioWorklet fails to initialize WASM, `hooks/useAudioGraph.ts` falls back to a `ScriptProcessorNode` on the main thread (deprecated but functional). This is triggered by the worklet posting an `error` message.

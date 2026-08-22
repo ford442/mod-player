@@ -36,11 +36,11 @@ The C++/Emscripten engine exists end-to-end:
 
 | Criterion | Current | Target |
 |-----------|---------|--------|
-| CI publishes **or** verifies native build | **Done** — path-filtered full build + weekly schedule + libopenmpt cache | Optional: debug ASSERTIONS matrix (PR6 polish) |
+| CI publishes **or** verifies native build | **Done** — path-filtered full build + weekly schedule + libopenmpt cache | **Done** — scheduled `build-native-debug` (`--debug` / ASSERTIONS=2) |
 | Feature flag / auto-detect documented | **Done** — `?engine=` / localStorage / public-mode force-JS / parity gate | Keep README + AGENTS in sync |
 | A/V sync ≥ JS worklet (post-prediction) | Frame clock + anchor + **load/seek frame reset**; smoke hard-requires `native-worklet` + non-frozen playhead | Green `report-native.json` after AudioWorklet thread start (aligned stack + `aw.js` path rewrite + real `WebAssembly`). Fill measured lag in `accurate_playback.md` |
 | No filename collision with JS worklet | **Done** — `openmpt-native.*` only; build refuses clobber | Keep guards + scheduled integrity check |
-| Export dual-context | **Documented** — MediaRecorder blocked on native (`docs/EXPORT.md`) | Dual-context capture still out of scope |
+| Export / capture | Default native shares one `AudioContext`; MediaRecorder works | `?nativeCtx=legacy` still dual-context / blocked |
 
 ---
 
@@ -94,10 +94,10 @@ INIT (utils/audioEngineSelection.ts):
 
 **Native** path:
 
-- C++ writes `PositionInfo` (shared memory); TS polls ~16 ms and emits `position` events as `WorkletPositionData` (`currentOrder`/`currentRow` naming).
-- `useAudioGraph` maps to `applyWorkletPositionSample` with `workletTime = data.workletTime ?? ctx.currentTime` — **main-thread clock**, not pre-render quantum time.
-- Extended fields (`audioFramesRendered`, `rowFraction`, `speed`, `sampleRate`) exist in C++ after rebuild.
-- **No `projectm-pcm`** from native; oscilloscope/projectM rely on AnalyserNode / MediaStream bridge instead of authentic WASM PCM chunks.
+- C++ writes `PositionInfo` (shared memory); TS polls ~16 ms and emits `position` as `WorkletPositionData` (ABI `currentOrder`/`currentRow` plus `order`/`row` aliases).
+- Adapter maps frame clock through `nativeClockAnchor` onto the **shared** AudioContext quantum-start domain (`audioTime` / `workletTime`), not poll-time `currentTime`.
+- PCM: ring copy at poll cadence → `broadcastPcmBlock` / `publishPcmBlock` (same shape as JS `projectm-pcm`).
+- Default graph: C++ AudioWorkletNode on the main context (no dual-context). `?nativeCtx=legacy` keeps the old auto-context + bridge.
 
 Implication: two adapters in `useAudioGraph` (message handler vs `engine.on('position')`). Unification goal is a **single normalized sample type** + optional PCM tap adapter, not necessarily postMessage from C++.
 
@@ -117,19 +117,21 @@ Acceptance: `smoke:playhead:native` asserts active engine `native-worklet` and m
 
 | Flag | Value | Assessment |
 |------|-------|------------|
-| `INITIAL_MEMORY` | 32 MiB (`33554432`) | Reasonable for module+heap; large ITs grow via growth |
-| `ALLOW_MEMORY_GROWTH` | 1 | Required |
-| `MAXIMUM_MEMORY` | 512 MiB (`536870912`) | **Present** (epic brief was stale if it said “missing”) |
-| `STACK_SIZE` | 128 KiB | OK for quantum stack temps |
-| `AUDIO_WORKLET` + `WASM_WORKERS` | 1 | Required for C++ worklet thread |
-| `MODULARIZE` / `EXPORT_NAME` | `createOpenMPTModule` | Matches TS import |
+| `INITIAL_MEMORY` | **128mb** | Hard cap for the audio worklet unless `--grow` |
+| `ALLOW_MEMORY_GROWTH` | **0** (release) | Avoids growth pauses; large ITs use `--grow` |
+| `MAXIMUM_MEMORY` | unset (release) / **512mb** with `--grow` | Debug: 256mb |
+| `STACK_SIZE` | 128 KiB, 16-byte aligned | Keep |
+| `AUDIO_WORKLET` + `WASM_WORKERS` | 1 | Required |
+| `MODULARIZE` / `EXPORT_NAME` | `createOpenMPTModule` | Matches TS |
+| `EXPORT_ES6` | **1** | Prefer ESM default; UMD fallbacks remain |
 | `EXPORTED_FUNCTIONS` | init/load/seek/poll/ring/pattern… | Audited by `verify:native-exports` |
-| `EXPORTED_RUNTIME_METHODS` | ccall, cwrap, UTF8ToString, getValue, setValue | Confirm if `emscriptenGetAudioObject` needs explicit export (may be auto with AUDIO_WORKLET) |
-| Release | `-O3 -DNDEBUG` | Default |
-| `--debug` | `-O0 -g -sASSERTIONS=2` | Local only today |
+| `EXPORTED_RUNTIME_METHODS` | ccall, cwrap, UTF8ToString, getValue, setValue, emscriptenGetAudioObject, emscriptenRegisterAudioObject | Required for shared-context attach |
+| Release | `-O3 -DNDEBUG -flto=thin -msimd128` + emmalloc | SIMD verified by `verify:native-simd` |
+| `--debug` | `-O0 -g -sASSERTIONS=2` | Scheduled CI matrix cell |
+| `--grow` | growth=1, MAXIMUM=512mb | Huge ITs / local escape |
 | `--safe-heap` | `SAFE_HEAP=1` | Local only |
 
-**Actionable gaps:** CI job for `--debug` (or ASSERTIONS=1 release smoke), document MAXIMUM_MEMORY rationale, optional `ASSERTIONS=1` on weekly release build without full `-O0`.
+**Actionable gaps:** filled — scheduled `--debug` cell, `--grow` documented, SIMD verify, EXPORT_ES6, shared-context attach.
 
 ### 4.7 Benchmarks
 
@@ -251,13 +253,15 @@ Fixtures: one large `.it` in `public/` or downloadable test asset (do not bloat 
 
 | Decision | Rationale |
 |----------|-----------|
-| Keep `INITIAL_MEMORY=32MB` | Avoids large fixed commit; growth handles big modules |
-| Keep `MAXIMUM_MEMORY=512MB` | Caps runaway growth; large multi-MB modules + pattern extract headroom |
-| Keep growth enabled | Required for variable module size |
+| Keep `INITIAL_MEMORY=128mb` fixed | Avoids growth pauses on the audio thread |
+| `--grow` → 512mb max | Escape hatch for huge ITs / debug |
+| Release: `ALLOW_MEMORY_GROWTH=0` | Default; document 128mb as the hard cap |
 | Release CI: no ASSERTIONS | Perf / size |
-| Weekly or path CI: optional `--debug` matrix | Catches heap errors without slowing every PR |
-| EXPORT list | Maintain via `verify:native-exports` only — no duplicate hand lists in docs |
-| Runtime methods | Audit bridge path for `emscriptenGetAudioObject` / `emscriptenRegisterAudioObject`; add to `EXPORTED_RUNTIME_METHODS` if missing in 3.1.51 |
+| Weekly CI: `--debug` matrix | Catches heap errors without slowing every PR |
+| `EXPORT_ES6=1` | Prefer ESM `createOpenMPTModule`; UMD fallbacks remain |
+| EXPORT list | Maintain via `verify:native-exports` |
+| Runtime methods | `emscriptenGetAudioObject` / `emscriptenRegisterAudioObject` exported for shared-context attach |
+| SIMD | `verify:native-simd` after release `build:emcc` |
 
 ---
 

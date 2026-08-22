@@ -140,3 +140,23 @@ export function overrideFromActiveEngine(
 ): AudioEngineOverride {
   return engine === 'native-worklet' ? 'native' : 'js';
 }
+
+export function parseNativeCtxQueryParam(
+  search: string | URLSearchParams | null | undefined,
+): 'legacy' | null {
+  if (search == null) return null;
+  const params = typeof search === 'string'
+    ? new URLSearchParams(search.startsWith('?') ? search.slice(1) : search)
+    : search;
+  const v = params.get('nativeCtx')?.trim().toLowerCase();
+  return v === 'legacy' ? 'legacy' : null;
+}
+
+/** Dual-context C++ AudioContext path (`?engine=native&nativeCtx=legacy`). */
+export function isNativeLegacyAudioContext(
+  search?: string | URLSearchParams | null,
+): boolean {
+  return parseNativeCtxQueryParam(
+    search ?? (typeof window !== 'undefined' ? window.location.search : null),
+  ) === 'legacy';
+}

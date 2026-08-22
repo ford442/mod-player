@@ -1,6 +1,8 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 import {
   parseEngineQueryParam,
+  parseNativeCtxQueryParam,
+  isNativeLegacyAudioContext,
   resolveAudioEnginePreference,
   shouldPromoteNativeEngine,
   writeStoredAudioEngineOverride,
@@ -46,6 +48,13 @@ describe('audioEngineSelection', () => {
     expect(parseEngineQueryParam('engine=native')).toBe('native');
     expect(parseEngineQueryParam(new URLSearchParams('engine=worklet'))).toBe('js');
     expect(parseEngineQueryParam('?engine=bogus')).toBeNull();
+  });
+
+  it('parses ?nativeCtx=legacy', () => {
+    expect(parseNativeCtxQueryParam('?engine=native&nativeCtx=legacy')).toBe('legacy');
+    expect(parseNativeCtxQueryParam('?nativeCtx=shared')).toBeNull();
+    expect(isNativeLegacyAudioContext('?engine=native')).toBe(false);
+    expect(isNativeLegacyAudioContext('?nativeCtx=legacy')).toBe(true);
   });
 
   it('URL overrides localStorage', () => {

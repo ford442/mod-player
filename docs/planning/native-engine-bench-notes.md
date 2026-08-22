@@ -35,8 +35,8 @@ Optional debug hook (future): expose `window.__ENGINE_BENCH__` with poll/message
 | Audio render | Worklet thread (wasm2js libopenmpt) | C++ AudioWorklet / WASM workers |
 | Position to main | `postMessage` every quantum (~350 Hz possible; UI applies ~as received) | Shared-memory poll ~16 ms (~60 Hz) |
 | Main-thread decode of position | Message handler + shared `applyNormalizedPosition` | Poll + same apply path |
-| projectM PCM chunks | Yes (`projectm-pcm`) | No — Analyser / ring bridge only |
-| Dual AudioContext | No | Yes (capture blocked — see `docs/EXPORT.md`) |
+| projectM PCM chunks | Yes (`projectm-pcm`) | Yes (ring copy → `broadcastPcmBlock`) |
+| Dual AudioContext | No | Only with `?nativeCtx=legacy` |
 
 Native should typically show **lower main-thread message overhead** (poll vs high-rate postMessage) and **higher one-time init cost** (glue + wasm compile). Large ITs stress pattern extract / matrix packing more than the engine apply path.
 
@@ -58,6 +58,8 @@ Fill in after a local run (example placeholders):
 - [x] Methodology documented
 - [x] Harness: `npm run bench:engine` → `artifacts/engine-bench/`
 - [ ] Numbers filled from at least one large-IT local run (operator) — **not a release gate**
+
+Harness: `npm run bench:engine` compares JS postMessage vs native poll. After a large-IT run, paste median `getPlayheadDebug` / load→audio into the table above. Default-module smoke is enough to keep the script green; large-IT numbers remain operator-filled.
 
 CI does **not** gate on this benchmark. A/V parity is gated by `smoke:playhead:native` (path-filtered + scheduled). This note is DX/perf awareness only; do not flip defaults on vibes alone.
 

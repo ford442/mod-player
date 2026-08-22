@@ -118,6 +118,9 @@ const optionalButExport = [
   'init_audio_with_context',
   'get_num_channels',
   'get_num_orders',
+  'get_num_patterns',
+  'get_duration_seconds',
+  'get_initial_bpm',
   'get_order_pattern',
 ];
 

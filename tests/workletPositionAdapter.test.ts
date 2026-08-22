@@ -88,6 +88,23 @@ describe('workletPositionAdapter', () => {
     expect(input.order).toBe(2);
   });
 
+  it('prefers app-facing order/row aliases on native samples', () => {
+    const data: WorkletPositionData = {
+      positionMs: 0,
+      currentRow: 3,
+      currentPattern: 0,
+      currentOrder: 1,
+      order: 9,
+      row: 4,
+      bpm: 125,
+      numChannels: 2,
+      channelVU: new Float32Array(2),
+    };
+    const input = nativePositionToInput(data, 0);
+    expect(input.order).toBe(9);
+    expect(input.row).toBe(4);
+  });
+
   it('applies VU/trigger without touching noteAge', () => {
     const states: ChannelShadowState[] = [
       { volume: 0, pan: 0, freq: 0, trigger: 0, noteAge: 5, activeEffect: 0, effectValue: 0, isMuted: 0 },

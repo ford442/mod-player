@@ -29,12 +29,28 @@ export interface WorkletPatternData {
     rows: WorkletPatternRow[];
 }
 
+export interface NativePcmChunk {
+    buffer: Float32Array;
+    channels: 1 | 2;
+    sampleRate: number;
+    samplesPerChannel: number;
+}
+
 export interface WorkletPositionData {
     positionMs: number;
     workletTime?: number;
+    /**
+     * Quantum start in the shared AudioContext `currentTime` domain when mapped
+     * by nativeClockAnchor (not poll-time currentTime).
+     */
+    audioTime?: number;
     currentRow: number;
     currentPattern: number;
     currentOrder: number;
+    /** App-facing alias of currentOrder (canonical apply path uses this). */
+    order?: number;
+    /** App-facing alias of currentRow. */
+    row?: number;
     bpm: number;
     /** Module speed factor (MOD/XM), when available from the engine */
     speed?: number;
@@ -72,6 +88,8 @@ export type EngineState = 'uninitialized' | 'initializing' | 'ready' | 'playing'
 export interface EngineEventMap {
     /** Fired when position/VU data is available (~60fps) */
     position: WorkletPositionData;
+    /** Authentic WASM PCM (same shape as JS worklet `projectm-pcm`). */
+    pcm: NativePcmChunk;
     /** Fired when a module finishes loading */
     loaded: WorkletModuleMetadata;
     /** Fired when the module reaches its end (non-looping) */
@@ -124,6 +142,9 @@ export interface EmscriptenOpenMPTModule {
     // Pattern data query functions
     _get_num_channels: () => number;
     _get_num_orders: () => number;
+    _get_num_patterns?: () => number;
+    _get_duration_seconds?: () => number;
+    _get_initial_bpm?: () => number;
     _get_order_pattern: (order: number) => number;
     _get_pattern_num_rows: (pattern: number) => number;
     _get_pattern_row_channel_command: (pattern: number, row: number, channel: number, command: number) => number;

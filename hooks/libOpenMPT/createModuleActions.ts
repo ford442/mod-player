@@ -1,4 +1,5 @@
 import type { PatternMatrix } from '../../types';
+import { parseModuleWithNative } from '../../audio-worklet/NativePatternReader';
 import { backfillPatternMatrices } from '../../utils/parseModuleWithLib';
 import { parserLog } from '../../utils/parserDebug';
 import { createParserWorker, PARSER_SLOW_HINT_MS } from '../../utils/parserWorker';
@@ -163,18 +164,37 @@ export function createProcessModuleData(deps: ModuleActionsDeps) {
     let loadedInstrumentTable = emptyInstrumentTable();
 
     try {
-      const parsed = await resolveParsedModule(
-        lib,
-        useWorkerParse && parserWorkerHealthyRef.current ? workerRef.current : null,
-        workerRef,
-        fileData,
-        fileDataCopy,
-        fileName,
-        onParseProgress,
-      );
-      patternMatrices = parsed.patternMatrices;
-      metadata = parsed.metadata;
-      loadedInstrumentTable = parsed.instrumentTable ?? emptyInstrumentTable();
+      const nativeEngine = refs.nativeEngineRef.current;
+      const useNativeParse =
+        refs.activeEngineRef.current === 'native-worklet' && nativeEngine != null;
+
+      if (useNativeParse) {
+        onParseProgress?.('patterns');
+        const nativeBuf = new Uint8Array(fileDataCopy.byteLength);
+        nativeBuf.set(fileDataCopy);
+        await nativeEngine.load(nativeBuf.buffer);
+        const nativeMod = nativeEngine.getNativeModule();
+        if (!nativeMod || nativeMod._get_num_orders() <= 0) {
+          throw new Error('Native pattern reader: module not ready after load');
+        }
+        const parsed = parseModuleWithNative(nativeMod, fileDataCopy, fileName);
+        patternMatrices = parsed.patternMatrices;
+        metadata = parsed.metadata;
+        loadedInstrumentTable = parsed.instrumentTable ?? emptyInstrumentTable();
+      } else {
+        const parsed = await resolveParsedModule(
+          lib,
+          useWorkerParse && parserWorkerHealthyRef.current ? workerRef.current : null,
+          workerRef,
+          fileData,
+          fileDataCopy,
+          fileName,
+          onParseProgress,
+        );
+        patternMatrices = parsed.patternMatrices;
+        metadata = parsed.metadata;
+        loadedInstrumentTable = parsed.instrumentTable ?? emptyInstrumentTable();
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Module parse failed';
       console.error(`[processModuleData] Parse failed (${fileName}):`, err);
@@ -199,7 +219,7 @@ export function createProcessModuleData(deps: ModuleActionsDeps) {
     patternMatricesRef.current = matrices;
 
     const patternsComplete = patternMatrices.length >= metadata.numOrders;
-    if (!patternsComplete && isLibReadyForParse(lib)) {
+    if (!patternsComplete && isLibReadyForParse(lib) && refs.activeEngineRef.current !== 'native-worklet') {
       const backfillAbort = new AbortController();
       patternBackfillAbortRef.current = backfillAbort;
       const backfillFileName = fileName;

@@ -30,9 +30,11 @@
 // Accessed from BOTH main thread and audio worklet thread.
 // Atomics or single-writer patterns are used to avoid races.
 
-// The module instance lives on the worklet thread (created there after
+// The render instance lives on the worklet thread (created there after
 // receiving module data from main thread via shared buffer).
 static OpenMPTModule g_module;
+// Main-thread copy for pattern/metadata reads (does not wait for the worklet).
+static OpenMPTModule g_metaModule;
 
 // Shared buffer for transferring module file data from main → worklet
 static uint8_t*        g_moduleData     = nullptr;
@@ -44,6 +46,9 @@ static std::atomic<int> g_cmdSeekOrder{-1};
 static std::atomic<int> g_cmdSeekRow{-1};
 static std::atomic<int> g_cmdSetLoop{-1}; // -1=no change, 0=off, 1=on
 static std::atomic<float> g_cmdVolume{-1.0f}; // <0 = no change
+// Render pause: silence output without AudioContext.suspend() (shared-context safe).
+static std::atomic<int> g_paused{0};
+static int g_ringOverrunLogged = 0;
 
 // Position info polled by main thread (written by worklet)
 static PositionInfo g_positionInfo;
@@ -161,8 +166,7 @@ EM_BOOL audio_process_cb(
     AudioSampleFrame& out = outputs[0];
     const int frames = 128; // Standard AudioWorklet quantum
 
-    if (!g_module.isLoaded()) {
-        // Output silence
+    if (g_paused.load(std::memory_order_acquire) || !g_module.isLoaded()) {
         std::memset(out.data, 0, sizeof(float) * frames * out.numberOfChannels);
         return EM_TRUE;
     }
@@ -231,6 +235,15 @@ EM_BOOL audio_process_cb(
     // ── Write to ring buffer (if configured for main-thread bridge routing) ──
     if (g_ringBufHeader && g_ringSamples && g_ringCapacity > 0) {
         int32_t head = __atomic_load_n(g_ringBufHeader, __ATOMIC_ACQUIRE);
+        int32_t readHead = __atomic_load_n(g_ringBufHeader + 1, __ATOMIC_ACQUIRE);
+        const int used = (head - readHead + g_ringCapacity) % g_ringCapacity;
+        const int freeFrames = g_ringCapacity - used - 1;
+        if (rendered > freeFrames && !g_ringOverrunLogged) {
+            std::fprintf(stderr,
+                "[worklet] ring buffer overrun (write lapped read; used=%d cap=%d)\n",
+                used, g_ringCapacity);
+            g_ringOverrunLogged = 1;
+        }
         for (int i = 0; i < rendered; ++i) {
             int pos = (head + i) % g_ringCapacity;
             g_ringSamples[pos * 2]     = interleaved[i * 2];     // Left
@@ -425,9 +438,16 @@ int load_module(const uint8_t* data, int length) {
 
     // Copy data for the worklet thread to consume
     g_moduleData = (uint8_t*)malloc(length);
-    if (!g_moduleData) return 0;
+    if (!g_moduleData) {
+        std::fprintf(stderr, "[C++] load_module: malloc(%d) failed (heap exhausted)\n", length);
+        return 0;
+    }
     std::memcpy(g_moduleData, data, length);
     g_moduleDataSize = length;
+
+    if (!g_metaModule.load(data, static_cast<size_t>(length))) {
+        std::fprintf(stderr, "[C++] load_module: metadata parse failed (%d bytes)\n", length);
+    }
 
     // Signal the worklet thread to load
     g_cmdLoad.store(1, std::memory_order_release);
@@ -436,10 +456,12 @@ int load_module(const uint8_t* data, int length) {
 }
 
 /**
- * Resume audio context (required after user gesture).
+ * Resume render (clears pause flag). Also resumes a suspended AudioContext
+ * after a user gesture — never used as the pause mechanism.
  */
 EMSCRIPTEN_KEEPALIVE
 void resume_audio() {
+    g_paused.store(0, std::memory_order_release);
     if (g_audioCtx) {
         EM_ASM({
             var ctx = emscriptenGetAudioObject($0);
@@ -449,16 +471,12 @@ void resume_audio() {
 }
 
 /**
- * Suspend audio context (pause).
+ * Pause render by silencing the worklet. Does NOT AudioContext.suspend()
+ * (that would freeze a shared main-thread graph — #329 / #330).
  */
 EMSCRIPTEN_KEEPALIVE
 void suspend_audio() {
-    if (g_audioCtx) {
-        EM_ASM({
-            var ctx = emscriptenGetAudioObject($0);
-            if (ctx && ctx.state === 'running') ctx.suspend();
-        }, g_audioCtx);
-    }
+    g_paused.store(1, std::memory_order_release);
 }
 
 /**
@@ -521,6 +539,7 @@ EMSCRIPTEN_AUDIO_WORKLET_NODE_T get_worklet_node() {
 EMSCRIPTEN_KEEPALIVE
 void cleanup_audio() {
     g_module.unload();
+    g_metaModule.unload();
     if (g_moduleData) {
         free(g_moduleData);
         g_moduleData = nullptr;
@@ -535,12 +554,16 @@ void cleanup_audio() {
 // These allow the JS engine to build a PatternMatrix for the current
 // module without shipping pattern bytes through the PositionInfo struct.
 
+static OpenMPTModule& patternQueryModule() {
+    return g_metaModule.isLoaded() ? g_metaModule : g_module;
+}
+
 /**
  * Get the number of channels in the currently loaded module.
  */
 EMSCRIPTEN_KEEPALIVE
 int get_num_channels() {
-    return g_module.getNumChannels();
+    return patternQueryModule().getNumChannels();
 }
 
 /**
@@ -548,7 +571,22 @@ int get_num_channels() {
  */
 EMSCRIPTEN_KEEPALIVE
 int get_num_orders() {
-    return g_module.getNumOrders();
+    return patternQueryModule().getNumOrders();
+}
+
+EMSCRIPTEN_KEEPALIVE
+int get_num_patterns() {
+    return patternQueryModule().getNumPatterns();
+}
+
+EMSCRIPTEN_KEEPALIVE
+double get_duration_seconds() {
+    return patternQueryModule().getDurationSeconds();
+}
+
+EMSCRIPTEN_KEEPALIVE
+double get_initial_bpm() {
+    return patternQueryModule().getBPM();
 }
 
 /**
@@ -556,7 +594,7 @@ int get_num_orders() {
  */
 EMSCRIPTEN_KEEPALIVE
 int get_order_pattern(int order) {
-    return g_module.getOrderPattern(order);
+    return patternQueryModule().getOrderPattern(order);
 }
 
 /**
@@ -564,7 +602,7 @@ int get_order_pattern(int order) {
  */
 EMSCRIPTEN_KEEPALIVE
 int get_pattern_num_rows(int pattern) {
-    return g_module.getPatternNumRows(pattern);
+    return patternQueryModule().getPatternNumRows(pattern);
 }
 
 /**
@@ -573,7 +611,7 @@ int get_pattern_num_rows(int pattern) {
  */
 EMSCRIPTEN_KEEPALIVE
 int get_pattern_row_channel_command(int pattern, int row, int channel, int command) {
-    return g_module.getPatternRowChannelCommand(pattern, row, channel, command);
+    return patternQueryModule().getPatternRowChannelCommand(pattern, row, channel, command);
 }
 
 } // extern "C"

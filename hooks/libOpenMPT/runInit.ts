@@ -1,5 +1,5 @@
 import { logWorkletDiagnostics } from '../../audio-worklet/diagnostics';
-import { OpenMPTWorkletEngine, NATIVE_RING_BUF_BYTES } from '../../audio-worklet/OpenMPTWorkletEngine';
+import { OpenMPTWorkletEngine } from '../../audio-worklet/OpenMPTWorkletEngine';
 import {
   resolveAudioEnginePreference,
   shouldPromoteNativeEngine,
@@ -155,24 +155,7 @@ export async function runLibOpenMPTInit(deps: InitDeps): Promise<void> {
         if (glueIsSafe) {
           console.log('[INIT] Native C++/Wasm AudioWorklet glue detected');
 
-          const sharedOutputBuffer: SharedArrayBuffer | undefined =
-            window.crossOriginIsolated && typeof SharedArrayBuffer !== 'undefined'
-              ? new SharedArrayBuffer(NATIVE_RING_BUF_BYTES)
-              : undefined;
-
-          if (sharedOutputBuffer) {
-            console.log('[INIT] Allocated ring-buffer SharedArrayBuffer:', NATIVE_RING_BUF_BYTES, 'bytes');
-          } else {
-            console.log(
-              '[INIT] crossOriginIsolated=false — ring-buffer bridge unavailable; '
-                + 'falling back to MediaStream bridge',
-            );
-          }
-
-          refs.nativeSharedBufferRef.current = sharedOutputBuffer ?? null;
-          const engineOptions: import('../../audio-worklet/OpenMPTWorkletEngine').NativeEngineOptions = {};
-          if (sharedOutputBuffer) engineOptions.sharedOutputBuffer = sharedOutputBuffer;
-          const engine = new OpenMPTWorkletEngine(engineOptions);
+          const engine = new OpenMPTWorkletEngine();
           await engine.init();
           refs.nativeEngineRef.current = engine;
           setIsNativeWorkletAvailable(true);

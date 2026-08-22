@@ -28,10 +28,13 @@ Override for experiments only: `EMSDK_PIN=latest npm run build:emcc`.
 
 | Mode | Flags |
 |------|--------|
-| Release (default) | `-O3 -DNDEBUG` |
-| `--debug` | `-O0 -g -DDEBUG -sASSERTIONS=2` |
+| Release (default) | `-O3 -DNDEBUG -flto=thin -msimd128`, `MALLOC=emmalloc` |
+| `--debug` | `-O0 -g -DDEBUG -sASSERTIONS=2`, growth on, `INITIAL_MEMORY=128mb`, `MAXIMUM_MEMORY=256mb` |
 | `--safe-heap` | `-sSAFE_HEAP=1` (slow) |
-| Always | `AUDIO_WORKLET`, `WASM_WORKERS`, `ALLOW_MEMORY_GROWTH`, `MAXIMUM_MEMORY=512MB`, `INITIAL_MEMORY=32MB`, `STACK_SIZE=128KB`, `MODULARIZE`, `EXPORT_NAME=createOpenMPTModule` |
+| `--grow` | `ALLOW_MEMORY_GROWTH=1` + `MAXIMUM_MEMORY=512mb` (huge ITs) |
+| Always | `AUDIO_WORKLET`, `WASM_WORKERS`, `MODULARIZE`, `EXPORT_ES6=1`, `EXPORT_NAME=createOpenMPTModule`, worklet stack 128 KiB |
+| Release heap | `ALLOW_MEMORY_GROWTH=0`, `INITIAL_MEMORY=128mb` (hard cap unless `--grow`) |
+| Runtime methods | ccall, cwrap, UTF8ToString, getValue, setValue, emscriptenGetAudioObject, emscriptenRegisterAudioObject |
 
 ## Local build
 

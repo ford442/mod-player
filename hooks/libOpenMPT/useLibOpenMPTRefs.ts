@@ -65,6 +65,7 @@ export function useLibOpenMPTRefs(): LibOpenMPTRefs {
   const userModuleLoadedRef = useRef<boolean>(false);
   const nativeEngineRef = useRef<OpenMPTWorkletEngine | null>(null);
   const nativeSharedBufferRef = useRef<SharedArrayBuffer | null>(null);
+  const activeEngineRef = useRef<'worklet' | 'native-worklet'>('worklet');
   const nativeClockAnchorRef = useRef<NativeClockAnchor | null>(null);
   const nativeBridgeLatencyRef = useRef<number>(0);
   const oscBufferRef = useRef<Float32Array | null>(null);
@@ -135,6 +136,7 @@ export function useLibOpenMPTRefs(): LibOpenMPTRefs {
     userModuleLoadedRef,
     nativeEngineRef,
     nativeSharedBufferRef,
+    activeEngineRef,
     nativeClockAnchorRef,
     nativeBridgeLatencyRef,
     oscBufferRef,

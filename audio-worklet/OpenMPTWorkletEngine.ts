@@ -23,6 +23,7 @@ import type {
     EngineState,
     EngineEventMap,
     EmscriptenOpenMPTModule,
+    NativePcmChunk,
 } from './types';
 import { withBase } from '../src/lib/paths';
 import { decodePositionInfo } from './positionInfoLayout';
@@ -31,6 +32,7 @@ import {
     resolveCreateOpenMPTModule,
     withNativeWebAssembly,
 } from './resolveNativeFactory';
+import { readPatternDataFromNative } from './NativePatternReader';
 
 // ── Public constants ─────────────────────────────────────────────────
 
@@ -46,7 +48,12 @@ export const NATIVE_RING_BUF_FRAMES = 8192;
  *   8 B header  (writeHead Int32 + readHead Int32)
  * + NATIVE_RING_BUF_FRAMES × 2 channels × 4 B  (interleaved Float32 stereo)
  */
-export const NATIVE_RING_BUF_BYTES = 8 + NATIVE_RING_BUF_FRAMES * 2 * 4; // 65 544 B
+export const NATIVE_PCM_CHUNK_FRAMES = 128;
+
+export interface NativeEngineAttachOptions {
+    /** `?engine=native&nativeCtx=legacy` — C++ creates its own AudioContext. */
+    legacy?: boolean;
+}
 
 // ── Construction options ──────────────────────────────────────────────
 
@@ -116,6 +123,9 @@ export class OpenMPTWorkletEngine extends MiniEventEmitter<EngineEventMap> {
     private sharedOutputBuffer: SharedArrayBuffer | null;
     /** WASM heap byte offset of the allocated ring buffer (0 = not allocated). */
     private ringBufPtr = 0;
+    /** True after attachAudioContext / legacy _init_audio. */
+    private audioAttached = false;
+    private attachedContext: AudioContext | null = null;
 
     /**
      * @param options  Construction options, including an optional basePath and
@@ -125,6 +135,10 @@ export class OpenMPTWorkletEngine extends MiniEventEmitter<EngineEventMap> {
         super();
         this.basePath = options?.basePath ?? withBase('worklets/');
         this.sharedOutputBuffer = options?.sharedOutputBuffer ?? null;
+    }
+
+    getNativeModule(): EmscriptenOpenMPTModule | null {
+        return this.module;
     }
 
     /** Current engine state */
@@ -139,25 +153,15 @@ export class OpenMPTWorkletEngine extends MiniEventEmitter<EngineEventMap> {
     // ── Initialization ───────────────────────────────────────────────
 
     /**
-     * Load the Emscripten module and initialize the AudioContext + worklet thread.
-     * Must be called once before any other methods.
+     * Load the Emscripten glue + WASM. Does **not** create an AudioContext.
+     * Call `attachAudioContext` on play with the shared main-thread context.
      */
-    async init(sampleRate = 0): Promise<void> {
+    async init(_sampleRate = 0): Promise<void> {
         if (this.module) return; // Already initialized
 
         this.setState('initializing');
 
         try {
-            // Dynamically import the Emscripten glue code.
-            // IMPORTANT: Use absolute paths rooted at BASE_URL so the browser
-            // fetches from /worklets/, not from /assets/ (where the Vite bundle lives).
-            // The /* @vite-ignore */ comment prevents Vite from rewriting these imports.
-            //
-            // ⚠️  NEVER import() an AudioWorklet processor script (e.g. openmpt-worklet.js)
-            //     on the main thread — it references AudioWorkletProcessor which only exists
-            //     inside AudioWorkletGlobalScope. See docs/WORKLET_AUDIO_BUG.md.
-            // The JS worklet processor (openmpt-worklet.js) references AudioWorkletProcessor
-            // and cannot be imported on the main thread. Only try the native Emscripten glue.
             const nativeUrl = withBase('worklets/openmpt-native.js');
             const glueModule = await import(/* @vite-ignore */ nativeUrl) as Record<string, unknown>;
             const createModule = resolveCreateOpenMPTModule(glueModule);
@@ -166,56 +170,14 @@ export class OpenMPTWorkletEngine extends MiniEventEmitter<EngineEventMap> {
                 throw new Error('Failed to load Emscripten module factory');
             }
 
-            // Instantiate with WASM file path override.
-            // Must use the real WebAssembly API — main-thread wasm2js stubs Memory().
             this.module = await withNativeWebAssembly(() =>
                 createModule({
-                    // pre.js overwrites locateFile; it honors wasmBasePath when set.
                     wasmBasePath: this.basePath,
                     locateFile: (path: string) => `${this.basePath}${path}`,
                 } as Partial<EmscriptenOpenMPTModule>),
             );
 
-            // Emscripten addModule('openmpt-native.aw.js') is page-relative.
             installNativeAwJsModuleRewrite(this.basePath);
-
-            // Initialize audio context and worklet thread
-            const result = this.module._init_audio(sampleRate);
-            if (!result) {
-                throw new Error('Failed to initialize AudioContext');
-            }
-
-            const readyDeadline = Date.now() + 8000;
-            while (Date.now() < readyDeadline && this.module._get_worklet_node() === 0) {
-                await new Promise((r) => setTimeout(r, 50));
-            }
-            if (this.module._get_worklet_node() === 0) {
-                throw new Error('Native AudioWorklet thread failed to start');
-            }
-
-            // If a shared output buffer was requested AND the WASM module supports
-            // the ring-buffer API, allocate a ring buffer inside WASM linear memory.
-            // WASM memory is itself a SharedArrayBuffer (in cross-origin-isolated
-            // contexts), so the bridge worklet can read from it via Atomics.
-            if (this.sharedOutputBuffer && typeof this.module._set_ring_buffer === 'function') {
-                const frameCapacity = NATIVE_RING_BUF_FRAMES;
-                const byteSize = 8 + frameCapacity * 2 * 4; // header + samples
-                const ptr = this.module._malloc(byteSize);
-                if (ptr) {
-                    // Zero-initialise header (writeHead + readHead) and sample area
-                    this.module.HEAPU8.fill(0, ptr, ptr + byteSize);
-                    this.module._set_ring_buffer(ptr, frameCapacity);
-                    this.ringBufPtr = ptr;
-                    console.log('[OpenMPTWorkletEngine] Ring buffer allocated at WASM ptr', ptr,
-                        '– capacity:', frameCapacity, 'frames');
-                } else {
-                    console.warn('[OpenMPTWorkletEngine] _malloc failed for ring buffer');
-                }
-            }
-
-            // Start polling for position data
-            this.startPolling();
-
             this.setState('ready');
         } catch (err) {
             const message = err instanceof Error ? err.message : String(err);
@@ -223,6 +185,91 @@ export class OpenMPTWorkletEngine extends MiniEventEmitter<EngineEventMap> {
             this.emit('error', { message, code: 'INIT_FAILED' });
             throw err;
         }
+    }
+
+    /**
+     * Start the C++ AudioWorklet thread on `ctx` (shared graph) or, when
+     * `legacy` is set, let C++ create its own AudioContext.
+     */
+    async attachAudioContext(
+        ctx: AudioContext,
+        options: NativeEngineAttachOptions = {},
+    ): Promise<void> {
+        if (!this.module) {
+            throw new Error('Engine not initialized');
+        }
+        if (this.audioAttached) {
+            this.attachedContext = ctx;
+            return;
+        }
+
+        const legacy = options.legacy === true;
+        let result = 0;
+        if (legacy) {
+            result = this.module._init_audio(ctx.sampleRate || 0);
+        } else {
+            const register = this.module.emscriptenRegisterAudioObject
+                ?? (globalThis as unknown as {
+                    emscriptenRegisterAudioObject?: (obj: AudioContext) => number;
+                }).emscriptenRegisterAudioObject;
+            if (typeof register !== 'function') {
+                throw new Error(
+                    'emscriptenRegisterAudioObject is not exported — rebuild native with AUDIO_WORKLET runtime methods',
+                );
+            }
+            const handle = register.call(this.module, ctx);
+            const initWithCtx = this.module._init_audio_with_context;
+            if (typeof initWithCtx !== 'function') {
+                throw new Error('_init_audio_with_context missing from native WASM');
+            }
+            result = initWithCtx(handle);
+        }
+        if (!result) {
+            throw new Error('Failed to initialize native AudioWorklet');
+        }
+
+        const readyDeadline = Date.now() + 8000;
+        while (Date.now() < readyDeadline && this.module._get_worklet_node() === 0) {
+            await new Promise((r) => setTimeout(r, 50));
+        }
+        if (this.module._get_worklet_node() === 0) {
+            throw new Error('Native AudioWorklet thread failed to start');
+        }
+
+        this.allocatePcmRing();
+        this.startPolling();
+        this.audioAttached = true;
+        this.attachedContext = ctx;
+    }
+
+    private allocatePcmRing(): void {
+        if (!this.module || this.ringBufPtr !== 0) return;
+        if (typeof this.module._set_ring_buffer !== 'function') return;
+        const frameCapacity = NATIVE_RING_BUF_FRAMES;
+        const byteSize = 8 + frameCapacity * 2 * 4;
+        const ptr = this.module._malloc(byteSize);
+        if (!ptr) {
+            console.warn('[OpenMPTWorkletEngine] _malloc failed for PCM ring buffer');
+            return;
+        }
+        this.module.HEAPU8.fill(0, ptr, ptr + byteSize);
+        this.module._set_ring_buffer(ptr, frameCapacity);
+        this.ringBufPtr = ptr;
+        console.log(
+            '[OpenMPTWorkletEngine] PCM ring allocated at WASM ptr',
+            ptr,
+            '– capacity:',
+            frameCapacity,
+            'frames',
+        );
+    }
+
+    getAttachedAudioContext(): AudioContext | null {
+        return this.attachedContext;
+    }
+
+    isAudioAttached(): boolean {
+        return this.audioAttached;
     }
 
     // ── Module loading ───────────────────────────────────────────────
@@ -586,6 +633,7 @@ export class OpenMPTWorkletEngine extends MiniEventEmitter<EngineEventMap> {
                 }
 
                 this.emit('position', data);
+                this.emitPcmChunk(data.sampleRate);
 
                 // Detect row change for higher-frequency updates
                 if (data.currentRow !== this.lastRow) {
@@ -602,38 +650,45 @@ export class OpenMPTWorkletEngine extends MiniEventEmitter<EngineEventMap> {
         }
     }
 
+    private emitPcmChunk(sampleRateHint?: number): void {
+        const chunk = this.copyPcmChunk(sampleRateHint);
+        if (chunk) this.emit('pcm', chunk);
+    }
+
     /**
-     * Read all cell commands for the given pattern from C++ WASM memory
-     * and return a structured WorkletPatternData object.
-     * Returns null when the module or pattern data functions are unavailable.
+     * Copy the last NATIVE_PCM_CHUNK_FRAMES stereo frames from the C++ ring.
      */
-    private readPatternData(patternIndex: number, numChannels: number): WorkletPatternData | null {
-        const m = this.module;
-        if (!m || typeof m._get_pattern_num_rows !== 'function') return null;
-
-        const numRows = m._get_pattern_num_rows(patternIndex);
-        if (numRows <= 0) return null;
-
-        const rows = [];
-        for (let r = 0; r < numRows; r++) {
-            const notes: number[]        = [];
-            const instruments: number[]  = [];
-            const volCmds: number[]      = [];
-            const volVals: number[]      = [];
-            const effCmds: number[]      = [];
-            const effVals: number[]      = [];
-            for (let c = 0; c < numChannels; c++) {
-                notes.push(m._get_pattern_row_channel_command(patternIndex, r, c, 0));
-                instruments.push(m._get_pattern_row_channel_command(patternIndex, r, c, 1));
-                volCmds.push(m._get_pattern_row_channel_command(patternIndex, r, c, 2));
-                volVals.push(m._get_pattern_row_channel_command(patternIndex, r, c, 3));
-                effCmds.push(m._get_pattern_row_channel_command(patternIndex, r, c, 4));
-                effVals.push(m._get_pattern_row_channel_command(patternIndex, r, c, 5));
-            }
-            rows.push({ notes, instruments, volCmds, volVals, effCmds, effVals });
+    copyPcmChunk(sampleRateHint?: number): NativePcmChunk | null {
+        if (!this.module || this.ringBufPtr <= 0) return null;
+        const writeHead = typeof this.module._get_ring_write_head === 'function'
+            ? this.module._get_ring_write_head()
+            : 0;
+        const cap = NATIVE_RING_BUF_FRAMES;
+        const frames = NATIVE_PCM_CHUNK_FRAMES;
+        const samplesOffsetBytes = this.ringBufPtr + 8;
+        const f32Index = samplesOffsetBytes / 4;
+        const heap = this.module.HEAPF32;
+        const out = new Float32Array(frames * 2);
+        for (let i = 0; i < frames; i++) {
+            const pos = (writeHead - frames + i + cap) % cap;
+            const src = f32Index + pos * 2;
+            out[i * 2] = heap[src] ?? 0;
+            out[i * 2 + 1] = heap[src + 1] ?? 0;
         }
+        const sampleRate = sampleRateHint
+            || this.attachedContext?.sampleRate
+            || 48000;
+        return {
+            buffer: out,
+            channels: 2,
+            sampleRate,
+            samplesPerChannel: frames,
+        };
+    }
 
-        return { patternIndex, numRows, numChannels, rows };
+    private readPatternData(patternIndex: number, numChannels: number): WorkletPatternData | null {
+        if (!this.module) return null;
+        return readPatternDataFromNative(this.module, patternIndex, numChannels);
     }
 
     /**

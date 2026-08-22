@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { isNativeLegacyAudioContext } from '../utils/audioEngineSelection';
 import type { PlayerFeaturesValue } from '../context/PlayerFeaturesContext';
 import type { MediaItem } from '../types';
 import type { SongSaveRequest } from '../utils/storageApi';
@@ -211,7 +212,7 @@ export function usePlayerFeaturesValue(params: UsePlayerFeaturesValueParams): Pl
     captureState,
     isRecording,
     getRendererBackend: () => window.currentPatternRenderer?.backend ?? null,
-    dualAudioContext: activeEngine === 'native-worklet',
+    dualAudioContext: activeEngine === 'native-worklet' && isNativeLegacyAudioContext(),
   }), [
     setIs3DMode, copyShareLink, mediaItem, mediaVisible, mediaFades, currentModuleFileName,
     moduleMediaHintText, handleMediaRemove, handleMediaAdd, handleRemoteMediaSelect,

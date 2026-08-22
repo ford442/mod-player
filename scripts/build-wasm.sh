@@ -20,9 +20,10 @@
 #      bin/libopenmpt.a for linking with emcc.
 #
 # Usage:
-#   ./scripts/build-wasm.sh              # release (-O3 + SIMD/LTO/emmalloc/fixed heap)
+#   ./scripts/build-wasm.sh              # release (-O3 + SIMD/LTO/emmalloc/fixed 128mb heap)
 #   ./scripts/build-wasm.sh --debug      # -O0 -g -sASSERTIONS=2
 #   ./scripts/build-wasm.sh --safe-heap  # + SAFE_HEAP (slow; debug memory)
+#   ./scripts/build-wasm.sh --grow       # ALLOW_MEMORY_GROWTH=1 MAXIMUM_MEMORY=512mb (huge ITs)
 #
 # Release opts (Phases 2–3): thin LTO, -msimd128, section GC, emmalloc, fixed heap.
 # After changing release flags, delete vendor/.../bin/libopenmpt.a to force rebuild.
@@ -83,16 +84,18 @@ LIBOPENMPT_MAKE_FLAGS=(
 # ── Flags from argv ──────────────────────────────────────────────────
 DEBUG_MODE=0
 SAFE_HEAP=0
+GROW_HEAP=0
 for arg in "$@"; do
     case "$arg" in
         --debug) DEBUG_MODE=1 ;;
         --safe-heap) SAFE_HEAP=1 ;;
+        --grow) GROW_HEAP=1 ;;
         -h|--help)
-            sed -n '2,35p' "$0" | sed 's/^# \?//'
+            sed -n '2,40p' "$0" | sed 's/^# \?//'
             exit 0
             ;;
         *)
-            echo "Unknown option: $arg (use --debug and/or --safe-heap)" >&2
+            echo "Unknown option: $arg (use --debug, --safe-heap, and/or --grow)" >&2
             exit 1
             ;;
     esac
@@ -127,6 +130,14 @@ else
         -sINITIAL_MEMORY=128mb
     )
     echo "🔧 Building in RELEASE mode (SIMD + LTO + emmalloc + fixed 128mb heap)"
+fi
+
+if [[ "$GROW_HEAP" -eq 1 ]]; then
+    EMSCRIPTEN_FLAGS+=(
+        -sALLOW_MEMORY_GROWTH=1
+        -sMAXIMUM_MEMORY=512mb
+    )
+    echo "🔧 Heap growth enabled (MAXIMUM_MEMORY=512mb) — for huge ITs"
 fi
 
 # libopenmpt static lib must be built with matching release opts (LTO + SIMD + atomics for WASM_WORKERS).
@@ -381,6 +392,9 @@ EXPORTED_FUNCTIONS=$(cat <<'EOF'
   '_get_ring_write_head',
   '_get_num_channels',
   '_get_num_orders',
+  '_get_num_patterns',
+  '_get_duration_seconds',
+  '_get_initial_bpm',
   '_get_order_pattern',
   '_get_pattern_num_rows',
   '_get_pattern_row_channel_command',
@@ -413,9 +427,10 @@ emcc \
     -sSINGLE_FILE=0 \
     -sENVIRONMENT=web,worker \
     "${EMSCRIPTEN_FLAGS[@]}" \
-    -sEXPORTED_RUNTIME_METHODS="['ccall','cwrap','UTF8ToString','getValue','setValue']" \
+    -sEXPORTED_RUNTIME_METHODS="['ccall','cwrap','UTF8ToString','getValue','setValue','emscriptenGetAudioObject','emscriptenRegisterAudioObject']" \
     -sEXPORTED_FUNCTIONS="$EXPORTED_FUNCTIONS_FLAT" \
     -sMODULARIZE=1 \
+    -sEXPORT_ES6=1 \
     -sEXPORT_NAME="createOpenMPTModule" \
     --pre-js "$CPP_DIR/pre.js" \
     \
@@ -448,6 +463,10 @@ fi
 if [[ -f "$OUTPUT_DIR/openmpt-worklet.wasm" ]]; then
     echo "⚠️  Removing obsolete $OUTPUT_DIR/openmpt-worklet.wasm (native output is openmpt-native.wasm)"
     rm -f "$OUTPUT_DIR/openmpt-worklet.wasm" "$OUTPUT_DIR/openmpt-worklet.aw.js"
+fi
+
+if [[ "$DEBUG_MODE" -eq 0 && -f "$OUTPUT_DIR/${OUTPUT_BASENAME}.wasm" ]]; then
+    node "$SCRIPT_DIR/verify-native-simd.mjs" "$OUTPUT_DIR/${OUTPUT_BASENAME}.wasm"
 fi
 
 echo ""

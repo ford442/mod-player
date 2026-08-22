@@ -181,6 +181,21 @@ describe('audio hook source invariants', () => {
     expect(useAudioGraph).toContain('shouldForceWorkletModuleLoad');
     expect(jsDispatch).toContain('shouldAcceptWorkletLoadedAck');
   });
+
+  it('native pause silences render without AudioContext.suspend', () => {
+    const cpp = readFileSync(join(ROOT, 'cpp/worklet_processor.cpp'), 'utf8');
+    const suspendIdx = cpp.indexOf('void suspend_audio()');
+    expect(suspendIdx).toBeGreaterThan(0);
+    const suspendBody = cpp.slice(suspendIdx, suspendIdx + 280);
+    expect(suspendBody).toContain('g_paused');
+    expect(suspendBody).not.toMatch(/ctx\.suspend/);
+    const engine = readFileSync(join(ROOT, 'audio-worklet/OpenMPTWorkletEngine.ts'), 'utf8');
+    const initMatch = engine.match(/async init\([\s\S]*?async attachAudioContext/);
+    expect(initMatch?.[0]).not.toContain('_init_audio(');
+    expect(engine).toContain('_init_audio_with_context');
+    expect(useAudioGraph).toContain('attachAudioContext');
+    expect(useAudioGraph).toContain('broadcastPcmBlock');
+  });
 });
 
 describe('workletAudioLifecycle (#354 pure helpers smoke)', () => {

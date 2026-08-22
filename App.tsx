@@ -8,6 +8,7 @@ import { useLibrary, useSaveSong, useSyncLibrary } from './hooks/useLibrary';
 import { useLocalLibrary } from './hooks/useLocalLibrary';
 import { useRateShader } from './hooks/useRateShader';
 import { startProjectMBridge } from './utils/projectMBridge';
+import { isNativeLegacyAudioContext } from './utils/audioEngineSelection';
 import { supportsStepsLength, usesOscilloscope } from './utils/shaderVersion';
 import { preserveWindowScroll } from './utils/scrollContainer';
 import { useToast } from './hooks/useToast';
@@ -164,7 +165,7 @@ function App() {
       audioContext: getAudioContext(),
       audioTapNode: getAudioTapNode(),
       preferWebGL2: true,
-      dualAudioContext: activeEngine === 'native-worklet',
+      dualAudioContext: activeEngine === 'native-worklet' && isNativeLegacyAudioContext(),
     });
   }, [activeEngine, getAudioContext, getAudioTapNode, startCapture]);
 

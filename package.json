@@ -11,6 +11,7 @@
     "build:emcc": "bash scripts/build-wasm.sh",
     "build:worklet": "echo '⚠️  build:worklet is deprecated — use npm run build:emcc (same script; outputs openmpt-native.* only)' >&2 && bash scripts/build-wasm.sh",
     "verify:native-exports": "node scripts/verify-native-exports.mjs",
+    "verify:native-simd": "node scripts/verify-native-simd.mjs",
     "build": "tsc && vite build",
     "build:xm-player": "VITE_APP_BASE_PATH=/xm-player/ VITE_STORAGE_API_URL=https://storage.noahcohn.com VITE_PUBLIC_MODE=1 npm run build",
     "build:public": "npm run build:xm-player:verify",

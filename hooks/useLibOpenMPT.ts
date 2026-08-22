@@ -78,6 +78,8 @@ export function useLibOpenMPT(initialVolume: number = 0.4, liteMode: boolean = f
     setWorkletLoadError,
   };
 
+  refs.activeEngineRef.current = activeEngine;
+
   const transportDeps = { refs, setters, activeEngine };
 
   const stopMusic = useCallback(createStopMusic(transportDeps), []);

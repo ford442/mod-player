@@ -31,15 +31,16 @@ The offline renderer uses 44.1 kHz stereo, windowed-sinc interpolation (length 8
 | Mobile Chrome | ✅ | ⚠️ | ❌ | ⚠️ | High CPU; short clips recommended |
 | Mobile Safari | ✅ | ⚠️ | ❌ | ⚠️ HEVC/MP4 | Audio tap requires active playback graph |
 
-### COOP/COEP and dual AudioContext (native engine)
+### COOP/COEP and AudioContext (native engine)
 
 | Engine | Audio for recording | Guidance |
 |--------|---------------------|----------|
 | JS AudioWorklet | Tap `stereoPanner` → `MediaStreamDestination` in main `AudioContext` | **Required for capture** |
 | ScriptProcessor fallback | Same main-context tap | Supported |
-| Native C++ worklet (`native-worklet`) | Separate `AudioContext` inside WASM bridge | **Recording blocked** — no silent dual-context capture |
+| Native C++ worklet (default) | Same shared `AudioContext`; C++ node in the master graph | **Record clip works** (`?engine=native`) |
+| Native legacy dual-context | `?engine=native&nativeCtx=legacy` | **Recording blocked** — switch off legacy or use JS |
 
-**Switch to JS before Record clip:**
+**Switch to JS (or drop `nativeCtx=legacy`) only if Record clip is disabled:**
 
 - URL: `?engine=js`
 - Or debug panel engine toggle (persists `localStorage.xasm1_audio_engine=js`)
@@ -71,5 +72,5 @@ stop() / cancel()
 1. Load `4-mat_madness.mod`, open Export panel, click **Download WAV** — file plays in an external player.
 2. Mute channel 1, export again — kick/snare balance should change vs full mix.
 3. Play module, click **Record clip**, wait ~5 s, **Stop** — WebM contains audio + visuals (WebGL2 renderer).
-4. Switch to native engine — Record clip stays disabled with dual-context warning; use `?engine=js` (or UI toggle) then record successfully.
+4. `?engine=native` (default single context) — Record clip should work without switching to JS. `?nativeCtx=legacy` still shows the dual-context warning.
 5. Offline WAV still works on either engine (worker path).

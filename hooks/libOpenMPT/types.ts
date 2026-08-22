@@ -73,6 +73,7 @@ export interface LibOpenMPTRefs {
   userModuleLoadedRef: React.MutableRefObject<boolean>;
   nativeEngineRef: React.MutableRefObject<OpenMPTWorkletEngine | null>;
   nativeSharedBufferRef: React.MutableRefObject<SharedArrayBuffer | null>;
+  activeEngineRef: React.MutableRefObject<'worklet' | 'native-worklet'>;
   /** Maps native frame clock → main heard-time for playhead prediction. */
   nativeClockAnchorRef: React.MutableRefObject<NativeClockAnchor | null>;
   /** Bridge latency estimate (ring vs MediaStream) for clock anchor. */

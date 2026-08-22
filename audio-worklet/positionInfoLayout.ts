@@ -117,6 +117,8 @@ export function decodePositionInfo(
     bpm,
     numChannels,
     channelVU,
+    order: currentOrder,
+    row: currentRow,
   };
 
   if (rowFraction != null && Number.isFinite(rowFraction)) {

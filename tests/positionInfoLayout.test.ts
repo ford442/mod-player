@@ -31,6 +31,8 @@ describe('positionInfoLayout fixture decode', () => {
     expect(decoded!.currentRow).toBe(12);
     expect(decoded!.currentPattern).toBe(3);
     expect(decoded!.currentOrder).toBe(1);
+    expect(decoded!.order).toBe(1);
+    expect(decoded!.row).toBe(12);
     expect(decoded!.bpm).toBeCloseTo(140.25, 5);
     expect(decoded!.numChannels).toBe(4);
     expect(decoded!.channelVU[0]).toBeCloseTo(0.1, 5);

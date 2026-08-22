@@ -187,6 +187,14 @@ int OpenMPTModule::getNumOrders() const {
     return mod_ ? openmpt_module_get_num_orders(mod_) : 0;
 }
 
+int OpenMPTModule::getNumPatterns() const {
+    return mod_ ? openmpt_module_get_num_patterns(mod_) : 0;
+}
+
+double OpenMPTModule::getDurationSeconds() const {
+    return mod_ ? openmpt_module_get_duration_seconds(mod_) : 0.0;
+}
+
 void OpenMPTModule::getChannelVU(float* out, int maxCh) const {
     if (!mod_) {
         std::memset(out, 0, sizeof(float) * maxCh);

@@ -92,8 +92,8 @@ export function nativePositionToInput(
     );
   }
   const input: WorkletPositionInput = {
-    order: data.currentOrder,
-    row: data.currentRow,
+    order: data.order ?? data.currentOrder,
+    row: data.row ?? data.currentRow,
     positionSeconds: data.positionMs / 1000,
     workletTime,
     bpm: data.bpm,

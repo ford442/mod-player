@@ -76,9 +76,11 @@ localStorage.setItem('xasm1_audio_engine', 'native')
 
 **Emscripten 3.1.51 AudioWorklet bootstrap:** `addModule('openmpt-native.aw.js')` is resolved against the **page URL**, not `locateFile`. The engine rewrites that path to `worklets/openmpt-native.aw.js`. C++ must pass a 16-byte-aligned worklet stack into `emscripten_start_wasm_audio_worklet_thread_async` (null stack fails).
 
-**projectM PCM chunks** (`type: 'projectm-pcm'`) are JS-worklet-only. Native uses the ring buffer / AnalyserNode path.
+**projectM PCM chunks** are posted from both engines: JS `projectm-pcm` and native ring copy → `broadcastPcmBlock`.
 
-**Performance capture (MediaRecorder)** requires the JS worklet — native uses a separate AudioContext. Use `?engine=js` or the UI toggle before Record clip. See `docs/EXPORT.md`.
+**Performance capture (MediaRecorder)** uses the shared main `AudioContext` on default native (`?engine=native`). Dual-context (`?nativeCtx=legacy`) still blocks Record clip. See `docs/EXPORT.md`.
+
+**Heap:** release native WASM is a **fixed 128mb** heap. Use `npm run build:emcc -- --grow` for huge ITs (`MAXIMUM_MEMORY=512mb`).
 
 ## CI / hygiene
 
