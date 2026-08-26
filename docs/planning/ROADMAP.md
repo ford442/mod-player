@@ -2,23 +2,27 @@
 
 Living pointer to active work. **Do not** append agent run diaries here — use GitHub issues and PRs for status.
 
-**Last reconciled:** 2026-08-21. `lint-and-build` is green on `main` again (#400, landed by #406 + #408); previous Active/#395/#396 rows were stale (those issues are closed; audio-smoke is green).
+**Last reconciled:** 2026-08-26. Foundation issues #401 / #402 / #404 are **closed** (code landed; leftovers filed as #411–#415). Weekly `native-wasm-scheduled.yml` is **green** as of 2026-08-24 (run 32696149357) including native playhead smoke — the 2026-08-21 “parity still fails” note was stale. `lint-and-build` is green on `main`. Only previously tracked open product issue was [#403](https://github.com/ford442/mod-player/issues/403).
+
+**Build on foundation before new content.** Do not start #417 (performance instrument) or new shaders until P1 rows below have a decision/PR. #403 (tracker studio) can proceed in parallel with P1 except live-audition audio, which should wait for typed worklets (#413) if it adds a new AudioWorklet.
 
 ## Active (do now)
 
-`lint-and-build` is green. `native-full-build` (path-filtered, in `ci.yml`) now compiles libopenmpt cleanly against emsdk 3.1.51 — the #400 pin fix is proven — but its native-engine parity step still fails: `requested native engine but active engine is "worklet" (expected "native-worklet")`. That's a runtime/parity-gate bug in the native audio engine itself, not a build/tooling issue, so it blocks #401 rather than #400. The standalone `native-wasm-scheduled.yml` workflow runs the same parity step and should be expected to fail the same way until #401 lands — someone with `workflow_dispatch` access should confirm on the next manual/weekly run.
-
 | Priority | Issue | Summary |
 |----------|-------|---------|
-| **P1 — Fix First** | [#401](https://github.com/ford442/mod-player/issues/401) | Native engine production path: single `AudioContext`, authentic PCM tap, `EXPORT_ES6` / heap contract, `--debug` CI cell. Unblocked by #400, but `native-full-build` / `native-wasm-scheduled.yml` fail parity (`active engine is "worklet"`, expected `"native-worklet"`) — likely the first thing to fix here. |
-| P1 | [#402](https://github.com/ford442/mod-player/issues/402) | GPU compute analysis: spectrum + waveform extrema + `timestamp-query`. Tracker engine stays CPU/WASM. Replaces AnalyserNode for chassis bands. |
+| **P1 — Fix First** | [#411](https://github.com/ford442/mod-player/issues/411) | Promote native after green parity: deploy `openmpt-native.*`, open the parity gate on preview only, delete `?nativeCtx=legacy`, lock shared `AudioContext` sampleRate, fill engine benches. |
+| P1 | [#412](https://github.com/ford442/mod-player/issues/412) | C++ compile leftovers (`STACK_SIZE`, `-fno-exceptions`) + interactive `ctl` / mute KEEPAlives; stop a third wasm2js module when native is active. |
+| P1 | [#413](https://github.com/ford442/mod-player/issues/413) | Compile `openmpt-worklet.js` / native-bridge from TypeScript (single protocol source). |
+| P1 | [#414](https://github.com/ford442/mod-player/issues/414) | Finish analysis-bus consumers; split `MainLayout.tsx` (848 lines) into chrome vs `stageMode` performance stage. Leftover of closed #404. |
+| P1 | [#415](https://github.com/ford442/mod-player/issues/415) | Resolve WebGL2 contradiction: revive `?renderer=webgl2` as a real viz session **or** delete the deferred path and retarget smoke/capture/docs. |
 
 ## Next (after foundation)
 
 | Priority | Issue | Summary |
 |----------|-------|---------|
 | P2 | [#403](https://github.com/ford442/mod-player/issues/403) | Tracker studio: inspector waveforms, S3M extract, **audible** pattern edits via a sample-audition worklet (libopenmpt cannot write cells). |
-| P2 | [#404](https://github.com/ford442/mod-player/issues/404) | Shared PCM analysis bus + performance stage (chassis + ProjectM + 3D on one clock). Split remaining `MainLayout` chrome vs stage. |
+| P2 | [#416](https://github.com/ford442/mod-player/issues/416) | Live channel mute/solo through JS + native (export-only today). Blocked on #412 for native; JS engine can ship first. Distinct from #403. |
+| P2 | [#417](https://github.com/ford442/mod-player/issues/417) | Performance instrument: MIDI/chassis on `playerCommands`, `stageMode`, WebCodecs music-video (`mp4-muxer` optional). Depends on #414 + #415 decision. |
 
 ## Landed (do not re-open)
 
@@ -36,6 +40,10 @@ Living pointer to active work. **Do not** append agent run diaries here — use 
 | [#396](https://github.com/ford442/mod-player/issues/396) WebGPU hard-fail viz probe | closed; `utils/webgpuDevice.ts` |
 | [#398](https://github.com/ford442/mod-player/issues/398) / [#399](https://github.com/ford442/mod-player/issues/399) Inspector names MVP | closed; waveforms still #403 |
 | [#400](https://github.com/ford442/mod-player/issues/400) Restore green CI (`typecheck:tests` fix, emsdk 3.1.51 pin, GH Actions majors, doc sync) | #406 + #408 (`lint-and-build` green on `main`) |
+| [#401](https://github.com/ford442/mod-player/issues/401) Native single-context + PCM tap + emcc contract | closed; leftover promotion/deploy is #411 |
+| [#402](https://github.com/ford442/mod-player/issues/402) GPU compute analysis pipeline | closed; `computeAnalysis.ts` + `pcmBus.ts` |
+| [#404](https://github.com/ford442/mod-player/issues/404) Shared PCM bus + performance stage | closed incomplete; leftover consumers/layout are #414 |
+| [#405](https://github.com/ford442/mod-player/issues/405) / [#407](https://github.com/ford442/mod-player/issues/407) ESLint warning hygiene | closed |
 
 ## Planning scratch (local, gitignored)
 
