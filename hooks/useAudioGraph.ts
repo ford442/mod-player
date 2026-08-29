@@ -15,6 +15,7 @@ import {
 } from './audioGraph/masterGraph';
 import { startJsWorkletPlayback } from './audioGraph/startJsWorkletPlayback';
 import { startNativePlayback } from './audioGraph/startNativePlayback';
+import { createSharedAudioContext } from './audioGraph/createSharedAudioContext';
 import type {
   AudioGraphCallbacks,
   AudioGraphConfig,
@@ -101,7 +102,7 @@ export async function startAudioPlayback(
   try {
     if (!refs.audioContextRef.current) {
       console.log('[PLAY] Creating new AudioContext...');
-      refs.audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ latencyHint: 'playback' });
+      refs.audioContextRef.current = createSharedAudioContext();
       refs.workletLoadedRef.current = false;
 
       // AUDIO-001 FIX COMPLETE: Detailed log right after AudioContext creation
