@@ -103,6 +103,15 @@ describe('audioEngineSelection', () => {
     expect(resolveAudioEnginePreference('?engine=js')).toEqual({ mode: 'force-js' });
   });
 
+  it('public mode with parity gate open still force-js (unless URL native)', () => {
+    vi.stubEnv('VITE_PUBLIC_MODE', '1');
+    vi.stubEnv('VITE_NATIVE_PARITY_GATE', '1');
+    writeStoredAudioEngineOverride('native');
+    expect(resolveAudioEnginePreference('')).toEqual({ mode: 'force-js' });
+    expect(resolveAudioEnginePreference('?engine=auto')).toEqual({ mode: 'auto' });
+    expect(resolveAudioEnginePreference('?engine=native')).toEqual({ mode: 'prefer-native' });
+  });
+
   it('writeStoredAudioEngineOverride(js) clears sticky native', () => {
     writeStoredAudioEngineOverride('native');
     expect(localStorage.getItem(AUDIO_ENGINE_STORAGE_KEY)).toBe('native');
