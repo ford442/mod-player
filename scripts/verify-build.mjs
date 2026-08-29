@@ -9,6 +9,10 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import {
+  isNativeEngineExpected,
+  verifyNativeWorkletArtifacts,
+} from './nativeArtifactContract.mjs';
 
 const BUILD_DIR = process.env.BUILD_DIR || 'dist';
 const PROJECT_NAME = process.env.PROJECT_NAME || 'xm-player';
@@ -198,12 +202,31 @@ try {
   );
 }
 
+// Native C++ engine glue — required only when build profile signals native/parity gate.
+const nativeExpected = isNativeEngineExpected();
+if (nativeExpected) {
+  const nativeCheck = verifyNativeWorkletArtifacts(BUILD_DIR);
+  if (!nativeCheck.ok) {
+    errors.push(...nativeCheck.errors);
+    errors.push(
+      'native engine expected (VITE_NATIVE_ENGINE=1 or VITE_NATIVE_PARITY_GATE=1) ' +
+        'but openmpt-native.* is missing or invalid — run npm run build:emcc before npm run build',
+    );
+  }
+} else {
+  console.log(
+    'verify-build: JS-only bundle (native not required; set VITE_NATIVE_ENGINE=1 or ' +
+      'VITE_NATIVE_PARITY_GATE=1 to require openmpt-native.*)',
+  );
+}
+
 if (errors.length > 0) {
   console.error('verify-build FAILED:');
   for (const e of errors) console.error(`  - ${e}`);
   process.exit(1);
 }
 
+const nativeSuffix = nativeExpected ? ', native engine artifacts present' : '';
 console.log(
-  `verify-build OK: ${stylesheetHrefs.length} stylesheet(s), ${scriptHrefs.length} module script(s)`,
+  `verify-build OK: ${stylesheetHrefs.length} stylesheet(s), ${scriptHrefs.length} module script(s)${nativeSuffix}`,
 );

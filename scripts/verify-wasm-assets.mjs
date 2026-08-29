@@ -23,37 +23,9 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 
-const WASM_MAGIC = Buffer.from([0x00, 0x61, 0x73, 0x6d]); // \0asm
+export const WASM_MAGIC = Buffer.from([0x00, 0x61, 0x73, 0x6d]); // \0asm
 /** Reject empty/tiny stubs even if magic somehow matched. */
-const MIN_WASM_BYTES = Number(process.env.MIN_WASM_BYTES || 1024);
-const ROOTS = (process.env.WASM_SCAN_ROOTS || 'public,dist')
-  .split(',')
-  .map((s) => s.trim())
-  .filter(Boolean);
-
-const errors = [];
-const checked = [];
-
-function walk(dir, out = []) {
-  if (!existsSync(dir)) return out;
-  let entries;
-  try {
-    entries = readdirSync(dir, { withFileTypes: true });
-  } catch {
-    return out;
-  }
-  for (const ent of entries) {
-    const full = join(dir, ent.name);
-    if (ent.isDirectory()) {
-      // Skip dependency / VCS noise if roots ever broaden
-      if (ent.name === 'node_modules' || ent.name === '.git') continue;
-      walk(full, out);
-    } else if (ent.isFile() && ent.name.endsWith('.wasm')) {
-      out.push(full);
-    }
-  }
-  return out;
-}
+export const MIN_WASM_BYTES = Number(process.env.MIN_WASM_BYTES || 1024);
 
 function looksLikeHtmlOrText(buf) {
   const sample = buf.subarray(0, Math.min(64, buf.length)).toString('utf8');
@@ -67,21 +39,25 @@ function looksLikeHtmlOrText(buf) {
   );
 }
 
-function validateWasmFile(filePath) {
-  const rel = relative(process.cwd(), filePath) || filePath;
-  checked.push(rel);
+/**
+ * Validate a single .wasm file. Returns an array of error strings (empty = OK).
+ */
+export function validateWasmFile(filePath, options = {}) {
+  const minBytes = options.minBytes ?? MIN_WASM_BYTES;
+  const rel = options.relPath ?? (relative(process.cwd(), filePath) || filePath);
+  const fileErrors = [];
 
   let st;
   try {
     st = statSync(filePath);
   } catch (e) {
-    errors.push(`${rel}: cannot stat (${e instanceof Error ? e.message : e})`);
-    return;
+    fileErrors.push(`${rel}: cannot stat (${e instanceof Error ? e.message : e})`);
+    return fileErrors;
   }
 
-  if (st.size < MIN_WASM_BYTES) {
-    errors.push(
-      `${rel}: only ${st.size} bytes (expected >= ${MIN_WASM_BYTES}). ` +
+  if (st.size < minBytes) {
+    fileErrors.push(
+      `${rel}: only ${st.size} bytes (expected >= ${minBytes}). ` +
         `Tiny files are usually failed downloads / HTML error pages.`,
     );
   }
@@ -90,54 +66,102 @@ function validateWasmFile(filePath) {
   try {
     buf = readFileSync(filePath);
   } catch (e) {
-    errors.push(`${rel}: cannot read (${e instanceof Error ? e.message : e})`);
-    return;
+    fileErrors.push(`${rel}: cannot read (${e instanceof Error ? e.message : e})`);
+    return fileErrors;
+  }
+
+  if (st.size === 0) {
+    fileErrors.push(`${rel}: file is empty`);
+    return fileErrors;
   }
 
   if (looksLikeHtmlOrText(buf)) {
-    errors.push(
+    fileErrors.push(
       `${rel}: content looks like HTML/text (e.g. 404 page), not WebAssembly. ` +
         `Remove it or replace with a real \\0asm binary.`,
     );
-    return;
+    return fileErrors;
   }
 
   if (buf.length < 4 || !buf.subarray(0, 4).equals(WASM_MAGIC)) {
     const preview = buf
       .subarray(0, Math.min(16, buf.length))
       .toString('hex');
-    errors.push(
+    fileErrors.push(
       `${rel}: missing WebAssembly magic \\0asm ` +
         `(got hex ${preview || '(empty)'}).`,
     );
   }
+
+  return fileErrors;
 }
 
-for (const root of ROOTS) {
-  for (const file of walk(root)) {
-    validateWasmFile(file);
+function walk(dir, out = []) {
+  if (!existsSync(dir)) return out;
+  let entries;
+  try {
+    entries = readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return out;
+  }
+  for (const ent of entries) {
+    const full = join(dir, ent.name);
+    if (ent.isDirectory()) {
+      if (ent.name === 'node_modules' || ent.name === '.git') continue;
+      walk(full, out);
+    } else if (ent.isFile() && ent.name.endsWith('.wasm')) {
+      out.push(full);
+    }
+  }
+  return out;
+}
+
+function runCli() {
+  const roots = (process.env.WASM_SCAN_ROOTS || 'public,dist')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  const errors = [];
+  const checked = [];
+
+  for (const root of roots) {
+    for (const file of walk(root)) {
+      const rel = relative(process.cwd(), file) || file;
+      checked.push(rel);
+      errors.push(...validateWasmFile(file, { relPath: rel }));
+    }
+  }
+
+  if (errors.length > 0) {
+    console.error('verify-wasm-assets FAILED:');
+    for (const e of errors) console.error(`  - ${e}`);
+    console.error(
+      `\nHint: production JS worklet uses wasm2js (libopenmpt-audioworklet.js); ` +
+        `a sibling libopenmpt.wasm is not required. Do not commit HTML 404 bodies as .wasm.`,
+    );
+    process.exit(1);
+  }
+
+  if (checked.length === 0) {
+    console.log(
+      'verify-wasm-assets OK: no .wasm files under',
+      roots.join(', '),
+      '(wasm2js / unbuilt native engine is fine)',
+    );
+  } else {
+    console.log(
+      `verify-wasm-assets OK: ${checked.length} file(s) have valid \\0asm magic:`,
+    );
+    for (const f of checked) console.log(`  - ${f}`);
   }
 }
 
-if (errors.length > 0) {
-  console.error('verify-wasm-assets FAILED:');
-  for (const e of errors) console.error(`  - ${e}`);
-  console.error(
-    `\nHint: production JS worklet uses wasm2js (libopenmpt-audioworklet.js); ` +
-      `a sibling libopenmpt.wasm is not required. Do not commit HTML 404 bodies as .wasm.`,
-  );
-  process.exit(1);
-}
+const isMain =
+  process.argv[1] &&
+  (process.argv[1].endsWith('verify-wasm-assets.mjs') ||
+    process.argv[1].replace(/\\/g, '/').endsWith('/scripts/verify-wasm-assets.mjs'));
 
-if (checked.length === 0) {
-  console.log(
-    'verify-wasm-assets OK: no .wasm files under',
-    ROOTS.join(', '),
-    '(wasm2js / unbuilt native engine is fine)',
-  );
-} else {
-  console.log(
-    `verify-wasm-assets OK: ${checked.length} file(s) have valid \\0asm magic:`,
-  );
-  for (const f of checked) console.log(`  - ${f}`);
+if (isMain) {
+  runCli();
 }

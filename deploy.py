@@ -76,6 +76,13 @@ PRELOAD_RE = re.compile(
 )
 MIN_CSS_BYTES = 10_000
 
+NATIVE_WORKLET_FILES = (
+    "worklets/openmpt-native.js",
+    "worklets/openmpt-native.wasm",
+    "worklets/openmpt-native.aw.js",
+)
+WASM_MAGIC = b"\x00asm"
+
 
 def resolve_asset_href(href: str) -> str:
     """Map index.html href to a path relative to dist/.
@@ -222,6 +229,79 @@ def validate_stylesheet_assets(build_path: Path) -> None:
         sys.exit(1)
 
     print(f"  ✓ stylesheet OK ({', '.join(hrefs)})")
+
+
+def _native_engine_expected_from_env() -> bool:
+    """Match scripts/nativeArtifactContract.mjs — native glue required at deploy."""
+    return (
+        os.getenv("VITE_NATIVE_ENGINE", "").strip() == "1"
+        or os.getenv("VITE_NATIVE_PARITY_GATE", "").strip() == "1"
+    )
+
+
+def _bundle_claims_native_parity_gate(build_path: Path) -> bool:
+    """Detect Vite-baked VITE_NATIVE_PARITY_GATE=1 in dist/assets (for --no-build)."""
+    assets_dir = build_path / "assets"
+    if not assets_dir.is_dir():
+        return False
+    # Vite inlines env as import.meta.env.VITE_NATIVE_PARITY_GATE === "1"
+    pattern = re.compile(
+        r"VITE_NATIVE_PARITY_GATE.{0,40}?[\"']1[\"']",
+        re.DOTALL,
+    )
+    for js_file in assets_dir.glob("*.js"):
+        try:
+            text = js_file.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+        if pattern.search(text):
+            return True
+    return False
+
+
+def validate_native_worklets(build_path: Path) -> None:
+    """Refuse deploy when bundle claims native support but glue is missing."""
+    claims_native = _native_engine_expected_from_env() or _bundle_claims_native_parity_gate(
+        build_path
+    )
+    if not claims_native:
+        print(
+            "  ✓ native worklets not required "
+            "(set VITE_NATIVE_ENGINE=1 or VITE_NATIVE_PARITY_GATE=1 to require openmpt-native.*)"
+        )
+        return
+
+    errors: list[str] = []
+    for rel in NATIVE_WORKLET_FILES:
+        file_path = build_path / rel
+        if not file_path.is_file():
+            errors.append(f"missing native worklet artifact: {rel}")
+            continue
+        size = file_path.stat().st_size
+        if size == 0:
+            errors.append(f"{rel}: file is empty")
+
+    wasm_path = build_path / "worklets/openmpt-native.wasm"
+    if wasm_path.is_file() and wasm_path.stat().st_size > 0:
+        head = wasm_path.read_bytes()[:4]
+        if head != WASM_MAGIC:
+            preview = head.hex() if head else "(empty)"
+            errors.append(
+                f"worklets/openmpt-native.wasm: missing WebAssembly magic \\0asm (got {preview})"
+            )
+
+    if errors:
+        print("ERROR: Native engine deploy validation failed:")
+        for err in errors:
+            print(f"  - {err}")
+        print(
+            "\nBundle claims native support (env or baked parity gate) but openmpt-native.* "
+            "is missing or invalid.\n"
+            "Run:  npm run build:emcc && npm run build:xm-player:preview:verify"
+        )
+        sys.exit(1)
+
+    print("  ✓ native worklet artifacts OK (openmpt-native.js, .wasm, .aw.js)")
 
 
 def build_inventory(build_path: Path) -> dict[str, object]:
@@ -424,6 +504,8 @@ def main() -> None:
     validate_build_base_path(build_path)
     print("Validating stylesheet assets...")
     validate_stylesheet_assets(build_path)
+    print("Validating native worklet artifacts...")
+    validate_native_worklets(build_path)
 
     manifest = build_inventory(build_path)
     prune_info = manifest.get("pruneAssets", {})
