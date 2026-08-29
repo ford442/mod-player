@@ -37,16 +37,9 @@ The offline renderer uses 44.1 kHz stereo, windowed-sinc interpolation (length 8
 |--------|---------------------|----------|
 | JS AudioWorklet | Tap `stereoPanner` → `MediaStreamDestination` in main `AudioContext` | **Required for capture** |
 | ScriptProcessor fallback | Same main-context tap | Supported |
-| Native C++ worklet (default) | Same shared `AudioContext`; C++ node in the master graph | **Record clip works** (`?engine=native`) |
-| Native legacy dual-context | `?engine=native&nativeCtx=legacy` | **Recording blocked** — switch off legacy or use JS |
+| Native C++ worklet | Same shared `AudioContext`; C++ node in the master graph | **Record clip works** (`?engine=native`) |
 
-**Switch to JS (or drop `nativeCtx=legacy`) only if Record clip is disabled:**
-
-- URL: `?engine=js`
-- Or debug panel engine toggle (persists `localStorage.xasm1_audio_engine=js`)
-- Offline WAV export does **not** need this — it uses a worker, not MediaRecorder
-
-Cross-origin isolation (`crossOriginIsolated`) is required for SharedArrayBuffer / native engine but does not block `MediaRecorder` when using the JS worklet path.
+Cross-origin isolation (`crossOriginIsolated`) is required for SharedArrayBuffer / native engine but does not block `MediaRecorder` when using the shared main graph.
 
 ## API surface
 
@@ -55,7 +48,7 @@ Cross-origin isolation (`crossOriginIsolated`) is required for SharedArrayBuffer
 exportWav({ fileData, fileName, muteMask?, startSeconds?, endSeconds? })
 
 // hooks/usePerformanceCapture.ts
-start({ getRenderer, audioContext, audioTapNode, preferWebGL2, dualAudioContext })
+start({ getRenderer, audioContext, audioTapNode, preferWebGL2 })
 stop() / cancel()
 ```
 
@@ -72,5 +65,5 @@ stop() / cancel()
 1. Load `4-mat_madness.mod`, open Export panel, click **Download WAV** — file plays in an external player.
 2. Mute channel 1, export again — kick/snare balance should change vs full mix.
 3. Play module, click **Record clip**, wait ~5 s, **Stop** — WebM contains audio + visuals (WebGL2 renderer).
-4. `?engine=native` (default single context) — Record clip should work without switching to JS. `?nativeCtx=legacy` still shows the dual-context warning.
+4. `?engine=native` — Record clip should work (shared `AudioContext` with JS path).
 5. Offline WAV still works on either engine (worker path).

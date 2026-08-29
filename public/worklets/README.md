@@ -78,7 +78,7 @@ localStorage.setItem('xasm1_audio_engine', 'native')
 
 **projectM PCM chunks** are posted from both engines: JS `projectm-pcm` and native ring copy → `broadcastPcmBlock`.
 
-**Performance capture (MediaRecorder)** uses the shared main `AudioContext` on default native (`?engine=native`). Dual-context (`?nativeCtx=legacy`) still blocks Record clip. See `docs/EXPORT.md`.
+**Performance capture (MediaRecorder)** uses the shared main `AudioContext` for both JS and native engines (`?engine=native`). See `docs/EXPORT.md`.
 
 **Heap:** release native WASM is a **fixed 128mb** heap. Use `npm run build:emcc -- --grow` for huge ITs (`MAXIMUM_MEMORY=512mb`).
 

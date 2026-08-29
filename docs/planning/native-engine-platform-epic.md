@@ -40,7 +40,7 @@ The C++/Emscripten engine exists end-to-end:
 | Feature flag / auto-detect documented | **Done** — `?engine=` / localStorage / public-mode force-JS / parity gate | Keep README + AGENTS in sync |
 | A/V sync ≥ JS worklet (post-prediction) | Frame clock + anchor + **load/seek frame reset**; smoke hard-requires `native-worklet` + non-frozen playhead | Green `report-native.json` after AudioWorklet thread start (aligned stack + `aw.js` path rewrite + real `WebAssembly`). Fill measured lag in `accurate_playback.md` |
 | No filename collision with JS worklet | **Done** — `openmpt-native.*` only; build refuses clobber | Keep guards + scheduled integrity check |
-| Export / capture | Default native shares one `AudioContext`; MediaRecorder works | `?nativeCtx=legacy` still dual-context / blocked |
+| Export / capture | Default native shares one `AudioContext`; MediaRecorder works | Keep single-context path documented |
 
 ---
 
@@ -97,7 +97,7 @@ INIT (utils/audioEngineSelection.ts):
 - C++ writes `PositionInfo` (shared memory); TS polls ~16 ms and emits `position` as `WorkletPositionData` (ABI `currentOrder`/`currentRow` plus `order`/`row` aliases).
 - Adapter maps frame clock through `nativeClockAnchor` onto the **shared** AudioContext quantum-start domain (`audioTime` / `workletTime`), not poll-time `currentTime`.
 - PCM: ring copy at poll cadence → `broadcastPcmBlock` / `publishPcmBlock` (same shape as JS `projectm-pcm`).
-- Default graph: C++ AudioWorkletNode on the main context (no dual-context). `?nativeCtx=legacy` keeps the old auto-context + bridge.
+- Default graph: C++ AudioWorkletNode on the main shared `AudioContext` (no dual-context).
 
 Implication: two adapters in `useAudioGraph` (message handler vs `engine.on('position')`). Unification goal is a **single normalized sample type** + optional PCM tap adapter, not necessarily postMessage from C++.
 
