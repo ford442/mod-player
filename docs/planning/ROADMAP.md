@@ -2,7 +2,9 @@
 
 Living pointer to active work. **Do not** append agent run diaries here — use GitHub issues and PRs for status.
 
-**Last reconciled:** 2026-08-26. Foundation issues #401 / #402 / #404 are **closed** (code landed; leftovers filed as #411–#415). Weekly `native-wasm-scheduled.yml` is **green** as of 2026-08-24 (run 32696149357) including native playhead smoke — the 2026-08-21 “parity still fails” note was stale. `lint-and-build` is green on `main`. Only previously tracked open product issue was [#403](https://github.com/ford442/mod-player/issues/403).
+**Last reconciled:** 2026-08-28. Foundation issues #401 / #402 / #404 are **closed** (code landed; leftovers filed as #411–#415). Weekly `native-wasm-scheduled.yml` is **green** as of 2026-08-24 (run 32696149357) including native playhead smoke — the 2026-08-21 “parity still fails” note was stale. CI is green on `main` (run 33020427533, `d03f7c1`) and there are **no open PRs**. Open issues: #403 and #411–#417.
+
+**Verified gap behind #411 (2026-08-28):** the deploy path has no native-artifact awareness. `openmpt-native.js` / `.wasm` / `.aw.js` are gitignored under both `public/worklets/` and `dist/worklets/` (`.gitignore:59-64`), `scripts/verify-build.mjs` only asserts the self-hosted `libmpt/*` assets, and `deploy.py` contains no reference to `worklets`, `native`, or `wasm`. A `python3 deploy.py` run from a checkout that never ran `npm run build:emcc` therefore ships a bundle where `?engine=native` has no glue, silently. Close that before opening the parity gate on any deploy profile.
 
 **Build on foundation before new content.** Do not start #417 (performance instrument) or new shaders until P1 rows below have a decision/PR. #403 (tracker studio) can proceed in parallel with P1 except live-audition audio, which should wait for typed worklets (#413) if it adds a new AudioWorklet.
 
