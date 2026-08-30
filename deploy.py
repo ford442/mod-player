@@ -373,6 +373,13 @@ def run_build() -> None:
     )
     if result.returncode != 0:
         sys.exit(1)
+    result = subprocess.run(
+        ["npm", "run", "verify:bundle-budget"],
+        cwd=Path(__file__).resolve().parent,
+        check=False,
+    )
+    if result.returncode != 0:
+        sys.exit(1)
 
 
 def main() -> None:

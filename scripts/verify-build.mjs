@@ -106,6 +106,16 @@ if (existsSync(assetsDir)) {
   if (stale.length > 0) {
     errors.push(`stale .1iss assets in dist/assets: ${stale.join(', ')}`);
   }
+  // Raw .ts source should never land in dist/assets — it means a `new URL('*.ts',
+  // import.meta.url)` reference (e.g. a diagnostic-only worker URL builder) was
+  // treated as a static asset instead of being bundled/tree-shaken, and the browser
+  // will fetch unusable TypeScript source instead of a compiled worker chunk.
+  const strayTs = readdirSync(assetsDir).filter((f) => f.endsWith('.ts'));
+  if (strayTs.length > 0) {
+    errors.push(
+      `raw TypeScript source leaked into dist/assets (unbundled new URL() reference?): ${strayTs.join(', ')}`,
+    );
+  }
 }
 
 const scriptHrefs = [

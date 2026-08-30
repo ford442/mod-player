@@ -97,6 +97,16 @@ if (!existsSync(htaccessPath)) {
   }
 }
 
+// Warn (non-blocking) when index.html eagerly modulepreloads the three-r3f chunk —
+// that forces every visitor to download it on initial load, defeating the point of
+// splitting it out of the main entry for the lazy-loaded 3D view.
+if (threeChunks.length > 0 && new RegExp(`modulepreload[^>]*href=["'][^"']*${THREE_CHUNK_PREFIX}-`).test(html)) {
+  console.warn(
+    `verify-bundle-budget WARN: index.html modulepreloads ${THREE_CHUNK_PREFIX}-*.js eagerly — ` +
+      `the 3D view chunk is fetched on every page load even when App3DView never renders.`,
+  );
+}
+
 if (errors.length > 0) {
   console.error('verify-bundle-budget FAILED:');
   for (const e of errors) console.error(`  - ${e}`);
