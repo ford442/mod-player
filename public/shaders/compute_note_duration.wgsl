@@ -175,10 +175,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         let effVal = getEffVal(pb);
 
         // DURA-003: copy note from trigger row into sustain tail rows
-        let meta   = rowMeta[row];
-        let dur    = metaDuration(meta);
-        let offset = metaRowOffset(meta);
-        let noff   = metaNoteOff(meta);
+        let rowInfo = rowMeta[row];
+        let dur    = metaDuration(rowInfo);
+        let offset = metaRowOffset(rowInfo);
+        let noff   = metaNoteOff(rowInfo);
         if (note == 0u && dur > 1u && offset > 0u && noff == 0u) {
             let startRow = row - offset;
             if (startRow < numRows) {

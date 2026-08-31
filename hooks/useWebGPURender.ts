@@ -38,6 +38,7 @@ export function useWebGPURender(
   enabled = true,
 ) {
   const [gpuReady, setGpuReady] = useState(false);
+  const [vizOffline, setVizOffline] = useState(false);
   const [deviceAcquired, setDeviceAcquired] = useState(false);
   const [deviceEpoch, setDeviceEpoch] = useState(0);
   const [deviceStatus, setDeviceStatus] = useState<WebGPUDeviceStatus>('initializing');
@@ -69,6 +70,7 @@ export function useWebGPURender(
 
     if (!enabled) {
       setGpuReady(false);
+      setVizOffline(false);
       setDeviceAcquired(false);
       setDeviceStatus('unsupported');
       return;
@@ -165,6 +167,7 @@ export function useWebGPURender(
 
     let cancelled = false;
     setGpuReady(false);
+    setVizOffline(false);
     layoutTypeRef.current = getLayoutType(shaderFile);
 
     const initShader = async () => {
@@ -175,6 +178,7 @@ export function useWebGPURender(
         contextRef.current = renderer.context;
         if (!renderer.isShaderReady()) {
           setGpuReady(false);
+          setVizOffline(true);
           setDebugInfo((prev) => ({
             ...prev,
             errors: [
@@ -184,12 +188,14 @@ export function useWebGPURender(
           }));
           return;
         }
+        setVizOffline(false);
         setGpuReady(true);
       } catch (error) {
         if (cancelled) return;
         const reason = error instanceof Error ? error.message : String(error);
         console.error('[Renderer] WebGPU shader init failed:', reason);
         setGpuReady(false);
+        setVizOffline(true);
         setDebugInfo((prev) => ({
           ...prev,
           errors: [
@@ -233,5 +239,5 @@ export function useWebGPURender(
     contextRef.current = renderer.context;
   }, [shaderFile]); // reads renderParamsRef; shaderFile is stable per init cycle
 
-  return { gpuReady, render, deviceRef, deviceStatus, contextRef };
+  return { gpuReady, vizOffline, render, deviceRef, deviceStatus, contextRef };
 }

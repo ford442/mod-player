@@ -332,6 +332,10 @@ describe('compute_note_duration dispatch', () => {
     expect(noteDurationWorkgroupCount(0)).toBe(1);
   });
 
+  it('does not use reserved WGSL identifier `meta`', () => {
+    expect(DURATION_SRC).not.toMatch(/\blet meta\b/);
+  });
+
   it('packs row scratch without truncating the DURA-003 lookback offset', () => {
     // rowOffset must survive up to MAX_ROWS-1 (1023) — 10 bits, not 8.
     const maxRows = wgslConst(DURATION_SRC, 'MAX_ROWS');

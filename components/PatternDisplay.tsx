@@ -287,7 +287,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
 
   const oscTextureRef = useRef<GPUTexture | null>(null);
 
-  const { gpuReady, render: renderWebGPU, deviceRef: gpuDevRef, deviceStatus, contextRef: gpuHookContextRef } = useWebGPURender(
+  const { gpuReady, vizOffline, render: renderWebGPU, deviceRef: gpuDevRef, deviceStatus, contextRef: gpuHookContextRef } = useWebGPURender(
     canvasRef, glCanvasRef, shaderFile,
     syncCanvasSize, renderParamsRef, matrix, padTopChannel, setDebugInfo, setWebgpuAvailable,
     bloomRef,
@@ -462,6 +462,17 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
             className="absolute inset-0 pointer-events-none"
             style={{ display: isOverlayActive ? 'block' : 'none', zIndex: 2, width: '100%', height: '100%' }}
           />
+        </div>
+      )}
+
+      {useWebGPU && vizOffline && webgpuAvailable && deviceStatus !== 'lost' && (
+        <div
+          className="absolute inset-0 z-10 flex items-center justify-center bg-black/75 text-amber-300 text-sm font-mono p-4 pointer-events-none"
+          role="status"
+          aria-live="polite"
+          data-viz-offline="true"
+        >
+          viz offline
         </div>
       )}
 

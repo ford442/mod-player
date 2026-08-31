@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { fetchRemoteSongs, isTrackerLibrarySong } from '../utils/storageApi';
+import { fetchRemoteSongs, fetchShaders, isTrackerLibrarySong } from '../utils/storageApi';
 import { inferFileNameFromUrl } from '../utils/remoteMedia';
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -131,5 +131,30 @@ describe('fetchRemoteSongs', () => {
 
     const songs = await fetchRemoteSongs();
     expect(songs.map((s) => s.fileName)).toEqual(['tune.it']);
+  });
+
+  it('returns the bundled local catalog when list payloads are invalid', async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({ oops: true }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const songs = await fetchRemoteSongs();
+    expect(songs.length).toBeGreaterThan(0);
+    expect(songs.some((s) => s.fileName === '4-mat_madness.mod')).toBe(true);
+    expect(songs.every((s) => s.downloadUrl.length > 0)).toBe(true);
+  });
+});
+
+describe('fetchShaders', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it('returns the local picker catalog when /api/shaders is invalid', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ not: 'shaders' })));
+    const shaders = await fetchShaders();
+    expect(shaders.length).toBeGreaterThan(0);
+    expect(shaders.some((s) => s.id.endsWith('.wgsl'))).toBe(true);
+    expect(shaders.every((s) => s.averageRating === null)).toBe(true);
   });
 });

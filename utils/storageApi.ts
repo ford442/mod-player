@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { detectRuntimeBase } from '../src/lib/paths';
+import { getLocalCatalogSongs, getLocalShaderCatalog } from './localCatalog';
 
 /** Production library API (storage_manager on Contabo). Dev uses Vite proxy when unset. */
 const PRODUCTION_STORAGE_API = 'https://storage.noahcohn.com';
@@ -233,20 +234,21 @@ export async function fetchRemoteSongs(): Promise<RemoteSong[]> {
     if (payload === null) continue;
     const songs = parseRemoteSongList(payload, path);
     if (songs === null) continue;
-    return songs.filter(isTrackerLibrarySong);
+    const tracker = songs.filter(isTrackerLibrarySong);
+    if (tracker.length > 0) return tracker;
   }
-  return [];
+  return getLocalCatalogSongs();
 }
 
 export async function fetchShaders(): Promise<ShaderMeta[]> {
   const url = toApiUrl('/api/shaders');
   const payload = await fetchJsonGraceful(url, '/api/shaders');
-  if (payload === null) return [];
+  if (payload === null) return getLocalShaderCatalog();
 
   const parsed = ShaderListSchema.safeParse(payload);
   if (!parsed.success) {
     console.warn('[storageApi] invalid /api/shaders response — degraded mode active.');
-    return [];
+    return getLocalShaderCatalog();
   }
   const shaders = Array.isArray(parsed.data)
     ? parsed.data
@@ -255,7 +257,8 @@ export async function fetchShaders(): Promise<ShaderMeta[]> {
       : 'items' in parsed.data
         ? parsed.data.items
         : parsed.data.results;
-  return shaders.map(normalizeShader);
+  const normalized = shaders.map(normalizeShader);
+  return normalized.length > 0 ? normalized : getLocalShaderCatalog();
 }
 
 export async function rateShader(id: string, score: number): Promise<ShaderMeta | null> {

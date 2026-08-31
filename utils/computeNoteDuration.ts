@@ -3,6 +3,7 @@
 
 import type { PatternMatrix } from '../types';
 import { withBase } from '../src/lib/paths';
+import { assertShaderModuleCompiled } from './gpuShaderCompile';
 
 const MAX_SHADER_ROWS = 1024; // Must match MAX_ROWS in compute_note_duration.wgsl
 
@@ -61,9 +62,7 @@ export async function initNoteDurationCompute(device: GPUDevice): Promise<NoteDu
   const shaderCode = await shaderResponse.text();
 
   const module = device.createShaderModule({ code: shaderCode });
-  if ('getCompilationInfo' in module) {
-    module.getCompilationInfo().catch(() => {});
-  }
+  await assertShaderModuleCompiled(module, 'compute_note_duration.wgsl');
 
   const bindGroupLayout = device.createBindGroupLayout({
     entries: [
@@ -118,6 +117,10 @@ export function runNoteDurationCompute(
   numChannels: number,
   padTopChannel: boolean
 ): GPUBuffer {
+  if (!state.pipeline) {
+    throw new Error('Note duration compute pipeline is not available');
+  }
+
   const totalCells = numRows * numChannels;
   const outputByteLength = Math.max(16, totalCells * 2 * 4);
 

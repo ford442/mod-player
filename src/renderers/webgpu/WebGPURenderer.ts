@@ -38,6 +38,7 @@ import {
 import { markWebGPUSessionFailed } from '../../../utils/webgpuProbe';
 import { AUDIO_REACTIVE_UNIFORM_BYTES, OSC_SAMPLE_COUNT } from '../../../utils/audioReactive';
 import { fetchShaderSource } from './shaderSource';
+import { assertShaderModuleCompiled } from '../../../utils/gpuShaderCompile';
 import {
   createMainBindGroupLayout,
   refreshMainBindGroup,
@@ -473,8 +474,14 @@ export class WebGPURenderer {
 
     const shaderSource = await fetchShaderSource(activeShaderFile);
     if (isCancelled() || pool.isDisposed) return;
-    const module = device.createShaderModule({ code: shaderSource });
-    if ('getCompilationInfo' in module) module.getCompilationInfo().catch(() => {});
+    const module = device.createShaderModule({ code: shaderSource, label: activeShaderFile });
+    try {
+      await assertShaderModuleCompiled(module, activeShaderFile);
+    } catch (e) {
+      this.pipeline = null;
+      throw e;
+    }
+    if (isCancelled() || pool.isDisposed) return;
 
     const layoutType = getLayoutType(activeShaderFile);
     this.layoutType = layoutType;
@@ -498,12 +505,17 @@ export class WebGPURenderer {
         primitive: { topology: 'triangle-list' },
       });
     } catch {
-      this.pipeline = device.createRenderPipeline({
-        layout: device.createPipelineLayout({ bindGroupLayouts: [bindGroupLayout] }),
-        vertex: { module, entryPoint: 'vertex_main' },
-        fragment: { module, entryPoint: 'fragment_main', targets },
-        primitive: { topology: 'triangle-list' },
-      });
+      try {
+        this.pipeline = device.createRenderPipeline({
+          layout: device.createPipelineLayout({ bindGroupLayouts: [bindGroupLayout] }),
+          vertex: { module, entryPoint: 'vertex_main' },
+          fragment: { module, entryPoint: 'fragment_main', targets },
+          primitive: { topology: 'triangle-list' },
+        });
+      } catch (e) {
+        this.pipeline = null;
+        throw e;
+      }
     }
 
     const uniformSize = layoutType === 'extended' ? 144 : (layoutType === 'texture' ? 64 : 32);
@@ -556,7 +568,12 @@ export class WebGPURenderer {
         const backgroundShaderFile = getBackgroundShaderFile(activeShaderFile);
         const backgroundSource = await fetchShaderSource(backgroundShaderFile);
         if (isCancelled() || pool.isDisposed) return;
-        const bezelModule = device.createShaderModule({ code: backgroundSource });
+        const bezelModule = device.createShaderModule({
+          code: backgroundSource,
+          label: backgroundShaderFile,
+        });
+        await assertShaderModuleCompiled(bezelModule, backgroundShaderFile);
+        if (isCancelled() || pool.isDisposed) return;
         const audioBezel = usesAudioReactiveBezel(activeShaderFile);
         const bezelBindEntries: GPUBindGroupLayoutEntry[] = [
           { binding: 0, visibility: GPUShaderStage.FRAGMENT, buffer: { type: 'uniform' } },
