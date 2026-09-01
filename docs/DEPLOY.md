@@ -72,6 +72,8 @@ If `/xm-player/` returns UTF-16 HTML or references an old `index-D7iykI5o.js` wh
 
 **Fix:** redeploy with prune (`python deploy.py`), ensure `dist/.htaccess` includes `DirectoryIndex index.html`, and delete any stale UTF-16 `index.html` on the VPS if it persists.
 
+`deploy.py` always packs HTML (never size-skips it) and appends `<!-- xasm-deploy:<sha> -->` so the VPS size-skip cannot leave a same-length stale `index.html` in place.
+
 ## COOP / COEP headers
 
 Production must match dev (`public/.htaccess` copied into `dist/`):

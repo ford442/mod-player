@@ -23,6 +23,7 @@ Requirements:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import io
 import json
 import os
@@ -278,6 +279,18 @@ def build_zip(build_path: Path, skip_sizes=None) -> bytes:
                 continue
             rel_s = str(rel).replace("\\", "/")
             local_size = file.stat().st_size
+            # Size is not a content hash. Vite index.html often keeps the same
+            # byte length while hashed JS/CSS filenames inside change. The
+            # Contabo extract path also skips equal-sized files, so HTML must
+            # both always be packed and have a distinct payload size.
+            is_html = rel.suffix.lower() in {".html", ".htm"}
+            if is_html:
+                raw = file.read_bytes()
+                digest = hashlib.sha256(raw).hexdigest()[:16]
+                stamped = raw.rstrip() + f"\n<!-- xasm-deploy:{digest} -->\n".encode("utf-8")
+                zf.writestr(rel_s, stamped)
+                print(f"  + {rel} (stamped {len(stamped)} bytes, sha {digest})")
+                continue
             if (skip_sizes or {}).get(rel_s) == local_size:
                 print(f"  = {rel} ({local_size} bytes, unchanged)")
                 continue
