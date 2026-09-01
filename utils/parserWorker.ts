@@ -1,20 +1,19 @@
 import type { WorkerParseMessage, WorkerParseResult, WorkerParseResponse, WorkerParseError } from '../types';
 import { parserLog } from './parserDebug';
 import { createParserPromise } from './parserPromise';
+import parserWorkerUrl from '../workers/openmpt-parser.worker.ts?worker&url';
 
 export const PARSER_WORKER_TIMEOUT_MS = 15_000;
 export const PARSER_SLOW_HINT_MS = 5_000;
 
-/** Resolved worker script URL (hashed chunk in production). */
+/** Resolved worker script URL (hashed JS chunk in production). */
 export function getParserWorkerUrl(): string {
-  return new URL('../workers/openmpt-parser.worker.ts', import.meta.url).href;
+  return parserWorkerUrl;
 }
 
 /**
- * HEAD-check parser worker availability.
- * Note: this is diagnostic-only. In production Vite hashes worker chunks, so the
- * source `.ts` URL used here may 404 even though the emitted worker chunk is valid.
- * The real availability test is attempting `new Worker(...)` and handling errors.
+ * HEAD-check parser worker availability (same hashed URL used by `new Worker`).
+ * Diagnostic only — parse still attempts the worker even if HEAD fails.
  */
 export async function verifyParserWorkerUrl(): Promise<boolean> {
   const url = getParserWorkerUrl();
@@ -30,10 +29,7 @@ export async function verifyParserWorkerUrl(): Promise<boolean> {
 }
 
 export function createParserWorker(onFatalError?: (message: string) => void): Worker {
-  const worker = new Worker(
-    new URL('../workers/openmpt-parser.worker.ts', import.meta.url),
-    { type: 'module' },
-  );
+  const worker = new Worker(parserWorkerUrl, { type: 'module' });
   worker.addEventListener('error', (event) => {
     const message =
       typeof event === 'string'

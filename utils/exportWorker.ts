@@ -4,18 +4,16 @@ import type {
   ExportWorkerRequest,
   ExportWorkerResult,
 } from '../workers/openmpt-export.worker';
+import exportWorkerUrl from '../workers/openmpt-export.worker.ts?worker&url';
 
 export const EXPORT_WORKER_TIMEOUT_MS = 10 * 60_000;
 
 export function getExportWorkerUrl(): string {
-  return new URL('../workers/openmpt-export.worker.ts', import.meta.url).href;
+  return exportWorkerUrl;
 }
 
 export function createExportWorker(onFatalError?: (message: string) => void): Worker {
-  const worker = new Worker(
-    new URL('../workers/openmpt-export.worker.ts', import.meta.url),
-    { type: 'module' },
-  );
+  const worker = new Worker(exportWorkerUrl, { type: 'module' });
   worker.addEventListener('error', (event) => {
     const message =
       typeof event === 'string'
