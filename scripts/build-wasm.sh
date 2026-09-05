@@ -25,7 +25,16 @@
 #   ./scripts/build-wasm.sh --safe-heap  # + SAFE_HEAP (slow; debug memory)
 #   ./scripts/build-wasm.sh --grow       # ALLOW_MEMORY_GROWTH=1 MAXIMUM_MEMORY=512mb (huge ITs)
 #
-# Release opts (Phases 2–3): thin LTO, -msimd128, section GC, emmalloc, fixed heap.
+# Heap contract (release, ALLOW_MEMORY_GROWTH=0):
+#   INITIAL_MEMORY=128mb is a HARD CAP shared by BOTH C++ OpenMPTModule instances
+#   (g_module on the AudioWorklet thread + g_metaModule on the main thread), the
+#   8192-frame stereo ring, the 128 KiB worklet stack, and pattern metadata.
+#   --grow (MAXIMUM_MEMORY=512mb) is the escape hatch for huge ITs. Do not raise
+#   the default 128mb cap here.
+#
+# Release opts (Phases 2–3): thin LTO, -msimd128, section GC, emmalloc, fixed heap,
+# wrapper -fno-exceptions/-fno-rtti, STACK_SIZE=128KiB (main thread; matches worklet stack).
+# libopenmpt.a keeps exceptions (C API try/catch in libopenmpt_c.cpp).
 # After changing release flags, delete vendor/.../bin/libopenmpt.a to force rebuild.
 #   npm run build:emcc                   # preferred package.json entry
 #   npm run build:worklet                # deprecated alias → this script
@@ -102,16 +111,29 @@ for arg in "$@"; do
 done
 
 # ── Compile / link flags ─────────────────────────────────────────────
-# Phase 2: SIMD, thin LTO, WASM feature flags, section GC, emmalloc, no exceptions.
+# Phase 2: SIMD, thin LTO, WASM feature flags, section GC, emmalloc.
+# Wrapper: -fno-exceptions -fno-rtti. libopenmpt.a keeps C++ exceptions (C API).
 # Phase 3: fixed heap (ALLOW_MEMORY_GROWTH=0) to avoid growth pauses during audio.
 COMPILE_FLAGS=()
 LINK_FLAGS=()
 EMSCRIPTEN_FLAGS=()
 
+# Main-thread C stack (g_metaModule.parse). Worklet thread stack is a separate
+# memalign(16, 128*1024) buffer in worklet_processor.cpp — not this flag.
+STACK_SIZE_FLAG=-sSTACK_SIZE=131072
+
 if [[ "$DEBUG_MODE" -eq 1 ]]; then
     # ASSERTIONS=2: expensive runtime checks — CI/debug builds only
-    COMPILE_FLAGS=(-O0 -g -DDEBUG)
-    EMSCRIPTEN_FLAGS=(-sASSERTIONS=2 -sALLOW_MEMORY_GROWTH=1 -sINITIAL_MEMORY=128mb -sMAXIMUM_MEMORY=256mb)
+    COMPILE_FLAGS=(-O0 -g -DDEBUG -fno-exceptions -fno-rtti)
+    EMSCRIPTEN_FLAGS=(
+        -sASSERTIONS=2
+        -sALLOW_MEMORY_GROWTH=1
+        -sINITIAL_MEMORY=128mb
+        -sMAXIMUM_MEMORY=256mb
+        "$STACK_SIZE_FLAG"
+        # Catching stays enabled: libopenmpt.a (libopenmpt_c.cpp) requires try/catch.
+        # Wrapper objects are still compiled with -fno-exceptions.
+    )
     echo "🔧 Building in DEBUG mode (ASSERTIONS=2)"
 else
     COMPILE_FLAGS=(
@@ -121,6 +143,8 @@ else
         -mbulk-memory -matomics -mnontrapping-fptoint -msign-ext
         -mtune=wasm32
         -ffunction-sections -fdata-sections
+        -fno-exceptions
+        -fno-rtti
     )
     LINK_FLAGS=(-Wl,--gc-sections)
     EMSCRIPTEN_FLAGS=(
@@ -128,6 +152,9 @@ else
         -sMALLOC=emmalloc
         -sALLOW_MEMORY_GROWTH=0
         -sINITIAL_MEMORY=128mb
+        "$STACK_SIZE_FLAG"
+        # Catching stays enabled: libopenmpt.a (libopenmpt_c.cpp) requires try/catch.
+        # Wrapper objects are still compiled with -fno-exceptions.
     )
     echo "🔧 Building in RELEASE mode (SIMD + LTO + emmalloc + fixed 128mb heap)"
 fi
@@ -141,6 +168,8 @@ if [[ "$GROW_HEAP" -eq 1 ]]; then
 fi
 
 # libopenmpt static lib must be built with matching release opts (LTO + SIMD + atomics for WASM_WORKERS).
+# Do NOT add -fno-exceptions here: libopenmpt_c.cpp uses try/catch as the C API error boundary
+# and will not compile. Wrapper/worklet still use -fno-exceptions (C API only, no throw).
 LIBOPENMPT_RELEASE_CXXFLAGS='-O3 -DNDEBUG -msimd128 -flto=thin -mbulk-memory -matomics'
 LIBOPENMPT_RELEASE_CFLAGS='-O3 -DNDEBUG -msimd128 -flto=thin -mbulk-memory -matomics'
 
@@ -384,6 +413,9 @@ EXPORTED_FUNCTIONS=$(cat <<'EOF'
   '_seek_order_row',
   '_set_loop',
   '_set_volume',
+  '_set_channel_mute',
+  '_set_render_param',
+  '_ctl_set_text',
   '_poll_position',
   '_get_audio_context',
   '_get_worklet_node',

@@ -18,6 +18,9 @@ import {
   postPlay,
   postSeek,
   postSetProjectmPcm,
+  postSetChannelMute,
+  postSetRenderParam,
+  postCtlSetText,
 } from '../audio-worklet/protocol';
 import { AUDIO_SAB_BYTES } from '../utils/audioReactive';
 
@@ -140,6 +143,9 @@ describe('parseMainToWorkletMessage', () => {
     expect(parseMainToWorkletMessage(postSeek(2, 16, 1.5)).ok).toBe(true);
     expect(parseMainToWorkletMessage(postSetProjectmPcm(true)).ok).toBe(true);
     expect(parseMainToWorkletMessage(postSetProjectmPcm(false)).ok).toBe(true);
+    expect(parseMainToWorkletMessage(postSetChannelMute(0, true)).ok).toBe(true);
+    expect(parseMainToWorkletMessage(postSetRenderParam(3, 8)).ok).toBe(true);
+    expect(parseMainToWorkletMessage(postCtlSetText('play.at_end', 'continue')).ok).toBe(true);
   });
 
   it('rejects malformed setProjectmPcm', () => {
@@ -152,6 +158,8 @@ describe('parseMainToWorkletMessage', () => {
   it('rejects malformed load payloads', () => {
     expect(parseMainToWorkletMessage({ type: MAIN_TO_WORKLET.load }).ok).toBe(false);
     expect(parseMainToWorkletMessage({ type: MAIN_TO_WORKLET.seek, order: -1, row: 0 }).ok).toBe(false);
+    expect(parseMainToWorkletMessage({ type: MAIN_TO_WORKLET.setChannelMute, channel: 0 }).ok).toBe(false);
+    expect(parseMainToWorkletMessage({ type: MAIN_TO_WORKLET.ctlSetText, key: 'x' }).ok).toBe(false);
   });
 
   it('covers every declared message type string', () => {

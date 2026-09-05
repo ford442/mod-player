@@ -221,6 +221,24 @@ const setAudioDiagMessageSchema = z.object({
   enabled: z.boolean(),
 });
 
+const setChannelMuteMessageSchema = z.object({
+  type: z.literal(MAIN_TO_WORKLET.setChannelMute),
+  channel: nonNegInt,
+  muted: z.boolean(),
+});
+
+const setRenderParamMessageSchema = z.object({
+  type: z.literal(MAIN_TO_WORKLET.setRenderParam),
+  param: finiteNumber,
+  value: finiteNumber,
+});
+
+const ctlSetTextMessageSchema = z.object({
+  type: z.literal(MAIN_TO_WORKLET.ctlSetText),
+  key: z.string(),
+  value: z.string(),
+});
+
 /** Legacy no-type load shim used by some callers. */
 const legacyLoadMessageSchema = z.object({
   type: z.undefined().optional(),
@@ -237,6 +255,9 @@ export const mainToWorkletMessageSchema = z.discriminatedUnion('type', [
   setAudioLiteMessageSchema,
   setProjectmPcmMessageSchema,
   setAudioDiagMessageSchema,
+  setChannelMuteMessageSchema,
+  setRenderParamMessageSchema,
+  ctlSetTextMessageSchema,
 ]);
 
 export type MainToWorkletMessage = z.infer<typeof mainToWorkletMessageSchema>;
@@ -308,6 +329,18 @@ export function postSetProjectmPcm(enabled: boolean): MainToWorkletMessage {
 /** Enable/disable per-quantum process() timing diagnostics (?audioDiag=1). */
 export function postSetAudioDiag(enabled: boolean): MainToWorkletMessage {
   return { type: MAIN_TO_WORKLET.setAudioDiag, enabled };
+}
+
+export function postSetChannelMute(channel: number, muted: boolean): MainToWorkletMessage {
+  return { type: MAIN_TO_WORKLET.setChannelMute, channel, muted };
+}
+
+export function postSetRenderParam(param: number, value: number): MainToWorkletMessage {
+  return { type: MAIN_TO_WORKLET.setRenderParam, param, value };
+}
+
+export function postCtlSetText(key: string, value: string): MainToWorkletMessage {
+  return { type: MAIN_TO_WORKLET.ctlSetText, key, value };
 }
 
 /** Runtime check for oscBuffer handler (replaces unchecked `as SharedArrayBuffer`). */

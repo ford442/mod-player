@@ -135,6 +135,9 @@ export interface EmscriptenOpenMPTModule {
     _seek_order_row: (order: number, row: number) => void;
     _set_loop: (loop: number) => void;
     _set_volume: (vol: number) => void;
+    _set_channel_mute: (channel: number, muted: number) => void;
+    _set_render_param: (param: number, value: number) => void;
+    _ctl_set_text: (keyPtr: number, valuePtr: number) => void;
     _poll_position: () => number; // Returns pointer to PositionInfo or 0
     _get_audio_context: () => number;
     _get_worklet_node: () => number;

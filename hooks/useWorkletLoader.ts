@@ -53,7 +53,8 @@ export const getWorkletUrl = (): string => {
   //      non-report quanta; audio-reactive SAB only at ~60 Hz; reuse VU array
   // v11: audioDiag uses Date.now() (performance.now is frozen per quantum in worklet)
   // v12: auto audio-lite for >16ch modules; playhead quantum compensation on main thread
-  const WORKLET_VERSION = '12';
+  // v13: setChannelMute / setRenderParam / ctlSetText protocol stubs (#412)
+  const WORKLET_VERSION = '13';
   const url = `${base}worklets/openmpt-worklet.js?v=${WORKLET_VERSION}`;
 
   return url;

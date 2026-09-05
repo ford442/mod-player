@@ -17,6 +17,9 @@ export const MAIN_TO_WORKLET = {
   setAudioLite: 'setAudioLite',
   setProjectmPcm: 'setProjectmPcm',
   setAudioDiag: 'setAudioDiag',
+  setChannelMute: 'setChannelMute',
+  setRenderParam: 'setRenderParam',
+  ctlSetText: 'ctlSetText',
 } as const;
 
 /** AudioWorklet processor → main thread */

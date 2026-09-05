@@ -19,6 +19,9 @@
     setAudioLite: 'setAudioLite',
     setProjectmPcm: 'setProjectmPcm',
     setAudioDiag: 'setAudioDiag',
+    setChannelMute: 'setChannelMute',
+    setRenderParam: 'setRenderParam',
+    ctlSetText: 'ctlSetText',
   });
 
   var WORKLET_TO_MAIN = Object.freeze({
@@ -96,6 +99,27 @@
     if (type === MAIN_TO_WORKLET.setProjectmPcm || type === MAIN_TO_WORKLET.setAudioDiag) {
       if (typeof data.enabled !== 'boolean') {
         return { ok: false, error: String(type) + ' requires enabled boolean' };
+      }
+      return { ok: true, message: data };
+    }
+
+    if (type === MAIN_TO_WORKLET.setChannelMute) {
+      if (!isNonNegInt(data.channel) || typeof data.muted !== 'boolean') {
+        return { ok: false, error: 'setChannelMute requires channel/muted' };
+      }
+      return { ok: true, message: data };
+    }
+
+    if (type === MAIN_TO_WORKLET.setRenderParam) {
+      if (!isFiniteNumber(data.param) || !isFiniteNumber(data.value)) {
+        return { ok: false, error: 'setRenderParam requires param/value' };
+      }
+      return { ok: true, message: data };
+    }
+
+    if (type === MAIN_TO_WORKLET.ctlSetText) {
+      if (typeof data.key !== 'string' || typeof data.value !== 'string') {
+        return { ok: false, error: 'ctlSetText requires key/value strings' };
       }
       return { ok: true, message: data };
     }

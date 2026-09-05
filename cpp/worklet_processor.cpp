@@ -16,6 +16,7 @@
 #include <emscripten/emscripten.h>
 #include <emscripten/webaudio.h>
 #include <emscripten/atomic.h>
+#include <emscripten/heap.h>
 
 #include <cstring>
 #include <cstdio>
@@ -24,6 +25,8 @@
 #include <atomic>
 
 #include "openmpt_wrapper.h"
+
+#include <cstdint>
 
 // ── Shared state ────────────────────────────────────────────────────
 //
@@ -46,6 +49,17 @@ static std::atomic<int> g_cmdSeekOrder{-1};
 static std::atomic<int> g_cmdSeekRow{-1};
 static std::atomic<int> g_cmdSetLoop{-1}; // -1=no change, 0=off, 1=on
 static std::atomic<float> g_cmdVolume{-1.0f}; // <0 = no change
+static std::atomic<int> g_cmdRenderParam{-1}; // -1 = no change
+static std::atomic<int32_t> g_cmdRenderValue{0};
+static std::atomic<int> g_cmdCtl{0}; // 1 = key/value buffers ready
+static char g_ctlKey[128];
+static char g_ctlVal[256];
+// Per-channel mute bits (32 = MAX_VU_CHANNELS). Main writes; audio thread applies.
+static std::atomic<uint32_t> g_muteBits{0};
+static uint32_t g_appliedMuteBits = 0;
+static int g_interpLength = 8;
+static int g_lastExtraRenderParam = -1;
+static int32_t g_lastExtraRenderValue = 0;
 // Render pause: silence output without AudioContext.suspend() (shared-context safe).
 static std::atomic<int> g_paused{0};
 static int g_ringOverrunLogged = 0;
@@ -99,6 +113,47 @@ static uint8_t* ensureWorkletStack() {
     return g_workletStack;
 }
 
+static void apply_persisted_controls(OpenMPTModule& m) {
+    m.setRenderParam(OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH, g_interpLength);
+    if (g_lastExtraRenderParam >= 0
+        && g_lastExtraRenderParam != OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH) {
+        m.setRenderParam(g_lastExtraRenderParam, g_lastExtraRenderValue);
+    }
+    if (g_ctlKey[0] != '\0') {
+        m.ctlSetText(g_ctlKey, g_ctlVal);
+    }
+    const uint32_t bits = g_muteBits.load(std::memory_order_acquire);
+    for (int i = 0; i < MAX_VU_CHANNELS; ++i) {
+        if ((bits >> i) & 1u) {
+            m.setChannelMute(i, true);
+        }
+    }
+}
+
+static void apply_mute_bits(OpenMPTModule& m, uint32_t bits, uint32_t previous) {
+    if (bits == previous) return;
+    for (int i = 0; i < MAX_VU_CHANNELS; ++i) {
+        const bool now = ((bits >> i) & 1u) != 0;
+        const bool was = ((previous >> i) & 1u) != 0;
+        if (now != was) {
+            m.setChannelMute(i, now);
+        }
+    }
+}
+
+static void log_heap_exhausted(int requested) {
+    const size_t heap = emscripten_get_heap_size();
+    const struct mallinfo mi = mallinfo();
+    std::fprintf(stderr,
+        "[C++] load_module: malloc(%d) failed (heap exhausted) "
+        "heap_size=%zu arena=%lu uordblks=%lu fordblks=%lu "
+        "(128MiB cap includes g_module + g_metaModule)\n",
+        requested, heap,
+        static_cast<unsigned long>(mi.arena),
+        static_cast<unsigned long>(mi.uordblks),
+        static_cast<unsigned long>(mi.fordblks));
+}
+
 // ── AudioWorklet process callback (runs on worklet thread) ──────────
 
 EM_BOOL audio_process_cb(
@@ -123,6 +178,8 @@ EM_BOOL audio_process_cb(
                 g_audioFramesRendered = 0.0;
                 g_lastReportedRow = -1;
                 g_lastReportTimeS = 0.0;
+                apply_persisted_controls(g_module);
+                g_appliedMuteBits = g_muteBits.load(std::memory_order_acquire);
             } else {
                 std::fprintf(stderr, "[worklet] Failed to load module\n");
             }
@@ -155,6 +212,33 @@ EM_BOOL audio_process_cb(
         if (vol >= 0.0f) {
             g_module.setVolume(vol);
         }
+    }
+
+    // Render param (interpolation length, stereo sep, …)
+    {
+        int param = g_cmdRenderParam.exchange(-1, std::memory_order_acq_rel);
+        if (param >= 0) {
+            const int32_t value = g_cmdRenderValue.load(std::memory_order_acquire);
+            g_module.setRenderParam(param, value);
+        }
+    }
+
+    // ctl_set_text
+    if (g_cmdCtl.exchange(0, std::memory_order_acq_rel) == 1) {
+        char key[sizeof(g_ctlKey)];
+        char val[sizeof(g_ctlVal)];
+        std::memcpy(key, g_ctlKey, sizeof(key));
+        std::memcpy(val, g_ctlVal, sizeof(val));
+        key[sizeof(key) - 1] = '\0';
+        val[sizeof(val) - 1] = '\0';
+        g_module.ctlSetText(key, val);
+    }
+
+    // Channel mute bitmask
+    {
+        const uint32_t bits = g_muteBits.load(std::memory_order_acquire);
+        apply_mute_bits(g_module, bits, g_appliedMuteBits);
+        g_appliedMuteBits = bits;
     }
 
     // ── Render audio ──
@@ -439,7 +523,7 @@ int load_module(const uint8_t* data, int length) {
     // Copy data for the worklet thread to consume
     g_moduleData = (uint8_t*)malloc(length);
     if (!g_moduleData) {
-        std::fprintf(stderr, "[C++] load_module: malloc(%d) failed (heap exhausted)\n", length);
+        log_heap_exhausted(length);
         return 0;
     }
     std::memcpy(g_moduleData, data, length);
@@ -447,6 +531,8 @@ int load_module(const uint8_t* data, int length) {
 
     if (!g_metaModule.load(data, static_cast<size_t>(length))) {
         std::fprintf(stderr, "[C++] load_module: metadata parse failed (%d bytes)\n", length);
+    } else {
+        apply_persisted_controls(g_metaModule);
     }
 
     // Signal the worklet thread to load
@@ -505,6 +591,59 @@ void set_volume(float vol) {
 }
 
 /**
+ * Mute/unmute a tracker channel (interactive ext). Applied on g_metaModule
+ * immediately; g_module sees the bitmask on the audio thread.
+ */
+EMSCRIPTEN_KEEPALIVE
+void set_channel_mute(int channel, int muted) {
+    if (channel < 0 || channel >= MAX_VU_CHANNELS) return;
+    uint32_t bits = g_muteBits.load(std::memory_order_relaxed);
+    if (muted) {
+        bits |= (1u << channel);
+    } else {
+        bits &= ~(1u << channel);
+    }
+    g_muteBits.store(bits, std::memory_order_release);
+    if (g_metaModule.isLoaded()) {
+        g_metaModule.setChannelMute(channel, muted != 0);
+    }
+}
+
+/**
+ * Set a libopenmpt render param (e.g. OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH).
+ */
+EMSCRIPTEN_KEEPALIVE
+void set_render_param(int param, int32_t value) {
+    if (param == OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH) {
+        g_interpLength = value;
+    } else {
+        g_lastExtraRenderParam = param;
+        g_lastExtraRenderValue = value;
+    }
+    g_cmdRenderValue.store(value, std::memory_order_relaxed);
+    g_cmdRenderParam.store(param, std::memory_order_release);
+    if (g_metaModule.isLoaded()) {
+        g_metaModule.setRenderParam(param, value);
+    }
+}
+
+/**
+ * Post-load ctl_set_text. Strings are copied into fixed buffers for the audio thread.
+ */
+EMSCRIPTEN_KEEPALIVE
+void ctl_set_text(const char* key, const char* value) {
+    if (!key || !value) return;
+    std::strncpy(g_ctlKey, key, sizeof(g_ctlKey) - 1);
+    g_ctlKey[sizeof(g_ctlKey) - 1] = '\0';
+    std::strncpy(g_ctlVal, value, sizeof(g_ctlVal) - 1);
+    g_ctlVal[sizeof(g_ctlVal) - 1] = '\0';
+    if (g_metaModule.isLoaded()) {
+        g_metaModule.ctlSetText(g_ctlKey, g_ctlVal);
+    }
+    g_cmdCtl.store(1, std::memory_order_release);
+}
+
+/**
  * Poll position info from the worklet thread.
  * @return Pointer to a static PositionInfo struct, or NULL if no new data.
  *         The caller should read it immediately (not thread-safe to hold).
@@ -544,6 +683,12 @@ void cleanup_audio() {
         free(g_moduleData);
         g_moduleData = nullptr;
     }
+    g_muteBits.store(0, std::memory_order_relaxed);
+    g_appliedMuteBits = 0;
+    g_interpLength = 8;
+    g_lastExtraRenderParam = -1;
+    g_ctlKey[0] = '\0';
+    g_ctlVal[0] = '\0';
     // Note: AudioContext destruction is handled by the browser
     // when the page unloads or the context is garbage collected.
     g_audioCtx = 0;

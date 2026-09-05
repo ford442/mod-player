@@ -29,7 +29,8 @@ OpenMPTModule::~OpenMPTModule() {
 bool OpenMPTModule::load(const uint8_t* data, size_t length) {
     unload(); // Clean up any previous module
 
-    mod_ = openmpt_module_create_from_memory2(
+    // Ext create so interactive mute is available; ctls stay null (post-load ctl_set_text).
+    modExt_ = openmpt_module_ext_create_from_memory(
         data, length,
         nullptr, nullptr, // log callback
         nullptr, nullptr, // error callback
@@ -38,12 +39,31 @@ bool OpenMPTModule::load(const uint8_t* data, size_t length) {
         nullptr           // ctls
     );
 
-    if (!mod_) {
-        std::fprintf(stderr, "[OpenMPTModule] Failed to create module from %zu bytes\n", length);
+    if (!modExt_) {
+        std::fprintf(stderr, "[OpenMPTModule] Failed to create ext module from %zu bytes\n", length);
         return false;
     }
 
-    // Set high-quality interpolation (windowed sinc)
+    mod_ = openmpt_module_ext_get_module(modExt_);
+    if (!mod_) {
+        std::fprintf(stderr, "[OpenMPTModule] ext_get_module returned null\n");
+        openmpt_module_ext_destroy(modExt_);
+        modExt_ = nullptr;
+        return false;
+    }
+
+    std::memset(&interactive_, 0, sizeof(interactive_));
+    interactiveReady_ = openmpt_module_ext_get_interface(
+        modExt_,
+        LIBOPENMPT_EXT_C_INTERFACE_INTERACTIVE,
+        &interactive_,
+        sizeof(interactive_)
+    ) != 0;
+    if (!interactiveReady_) {
+        std::fprintf(stderr, "[OpenMPTModule] interactive interface unavailable (mute will no-op)\n");
+    }
+
+    // Default: windowed sinc (matches offline WAV export). Overridable via setRenderParam.
     openmpt_module_set_render_param(mod_, OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH, 8);
 
     // Default: infinite loop
@@ -53,10 +73,13 @@ bool OpenMPTModule::load(const uint8_t* data, size_t length) {
 }
 
 void OpenMPTModule::unload() {
-    if (mod_) {
-        openmpt_module_destroy(mod_);
-        mod_ = nullptr;
+    if (modExt_) {
+        openmpt_module_ext_destroy(modExt_);
+        modExt_ = nullptr;
+        mod_ = nullptr; // owned by ext
     }
+    interactiveReady_ = false;
+    std::memset(&interactive_, 0, sizeof(interactive_));
 }
 
 // ── Playback ────────────────────────────────────────────────────────
@@ -99,6 +122,25 @@ void OpenMPTModule::setRepeatCount(int count) {
 
 void OpenMPTModule::setVolume(float vol) {
     volume_ = std::max(0.0f, std::min(1.0f, vol));
+}
+
+void OpenMPTModule::setChannelMute(int channel, bool muted) {
+    if (!interactiveReady_ || !modExt_ || !interactive_.set_channel_mute_status) {
+        return;
+    }
+    interactive_.set_channel_mute_status(modExt_, channel, muted ? 1 : 0);
+}
+
+void OpenMPTModule::setRenderParam(int param, int32_t value) {
+    if (mod_) {
+        openmpt_module_set_render_param(mod_, param, value);
+    }
+}
+
+void OpenMPTModule::ctlSetText(const char* key, const char* value) {
+    if (mod_ && key && value) {
+        openmpt_module_ctl_set_text(mod_, key, value);
+    }
 }
 
 // ── Position / metadata ─────────────────────────────────────────────

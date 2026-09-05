@@ -127,7 +127,11 @@ export function createProcessModuleData(deps: ModuleActionsDeps) {
     const fileDataCopy = fileData.slice();
     fileDataRef.current = fileDataCopy;
 
-    const useWorkerParse = !isLibReadyForParse(lib);
+    const nativeEngineEarly = refs.nativeEngineRef.current;
+    const useNativeParse =
+      refs.activeEngineRef.current === 'native-worklet' && nativeEngineEarly != null;
+
+    const useWorkerParse = !useNativeParse && !isLibReadyForParse(lib);
     if (useWorkerParse && !workerRef.current && parserWorkerHealthyRef.current) {
       try {
         workerRef.current = createParserWorker((message) => {
@@ -164,16 +168,12 @@ export function createProcessModuleData(deps: ModuleActionsDeps) {
     let loadedInstrumentTable = emptyInstrumentTable();
 
     try {
-      const nativeEngine = refs.nativeEngineRef.current;
-      const useNativeParse =
-        refs.activeEngineRef.current === 'native-worklet' && nativeEngine != null;
-
-      if (useNativeParse) {
+      if (useNativeParse && nativeEngineEarly) {
         onParseProgress?.('patterns');
         const nativeBuf = new Uint8Array(fileDataCopy.byteLength);
         nativeBuf.set(fileDataCopy);
-        await nativeEngine.load(nativeBuf.buffer);
-        const nativeMod = nativeEngine.getNativeModule();
+        await nativeEngineEarly.load(nativeBuf.buffer);
+        const nativeMod = nativeEngineEarly.getNativeModule();
         if (!nativeMod || nativeMod._get_num_orders() <= 0) {
           throw new Error('Native pattern reader: module not ready after load');
         }

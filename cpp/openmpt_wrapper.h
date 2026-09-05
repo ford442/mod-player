@@ -17,6 +17,7 @@
 
 // libopenmpt public C API
 #include <libopenmpt/libopenmpt.h>
+#include <libopenmpt/libopenmpt_ext.h>
 
 // Maximum channels we report VU for (matches JS side Float32Array[32])
 constexpr int MAX_VU_CHANNELS = 32;
@@ -112,6 +113,15 @@ public:
     /** Set master volume (0.0 – 1.0 maps to render gain). */
     void setVolume(float vol);
 
+    /** Per-channel mute via openmpt_module_ext interactive (no-op if iface missing). */
+    void setChannelMute(int channel, bool muted);
+
+    /** libopenmpt render param (interpolation length, stereo sep, …). */
+    void setRenderParam(int param, int32_t value);
+
+    /** Post-load ctl_set_text (e.g. render.resampler.emulate_amiga). */
+    void ctlSetText(const char* key, const char* value);
+
     // ── Position / metadata queries ─────────────────────────────────
 
     void fillPositionInfo(PositionInfo& out) const;
@@ -149,6 +159,9 @@ public:
     int getPatternRowChannelCommand(int pattern, int row, int channel, int command) const;
 
 private:
+    openmpt_module_ext* modExt_ = nullptr;
     openmpt_module* mod_ = nullptr;
+    openmpt_module_ext_interface_interactive interactive_{};
+    bool interactiveReady_ = false;
     float volume_ = 1.0f;
 };

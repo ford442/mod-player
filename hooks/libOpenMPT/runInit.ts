@@ -158,6 +158,11 @@ export async function runLibOpenMPTInit(deps: InitDeps): Promise<void> {
           const engine = new OpenMPTWorkletEngine();
           await engine.init();
           refs.nativeEngineRef.current = engine;
+          window.__XASM1_NATIVE__ = {
+            setChannelMute: (channel, muted) => engine.setChannelMute(channel, muted),
+            setInterpolationLength: (length) => engine.setInterpolationLength(length),
+            ctlSetText: (key, value) => engine.ctlSetText(key, value),
+          };
           setIsNativeWorkletAvailable(true);
 
           if (shouldPromoteNativeEngine(enginePref, true)) {
@@ -208,6 +213,9 @@ export function cleanupLibOpenMPT(refs: LibOpenMPTRefs) {
   if (refs.nativeEngineRef.current) {
     refs.nativeEngineRef.current.destroy();
     refs.nativeEngineRef.current = null;
+  }
+  if (typeof window !== 'undefined') {
+    delete window.__XASM1_NATIVE__;
   }
   if (refs.audioWorkletNodeRef.current) refs.audioWorkletNodeRef.current.disconnect();
   if (refs.stereoPannerRef.current) refs.stereoPannerRef.current.disconnect();

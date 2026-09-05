@@ -305,6 +305,14 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
       } else if (type === MT.setAudioDiag) {
         this._audioDiag = !!msg.enabled;
         this._resetAudioDiag();
+      } else if (type === MT.setChannelMute) {
+        // Stub for #416 live mute on the JS engine; native uses KEEPAlives.
+      } else if (type === MT.setRenderParam) {
+        if (this.modulePtr && this.lib && typeof this.lib._openmpt_module_set_render_param === 'function') {
+          this.lib._openmpt_module_set_render_param(this.modulePtr, msg.param, msg.value);
+        }
+      } else if (type === MT.ctlSetText) {
+        // String marshalling into wasm2js is #416; accept the message so protocol stays valid.
       } else if (!type && moduleData) {
         await this.loadModule(moduleData);
       }

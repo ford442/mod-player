@@ -50,6 +50,19 @@ export const NATIVE_RING_BUF_FRAMES = 8192;
  */
 export const NATIVE_PCM_CHUNK_FRAMES = 128;
 
+/** libopenmpt.h OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH */
+export const OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH = 3;
+
+export type OpenMPTInterpolationLength = 1 | 2 | 4 | 8;
+
+function writeCString(mod: EmscriptenOpenMPTModule, text: string): number {
+    const bytes = new TextEncoder().encode(text);
+    const ptr = mod._malloc(bytes.length + 1);
+    mod.HEAPU8.set(bytes, ptr);
+    mod.HEAPU8[ptr + bytes.length] = 0;
+    return ptr;
+}
+
 export interface NativeEngineAttachOptions {
     /** `?engine=native&nativeCtx=legacy` — C++ creates its own AudioContext. */
     legacy?: boolean;
@@ -422,6 +435,31 @@ export class OpenMPTWorkletEngine extends MiniEventEmitter<EngineEventMap> {
     /** Set loop mode. */
     setLoop(loop: boolean): void {
         this.module?._set_loop(loop ? 1 : 0);
+    }
+
+    /** Mute or unmute one tracker channel (libopenmpt interactive). */
+    setChannelMute(channel: number, muted: boolean): void {
+        this.module?._set_channel_mute(channel | 0, muted ? 1 : 0);
+    }
+
+    /** Interpolation filter length: 1=nearest, 2=linear, 4=cubic, 8=windowed sinc. */
+    setInterpolationLength(length: OpenMPTInterpolationLength): void {
+        this.setRenderParam(OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH, length);
+    }
+
+    setRenderParam(param: number, value: number): void {
+        this.module?._set_render_param(param | 0, value | 0);
+    }
+
+    /** Post-load ctl_set_text (e.g. play.at_end, render.resampler.emulate_amiga). */
+    ctlSetText(key: string, value: string): void {
+        const m = this.module;
+        if (!m) return;
+        const keyPtr = writeCString(m, key);
+        const valPtr = writeCString(m, value);
+        m._ctl_set_text(keyPtr, valPtr);
+        m._free(keyPtr);
+        m._free(valPtr);
     }
 
     // ── Position queries ─────────────────────────────────────────────

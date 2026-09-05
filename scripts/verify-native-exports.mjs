@@ -100,6 +100,9 @@ const requiredByEngine = [
   'suspend_audio',
   'seek_order_row',
   'set_volume',
+  'set_channel_mute',
+  'set_render_param',
+  'ctl_set_text',
   'set_loop',
   'poll_position',
   'get_audio_context',
@@ -156,6 +159,18 @@ if (/OUTPUT_BASENAME="openmpt-worklet"/.test(buildSh) || /-o\s+"?\$OUTPUT_DIR\/o
 }
 if (!/OUTPUT_BASENAME="openmpt-native"/.test(buildSh)) {
   errors.push('scripts/build-wasm.sh should set OUTPUT_BASENAME="openmpt-native"');
+}
+
+if (!/-sSTACK_SIZE=131072/.test(buildSh)) {
+  errors.push('scripts/build-wasm.sh must set -sSTACK_SIZE=131072 (main + meta parse stack)');
+}
+if (!/-fno-exceptions/.test(buildSh)) {
+  errors.push('scripts/build-wasm.sh must compile wrapper with -fno-exceptions');
+}
+if (/-sDISABLE_EXCEPTION_CATCHING=1/.test(buildSh)) {
+  errors.push(
+    'scripts/build-wasm.sh must not set DISABLE_EXCEPTION_CATCHING=1 (libopenmpt_c.cpp try/catch)',
+  );
 }
 
 // Strip comments before scanning shell for dangerous command patterns

@@ -43,6 +43,12 @@ interface MIDIMessageEvent extends Event {
 interface Window {
   /** Real WebAssembly API snapshotted before wasm2js libopenmptjs.js loads. */
   __NATIVE_WEBASSEMBLY__?: typeof WebAssembly;
+  /** Native engine test hook (?engine=native) — mute / interpolation, not mixer UI. */
+  __XASM1_NATIVE__?: {
+    setChannelMute: (channel: number, muted: boolean) => void;
+    setInterpolationLength: (length: 1 | 2 | 4 | 8) => void;
+    ctlSetText: (key: string, value: string) => void;
+  };
 }
 
 interface ImportMetaEnv {
