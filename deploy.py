@@ -6,8 +6,9 @@ Deployment now goes through storage.noahcohn.com (Contabo VPS).
 No SFTP passwords are stored in this repo.
 
 Usage:
-  python deploy.py                 # build (xm-player profile) + validate + upload
-  python deploy.py --no-build      # upload existing dist/ only (must already be xm-player build)
+  python deploy.py                 # build test.1ink.us profile + validate + upload
+  python deploy.py --site go       # build go.1ink.us public-lock profile + validate + upload
+  python deploy.py --no-build      # upload existing dist/ only (must already match --site profile)
   python deploy.py --dry-run       # validate locally; never upload
   python deploy.py --require-native  # abort unless dist/worklets/ has a complete native trio
 
@@ -56,6 +57,14 @@ DEPLOY_FOLDER: str = ""
 # target_site for storage.noahcohn.com: "test" → test.1ink.us, "go" → go.1ink.us
 # Override with --site or DEPLOY_TARGET=go
 DEPLOY_TARGET: str = os.getenv("DEPLOY_TARGET", "test").strip().lower() or "test"
+BUILD_SCRIPT_BY_SITE: dict[str, str] = {
+    "test": "build:xm-player",
+    "go": "build:go",
+}
+PROFILE_BY_SITE: dict[str, str] = {
+    "test": "dev (full shader catalog)",
+    "go": "public (v0.30b lock, no picker)",
+}
 
 # Set via environment: export DEPLOY_TOKEN="your_long_token_from_vps_env"
 DEPLOY_TOKEN: Optional[str] = os.getenv(
@@ -225,7 +234,7 @@ def validate_stylesheet_assets(build_path: Path) -> None:
         print("ERROR: Build validation failed:")
         for err in errors:
             print(f"  - {err}")
-        print("\nRebuild with:  npm run build:xm-player:verify")
+        print("\nRebuild with the matching site profile, e.g. `npm run build:xm-player:verify` or `npm run build:go:verify`.")
         sys.exit(1)
 
     print(f"  ✓ stylesheet OK ({', '.join(hrefs)})")
@@ -449,15 +458,19 @@ def deploy_bundle(build_path: Path, *, clean: bool, target_site: str) -> bool:
         return False
 
 
-def run_build() -> None:
-    print("Running npm run build:xm-player ...")
+def run_build(target_site: str) -> None:
+    build_script = BUILD_SCRIPT_BY_SITE.get(target_site)
+    if not build_script:
+        print(f"ERROR: no build script configured for target site '{target_site}'")
+        sys.exit(1)
+    print(f"Running npm run {build_script} ...")
     result = subprocess.run(
-        ["npm", "run", "build:xm-player"],
+        ["npm", "run", build_script],
         cwd=Path(__file__).resolve().parent,
         check=False,
     )
     if result.returncode != 0:
-        print("ERROR: npm run build:xm-player failed")
+        print(f"ERROR: npm run {build_script} failed")
         sys.exit(1)
     result = subprocess.run(
         ["npm", "run", "verify:build"],
@@ -482,7 +495,7 @@ def main() -> None:
     parser.add_argument(
         "--no-build",
         action="store_true",
-        help="Skip npm run build:xm-player:verify (upload existing dist/ only)",
+        help="Skip the site-matching build/verify step (existing dist/ must already match the selected --site profile)",
     )
     parser.add_argument(
         "--dry-run",
@@ -520,17 +533,19 @@ def main() -> None:
         sys.exit(1)
     host = live_host_for_target(target_site)
 
-    print(f"\n=== Deploying '{PROJECT_NAME}' via Contabo -> {host}/xm-player ===\n")
+    profile = PROFILE_BY_SITE[target_site]
+    print(f"\n=== Deploying '{PROJECT_NAME}' via Contabo -> {host}/xm-player ===")
+    print(f"Profile: {profile}\n")
     if args.dry_run:
         print("DRY RUN: local validation only — will not upload.\n")
 
     if not args.no_build:
-        run_build()
+        run_build(target_site)
 
     build_path = Path(BUILD_DIR)
     if not build_path.exists() or not build_path.is_dir():
         print(f"ERROR: Build directory '{BUILD_DIR}/' does not exist.")
-        print("Run:  npm run build:xm-player:verify")
+        print("Run the matching site profile first: `npm run build:xm-player:verify` or `npm run build:go:verify`.")
         sys.exit(1)
 
     validate_build_base_path(build_path)
