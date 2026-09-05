@@ -9,6 +9,10 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import {
+  classifyNativeEngine,
+  formatNativeEngineSummary,
+} from './nativeEngineArtifacts.mjs';
 
 const BUILD_DIR = process.env.BUILD_DIR || 'dist';
 const PROJECT_NAME = process.env.PROJECT_NAME || 'xm-player';
@@ -206,6 +210,32 @@ try {
   errors.push(
     `verify-wasm-assets could not run: ${e instanceof Error ? e.message : e}`,
   );
+}
+
+// Optional native C++/Emscripten engine (gitignored until `npm run build:emcc`).
+// Absent is OK (JS worklet remains the default). Partial or invalid is always a
+// broken dist and must fail. See scripts/nativeEngineArtifacts.mjs.
+{
+  const native = classifyNativeEngine(join(BUILD_DIR, 'worklets'));
+  if (native.status === 'complete') {
+    console.log(formatNativeEngineSummary(native));
+  } else if (native.status === 'absent') {
+    console.warn('');
+    console.warn('================================================================');
+    console.warn(' WARNING: native audio engine artifacts are NOT in dist/worklets/');
+    console.warn('   missing: openmpt-native.js, openmpt-native.wasm, openmpt-native.aw.js');
+    console.warn('   Run `npm run build:emcc` (emsdk 3.1.51) before this build');
+    console.warn('   if you intend to ship `?engine=native`.');
+    console.warn('   Without them, ?engine=native soft-fails to the JS worklet.');
+    console.warn('   (Unbuilt native is optional; this is not a verify-build failure.)');
+    console.warn('================================================================');
+    console.warn('');
+  } else {
+    errors.push(formatNativeEngineSummary(native));
+    for (const err of native.errors) {
+      errors.push(err);
+    }
+  }
 }
 
 if (errors.length > 0) {
