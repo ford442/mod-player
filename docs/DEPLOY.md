@@ -7,9 +7,48 @@ npm run deploy                   # build (xm-player profile), validate, upload z
 # or step by step:
 npm run build:xm-player:verify   # build + validate dist/
 python deploy.py --no-build      # upload an already-validated dist/
+python deploy.py --dry-run --no-build   # local classify/validate; never upload
 ```
 
 Deploy target: `https://test.1ink.us/xm-player/` via `storage.noahcohn.com` bundle API.
+
+## Native audio engine (optional)
+
+The JS AudioWorklet (`public/worklets/openmpt-worklet.js`) is always shipped. The native C++/Emscripten engine is **optional** and **gitignored**. Vite copies `public/` into `dist/` verbatim, so if the trio exists under `public/worklets/` it lands in `dist/worklets/`.
+
+**Build order when you want `?engine=native` to work on the live site:**
+
+```bash
+# emsdk 3.1.51
+source /path/to/emsdk/emsdk_env.sh
+npm run build:emcc
+# → public/worklets/openmpt-native.js
+# → public/worklets/openmpt-native.wasm
+# → public/worklets/openmpt-native.aw.js
+python3 deploy.py                 # or: npm run build:xm-player:verify && python3 deploy.py --no-build
+```
+
+Do **not** commit those three files. A checkout that never ran `build:emcc` still deploys the JS engine.
+
+`scripts/verify-build.mjs` and `deploy.py` classify the trio in `dist/worklets/`:
+
+| State | Meaning | verify-build | deploy.py |
+|-------|---------|--------------|-----------|
+| **complete** | all three present, `.wasm` has `\0asm` magic, JS is not an HTML error page | PASS + sizes | prints that native is shipping |
+| **absent** | none of the three exist | PASS + loud warning naming `npm run build:emcc` | same banner; continues (JS-only deploy) |
+| **partial** | 1 or 2 of 3 exist | **FAIL** | **abort**, no upload |
+| **invalid** | all three exist but content is HTML / not wasm | **FAIL** | **abort**, no upload |
+
+Strict production (refuse a JS-only ship):
+
+```bash
+python3 deploy.py --require-native
+# or: DEPLOY_REQUIRE_NATIVE=1 python3 deploy.py
+```
+
+`--dry-run` runs the same local checks (and zips in memory) but never calls the Contabo upload or live-index APIs.
+
+**What users see when native is missing:** playback still works on the JS worklet. `?engine=native` (or a sticky prefer-native localStorage) **soft-fails** to JS with a console warning — the app does not hard-fail. Public builds (`VITE_PUBLIC_MODE=1`) still force JS unless the URL opts into native; see `public/worklets/README.md`.
 
 ## Build validation
 
@@ -20,6 +59,7 @@ Before upload, `deploy.py` and `scripts/verify-build.mjs` check:
 - Referenced CSS is ≥ 10 KB, UTF-8, no NUL bytes
 - Module script and stylesheet files exist on disk
 - No `.1iss` files in `dist/assets/`
+- Native engine trio is complete, absent (warned), or refused if partial/invalid
 
 ## Asset pruning (stale bundles)
 

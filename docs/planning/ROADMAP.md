@@ -2,17 +2,11 @@
 
 Living pointer to active work. **Do not** append agent run diaries here — use GitHub issues and PRs for status.
 
-**Last reconciled:** 2026-09-04. Foundation issues #401 / #402 / #404 are **closed** (code landed; leftovers filed as #411–#415). Weekly `native-wasm-scheduled.yml` is **green** as of 2026-08-31 (run 33362867908). CI is green on `main` (run 33489336458, `e44c941`, 2026-09-01) and there are **no open PRs**. Open issues: #403 and #411–#417 — unchanged since 2026-08-26.
+**Last reconciled:** 2026-09-05. Foundation issues #401 / #402 / #404 are **closed** (code landed; leftovers filed as #411–#415). Weekly `native-wasm-scheduled.yml` is **green** as of 2026-08-31 (run 33362867908).
 
-**Verified gap behind #411 — still open, re-checked 2026-09-04.** The deploy path still has no native-artifact awareness, and nothing that landed since 2026-08-28 touched it:
+**Deploy native-artifact gap behind #411 — closed 2026-09-05.** `scripts/verify-build.mjs` and `deploy.py` now classify `dist/worklets/openmpt-native.{js,wasm,aw.js}` as complete / absent / partial (invalid content fails). Absent warns and still deploys JS-only; partial aborts; `--require-native` / `DEPLOY_REQUIRE_NATIVE=1` refuses absent; `--dry-run` never uploads. Artifacts stay gitignored. Runtime `?engine=native` soft-fail is unchanged.
 
-- `deploy.py` matches zero occurrences of `native`, `worklet`, `wasm`, or `emcc`.
-- `scripts/verify-build.mjs` asserts only `libmpt/libopenmpt.wasm` and `libmpt/libopenmptjs.js` (lines 141–152); `scripts/verify-bundle-budget.mjs` has no native/worklet awareness either.
-- `docs/DEPLOY.md` never mentions `emcc` or `native` — there is no documented "build the native engine before deploying" step.
-- `openmpt-native.js` / `.wasm` / `.aw.js` stay gitignored under both `public/worklets/` and `dist/worklets/` (`.gitignore:59-64`).
-- The user-visible symptom is a soft-fail, not an error: `hooks/libOpenMPT/runInit.ts:177` logs `?engine=native / localStorage prefer-native but glue missing — soft-fail to JS worklet` and plays on. A `python3 deploy.py` from a checkout that never ran `npm run build:emcc` therefore ships a bundle where `?engine=native` silently is not native.
-
-Close that before opening the parity gate on any deploy profile. What landed 2026-08-30 → 09-01 (#422 bundle-budget + stray-artifact verify gaps; `deploy.py` HTML content-stamping so the VPS size-skip cannot keep a stale same-length `index.html`) hardened a *different* part of the same pipeline and did not narrow this gap.
+**#411 itself remains open** (parity gate on preview, delete `?nativeCtx=legacy`, lock shared `AudioContext` sampleRate, engine benches). Do not treat the deploy tri-state as the whole P1 row.
 
 **Build on foundation before new content.** Do not start #417 (performance instrument) or new shaders until P1 rows below have a decision/PR. #403 (tracker studio) can proceed in parallel with P1 except live-audition audio, which should wait for typed worklets (#413) if it adds a new AudioWorklet.
 

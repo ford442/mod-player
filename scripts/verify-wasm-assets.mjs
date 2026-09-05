@@ -18,7 +18,8 @@
  *   runtime is embedded in the JS. A sibling libopenmpt.wasm is NOT required
  *   and must not be a fake HTML file. Optional native engine outputs
  *   (openmpt-native.wasm, openmpt-worklet.wasm) are gitignored until built;
- *   when present they are also validated.
+ *   when present they are also validated. Presence of the native trio is
+ *   classified by scripts/verify-build.mjs (absent OK; partial/invalid fail).
  */
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';

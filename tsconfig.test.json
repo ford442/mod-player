@@ -3,6 +3,13 @@
   "compilerOptions": {
     "allowJs": true
   },
-  "include": ["tests/**/*.ts", "vite-env.d.ts", "scripts/sync-shaders.mjs", "scripts/sync-shaders.mjs.d.ts"],
+  "include": [
+    "tests/**/*.ts",
+    "vite-env.d.ts",
+    "scripts/sync-shaders.mjs",
+    "scripts/sync-shaders.mjs.d.ts",
+    "scripts/nativeEngineArtifacts.mjs",
+    "scripts/nativeEngineArtifacts.mjs.d.ts"
+  ],
   "exclude": ["node_modules", "dist", "archive", "jules_patch"]
 }
