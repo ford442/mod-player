@@ -61,6 +61,11 @@ import {
 } from './frameDraw';
 import { ComputeAnalysis, COMPUTE_ANALYSIS_PASS_LABEL } from './computeAnalysis';
 import { GpuTimestampRecorder, deviceHasTimestampQuery } from './timestampQuery';
+import {
+  isPatternDiagEnabled,
+  livePcmSubscribers,
+  recordPatternBoundaryEvent,
+} from '../../../utils/patternBoundaryDiag';
 
 export interface WebGPURendererCallbacks {
   onDeviceStatus?: (status: WebGPUDeviceStatus) => void;
@@ -118,6 +123,8 @@ export class WebGPURenderer {
   private computeAnalysisInit: Promise<void> | null = null;
   /** Whether the active shader opted into GPU audio analysis (ShaderMeta flag). */
   private gpuSpectrumWanted = false;
+  /** Skip DURA/cells rebuild when the same pattern is already on the GPU. */
+  private lastCellsKey = '';
   private timestamps: GpuTimestampRecorder | null = null;
 
   private readonly scratch: FrameDrawScratch = {
@@ -272,6 +279,7 @@ export class WebGPURenderer {
     }
 
     this.cellsBuffer = null;
+    this.lastCellsKey = '';
     this.uniformBuffer = null;
     this.rowFlagsBuffer = null;
     this.channelsBuffer = null;
@@ -686,16 +694,23 @@ export class WebGPURenderer {
     const numChannels = params.padTopChannel ? rawChannels + 1 : rawChannels;
     if (numChannels <= 0) return;
     const numRows = matrix?.numRows ?? DEFAULT_ROWS;
+    const cellsKey = `${matrix?.patternIndex ?? -1}:${numRows}:${numChannels}`;
+    if (this.cellsBuffer && this.lastCellsKey === cellsKey) {
+      return;
+    }
 
     this.renderFrameCount = 0;
     this.renderGeneration = this.lifecycle.bump();
+
+    const diagOn = isPatternDiagEnabled();
+    const t0 = diagOn ? performance.now() : 0;
 
     if (this.cellsBuffer) {
       pool.releaseBuffer('cells', this.cellsBuffer, CELLS_USAGE);
       this.cellsBuffer = null;
     }
 
-    const { buffer } = uploadCellsBuffer({
+    const { buffer, timings } = uploadCellsBuffer({
       device,
       pool,
       shaderFile: this.shaderFile,
@@ -711,6 +726,7 @@ export class WebGPURenderer {
       },
     });
     this.cellsBuffer = buffer;
+    this.lastCellsKey = cellsKey;
 
     assertCellsBufferSize(this.cellsBuffer, numRows, numChannels);
 
@@ -733,6 +749,25 @@ export class WebGPURenderer {
     }
     if (import.meta.env.DEV) {
       pool.logStats('WebGPU matrix update');
+    }
+
+    if (diagOn) {
+      recordPatternBoundaryEvent({
+        kind: 'gpu-matrix',
+        ms: performance.now() - t0,
+        at: t0,
+        order: matrix?.order,
+        rows: numRows,
+        channels: numChannels,
+        shader: this.shaderFile,
+        path: timings.path,
+        packMs: timings.packMs,
+        computeMs: timings.computeMs,
+        liteMode: this.liteMode,
+        gpuSpectrum: this.gpuSpectrumWanted,
+        pcmSubscribers: livePcmSubscribers(),
+        parityReadback: Boolean(import.meta.env.DEV),
+      });
     }
   }
 

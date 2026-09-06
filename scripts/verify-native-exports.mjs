@@ -167,6 +167,41 @@ if (!/-sSTACK_SIZE=131072/.test(buildSh)) {
 if (!/-fno-exceptions/.test(buildSh)) {
   errors.push('scripts/build-wasm.sh must compile wrapper with -fno-exceptions');
 }
+if (!/--post-js "\$CPP_DIR\/post\.js"/.test(buildSh) && !/--post-js \$CPP_DIR\/post\.js/.test(buildSh)) {
+  errors.push('scripts/build-wasm.sh must --post-js cpp/post.js (Module audio-object exports)');
+}
+if (!/patch-native-glue\.mjs/.test(buildSh)) {
+  errors.push('scripts/build-wasm.sh must run scripts/patch-native-glue.mjs on openmpt-native.js');
+}
+
+const preJs = join(ROOT, 'cpp/pre.js');
+if (existsSync(preJs)) {
+  const pre = readFileSync(preJs, 'utf8');
+  if (!/typeof globalThis\.setTimeout !== 'function'/.test(pre) && !/typeof globalThis\.setTimeout !== "function"/.test(pre)) {
+    errors.push('cpp/pre.js must only polyfill setTimeout when it is missing (do not clobber main-thread timers)');
+  }
+}
+const postJs = join(ROOT, 'cpp/post.js');
+if (!existsSync(postJs)) {
+  errors.push('missing cpp/post.js (exports emscriptenRegisterAudioObject onto Module)');
+} else {
+  const post = readFileSync(postJs, 'utf8');
+  if (!/emscriptenRegisterAudioObject/.test(post)) {
+    errors.push('cpp/post.js must assign emscriptenRegisterAudioObject onto Module');
+  }
+}
+
+const glue = join(ROOT, 'public/worklets/openmpt-native.js');
+if (existsSync(glue)) {
+  const glueSrc = readFileSync(glue, 'utf8');
+  if (/globalThis\.setTimeout=function\(callback,delay\)\{Promise\.resolve\(\)\.then\(callback\)/.test(glueSrc)
+      && !/typeof globalThis\.setTimeout!=="function"/.test(glueSrc)) {
+    errors.push('public/worklets/openmpt-native.js still clobbers main-thread setTimeout — run scripts/patch-native-glue.mjs');
+  }
+  if (!/Module\["emscriptenRegisterAudioObject"\]/.test(glueSrc) && !/Module\['emscriptenRegisterAudioObject'\]/.test(glueSrc)) {
+    errors.push('public/worklets/openmpt-native.js must export Module.emscriptenRegisterAudioObject');
+  }
+}
 if (/-sDISABLE_EXCEPTION_CATCHING=1/.test(buildSh)) {
   errors.push(
     'scripts/build-wasm.sh must not set DISABLE_EXCEPTION_CATCHING=1 (libopenmpt_c.cpp try/catch)',

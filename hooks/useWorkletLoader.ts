@@ -54,7 +54,8 @@ export const getWorkletUrl = (): string => {
   // v11: audioDiag uses Date.now() (performance.now is frozen per quantum in worklet)
   // v12: auto audio-lite for >16ch modules; playhead quantum compensation on main thread
   // v13: setChannelMute / setRenderParam / ctlSetText protocol stubs (#412)
-  const WORKLET_VERSION = '13';
+  // v14: audioDiag records slow-quantum row (no audio-thread console.log)
+  const WORKLET_VERSION = '14';
   const url = `${base}worklets/openmpt-worklet.js?v=${WORKLET_VERSION}`;
 
   return url;

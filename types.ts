@@ -236,9 +236,23 @@ export interface AudioDiagSnapshot {
   wrapOverruns: number;
   order: number;
   row: number;
+  /** Worst process() duration observed in any window since enable. */
+  sessionMaxProcessMs: number;
+  /** Location of the worst quantum in the most recent window. */
+  lastSlowMs?: number;
+  lastSlowOrder?: number;
+  lastSlowRow?: number;
+  pcmEnabled?: boolean;
+  audioLite?: boolean;
   /** performance.now() of the last report received on the main thread. */
   updatedAt: number;
 }
+
+/**
+ * Main-thread / GPU cost at pattern (order) changes (?patternDiag=1 or ?audioDiag=1).
+ * Complements AudioDiagSnapshot, which only times the worklet quantum.
+ */
+export type PatternDiagSnapshot = import('./utils/patternBoundaryDiag').PatternDiagSnapshot;
 
 export interface SyncDebugInfo {
   mode: string;
@@ -284,6 +298,8 @@ declare global {
     __PLAYHEAD_DEBUG__?: PlayheadDebugSnapshot;
     /** Worklet process() timing snapshot (when ?audioDiag=1) */
     __AUDIO_DIAG__?: AudioDiagSnapshot;
+    /** Main-thread/GPU pattern-boundary timings (when ?patternDiag=1 or ?audioDiag=1) */
+    __PATTERN_DIAG__?: PatternDiagSnapshot;
     /** Headless Chrome / Playwright automation hooks (dev + CI) */
     __TEST_HOOKS__?: {
       seekToRow: (row: number) => void;

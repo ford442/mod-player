@@ -18,6 +18,7 @@ import {
   WORKLET_ROW_SMOOTHING,
 } from './constants';
 import type { UpdateUIParams } from './types';
+import { isPatternDiagEnabled, recordPatternBoundaryEvent } from '../../utils/patternBoundaryDiag';
 
 /** TIMING FIX: Improved updateUI with drift compensation and proper interpolation */
 export function createUpdateUI({
@@ -190,6 +191,8 @@ export function createUpdateUI({
     const bpmChanged = Math.abs(currentBpm - lastUiBpmRef.current) >= 0.5;
 
     if (orderChanged) {
+      const diagOn = isPatternDiagEnabled();
+      const t0 = diagOn ? performance.now() : 0;
       const newMatrix = patternMatricesRef.current[order];
       let globalRow = 0;
       for (let i = 0; i < order; i++) {
@@ -206,6 +209,18 @@ export function createUpdateUI({
       lastUiOrderRef.current = order;
       lastUiRowIntRef.current = rowIntUi;
       lastUiBpmRef.current = currentBpm;
+      if (diagOn) {
+        recordPatternBoundaryEvent({
+          kind: 'order-change-ui',
+          ms: performance.now() - t0,
+          at: t0,
+          order,
+          row: rowIntUi,
+          rows: newMatrix?.numRows,
+          channels: newMatrix?.numChannels,
+          engine: activeEngine,
+        });
+      }
     } else {
       if (rowChanged || bpmChanged) {
         setModuleInfo((prev: ModuleInfo) => ({ ...prev, order, row: rowIntUi, bpm: currentBpm }));

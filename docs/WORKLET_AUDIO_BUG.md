@@ -302,7 +302,31 @@ Symptom still matched **memory allocation / underrun cascade**: a few skipped qu
 ?audioDiag=1
 ```
 
-Then watch `window.__AUDIO_DIAG__` — if `wrapOverruns` climbs at order changes, `process()` is still exceeding the ~2.9 ms quantum on pattern boundaries.
+That flag now times **both** sides of a pattern-boundary hitch:
+
+| Object | What it measures |
+|--------|------------------|
+| `window.__AUDIO_DIAG__` | Worklet `process()` vs the ~2.9 ms quantum. `wrapOverruns` / `wrapMaxProcessMs` are only the quanta where the row counter went backwards. |
+| `window.__PATTERN_DIAG__` | Main-thread cost at the same boundary: React `setSequencerMatrix`, WebGPU cells rebuild (DURA compute + bind group), native cell-by-cell pattern read. |
+
+`?patternDiag=1` enables only the main-thread/GPU half (no per-quantum `performance.now` on the audio thread). Console lines are `[AudioDiag]` and `[PatternDiag]`.
+
+Isolation (reload after each change, play until several order changes):
+
+| Test | If hitch **vanishes** | Hypothesis |
+|------|------------------------|------------|
+| `?renderer=html` | Main-thread/GPU cells rebuild, not DSP | GPU `updateMatrix` / DURA |
+| `?engine=js` (vs native) | Native `readPatternDataFromNative` on order change | Native pattern extract |
+| shader **not** v0.55 / v0.58 | GPU spectrum re-enabled `projectm-pcm` | Worklet PCM stream |
+| production build (not `npm run dev`) | DEV DURA parity GPU readback | Dev-only stall |
+| lite mode | DURA compute + analysis | GPU duration pass |
+
+Interpretation:
+
+- `wrapOverruns` climbs, `__PATTERN_DIAG__.maxGpuMatrixMs` stays small → worklet/libopenmpt over budget (hypothesis A).
+- `wrapOverruns` stays 0, `maxGpuMatrixMs` > ~8 ms → GPU/React starving the audio callback (hypothesis B). Default v0.30b still rebuilds the cells buffer + DURA compute on **every** order change.
+- Native `maxNativeReadMs` > ~8 ms → main-thread WASM walk (`rows × channels × 6` command reads) at the boundary.
+- Both wrap overruns **and** GPU rebuild large → stacked hitch; the GPU work is scheduled on the same order-change frame the worklet is already heaviest.
 
 ---
 
@@ -360,9 +384,15 @@ Interpretation:
 
 - `wrapMaxProcessMs > budgetMs` with `overruns` near zero elsewhere → the
   boundary itself is over budget (worklet/libopenmpt — hypothesis A).
-- `maxProcessMs` high everywhere → general worklet overload, not boundary-specific.
-- Both near zero while a hitch is still audible → the problem is main-thread/GPU
-  or the visual playhead snap, not the DSP. Re-test with `?renderer=html`.
+- `wrapOverruns === 0` but `totalOverruns` / `sessionMaxProcessMs` high
+  (including `lastSlowRow` mid-pattern) → general worklet overload, **not**
+  a pattern-boundary DSP hitch. Underruns are just easier to hear at row 0
+  because many notes attack together.
+- `maxProcessMs` high everywhere → same: general worklet overload.
+- Both wrap stats and GPU `maxGpuMatrixMs` near zero while a hitch is still
+  visible → playhead snap / React commit. Re-test with `?renderer=html`.
+- Close DevTools before a second pass: worklet `console.log` + an open
+  inspector inflates `process()`. v14 no longer logs wraps from the audio thread.
 
 Diagnostics are off unless requested; the timing code costs two
 `performance.now()` calls per quantum only when enabled.

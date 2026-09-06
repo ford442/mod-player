@@ -13,8 +13,9 @@ import {
   NATIVE_BRIDGE_LATENCY_RING_SEC,
 } from '../../utils/nativeClockAnchor';
 import { isNativeLegacyAudioContext } from '../../utils/audioEngineSelection';
+import { hasProjectMConsumer } from '../../utils/audioDiagOptions';
 import { broadcastPcmBlock } from '../../utils/projectMBridge';
-import { publishPcmBlock } from '../../utils/pcmBus';
+import { pcmBusHasSubscribers, publishPcmBlock, setPcmDemandListener } from '../../utils/pcmBus';
 import { workletPatternToMatrix } from '../../audio-worklet/NativePatternReader';
 import { moduleBytesFromFileData, wireMasterOutput } from './masterGraph';
 import type { AudioGraphCallbacks, AudioGraphConfig, AudioGraphRefs } from './types';
@@ -47,8 +48,17 @@ export async function startNativePlayback(
 
     engine.setVolume(config.volume);
     engine.setLoop(config.isLooping);
+    // Match the JS worklet: windowed sinc 8 is too heavy for realtime at wraps.
+    engine.setInterpolationLength(4);
 
     engine.removeAllListeners();
+    const syncPcmCapture = (wanted: boolean) => {
+      engine.setPcmCapture(wanted || hasProjectMConsumer());
+    };
+    syncPcmCapture(pcmBusHasSubscribers());
+    setPcmDemandListener((wanted) => {
+      syncPcmCapture(wanted);
+    });
 
     let bridgeEstablished = false;
     let bridgeLatencySec = 0;

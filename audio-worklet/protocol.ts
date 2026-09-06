@@ -113,6 +113,12 @@ const audioDiagMessageSchema = z.object({
   order: nonNegInt,
   row: nonNegInt,
   audioTime: finiteNumber.optional(),
+  /** Quantum that set maxProcessMs in this window (not necessarily the wrap). */
+  slowMs: finiteNumber.optional(),
+  slowOrder: nonNegInt.optional(),
+  slowRow: nonNegInt.optional(),
+  pcmEnabled: z.boolean().optional(),
+  audioLite: z.boolean().optional(),
 });
 
 export const workletToMainMessageSchema = z.discriminatedUnion('type', [

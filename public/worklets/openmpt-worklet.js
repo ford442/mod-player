@@ -363,6 +363,9 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
     this._diagWrapMaxMs = 0;
     this._diagWrapCount = 0;
     this._diagWrapOverruns = 0;
+    this._diagSlowMs = 0;
+    this._diagSlowOrder = 0;
+    this._diagSlowRow = 0;
   }
 
   /** High-resolution clock for diagnostics.
@@ -791,10 +794,16 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
 
       this._diagQuanta++;
       this._diagSumMs += elapsedMs;
-      if (elapsedMs > this._diagMaxMs) this._diagMaxMs = elapsedMs;
+      if (elapsedMs > this._diagMaxMs) {
+        this._diagMaxMs = elapsedMs;
+        this._diagSlowMs = elapsedMs;
+        this._diagSlowOrder = order;
+        this._diagSlowRow = rowInt;
+      }
       if (elapsedMs > budgetMs) this._diagOverruns++;
       if (wrapped) {
-        console.log(`[Worklet] WRAPPED: rowInt=${rowInt} < _prevRowInt=${this._prevRowInt}, elapsedMs=${elapsedMs.toFixed(2)}, budgetMs=${budgetMs.toFixed(2)}`);
+        // Do not console.log here — DevTools I/O on the audio thread inflates
+        // process() and makes wrap hitches look worse than they are.
         this._diagWrapCount++;
         if (elapsedMs > this._diagWrapMaxMs) this._diagWrapMaxMs = elapsedMs;
         if (elapsedMs > budgetMs) this._diagWrapOverruns++;
@@ -813,6 +822,11 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
           wrapOverruns: this._diagWrapOverruns,
           order,
           row: rowInt,
+          slowMs: this._diagSlowMs,
+          slowOrder: this._diagSlowOrder,
+          slowRow: this._diagSlowRow,
+          pcmEnabled: !!this._projectmPcmEnabled,
+          audioLite: !!this._audioLite,
           audioTime,
         });
         this._resetAudioDiag();

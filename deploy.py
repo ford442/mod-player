@@ -36,6 +36,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 import zipfile
 from pathlib import Path
 from typing import Optional
@@ -367,7 +368,15 @@ def build_zip(build_path: Path, skip_sizes=None) -> bytes:
             if is_html:
                 raw = file.read_bytes()
                 digest = hashlib.sha256(raw).hexdigest()[:16]
-                stamped = raw.rstrip() + f"\n<!-- xasm-deploy:{digest} -->\n".encode("utf-8")
+                # Vite 8-char hashes keep the body the same length. A fixed-width
+                # stamp does too, so pad until the payload differs from remote.
+                stamp = f"\n<!-- xasm-deploy:{digest}:{int(time.time())} -->\n"
+                stamped = raw.rstrip() + stamp.encode("utf-8")
+                remote_size = (skip_sizes or {}).get(rel_s)
+                pad = 1
+                while remote_size is not None and len(stamped) == remote_size:
+                    stamped = raw.rstrip() + stamp.encode("utf-8") + (b" " * pad) + b"\n"
+                    pad += 1
                 zf.writestr(rel_s, stamped)
                 print(f"  + {rel} (stamped {len(stamped)} bytes, sha {digest})")
                 continue

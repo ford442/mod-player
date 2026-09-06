@@ -38,7 +38,8 @@ export function mergeAudioDiag(
   prev: AudioDiagSnapshot | undefined,
   msg: WorkletAudioDiagMessage,
 ): AudioDiagSnapshot {
-  return {
+  const slowMs = msg.slowMs ?? msg.maxProcessMs;
+  const next: AudioDiagSnapshot = {
     budgetMs: msg.budgetMs,
     quanta: msg.quanta,
     avgProcessMs: msg.avgProcessMs,
@@ -53,6 +54,13 @@ export function mergeAudioDiag(
     wrapOverruns: (prev?.wrapOverruns ?? 0) + msg.wrapOverruns,
     order: msg.order,
     row: msg.row,
-    updatedAt: performance.now(),
+    sessionMaxProcessMs: Math.max(prev?.sessionMaxProcessMs ?? 0, msg.maxProcessMs),
+    updatedAt: typeof performance !== 'undefined' ? performance.now() : 0,
   };
+  if (slowMs > 0) next.lastSlowMs = slowMs;
+  if (msg.slowOrder != null) next.lastSlowOrder = msg.slowOrder;
+  if (msg.slowRow != null) next.lastSlowRow = msg.slowRow;
+  if (msg.pcmEnabled != null) next.pcmEnabled = msg.pcmEnabled;
+  if (msg.audioLite != null) next.audioLite = msg.audioLite;
+  return next;
 }

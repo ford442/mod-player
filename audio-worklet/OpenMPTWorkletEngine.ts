@@ -18,7 +18,6 @@
 
 import type {
     WorkletPositionData,
-    WorkletPatternData,
     WorkletModuleMetadata,
     EngineState,
     EngineEventMap,
@@ -30,9 +29,10 @@ import { decodePositionInfo } from './positionInfoLayout';
 import {
     installNativeAwJsModuleRewrite,
     resolveCreateOpenMPTModule,
+    resolveEmscriptenRegisterAudioObject,
     withNativeWebAssembly,
+    withPreservedMainThreadTimers,
 } from './resolveNativeFactory';
-import { readPatternDataFromNative } from './NativePatternReader';
 
 // ── Public constants ─────────────────────────────────────────────────
 
@@ -130,7 +130,8 @@ export class OpenMPTWorkletEngine extends MiniEventEmitter<EngineEventMap> {
     private state: EngineState = 'uninitialized';
     private pollTimer: ReturnType<typeof setInterval> | null = null;
     private lastRow = -1;
-    private lastPatternOrder = -1;
+    /** When true, copy PCM out of the C++ ring each poll (pcmBus / Project-M). */
+    private pcmCapture = false;
     private basePath: string;
     /** SharedArrayBuffer provided at construction (signals ring-buffer bridge intent). */
     private sharedOutputBuffer: SharedArrayBuffer | null;
@@ -183,11 +184,13 @@ export class OpenMPTWorkletEngine extends MiniEventEmitter<EngineEventMap> {
                 throw new Error('Failed to load Emscripten module factory');
             }
 
-            this.module = await withNativeWebAssembly(() =>
-                createModule({
-                    wasmBasePath: this.basePath,
-                    locateFile: (path: string) => `${this.basePath}${path}`,
-                } as Partial<EmscriptenOpenMPTModule>),
+            this.module = await withPreservedMainThreadTimers(() =>
+                withNativeWebAssembly(() =>
+                    createModule({
+                        wasmBasePath: this.basePath,
+                        locateFile: (path: string) => `${this.basePath}${path}`,
+                    } as Partial<EmscriptenOpenMPTModule>),
+                ),
             );
 
             installNativeAwJsModuleRewrite(this.basePath);
@@ -221,16 +224,13 @@ export class OpenMPTWorkletEngine extends MiniEventEmitter<EngineEventMap> {
         if (legacy) {
             result = this.module._init_audio(ctx.sampleRate || 0);
         } else {
-            const register = this.module.emscriptenRegisterAudioObject
-                ?? (globalThis as unknown as {
-                    emscriptenRegisterAudioObject?: (obj: AudioContext) => number;
-                }).emscriptenRegisterAudioObject;
-            if (typeof register !== 'function') {
+            const register = resolveEmscriptenRegisterAudioObject(this.module);
+            if (!register) {
                 throw new Error(
                     'emscriptenRegisterAudioObject is not exported — rebuild native with AUDIO_WORKLET runtime methods',
                 );
             }
-            const handle = register.call(this.module, ctx);
+            const handle = register(ctx);
             const initWithCtx = this.module._init_audio_with_context;
             if (typeof initWithCtx !== 'function') {
                 throw new Error('_init_audio_with_context missing from native WASM');
@@ -435,6 +435,11 @@ export class OpenMPTWorkletEngine extends MiniEventEmitter<EngineEventMap> {
     /** Set loop mode. */
     setLoop(loop: boolean): void {
         this.module?._set_loop(loop ? 1 : 0);
+    }
+
+    /** Enable/disable the 16 ms HEAPF32 PCM copy (off unless a consumer exists). */
+    setPcmCapture(enabled: boolean): void {
+        this.pcmCapture = enabled;
     }
 
     /** Mute or unmute one tracker channel (libopenmpt interactive). */
@@ -661,17 +666,12 @@ export class OpenMPTWorkletEngine extends MiniEventEmitter<EngineEventMap> {
                     return;
                 }
 
-                // Attach pattern data when the order (pattern) changes
-                if (data.currentOrder !== this.lastPatternOrder) {
-                    this.lastPatternOrder = data.currentOrder;
-                    const patternData = this.readPatternData(data.currentPattern, data.numChannels);
-                    if (patternData) {
-                        data.patternData = patternData;
-                    }
-                }
-
+                // Pattern matrices are extracted once at module load
+                // (parseModuleWithNative). Do not walk cells here — that was
+                // rows×channels×6 WASM calls on the shared heap at every order
+                // change, concurrent with the audio thread mixer.
                 this.emit('position', data);
-                this.emitPcmChunk(data.sampleRate);
+                if (this.pcmCapture) this.emitPcmChunk(data.sampleRate);
 
                 // Detect row change for higher-frequency updates
                 if (data.currentRow !== this.lastRow) {
@@ -722,11 +722,6 @@ export class OpenMPTWorkletEngine extends MiniEventEmitter<EngineEventMap> {
             sampleRate,
             samplesPerChannel: frames,
         };
-    }
-
-    private readPatternData(patternIndex: number, numChannels: number): WorkletPatternData | null {
-        if (!this.module) return null;
-        return readPatternDataFromNative(this.module, patternIndex, numChannels);
     }
 
     /**

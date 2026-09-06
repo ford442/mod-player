@@ -35,8 +35,15 @@ export interface CellsUploadOptions {
   onParityError?: (message: string) => void;
 }
 
+export interface CellsUploadTimings {
+  path: 'compute' | 'cpu';
+  packMs: number;
+  computeMs: number;
+}
+
 export interface CellsUploadResult {
   buffer: GPUBuffer;
+  timings: CellsUploadTimings;
 }
 
 export function uploadCellsBuffer(options: CellsUploadOptions): CellsUploadResult {
@@ -55,7 +62,9 @@ export function uploadCellsBuffer(options: CellsUploadOptions): CellsUploadResul
   const useCompute = !liteMode && isHighPrec && computeState && canUseComputePath(matrix);
 
   if (useCompute) {
+    const packStart = performance.now();
     const rawPacked = packPatternMatrixComputeInput(matrix, padTopChannel);
+    const packMs = performance.now() - packStart;
     const rawBuffer = pool.track(
       createBufferWithData(device, rawPacked.packedData, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST),
       'matrix',
@@ -63,10 +72,12 @@ export function uploadCellsBuffer(options: CellsUploadOptions): CellsUploadResul
     const numRows = matrix?.numRows ?? DEFAULT_ROWS;
     const rawChannels = matrix?.numChannels ?? DEFAULT_CHANNELS;
     const numChannels = padTopChannel ? rawChannels + 1 : rawChannels;
+    const computeStart = performance.now();
     const buffer = pool.track(
       runNoteDurationCompute(device, computeState, rawBuffer, numRows, numChannels, padTopChannel),
       'matrix',
     );
+    const computeMs = performance.now() - computeStart;
     pool.destroyTracked(rawBuffer);
 
     if (import.meta.env.DEV && options.onParityError) {
@@ -83,11 +94,13 @@ export function uploadCellsBuffer(options: CellsUploadOptions): CellsUploadResul
       })();
     }
 
-    return { buffer };
+    return { buffer, timings: { path: 'compute', packMs, computeMs } };
   }
 
   const packFunc = isHighPrec ? packPatternMatrixHighPrecision : packPatternMatrix;
+  const packStart = performance.now();
   const { packedData } = packFunc(matrix, padTopChannel);
+  const packMs = performance.now() - packStart;
   const buffer = pool.acquireBuffer('cells', packedData.byteLength, CELLS_USAGE, (buf) => {
     device.queue.writeBuffer(buf, 0, packedData.buffer, packedData.byteOffset, packedData.byteLength);
   }, 'matrix');
@@ -96,7 +109,7 @@ export function uploadCellsBuffer(options: CellsUploadOptions): CellsUploadResul
     void buffer;
   }
 
-  return { buffer };
+  return { buffer, timings: { path: 'cpu', packMs, computeMs: 0 } };
 }
 
 export interface ExtendedBuffersState {

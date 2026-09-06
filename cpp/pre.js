@@ -5,13 +5,20 @@
  * configuration for the AudioWorklet build.
  */
 
-// Polyfill timers for Emscripten inside AudioWorklet (setTimeout is missing
-// and sometimes causes crashes when compiled code tries to use it).
-globalThis.setTimeout = function(callback, delay) {
-    Promise.resolve().then(callback); // Execute as a microtask
-    return 0;
-};
-globalThis.clearTimeout = function() {};
+// Polyfill timers only when the host has none (legacy AudioWorklet scopes).
+// Chrome 116+ already provides setTimeout in AudioWorkletGlobalScope, and this
+// file is also --pre-js'd into the MAIN-THREAD glue. Unconditionally replacing
+// window.setTimeout with a delay-ignoring microtask breaks:
+//   - JS worklet addModule timeouts after a native init
+//   - Emscripten AUDIO_WORKLET / WASM_WORKER startup
+// See docs/WORKLET_AUDIO_BUG.md (setTimeout polyfill).
+if (typeof globalThis.setTimeout !== 'function') {
+    globalThis.setTimeout = function (callback) {
+        Promise.resolve().then(callback);
+        return 0;
+    };
+    globalThis.clearTimeout = function () {};
+}
 
 // Ensure Module exists
 if (typeof Module === 'undefined') Module = {};

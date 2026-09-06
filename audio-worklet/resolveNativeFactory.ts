@@ -67,6 +67,41 @@ export function installNativeAwJsModuleRewrite(basePath: string): void {
   proto.__xasm1AwRewrite = true;
 }
 
+/**
+ * Native --pre-js used to replace window.setTimeout with a delay-ignoring
+ * microtask. Keep the real timers around createModule() so JS worklet fallback
+ * and addModule timeouts still work if an old glue file loads.
+ */
+export async function withPreservedMainThreadTimers<T>(fn: () => Promise<T>): Promise<T> {
+  const setTimeoutFn = globalThis.setTimeout;
+  const clearTimeoutFn = globalThis.clearTimeout;
+  const setIntervalFn = globalThis.setInterval;
+  const clearIntervalFn = globalThis.clearInterval;
+  try {
+    return await fn();
+  } finally {
+    if (globalThis.setTimeout !== setTimeoutFn) globalThis.setTimeout = setTimeoutFn;
+    if (globalThis.clearTimeout !== clearTimeoutFn) globalThis.clearTimeout = clearTimeoutFn;
+    if (globalThis.setInterval !== setIntervalFn) globalThis.setInterval = setIntervalFn;
+    if (globalThis.clearInterval !== clearIntervalFn) globalThis.clearInterval = clearIntervalFn;
+  }
+}
+
+export function resolveEmscriptenRegisterAudioObject(
+  moduleObj: { emscriptenRegisterAudioObject?: (obj: AudioContext | AudioNode) => number } | null | undefined,
+  globalObj: Record<string, unknown> = globalThis as unknown as Record<string, unknown>,
+): ((obj: AudioContext | AudioNode) => number) | null {
+  const fromMod = moduleObj?.emscriptenRegisterAudioObject;
+  if (typeof fromMod === 'function') {
+    return fromMod.bind(moduleObj);
+  }
+  const fromGlobal = globalObj['emscriptenRegisterAudioObject'];
+  if (typeof fromGlobal === 'function') {
+    return fromGlobal as (obj: AudioContext | AudioNode) => number;
+  }
+  return null;
+}
+
 export function resolveCreateOpenMPTModule(
   ns: Record<string, unknown> | null | undefined,
   globalObj: Record<string, unknown> = globalThis as unknown as Record<string, unknown>,

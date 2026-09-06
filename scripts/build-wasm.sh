@@ -465,8 +465,13 @@ emcc \
     -sEXPORT_ES6=1 \
     -sEXPORT_NAME="createOpenMPTModule" \
     --pre-js "$CPP_DIR/pre.js" \
+    --post-js "$CPP_DIR/post.js" \
     \
     -o "$OUTPUT_DIR/${OUTPUT_BASENAME}.js"
+
+# emcc 3.1.51 may still omit AUDIO_WORKLET helpers on Module and/or emit the
+# old main-thread setTimeout smash — normalize the glue in place.
+node "$SCRIPT_DIR/patch-native-glue.mjs" "$OUTPUT_DIR/${OUTPUT_BASENAME}.js"
 
 # ── Post-build safety checks ─────────────────────────────────────────
 if [[ ! -f "$OUTPUT_DIR/${OUTPUT_BASENAME}.js" ]]; then

@@ -9,6 +9,7 @@ describe('#412 native ctl / mute / one-module parse', () => {
   const wrapper = readFileSync(join(ROOT, 'cpp/openmpt_wrapper.cpp'), 'utf8');
   const worklet = readFileSync(join(ROOT, 'cpp/worklet_processor.cpp'), 'utf8');
   const engine = readFileSync(join(ROOT, 'audio-worklet/OpenMPTWorkletEngine.ts'), 'utf8');
+  const nativePlay = readFileSync(join(ROOT, 'hooks/audioGraph/startNativePlayback.ts'), 'utf8');
   const moduleActions = readFileSync(join(ROOT, 'hooks/libOpenMPT/createModuleActions.ts'), 'utf8');
   const runInit = readFileSync(join(ROOT, 'hooks/libOpenMPT/runInit.ts'), 'utf8');
   const buildSh = readFileSync(join(ROOT, 'scripts/build-wasm.sh'), 'utf8');
@@ -38,6 +39,14 @@ describe('#412 native ctl / mute / one-module parse', () => {
     expect(engine).toContain('OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH');
   });
 
+  it('does not walk pattern cells on the 16 ms poll (shared-heap stall at order change)', () => {
+    const pollIdx = engine.indexOf('private startPolling()');
+    expect(pollIdx).toBeGreaterThan(0);
+    const pollBody = engine.slice(pollIdx, engine.indexOf('private stopPolling()'));
+    expect(pollBody).not.toContain('readPatternData');
+    expect(pollBody).toContain('if (this.pcmCapture)');
+  });
+
   it('skips wasm2js parser worker when native parse is active', () => {
     expect(moduleActions).toContain("activeEngineRef.current === 'native-worklet'");
     expect(moduleActions).toContain('!useNativeParse && !isLibReadyForParse');
@@ -54,5 +63,13 @@ describe('#412 native ctl / mute / one-module parse', () => {
     expect(buildSh).toContain("'_set_render_param'");
     expect(buildSh).toContain("'_ctl_set_text'");
     expect(buildSh).toContain('g_module on the AudioWorklet thread + g_metaModule');
+    expect(buildSh).toContain('--post-js');
+    expect(buildSh).toContain('patch-native-glue.mjs');
+  });
+
+  it('native play uses realtime interpolation 4 and demand-driven PCM capture', () => {
+    expect(nativePlay).toContain('setInterpolationLength(4)');
+    expect(nativePlay).toContain('setPcmCapture');
+    expect(nativePlay).toContain('setPcmDemandListener');
   });
 });

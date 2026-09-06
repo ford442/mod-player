@@ -279,6 +279,10 @@ describe('#354 production source invariants', () => {
     expect(workletSource).toMatch(/type:\s*WT\.audioDiag/);
     expect(useAudioGraph).toContain('postSetAudioDiag(isAudioDiagEnabled())');
     expect(useAudioGraph).toContain('__AUDIO_DIAG__');
+    // Audio-thread console I/O with DevTools open inflates process() and
+    // makes wrap hitches look worse than they are.
+    expect(workletSource).not.toMatch(/console\.log\(`\[Worklet\] WRAPPED/);
+    expect(workletSource).toContain('slowRow');
   });
 
   it('play path uses shouldForceWorkletModuleLoad + shouldAcceptWorkletLoadedAck', () => {

@@ -20,6 +20,7 @@ import {
   isAudioDiagEnabled,
   mergeAudioDiag,
 } from '../../utils/audioDiagOptions';
+import { seedPatternDiag } from '../../utils/patternBoundaryDiag';
 import { dispatchWorkletToMainMessage } from '../../audio-worklet/jsWorkletDispatch';
 import { moduleBytesFromFileData, wireMasterOutput } from './masterGraph';
 import { runScriptProcessorFallback } from './scriptProcessorFallback';
@@ -347,6 +348,7 @@ export async function startJsWorkletPlayback(
       }
     });
     node.port.postMessage(postSetAudioDiag(isAudioDiagEnabled()));
+    seedPatternDiag();
 
     const moduleBuf = moduleBytesFromFileData(refs.fileDataRef.current);
     if (moduleBuf) {
