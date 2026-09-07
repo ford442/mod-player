@@ -21,6 +21,8 @@ export interface PlayerUiState {
    * Default off so play-only UX is unchanged.
    */
   editMode: boolean;
+  /** Full-viewport performance stage — hides chrome, shows only the visualizer + minimal transport. */
+  stageMode: boolean;
   /** 1-based instrument index, or null when nothing selected. */
   selectedInstrumentIndex: number | null;
   /** 1-based sample index, or null when nothing selected. */
@@ -39,6 +41,8 @@ export interface PlayerUiState {
   setShowLocalLibrary: (show: boolean) => void;
   setEditMode: (editMode: boolean) => void;
   toggleEditMode: () => void;
+  setStageMode: (stageMode: boolean) => void;
+  toggleStageMode: () => void;
   setSelectedInstrumentIndex: (index: number | null) => void;
   setSelectedSampleIndex: (index: number | null) => void;
   clearInstrumentSelection: () => void;
@@ -58,6 +62,7 @@ export const usePlayerUiStore = create<PlayerUiState>((set) => ({
   showLibraryBrowser: false,
   showLocalLibrary: false,
   editMode: false,
+  stageMode: readLocalStorage<boolean>('xasm1_stage_mode', false),
   selectedInstrumentIndex: null,
   selectedSampleIndex: null,
   setTheme: (theme) => {
@@ -89,6 +94,17 @@ export const usePlayerUiStore = create<PlayerUiState>((set) => ({
   setShowLocalLibrary: (showLocalLibrary) => set({ showLocalLibrary }),
   setEditMode: (editMode) => set({ editMode }),
   toggleEditMode: () => set((state) => ({ editMode: !state.editMode })),
+  setStageMode: (stageMode) => {
+    writeLocalStorage('xasm1_stage_mode', stageMode);
+    set((state) => ({ stageMode, editMode: stageMode ? false : state.editMode }));
+  },
+  toggleStageMode: () => {
+    set((state) => {
+      const stageMode = !state.stageMode;
+      writeLocalStorage('xasm1_stage_mode', stageMode);
+      return { stageMode, editMode: stageMode ? false : state.editMode };
+    });
+  },
   setSelectedInstrumentIndex: (selectedInstrumentIndex) => set({ selectedInstrumentIndex }),
   setSelectedSampleIndex: (selectedSampleIndex) => set({ selectedSampleIndex }),
   clearInstrumentSelection: () => set({ selectedInstrumentIndex: null, selectedSampleIndex: null }),

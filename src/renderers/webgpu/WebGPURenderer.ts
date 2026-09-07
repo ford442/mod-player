@@ -24,6 +24,7 @@ import {
 import type { BloomPostProcessor } from '../../../utils/bloomPostProcessor';
 import type React from 'react';
 import { GpuResourcePool } from '../../../utils/gpuResourcePool';
+import { LruCache } from '../../../utils/lruCache';
 import { GpuLifecycle } from '../../../utils/gpuLifecycle';
 import { generateEmptyInstrumentPalette, MAX_INSTRUMENT_PALETTE_SIZE } from '../../../utils/instrumentPalette';
 import {
@@ -52,6 +53,7 @@ import {
   assertCellsBufferSize,
   CELLS_USAGE,
   type ExtendedBuffersState,
+  type CellsUploadTimings,
 } from './matrixBuffers';
 import {
   renderWebGPUFrame,
@@ -81,6 +83,9 @@ export interface WebGPURendererDeps {
   oscTextureRef?: React.MutableRefObject<GPUTexture | null> | undefined;
   bloomProcessorRef?: React.MutableRefObject<BloomPostProcessor | null> | undefined;
 }
+
+/** Max distinct patterns to keep GPU buffers resident for (see WebGPURenderer.cellsCache). */
+const CELLS_CACHE_LIMIT = 12;
 
 export class WebGPURenderer {
   device: GPUDevice | null = null;
@@ -125,6 +130,19 @@ export class WebGPURenderer {
   private gpuSpectrumWanted = false;
   /** Skip DURA/cells rebuild when the same pattern is already on the GPU. */
   private lastCellsKey = '';
+  /**
+   * Previously-built cells buffers, keyed by cellsKey, so revisiting a pattern
+   * (loops, repeated verse/chorus order slots) skips the CPU repack + GPU DURA
+   * compute dispatch that otherwise runs, unthrottled, on every order change.
+   * Cleared on shader change (`releaseShaderResources` — same 'matrix' pool
+   * scope as these buffers) and whenever a new module finishes loading, so a
+   * coincidentally matching cellsKey from a previous song is never reused.
+   */
+  private readonly cellsCache = new LruCache<string, { buffer: GPUBuffer; timings: CellsUploadTimings }>(
+    CELLS_CACHE_LIMIT,
+    (_key, entry) => this.pool?.destroyTracked(entry.buffer),
+  );
+  private wasModuleLoaded = false;
   private timestamps: GpuTimestampRecorder | null = null;
 
   private readonly scratch: FrameDrawScratch = {
@@ -265,6 +283,7 @@ export class WebGPURenderer {
 
     const pool = this.pool;
     if (pool && !pool.isDisposed) {
+      this.cellsCache.clear();
       if (this.cellsBuffer) {
         pool.releaseBuffer('cells', this.cellsBuffer, CELLS_USAGE);
       }
@@ -690,6 +709,14 @@ export class WebGPURenderer {
     const pool = this.pool;
     if (!device || !pool || pool.isDisposed) return;
 
+    // A fresh module load invalidates every cached pattern buffer — a
+    // coincidentally matching cellsKey from the previous song must never be
+    // reused (different pattern content, same patternIndex/numRows/numChannels).
+    if (params.isModuleLoaded && !this.wasModuleLoaded) {
+      this.cellsCache.clear();
+    }
+    this.wasModuleLoaded = params.isModuleLoaded;
+
     const rawChannels = matrix?.numChannels ?? DEFAULT_CHANNELS;
     const numChannels = params.padTopChannel ? rawChannels + 1 : rawChannels;
     if (numChannels <= 0) return;
@@ -705,26 +732,37 @@ export class WebGPURenderer {
     const diagOn = isPatternDiagEnabled();
     const t0 = diagOn ? performance.now() : 0;
 
-    if (this.cellsBuffer) {
-      pool.releaseBuffer('cells', this.cellsBuffer, CELLS_USAGE);
-      this.cellsBuffer = null;
+    // Note: the previous cellsBuffer is intentionally NOT released here — it
+    // stays alive in cellsCache (keyed by its own cellsKey) so revisiting that
+    // pattern later skips the repack/DURA-compute below. Eviction happens in
+    // storeCellsCache (LRU cap) or clearCellsCache (shader change / new module).
+    const cached = this.cellsCache.get(cellsKey);
+    let buffer: GPUBuffer;
+    let timings: CellsUploadTimings;
+    if (cached && pool.isAlive(cached.buffer)) {
+      buffer = cached.buffer;
+      timings = { ...cached.timings, packMs: 0, computeMs: 0 };
+      this.cellsCache.touch(cellsKey);
+    } else {
+      const uploaded = uploadCellsBuffer({
+        device,
+        pool,
+        shaderFile: this.shaderFile,
+        matrix: params.matrix,
+        padTopChannel: params.padTopChannel,
+        liteMode: this.liteMode,
+        computeState: this.computeState,
+        onParityError: (msg) => {
+          this.callbacks.onDebugInfo?.((prev) => ({
+            ...prev,
+            errors: [...prev.errors.filter((e) => !e.startsWith('DURA-PARITY')), msg],
+          }));
+        },
+      });
+      buffer = uploaded.buffer;
+      timings = uploaded.timings;
+      this.cellsCache.set(cellsKey, { buffer, timings: uploaded.timings });
     }
-
-    const { buffer, timings } = uploadCellsBuffer({
-      device,
-      pool,
-      shaderFile: this.shaderFile,
-      matrix: params.matrix,
-      padTopChannel: params.padTopChannel,
-      liteMode: this.liteMode,
-      computeState: this.computeState,
-      onParityError: (msg) => {
-        this.callbacks.onDebugInfo?.((prev) => ({
-          ...prev,
-          errors: [...prev.errors.filter((e) => !e.startsWith('DURA-PARITY')), msg],
-        }));
-      },
-    });
     this.cellsBuffer = buffer;
     this.lastCellsKey = cellsKey;
 
