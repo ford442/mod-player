@@ -55,7 +55,9 @@ export const getWorkletUrl = (): string => {
   // v12: auto audio-lite for >16ch modules; playhead quantum compensation on main thread
   // v13: setChannelMute / setRenderParam / ctlSetText protocol stubs (#412)
   // v14: audioDiag records slow-quantum row (no audio-thread console.log)
-  const WORKLET_VERSION = '14';
+  // v15: drop get_time_at_position from process() (GetLength grew with order);
+  //      O(1) row fraction; wrap-N / callback-gap / heap diag
+  const WORKLET_VERSION = '15';
   const url = `${base}worklets/openmpt-worklet.js?v=${WORKLET_VERSION}`;
 
   return url;

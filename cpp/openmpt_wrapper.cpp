@@ -63,8 +63,10 @@ bool OpenMPTModule::load(const uint8_t* data, size_t length) {
         std::fprintf(stderr, "[OpenMPTModule] interactive interface unavailable (mute will no-op)\n");
     }
 
-    // Default: windowed sinc (matches offline WAV export). Overridable via setRenderParam.
-    openmpt_module_set_render_param(mod_, OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH, 8);
+    // Default: cubic/windowed-sinc 4 — matches realtime JS worklet. Length 8
+    // (max sinc) is too heavy at pattern wraps; offline WAV export can still
+    // override via setRenderParam.
+    openmpt_module_set_render_param(mod_, OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH, 4);
 
     // Default: infinite loop
     openmpt_module_set_repeat_count(mod_, -1);
@@ -165,20 +167,8 @@ void OpenMPTModule::fillPositionInfo(PositionInfo& out) const {
         out.currentPattern = openmpt_module_get_order_pattern(mod_, out.currentOrder);
     }
 
-    // Fractional row via time-at-position markers (same approach as JS worklet)
-    if (out.currentRow >= 0 && out.currentOrder >= 0) {
-        const double t0 = openmpt_module_get_time_at_position(mod_, out.currentOrder, out.currentRow);
-        double t1 = openmpt_module_get_time_at_position(mod_, out.currentOrder, out.currentRow + 1);
-        if (!(t1 > t0)) {
-            t1 = openmpt_module_get_time_at_position(mod_, out.currentOrder + 1, 0);
-        }
-        if (t1 > t0) {
-            const double frac = (posSec - t0) / (t1 - t0);
-            if (frac >= 0.0 && frac < 1.0) {
-                out.rowFraction = static_cast<float>(out.currentRow) + static_cast<float>(frac);
-            }
-        }
-    }
+    // Integer rowFraction: GetLength/time-at-row is O(song) and must stay off
+    // the audio thread. Main thread extrapolates with BPM.
 
     // Per-channel VU
     getChannelVU(out.channelVU, MAX_VU_CHANNELS);

@@ -283,6 +283,8 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
         log('Playback paused');
       } else if (type === MT.seek) {
         this.hasEnded = false;
+        this._fracRowInt = -1;
+        this._rowStartPosSec = 0;
         if (this.modulePtr && this.lib) {
           this.lib._openmpt_module_set_position_order_row(
             this.modulePtr, msg.order, msg.row
@@ -305,6 +307,8 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
       } else if (type === MT.setAudioDiag) {
         this._audioDiag = !!msg.enabled;
         this._resetAudioDiag();
+        this._diagSessionWrapProcessMs = [];
+        this._lastProcessTime = -1;
       } else if (type === MT.setChannelMute) {
         // Stub for #416 live mute on the JS engine; native uses KEEPAlives.
       } else if (type === MT.setRenderParam) {
@@ -340,6 +344,15 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
     this._lastOrder = 0;
     this._lastBpm = 125;
     this._lastSpeed = 6;
+    /** O(1) in-row fraction: snapshot positionSeconds when rowInt changes. */
+    this._fracRowInt = -1;
+    this._rowStartPosSec = 0;
+    /** Session heap-view recreates (HEAPF32.buffer identity changed). */
+    this._heapMoves = 0;
+    /** Audio clock of the previous process() — callback-gap diag. */
+    this._lastProcessTime = -1;
+    /** First N wrap windows' maxProcessMs (session; not reset per report). */
+    this._diagSessionWrapProcessMs = [];
     this._lpBass = 0;
     this._lpMid = 0;
     this._prevBass = 0;
@@ -354,7 +367,7 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
     }
   }
 
-  /** Clear the ?audioDiag=1 accumulators (called on enable/disable and after each report). */
+  /** Clear the ?audioDiag=1 window accumulators (after each report). Session wrap history stays. */
   _resetAudioDiag() {
     this._diagQuanta = 0;
     this._diagSumMs = 0;
@@ -366,6 +379,7 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
     this._diagSlowMs = 0;
     this._diagSlowOrder = 0;
     this._diagSlowRow = 0;
+    this._diagMaxGapMs = 0;
   }
 
   /** High-resolution clock for diagnostics.
@@ -552,6 +566,8 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
       this._heapBuffer = null;
       this._leftHeapView = null;
       this._rightHeapView = null;
+      this._fracRowInt = -1;
+      this._rowStartPosSec = 0;
 
       // OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH:
       // 8 = highest-quality sinc (too heavy for wasm2js AudioWorklet on XM
@@ -626,40 +642,32 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
     let bpm = this._lastBpm;
     let speed = this._lastSpeed;
     let rowFraction = rowInt;
+    let playingChannels = -1;
 
-    if (shouldReportPosition || diagOn) {
+    if (shouldReportPosition) {
       // Capture *before* read_float_stereo so the row matches this quantum's
       // first sample (main-thread prediction anchors on audioTime).
+      // Do NOT query time-at-row here — libopenmpt GetLength walks the song
+      // up to (order, row), so cost grew across wraps until audio garbled.
       rowInt = lib._openmpt_module_get_current_row(mod);
-      if (shouldReportPosition) {
-        order = lib._openmpt_module_get_current_order(mod);
-        posSec = lib._openmpt_module_get_position_seconds(mod);
-        bpm = lib._openmpt_module_get_current_estimated_bpm(mod);
-        speed = lib._openmpt_module_get_current_speed(mod);
-        this._lastOrder = order;
-        this._lastBpm = bpm;
-        this._lastSpeed = speed;
+      order = lib._openmpt_module_get_current_order(mod);
+      posSec = lib._openmpt_module_get_position_seconds(mod);
+      bpm = lib._openmpt_module_get_current_estimated_bpm(mod);
+      speed = lib._openmpt_module_get_current_speed(mod);
+      this._lastOrder = order;
+      this._lastBpm = bpm;
+      this._lastSpeed = speed;
 
-        if (typeof lib._openmpt_module_get_time_at_position === 'function') {
-          const t0 = lib._openmpt_module_get_time_at_position(mod, order, rowInt);
-          let t1 = lib._openmpt_module_get_time_at_position(mod, order, rowInt + 1);
-          // End of pattern: try first row of next order
-          if (!(t1 > t0)) {
-            t1 = lib._openmpt_module_get_time_at_position(mod, order + 1, 0);
-          }
-          if (t1 > t0 && Number.isFinite(t0) && Number.isFinite(t1) && Number.isFinite(posSec)) {
-            const frac = (posSec - t0) / (t1 - t0);
-            if (Number.isFinite(frac)) {
-              rowFraction = rowInt + Math.min(0.999, Math.max(0, frac));
-            } else {
-              rowFraction = rowInt;
-            }
-          } else {
-            rowFraction = rowInt;
-          }
-        } else {
-          rowFraction = rowInt;
-        }
+      if (rowInt !== this._fracRowInt) {
+        this._rowStartPosSec = posSec;
+        this._fracRowInt = rowInt;
+      }
+      const rowsPerSec = Math.max(0.25, (Math.max(bpm, 1) / 60) * 4);
+      const frac = (posSec - this._rowStartPosSec) * rowsPerSec;
+      rowFraction = rowInt + Math.min(0.999, Math.max(0, Number.isFinite(frac) ? frac : 0));
+
+      if (diagOn && typeof lib._openmpt_module_get_current_playing_channels === 'function') {
+        playingChannels = lib._openmpt_module_get_current_playing_channels(mod);
       }
     }
 
@@ -690,6 +698,7 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
       this._heapBuffer = heapBuf;
       this._leftHeapView = new Float32Array(heapBuf, this.leftBufPtr, this.maxFrames);
       this._rightHeapView = new Float32Array(heapBuf, this.rightBufPtr, this.maxFrames);
+      this._heapMoves++;
     }
     const leftSrc = this._leftHeapView;
     const rightSrc = this._rightHeapView;
@@ -748,8 +757,7 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
     }
 
     // VU + audio-reactive SAB + position post only at report rate (~60 Hz).
-    // get_time_at_position / per-channel VU / IIR band split are the dominant
-    // extra cost on multi-channel XM at pattern starts when run every quantum.
+    // Per-channel VU / IIR band split must not run every quantum.
     if (shouldReportPosition) {
       const numCh = lib._openmpt_module_get_num_channels(mod);
       const n = Math.min(numCh, 32);
@@ -789,8 +797,11 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
       const elapsedMs = this._diagNow() - diagStart;
       // Deadline for this callback: one quantum of wall time.
       const budgetMs = (numSamples / sampleRate) * 1000;
-      // Row went backwards (63→0): a pattern boundary / wrap.
-      const wrapped = this._prevRowInt >= 0 && rowInt < this._prevRowInt;
+      if (this._lastProcessTime >= 0) {
+        const gapMs = (audioTime - this._lastProcessTime) * 1000 - budgetMs;
+        if (gapMs > this._diagMaxGapMs) this._diagMaxGapMs = gapMs;
+      }
+      this._lastProcessTime = audioTime;
 
       this._diagQuanta++;
       this._diagSumMs += elapsedMs;
@@ -801,16 +812,22 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
         this._diagSlowRow = rowInt;
       }
       if (elapsedMs > budgetMs) this._diagOverruns++;
+
+      // Wrap detection is report-rate only (no extra get_current_row per quantum).
+      const wrapped = shouldReportPosition
+        && this._prevRowInt >= 0
+        && rowInt < this._prevRowInt;
       if (wrapped) {
-        // Do not console.log here — DevTools I/O on the audio thread inflates
-        // process() and makes wrap hitches look worse than they are.
         this._diagWrapCount++;
         if (elapsedMs > this._diagWrapMaxMs) this._diagWrapMaxMs = elapsedMs;
         if (elapsedMs > budgetMs) this._diagWrapOverruns++;
+        if (this._diagSessionWrapProcessMs.length < 16) {
+          this._diagSessionWrapProcessMs.push(this._diagMaxMs);
+        }
       }
 
       if (shouldReportPosition && this._diagQuanta > 0) {
-        this.port.postMessage({
+        const diagMsg = {
           type: WT.audioDiag,
           budgetMs,
           quanta: this._diagQuanta,
@@ -828,11 +845,17 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
           pcmEnabled: !!this._projectmPcmEnabled,
           audioLite: !!this._audioLite,
           audioTime,
-        });
+          wrapProcessMs: this._diagSessionWrapProcessMs.slice(),
+          maxCallbackGapMs: this._diagMaxGapMs,
+          heapBytes: heapBuf.byteLength,
+          heapMoves: this._heapMoves,
+        };
+        if (playingChannels >= 0) diagMsg.playingChannels = playingChannels;
+        this.port.postMessage(diagMsg);
         this._resetAudioDiag();
       }
     }
-    if (shouldReportPosition || diagOn) {
+    if (shouldReportPosition) {
       this._prevRowInt = rowInt;
     }
 

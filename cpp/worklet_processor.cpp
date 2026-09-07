@@ -57,7 +57,7 @@ static char g_ctlVal[256];
 // Per-channel mute bits (32 = MAX_VU_CHANNELS). Main writes; audio thread applies.
 static std::atomic<uint32_t> g_muteBits{0};
 static uint32_t g_appliedMuteBits = 0;
-static int g_interpLength = 8;
+static int g_interpLength = 4;
 static int g_lastExtraRenderParam = -1;
 static int32_t g_lastExtraRenderValue = 0;
 // Render pause: silence output without AudioContext.suspend() (shared-context safe).
@@ -258,25 +258,22 @@ EM_BOOL audio_process_cb(
     // Prefer context sample rate when available (Emscripten sets 48000 typically)
     const int sr = g_renderSampleRate > 0 ? g_renderSampleRate : 48000;
 
-    // ── Pre-render position snapshot (mirrors JS worklet quantum tag) ──
-    // audioFramesRendered is the frame count at the *start* of this quantum so
-    // workletTime = frames/sampleRate tags the first output sample.
-    g_module.fillPositionInfo(g_positionInfo);
-    g_positionInfo.audioFramesRendered = g_audioFramesRendered;
-    g_positionInfo.sampleRate = sr;
-
+    // Position/VU fill is ~60 Hz (mirrors shouldFillNativePosition). Cheap
+    // getCurrentRow detects row changes; fillPositionInfo (VU sweep) stays
+    // inside the gate — never GetLength/time-at-row on this thread.
     {
-        const int currentRow = g_positionInfo.currentRow;
         static double timeSinceLastReport = 0.0;
-        // Coalesce ready-flag lightly (~8 ms) but always refresh the struct above.
+        const int currentRow = g_module.getCurrentRow();
         const bool rowChanged = (currentRow != g_lastReportedRow);
-        const bool timeThreshold = (timeSinceLastReport >= 0.008);
+        const bool timeThreshold = (timeSinceLastReport >= (1.0 / 60.0));
         if (rowChanged || timeThreshold) {
+            g_module.fillPositionInfo(g_positionInfo);
+            g_positionInfo.audioFramesRendered = g_audioFramesRendered;
+            g_positionInfo.sampleRate = sr;
             g_lastReportedRow = currentRow;
             timeSinceLastReport = 0.0;
             g_positionReady.store(1, std::memory_order_release);
         }
-        // Accumulate wall quantum even when flag not raised (next threshold)
         timeSinceLastReport += 128.0 / static_cast<double>(sr);
     }
 
@@ -685,7 +682,7 @@ void cleanup_audio() {
     }
     g_muteBits.store(0, std::memory_order_relaxed);
     g_appliedMuteBits = 0;
-    g_interpLength = 8;
+    g_interpLength = 4;
     g_lastExtraRenderParam = -1;
     g_ctlKey[0] = '\0';
     g_ctlVal[0] = '\0';
