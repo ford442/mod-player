@@ -354,13 +354,44 @@ costs remained and are now gated:
 
 | Work | Before | Now |
 |------|--------|-----|
-| `get_time_at_position` (up to 3 WASM calls, for `rowFraction`) | every quantum | only when a position report is due (~60 Hz) |
+| `get_time_at_position` (GetLength walk to order/row) | every quantum, then ~60 Hz | **never** on the audio thread (v15) — main thread extrapolates row fraction |
 | Per-channel VU sweep (up to 32 WASM calls) | every quantum | sampled at report rate; last snapshot reused in between |
 | `projectm-pcm` interleave + `postMessage` (~88/s) | always | only when a Project-M consumer exists (popup/iframe) |
 
 The report gate is the hoisted `shouldReportPosition` boolean — it drives both
 the report-only work and the `postMessage` itself, so they cannot drift apart.
-`tests/workletRegressionGuards.test.ts` asserts all three.
+`tests/workletRegressionGuards.test.ts` asserts VU stays gated and that
+`process()` contains **no** `_openmpt_module_get_time_at_position`.
+
+### Progressive wrap garble — GetLength leftover (2026-09)
+
+After v9–v14, `?audioDiag=1` showed wrap `process()` cheap (`wrapOverruns: 0`)
+while **mid-pattern** quanta spiked 4–8 ms (`lastSlowRow` 20 / 34) and audio
+got worse on each pattern wrap until it garbled. HTML renderer and both
+engines (JS + native) were affected — not GPU / React.
+
+`openmpt_module_get_time_at_position` runs OpenMPT `GetLength`: it
+**re-simulates the module to the target order/row**. Cost scales with song
+position. The JS worklet still called it 2–3× per ~60 Hz report; native
+called it **every quantum** inside `fillPositionInfo`.
+
+| Change | Detail |
+|--------|--------|
+| JS worklet v15 | Delete time-at-row from `process()`; O(1) fraction from `positionSeconds` + BPM; `WORKLET_VERSION` 15 |
+| Native `fillPositionInfo` | Integer `rowFraction` only; no GetLength |
+| Native `audio_process_cb` | Position/VU fill at ~60 Hz (plus cheap `getCurrentRow` for row changes) |
+| Native PCM ring | Allocated on `setPcmCapture(true)` / legacy bridge, not on every attach |
+| Native play | Skip `engine.load` when parse already loaded the same bytes |
+| Interp default | C++ load / `g_interpLength` **4** (was 8 until play() overrode) |
+
+Ruled out by production timings: GPU `updateMatrix` (0.4–1.2 ms), React
+`order-change-ui` (0.19 ms), wrap-quantum DSP, PCM stream, native 16 ms
+pattern cell walk (already removed).
+
+`?audioDiag=1` now also records `wrapProcessMs[]` (wrap-0 vs wrap-N),
+`maxCallbackGapMs` (late callback, not in-callback `Date.now()`),
+`heapBytes` / `heapMoves`, and `playingChannels` on the report path only.
+Listen tests should still use diag **off**.
 
 ### `?audioDiag=1` — process() timing
 
@@ -372,7 +403,9 @@ each position report. Read it from the console while playing:
 window.__AUDIO_DIAG__
 // { budgetMs, quanta, avgProcessMs, maxProcessMs, overruns,
 //   totalQuanta, totalOverruns,
-//   wraps, wrapMaxProcessMs, wrapOverruns, order, row, updatedAt }
+//   wraps, wrapMaxProcessMs, wrapOverruns, wrapProcessMs,
+//   maxCallbackGapMs, heapBytes, heapMoves, playingChannels,
+//   order, row, updatedAt }
 ```
 
 `wrap*` fields cover only the quanta where the row counter went backwards — a
@@ -393,6 +426,8 @@ Interpretation:
   visible → playhead snap / React commit. Re-test with `?renderer=html`.
 - Close DevTools before a second pass: worklet `console.log` + an open
   inspector inflates `process()`. v14 no longer logs wraps from the audio thread.
+- `wrapProcessMs[n]` climbing vs `[0]` → leftover growth (mixer / heap / GetLength).
+  `maxCallbackGapMs` high with cheap `maxProcessMs` → scheduling hole, not DSP.
 
 Diagnostics are off unless requested; the timing code costs two
-`performance.now()` calls per quantum only when enabled.
+`Date.now()` calls per quantum only when enabled.

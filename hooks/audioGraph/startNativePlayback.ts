@@ -8,6 +8,9 @@ import {
   nativePositionToInput,
 } from '../../utils/workletPositionAdapter';
 import {
+  shouldReloadNativeModule,
+} from '../../utils/workletAudioLifecycle';
+import {
   createNativeClockAnchor,
   NATIVE_BRIDGE_LATENCY_MEDIASTREAM_SEC,
   NATIVE_BRIDGE_LATENCY_RING_SEC,
@@ -42,8 +45,12 @@ export async function startNativePlayback(
 
     const buf = moduleBytesFromFileData(refs.fileDataRef.current);
     if (buf) {
-      console.log('[PLAY] Sending module data to native engine:', buf.byteLength, 'bytes');
-      await engine.load(buf);
+      if (shouldReloadNativeModule(engine.getLoadedFingerprint(), buf)) {
+        console.log('[PLAY] Sending module data to native engine:', buf.byteLength, 'bytes');
+        await engine.load(buf);
+      } else {
+        console.log('[PLAY] Native module already loaded — skipping duplicate parse');
+      }
     }
 
     engine.setVolume(config.volume);
@@ -64,6 +71,7 @@ export async function startNativePlayback(
     let bridgeLatencySec = 0;
 
     if (legacy) {
+      engine.ensurePcmRing();
       bridgeLatencySec = NATIVE_BRIDGE_LATENCY_MEDIASTREAM_SEC;
       const wasmSAB = engine.getWasmMemory();
       const ringByteOffset = engine.getRingBufByteOffset();

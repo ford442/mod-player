@@ -214,12 +214,7 @@ describe('#354 production source invariants', () => {
   });
 
   it('report-only WASM queries stay behind the 60 Hz gate', () => {
-    // get_time_at_position (up to 3 WASM calls) only feeds rowFraction in the
-    // position post — it must not run on every quantum.
-    expect(workletSource).toMatch(
-      /if\s*\(\s*shouldReportPosition\s*\)\s*\{[\s\S]*?typeof lib\._openmpt_module_get_time_at_position/,
-    );
-    // Same for the up-to-32 per-channel VU queries.
+    // VU (up to 32 WASM calls) only feeds the position post — not every quantum.
     const vuBlock = workletSource.match(
       /if\s*\(\s*shouldReportPosition\s*\)\s*\{[\s\S]*?_openmpt_module_get_current_channel_vu_mono/,
     );
@@ -283,6 +278,9 @@ describe('#354 production source invariants', () => {
     // makes wrap hitches look worse than they are.
     expect(workletSource).not.toMatch(/console\.log\(`\[Worklet\] WRAPPED/);
     expect(workletSource).toContain('slowRow');
+    expect(workletSource).toContain('wrapProcessMs');
+    expect(workletSource).toContain('maxCallbackGapMs');
+    expect(workletSource).toContain('heapMoves');
   });
 
   it('play path uses shouldForceWorkletModuleLoad + shouldAcceptWorkletLoadedAck', () => {
@@ -304,35 +302,39 @@ describe('#354 production source invariants', () => {
 
   it('lifecycle module exports the #354 helpers used by tests and hooks', () => {
     expect(lifecycle).toContain('shouldReportWorkletPosition');
+    expect(lifecycle).toContain('shouldFillNativePosition');
+    expect(lifecycle).toContain('shouldReloadNativeModule');
     expect(lifecycle).toContain('shouldAcceptWorkletLoadedAck');
     expect(lifecycle).toContain('shouldForceWorkletModuleLoad');
     expect(lifecycle).toContain('planJsWorkletHotReloadPlay');
     expect(lifecycle).toContain('WORKLET_POSITION_REPORT_INTERVAL_SEC');
   });
 
-  it('WORKLET_VERSION stays cache-busted at ≥ 12 after playhead/sync tightening', () => {
+  it('WORKLET_VERSION stays cache-busted at ≥ 15 after GetLength removal', () => {
     const m = useWorkletLoader.match(/WORKLET_VERSION\s*=\s*['"](\d+)['"]/);
     expect(m, 'WORKLET_VERSION must be defined').toBeTruthy();
-    expect(Number(m![1])).toBeGreaterThanOrEqual(12);
+    expect(Number(m![1])).toBeGreaterThanOrEqual(15);
   });
 
-  it('gates get_time_at_position + channel VU behind the position throttle (XM stutter)', () => {
-    // Expensive helpers must not run every quantum — only inside the ~60 Hz report block.
+  it('process() never calls get_time_at_position (GetLength grew with order)', () => {
+    const processIdx = workletSource.lastIndexOf('process(_inputs, outputs, _parameters)');
+    expect(processIdx).toBeGreaterThan(0);
+    const processBody = workletSource.slice(processIdx);
+    expect(processBody).not.toContain('_openmpt_module_get_time_at_position');
+    expect(workletSource).not.toContain('_openmpt_module_get_time_at_position');
+  });
+
+  it('gates channel VU behind the position throttle (XM stutter)', () => {
     const throttleIdx = workletSource.indexOf(
       'currentTime - this.lastPositionReportTime >= this.positionReportInterval',
     );
     expect(throttleIdx).toBeGreaterThan(0);
     const afterThrottle = workletSource.slice(throttleIdx);
-    expect(afterThrottle).toContain('_openmpt_module_get_time_at_position');
     expect(afterThrottle).toContain('_openmpt_module_get_current_channel_vu_mono');
 
-    // Before the throttle check in process(), those calls must not appear.
     const processIdx = workletSource.lastIndexOf('process(_inputs, outputs, _parameters)');
     const processBody = workletSource.slice(processIdx, throttleIdx);
-    expect(processBody).not.toContain('_openmpt_module_get_time_at_position');
     expect(processBody).not.toContain('_openmpt_module_get_current_channel_vu_mono');
-    // Non-report quanta must also skip bpm/speed/order/position_seconds queries
-    // (only last-reported values are reused) so pattern-boundary quanta free budget.
     expect(processBody).not.toContain('_openmpt_module_get_current_estimated_bpm');
     expect(processBody).not.toContain('_openmpt_module_get_current_speed');
   });

@@ -75,6 +75,47 @@ export function shouldReportWorkletPosition(
 }
 
 /**
+ * Native audio thread: fill PositionInfo + VU at the same ~60 Hz cadence as
+ * JS worklet position reports. C++ `audio_process_cb` mirrors this with
+ * `timeSinceLastReport >= 1/60` (plus cheap getCurrentRow for row changes).
+ */
+export function shouldFillNativePosition(
+  currentTime: number,
+  lastFillTime: number,
+  intervalSec: number = WORKLET_POSITION_REPORT_INTERVAL_SEC,
+): boolean {
+  return shouldReportWorkletPosition(currentTime, lastFillTime, intervalSec);
+}
+
+// ── Native duplicate-load skip ──────────────────────────────────────────────
+
+export interface NativeModuleFingerprint {
+  byteLength: number;
+  sig: number;
+}
+
+/** Cheap identity for "already parsed this module into the native engine". */
+export function nativeModuleFingerprint(data: ArrayBuffer): NativeModuleFingerprint {
+  const u8 = new Uint8Array(data);
+  let sig = u8.byteLength;
+  const n = Math.min(64, u8.length);
+  for (let i = 0; i < n; i++) {
+    sig = (Math.imul(sig, 33) + (u8[i] ?? 0) + (u8[u8.length - 1 - i] ?? 0)) | 0;
+  }
+  return { byteLength: u8.byteLength, sig };
+}
+
+/** True when play() must call engine.load again (fingerprint missing or differs). */
+export function shouldReloadNativeModule(
+  loaded: NativeModuleFingerprint | null | undefined,
+  incoming: ArrayBuffer,
+): boolean {
+  if (!loaded) return true;
+  const next = nativeModuleFingerprint(incoming);
+  return loaded.byteLength !== next.byteLength || loaded.sig !== next.sig;
+}
+
+/**
  * Simulate N audio quanta and count how many position reports the throttle allows.
  * Uses a fake audio clock (no real sleep) — quantumSec defaults to 128/44100 ≈ 350 Hz.
  */

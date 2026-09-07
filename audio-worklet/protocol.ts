@@ -119,6 +119,13 @@ const audioDiagMessageSchema = z.object({
   slowRow: nonNegInt.optional(),
   pcmEnabled: z.boolean().optional(),
   audioLite: z.boolean().optional(),
+  /** First wrap windows' maxProcessMs (session; wrap-0 vs wrap-N). */
+  wrapProcessMs: z.array(finiteNumber).optional(),
+  /** Worst scheduling gap in this window (late callback), ms. */
+  maxCallbackGapMs: finiteNumber.optional(),
+  heapBytes: nonNegInt.optional(),
+  heapMoves: nonNegInt.optional(),
+  playingChannels: nonNegInt.optional(),
 });
 
 export const workletToMainMessageSchema = z.discriminatedUnion('type', [

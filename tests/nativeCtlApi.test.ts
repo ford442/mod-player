@@ -18,7 +18,7 @@ describe('#412 native ctl / mute / one-module parse', () => {
     expect(wrapper).toContain('openmpt_module_ext_create_from_memory');
     expect(wrapper).toContain('set_channel_mute_status');
     expect(wrapper).toContain('openmpt_module_ctl_set_text');
-    expect(wrapper).toContain('OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH, 8');
+    expect(wrapper).toContain('OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH, 4');
   });
 
   it('exports mute / render / ctl KEEPAlives with audio-thread atomics', () => {
@@ -71,5 +71,32 @@ describe('#412 native ctl / mute / one-module parse', () => {
     expect(nativePlay).toContain('setInterpolationLength(4)');
     expect(nativePlay).toContain('setPcmCapture');
     expect(nativePlay).toContain('setPcmDemandListener');
+    expect(nativePlay).toContain('shouldReloadNativeModule');
+    expect(nativePlay).toContain('ensurePcmRing');
+  });
+
+  it('does not call GetLength/time-at-row on the audio thread', () => {
+    expect(wrapper).not.toContain('openmpt_module_get_time_at_position');
+    expect(worklet).not.toContain('openmpt_module_get_time_at_position');
+  });
+
+  it('gates fillPositionInfo behind the ~60 Hz / row-change coalesce', () => {
+    const cbIdx = worklet.indexOf('audio_process_cb(');
+    expect(cbIdx).toBeGreaterThan(0);
+    const renderIdx = worklet.indexOf('readInterleavedStereo', cbIdx);
+    const fillIdx = worklet.indexOf('g_module.fillPositionInfo', cbIdx);
+    expect(fillIdx).toBeGreaterThan(cbIdx);
+    expect(fillIdx).toBeLessThan(renderIdx);
+    const gate = worklet.slice(cbIdx, fillIdx);
+    expect(gate).toContain('timeSinceLastReport');
+    expect(gate).toContain('1.0 / 60.0');
+    const attachIdx = engine.indexOf('async attachAudioContext');
+    const ensureIdx = engine.indexOf('ensurePcmRing');
+    expect(attachIdx).toBeGreaterThan(0);
+    expect(ensureIdx).toBeGreaterThan(attachIdx);
+    const attachBody = engine.slice(attachIdx, ensureIdx);
+    expect(attachBody).not.toContain('this.allocatePcmRing()');
+    expect(engine).toContain('setPcmCapture');
+    expect(engine).toContain('ensurePcmRing');
   });
 });

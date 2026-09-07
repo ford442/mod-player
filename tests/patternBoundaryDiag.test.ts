@@ -139,6 +139,53 @@ describe('mergeAudioDiag', () => {
     expect(second.wraps).toBe(1);
     expect(second.lastSlowRow).toBe(0);
   });
+
+  it('accumulates wrap-N history and callback-gap / heap fields', () => {
+    const first = mergeAudioDiag(undefined, {
+      type: WORKLET_TO_MAIN.audioDiag,
+      budgetMs: 2.9,
+      quanta: 6,
+      avgProcessMs: 1.2,
+      maxProcessMs: 3,
+      overruns: 0,
+      wraps: 1,
+      wrapMaxProcessMs: 3,
+      wrapOverruns: 0,
+      order: 0,
+      row: 0,
+      wrapProcessMs: [3],
+      maxCallbackGapMs: 1.5,
+      heapBytes: 16_777_216,
+      heapMoves: 1,
+      playingChannels: 4,
+    });
+    expect(first.wrapProcessMs).toEqual([3]);
+    expect(first.maxCallbackGapMs).toBe(1.5);
+    expect(first.heapBytes).toBe(16_777_216);
+    expect(first.playingChannels).toBe(4);
+
+    const second = mergeAudioDiag(first, {
+      type: WORKLET_TO_MAIN.audioDiag,
+      budgetMs: 2.9,
+      quanta: 6,
+      avgProcessMs: 1.1,
+      maxProcessMs: 4,
+      overruns: 0,
+      wraps: 1,
+      wrapMaxProcessMs: 4,
+      wrapOverruns: 0,
+      order: 1,
+      row: 0,
+      wrapProcessMs: [3, 4],
+      maxCallbackGapMs: 0.2,
+      heapMoves: 1,
+      playingChannels: 4,
+    });
+    expect(second.wrapProcessMs).toEqual([3, 4]);
+    expect(second.wrapProcessMs?.[0]).toBe(3);
+    expect(second.maxCallbackGapMs).toBe(1.5);
+    expect(second.heapMoves).toBe(1);
+  });
 });
 
 describe('pattern-boundary diag is wired into the order-change path', () => {

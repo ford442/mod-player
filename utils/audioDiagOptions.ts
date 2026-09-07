@@ -10,6 +10,9 @@
 import type { AudioDiagSnapshot } from '../types';
 import type { WorkletAudioDiagMessage } from '../audio-worklet/protocol';
 
+/** Keep the first N wrap-window maxProcessMs values (wrap-0 vs wrap-N). */
+export const AUDIO_DIAG_WRAP_HISTORY = 16;
+
 /** ?audioDiag=1 (or localStorage xasm1_audio_diag=1) enables worklet timing. */
 export function isAudioDiagEnabled(): boolean {
   try {
@@ -62,5 +65,22 @@ export function mergeAudioDiag(
   if (msg.slowRow != null) next.lastSlowRow = msg.slowRow;
   if (msg.pcmEnabled != null) next.pcmEnabled = msg.pcmEnabled;
   if (msg.audioLite != null) next.audioLite = msg.audioLite;
+  const wrapHist = msg.wrapProcessMs ?? prev?.wrapProcessMs;
+  if (wrapHist && wrapHist.length > 0) {
+    next.wrapProcessMs = wrapHist.length > AUDIO_DIAG_WRAP_HISTORY
+      ? wrapHist.slice(0, AUDIO_DIAG_WRAP_HISTORY)
+      : wrapHist.slice();
+  }
+  if (msg.maxCallbackGapMs != null) {
+    next.maxCallbackGapMs = Math.max(prev?.maxCallbackGapMs ?? 0, msg.maxCallbackGapMs);
+  } else if (prev?.maxCallbackGapMs != null) {
+    next.maxCallbackGapMs = prev.maxCallbackGapMs;
+  }
+  if (msg.heapBytes != null) next.heapBytes = msg.heapBytes;
+  else if (prev?.heapBytes != null) next.heapBytes = prev.heapBytes;
+  if (msg.heapMoves != null) next.heapMoves = msg.heapMoves;
+  else if (prev?.heapMoves != null) next.heapMoves = prev.heapMoves;
+  if (msg.playingChannels != null) next.playingChannels = msg.playingChannels;
+  else if (prev?.playingChannels != null) next.playingChannels = prev.playingChannels;
   return next;
 }

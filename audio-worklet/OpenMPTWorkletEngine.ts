@@ -33,6 +33,10 @@ import {
     withNativeWebAssembly,
     withPreservedMainThreadTimers,
 } from './resolveNativeFactory';
+import {
+    nativeModuleFingerprint,
+    type NativeModuleFingerprint,
+} from '../utils/workletAudioLifecycle';
 
 // ── Public constants ─────────────────────────────────────────────────
 
@@ -140,6 +144,8 @@ export class OpenMPTWorkletEngine extends MiniEventEmitter<EngineEventMap> {
     /** True after attachAudioContext / legacy _init_audio. */
     private audioAttached = false;
     private attachedContext: AudioContext | null = null;
+    /** Fingerprint of the last successful load() — skip duplicate parse on play. */
+    private loadedFingerprint: NativeModuleFingerprint | null = null;
 
     /**
      * @param options  Construction options, including an optional basePath and
@@ -249,10 +255,16 @@ export class OpenMPTWorkletEngine extends MiniEventEmitter<EngineEventMap> {
             throw new Error('Native AudioWorklet thread failed to start');
         }
 
-        this.allocatePcmRing();
+        // PCM ring is demand-driven (setPcmCapture / legacy bridge). Writing
+        // it every quantum on the audio thread contended with the mixer.
         this.startPolling();
         this.audioAttached = true;
         this.attachedContext = ctx;
+    }
+
+    /** Allocate the WASM PCM ring if missing (capture or legacy bridge). */
+    ensurePcmRing(): void {
+        this.allocatePcmRing();
     }
 
     private allocatePcmRing(): void {
@@ -323,6 +335,7 @@ export class OpenMPTWorkletEngine extends MiniEventEmitter<EngineEventMap> {
                 initialBpm: 0,
             };
 
+            this.loadedFingerprint = nativeModuleFingerprint(data);
             this.emit('loaded', metadata);
             return metadata;
         } catch (err) {
@@ -440,6 +453,12 @@ export class OpenMPTWorkletEngine extends MiniEventEmitter<EngineEventMap> {
     /** Enable/disable the 16 ms HEAPF32 PCM copy (off unless a consumer exists). */
     setPcmCapture(enabled: boolean): void {
         this.pcmCapture = enabled;
+        if (enabled) this.allocatePcmRing();
+    }
+
+    /** Last successful load fingerprint, or null if nothing has been loaded. */
+    getLoadedFingerprint(): NativeModuleFingerprint | null {
+        return this.loadedFingerprint;
     }
 
     /** Mute or unmute one tracker channel (libopenmpt interactive). */
@@ -638,6 +657,7 @@ export class OpenMPTWorkletEngine extends MiniEventEmitter<EngineEventMap> {
         this.stopPolling();
         this.module?._cleanup_audio();
         this.module = null;
+        this.loadedFingerprint = null;
         this.setState('uninitialized');
         this.removeAllListeners();
     }

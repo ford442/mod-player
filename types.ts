@@ -244,6 +244,16 @@ export interface AudioDiagSnapshot {
   lastSlowRow?: number;
   pcmEnabled?: boolean;
   audioLite?: boolean;
+  /**
+   * First wrap windows' process() max (ms). Compare wrap-0 vs wrap-N for
+   * mixer/GetLength growth. Capped (16).
+   */
+  wrapProcessMs?: number[];
+  /** Worst scheduling gap since enable (callback arrived late), ms. */
+  maxCallbackGapMs?: number;
+  heapBytes?: number;
+  heapMoves?: number;
+  playingChannels?: number;
   /** performance.now() of the last report received on the main thread. */
   updatedAt: number;
 }

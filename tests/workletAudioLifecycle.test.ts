@@ -13,6 +13,9 @@ import {
   shouldForceWorkletModuleLoad,
   shouldPostInitLib,
   shouldReportWorkletPosition,
+  shouldFillNativePosition,
+  shouldReloadNativeModule,
+  nativeModuleFingerprint,
   WORKLET_POSITION_REPORT_INTERVAL_SEC,
 } from '../utils/workletAudioLifecycle';
 import {
@@ -203,6 +206,19 @@ describe('workletAudioLifecycle (#354 pure helpers smoke)', () => {
     expect(WORKLET_POSITION_REPORT_INTERVAL_SEC).toBeCloseTo(1 / 60, 12);
     expect(shouldReportWorkletPosition(0, Number.NEGATIVE_INFINITY)).toBe(true);
     expect(shouldReportWorkletPosition(0.001, 0)).toBe(false);
+    expect(shouldFillNativePosition(0, Number.NEGATIVE_INFINITY)).toBe(true);
+    expect(shouldFillNativePosition(0.001, 0)).toBe(false);
+    expect(shouldFillNativePosition(1 / 60, 0)).toBe(true);
+  });
+
+  it('native fingerprint skip avoids a second parse of the same bytes', () => {
+    const a = new Uint8Array([1, 2, 3, 4, 5]).buffer;
+    const b = new Uint8Array([1, 2, 3, 4, 5]).buffer;
+    const c = new Uint8Array([9, 2, 3, 4, 5]).buffer;
+    const fp = nativeModuleFingerprint(a);
+    expect(shouldReloadNativeModule(null, a)).toBe(true);
+    expect(shouldReloadNativeModule(fp, b)).toBe(false);
+    expect(shouldReloadNativeModule(fp, c)).toBe(true);
   });
 
   it('loaded-ack helper drops mismatched tokens', () => {
