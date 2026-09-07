@@ -119,7 +119,7 @@ export async function startAudioPlayback(
     console.log('[PLAY] AudioContext state:', ctx.state);
 
     // AUDIO-001 FIX COMPLETE: Log diagnostics
-    logWorkletDiagnostics(config.WORKLET_URL, ctx);
+    if (import.meta.env.DEV) logWorkletDiagnostics(config.WORKLET_URL, ctx);
 
     if (ctx.state === 'suspended') {
       console.log('[PLAY] Resuming suspended AudioContext...');

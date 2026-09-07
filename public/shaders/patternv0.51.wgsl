@@ -37,14 +37,15 @@ fn unpackDurationInfo(packedA: u32, packedB: u32) -> NoteDurationInfo {
 
 fn calculateSustainBrightness(info: NoteDurationInfo, baseIntensity: f32) -> f32 {
   if (info.duration <= 1u) { return baseIntensity; }
-  let progress = f32(info.rowOffset) / f32(info.duration);
   if (info.rowOffset == 0u) { return baseIntensity; }
-  let remaining = info.duration - info.rowOffset;
-  if (remaining <= 3u) {
-    let fadeFactor = f32(remaining) / 3.0;
-    return baseIntensity * (0.3 + 0.3 * fadeFactor);
-  }
-  return baseIntensity * (0.4 + 0.2 * (1.0 - progress));
+  let progress = clamp(f32(info.rowOffset) / f32(info.duration), 0.0, 1.0);
+  // Monotonic decay across the whole sustain — not just the last few rows —
+  // so a viewer can read "how much longer this note has" at a glance instead
+  // of seeing a flat mid-band that only changes right before cutoff. The
+  // eased falloff (pow > 1) stays brighter just after the trigger, then
+  // fades more steeply toward the note's end.
+  let decay = pow(1.0 - progress, 1.6);
+  return baseIntensity * (0.18 + 0.42 * decay);
 }
 fn pitchClassFromIndex(note: u32) -> f32 {
   if (note == 0u || note > NOTE_MAX) { return 0.0; }
@@ -528,28 +529,22 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     // DURA: Unpack note and duration info from new packed format
     let note = (in.packedA >> 24) & 255u;
     let instRaw = (in.packedA >> 16) & 255u;
-    let durationRaw = (in.packedA >> 8) & 255u;        // DURA: duration in rows
     let volPacked = in.packedA & 255u;                // DURA: packed volCmd/volVal
     
     let effCmd = (in.packedB >> 24) & 255u;           // DURA: effect command
     let effVal = (in.packedB >> 16) & 255u;           // DURA: effect value  
-    let durationFlags = (in.packedB >> 8) & 0x7Fu;    // DURA: rowOffset + isNoteOff
     let volCmdFull = in.packedB & 255u;               // DURA: full volume command
 
     // Unpack expression-only flag from bit 7 of inst field (EXPR-001)
     let isExpressionOnly = (instRaw & 128u) != 0u;
     let inst = instRaw & 127u;
-    
+
     // DURA: Reconstruct volume command from packed nibble
     let volCmd = (volPacked >> 4) << 4;
     let volVal = (volPacked & 0x0Fu) << 4;
 
     // DURA: Build duration info struct
-    var dInfo: NoteDurationInfo;
-    dInfo.duration = durationRaw;
-    if (dInfo.duration == 0u) { dInfo.duration = 1u; }
-    dInfo.rowOffset = durationFlags >> 1u;
-    dInfo.isNoteOff = (durationFlags & 1u) != 0u;
+    let dInfo = unpackDurationInfo(in.packedA, in.packedB);
 
     // AMBER-BLUE: Cell-type classification
     let isNoteOn   = (note > 0u && note < NOTE_OFF_MIN && dInfo.isTrigger);
@@ -592,7 +587,7 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
       if (isNoteOn) {
         midIntensity = calculateSustainBrightness(dInfo, 1.1 + bloom * 2.5);
       } else {
-        midIntensity = 0.32 + bloom * 0.35;
+        midIntensity = calculateSustainBrightness(dInfo, 0.32 + bloom * 0.35);
       }
       if (isMuted) { midIntensity *= 0.25; }
     } else if (isNoteOff) {

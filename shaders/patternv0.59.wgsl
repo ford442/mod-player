@@ -422,28 +422,22 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     // DURA: Unpack note and duration info from new packed format
     let note = (in.packedA >> 24) & 255u;
     let instRaw = (in.packedA >> 16) & 255u;
-    let durationRaw = (in.packedA >> 8) & 255u;        // DURA: duration in rows
     let volPacked = in.packedA & 255u;                // DURA: packed volCmd/volVal
     
     let effCmd = (in.packedB >> 24) & 255u;           // DURA: effect command
     let effVal = (in.packedB >> 16) & 255u;           // DURA: effect value  
-    let durationFlags = (in.packedB >> 8) & 0x7Fu;    // DURA: rowOffset + isNoteOff
     let volCmdFull = in.packedB & 255u;               // DURA: full volume command
 
     // Unpack expression-only flag from bit 7 of inst field (EXPR-001)
     let isExpressionOnly = (instRaw & 128u) != 0u;
     let inst = instRaw & 127u;
-    
+
     // DURA: Reconstruct volume command from packed nibble
     let volCmd = (volPacked >> 4) << 4;
     let volVal = (volPacked & 0x0Fu) << 4;
 
     // DURA: Build duration info struct
-    var dInfo: NoteDurationInfo;
-    dInfo.duration = durationRaw;
-    if (dInfo.duration == 0u) { dInfo.duration = 1u; }
-    dInfo.rowOffset = durationFlags >> 1u;
-    dInfo.isNoteOff = (durationFlags & 1u) != 0u;
+    let dInfo = unpackDurationInfo(in.packedA, in.packedB);
 
     // AMBER-BLUE: Cell-type classification
     let isNoteOn   = (note > 0u && note < NOTE_OFF_MIN && dInfo.isTrigger);
@@ -493,7 +487,7 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
       if (isNoteOn) {
         midIntensity = calculateSustainBrightness(dInfo, 1.1 + bloom * 2.5);
       } else {
-        midIntensity = 0.32 + bloom * 0.35;
+        midIntensity = calculateSustainBrightness(dInfo, 0.32 + bloom * 0.35);
       }
       if (isMuted) { midIntensity *= 0.25; }
     } else if (isNoteOff) {

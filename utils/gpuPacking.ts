@@ -280,7 +280,11 @@ export const calculateNoteDurations = (
       const note = cell.note || 0;
       const hasNote = note >= NOTE_MIN && note <= NOTE_MAX;
       const isNoteOff = note >= NOTE_OFF_MIN;
-      const isVolumeOff = cell.volCmd === 0xC0 && cell.volVal === 0;
+      // libopenmpt's VolumeCommand enum: VOLCMD_VOLUME = 1 (modcommand.h). A
+      // "Set Volume 0" in the volume column silences the note without a real
+      // note-off/cut event — volCmd is never the byte value 0xC0 in practice.
+      const VOLCMD_VOLUME = 1;
+      const isVolumeOff = cell.volCmd === VOLCMD_VOLUME && cell.volVal === 0;
 
       // Detect ECx (note cut after x ticks) — MOD/XM effect 'E' (cmd 14 or ASCII 69/'E')
       // with parameter upper nibble 0xC (values 0xC0–0xCF).

@@ -65,14 +65,15 @@ fn unpackDurationInfo(packedA: u32, packedB: u32) -> NoteDurationInfo {
 
 fn calculateSustainBrightness(info: NoteDurationInfo, baseIntensity: f32) -> f32 {
   if (info.duration <= 1u) { return baseIntensity; }
-  let progress = f32(info.rowOffset) / f32(info.duration);
   if (info.rowOffset == 0u) { return baseIntensity; }
-  let remaining = info.duration - info.rowOffset;
-  if (remaining <= 3u) {
-    let fadeFactor = f32(remaining) / 3.0;
-    return baseIntensity * (0.3 + 0.3 * fadeFactor);
-  }
-  return baseIntensity * (0.4 + 0.2 * (1.0 - progress));
+  let progress = clamp(f32(info.rowOffset) / f32(info.duration), 0.0, 1.0);
+  // Monotonic decay across the whole sustain — not just the last few rows —
+  // so a viewer can read "how much longer this note has" at a glance instead
+  // of seeing a flat mid-band that only changes right before cutoff. The
+  // eased falloff (pow > 1) stays brighter just after the trigger, then
+  // fades more steeply toward the note's end.
+  let decay = pow(1.0 - progress, 1.6);
+  return baseIntensity * (0.18 + 0.42 * decay);
 }
 fn pitchClassFromIndex(note: u32) -> f32 {
   if (note == 0u || note > NOTE_MAX) { return 0.0; }
@@ -549,12 +550,10 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   if (inButton > 0.5) {
     let note = (in.packedA >> 24) & 255u;
     let instRaw = (in.packedA >> 16) & 255u;
-    let durationRaw = (in.packedA >> 8) & 255u;
     let volPacked = in.packedA & 255u;
 
     let effCmd = (in.packedB >> 24) & 255u;
     let effVal = (in.packedB >> 16) & 255u;
-    let durationFlags = (in.packedB >> 8) & 0x7Fu;
     let volCmdFull = in.packedB & 255u;
 
     let isExpressionOnly = (instRaw & 128u) != 0u;
@@ -563,11 +562,7 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     let volCmd = (volPacked >> 4) << 4;
     let volVal = (volPacked & 0x0Fu) << 4;
 
-    var dInfo: NoteDurationInfo;
-    dInfo.duration = durationRaw;
-    if (dInfo.duration == 0u) { dInfo.duration = 1u; }
-    dInfo.rowOffset = durationFlags >> 1u;
-    dInfo.isNoteOff = (durationFlags & 1u) != 0u;
+    let dInfo = unpackDurationInfo(in.packedA, in.packedB);
 
     let isNoteOn   = (note > 0u && note < NOTE_OFF_MIN && dInfo.isTrigger);
     let isNoteOff  = (note >= NOTE_OFF_MIN);
@@ -616,10 +611,9 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
         midIntensity = calculateSustainBrightness(dInfo, 1.2 + bloom * 2.8) * (0.65 + 0.45 * volumeFactor);
       } else {
         let tailCol = vec3<f32>(0.12, 0.38, 0.55);
-        let fade = 1.0 - (f32(dInfo.rowOffset) / max(f32(dInfo.duration), 1.0)) * 0.35;
-        noteColor = mix(tailCol, noteColor * 0.45, 0.25);
+        noteColor = mix(tailCol, noteColor * 0.45, 0.55);
         let sustainPulse = 1.0 + 0.07 * sin(uniforms.timeSec * 3.0 + f32(in.row) * 0.4);
-        midIntensity = (0.14 + bloom * 0.12) * fade * (0.75 + 0.25 * volumeFactor) * sustainPulse;
+        midIntensity = calculateSustainBrightness(dInfo, 0.14 + bloom * 0.12) * (0.75 + 0.25 * volumeFactor) * sustainPulse;
       }
       if (isMuted) { midIntensity *= 0.25; }
     } else if (isNoteOff) {

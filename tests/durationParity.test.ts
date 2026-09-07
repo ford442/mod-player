@@ -118,11 +118,13 @@ describe('duration parity (DURA-001 CPU path)', () => {
     expect(c.rowOffset).toBe(0);
   });
 
-  it('T6: volume-off (C00) terminates note', () => {
+  it('T6: volume-off (Set Volume 0, VOLCMD_VOLUME=1) terminates note', () => {
+    // libopenmpt's VolumeCommand enum: VOLCMD_VOLUME = 1 (modcommand.h) — a
+    // real "Set Volume 0" cell, not the old (unreachable) 0xC0 byte value.
     const mat = makeMatrix(8, [[
       { note: 60 },
       {}, {},
-      { volCmd: 0xc0, volVal: 0 },
+      { volCmd: 1, volVal: 0 },
       {}, {}, {}, {},
     ]]);
 

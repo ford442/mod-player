@@ -27,6 +27,9 @@ const NOTE_OFF_MIN: u32   = 120u;
 const EFFECT_E_DECIMAL: u32 = 14u;
 const EFFECT_E_ASCII: u32   = 69u;
 const EFFECT_E_LOWER: u32   = 101u;
+// libopenmpt's VolumeCommand enum: VOLCMD_VOLUME = 1 (modcommand.h). Must
+// match utils/gpuPacking.ts's VOLCMD_VOLUME constant.
+const VOLCMD_VOLUME: u32 = 1u;
 
 // Maximum rows supported by this shader (IT format max = 1024).
 // If a pattern exceeds this, the CPU fallback must be used.
@@ -114,7 +117,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
         let hasNote     = note >= NOTE_MIN && note <= NOTE_MAX;
         let isNoteOff   = note >= NOTE_OFF_MIN;
-        let isVolumeOff = volCmd == 0xC0u && volVal == 0u;
+        let isVolumeOff = volCmd == VOLCMD_VOLUME && volVal == 0u;
         let effCut      = isEffectCut(effCmd, effVal);
 
         if (hasNote) {

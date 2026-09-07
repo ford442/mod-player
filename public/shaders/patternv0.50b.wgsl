@@ -36,14 +36,15 @@ fn unpackDurationInfo(packedA: u32, packedB: u32) -> NoteDurationInfo {
 
 fn calculateSustainBrightness(info: NoteDurationInfo, baseIntensity: f32) -> f32 {
   if (info.duration <= 1u) { return baseIntensity; }
-  let progress = f32(info.rowOffset) / f32(info.duration);
   if (info.rowOffset == 0u) { return baseIntensity; }
-  let remaining = info.duration - info.rowOffset;
-  if (remaining <= 3u) {
-    let fadeFactor = f32(remaining) / 3.0;
-    return baseIntensity * (0.3 + 0.3 * fadeFactor);
-  }
-  return baseIntensity * (0.4 + 0.2 * (1.0 - progress));
+  let progress = clamp(f32(info.rowOffset) / f32(info.duration), 0.0, 1.0);
+  // Monotonic decay across the whole sustain — not just the last few rows —
+  // so a viewer can read "how much longer this note has" at a glance instead
+  // of seeing a flat mid-band that only changes right before cutoff. The
+  // eased falloff (pow > 1) stays brighter just after the trigger, then
+  // fades more steeply toward the note's end.
+  let decay = pow(1.0 - progress, 1.6);
+  return baseIntensity * (0.18 + 0.42 * decay);
 }
 fn pitchClassFromIndex(note: u32) -> f32 {
   if (note == 0u || note > NOTE_MAX) { return 0.0; }

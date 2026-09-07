@@ -103,7 +103,7 @@ export async function runLibOpenMPTInit(deps: InitDeps): Promise<void> {
     console.log('[INIT] Testing AudioWorklet support...');
     try {
       const hasWorkletSupport = checkWorkletSupport();
-      logWorkletDiagnostics(WORKLET_URL);
+      if (import.meta.env.DEV) logWorkletDiagnostics(WORKLET_URL);
 
       if (hasWorkletSupport) {
         const fileAccessible = await verifyWorkletFile();
