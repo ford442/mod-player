@@ -37,7 +37,7 @@ describe('resolveCreateOpenMPTModule', () => {
 
 describe('resolveEmscriptenRegisterAudioObject', () => {
   it('prefers the method on the module object', () => {
-    const fn = (obj: AudioContext | AudioNode) => 7;
+    const fn = (_obj: AudioContext | AudioNode) => 7;
     const mod = { emscriptenRegisterAudioObject: fn };
     const resolved = resolveEmscriptenRegisterAudioObject(mod, {});
     expect(resolved).toBeTypeOf('function');
