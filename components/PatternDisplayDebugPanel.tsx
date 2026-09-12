@@ -64,10 +64,8 @@ export function PatternDisplayDebugPanel({
               className="ml-2 bg-[#111] border border-green-500/40 text-green-300 rounded px-1 py-0.5 text-[10px]"
             >
               <option value="webgpu">webgpu</option>
+              <option value="webgl2">webgl2</option>
               <option value="html">html (DOM grid)</option>
-              <option value="webgl2" disabled title="WebGL2 shader path deferred">
-                webgl2 (deferred)
-              </option>
             </select>
           </div>
           {typeof window !== 'undefined' && window.__WEBGPU_PROBE__ && !window.__WEBGPU_PROBE__.ok && (

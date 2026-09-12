@@ -96,8 +96,8 @@ python3 deploy.py    # Build + SFTP upload to production server
 
 | Backend | Entry | Use case |
 |---------|-------|----------|
-| `webgpu` | default | Production visuals (WGSL + bloom) — **required** for GPU viz this phase |
-| `webgl2` | deferred | GLSL reference path exists but is **not** auto-selected; `?renderer=webgl2` no-ops to WebGPU |
+| `webgpu` | default | Production visuals (WGSL + bloom) |
+| `webgl2` | `?renderer=webgl2` | Real GLSL reference session; also auto-selected when the WebGPU probe/device fails |
 | `html` | `?renderer=html` | DOM pattern grid (tracker UI), not a GLSL shader session |
 
 Toggle via debug panel (🔍), `localStorage.xasm1_pattern_renderer`, or `window.DEBUG_RENDERER`. WebGL2 debug: **Alt+D** cycles wireframe/UV/playhead modes (dev only).

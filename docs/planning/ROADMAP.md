@@ -49,7 +49,7 @@ Fix per #427: render both subtrees unconditionally in a structurally invariant o
 | P1 | [#413](https://github.com/ford442/mod-player/issues/413) | Compile `openmpt-worklet.js` / native-bridge from TypeScript (single protocol source). |
 | P1 | [#414](https://github.com/ford442/mod-player/issues/414) | Bus half **done** (`utils/pcmBus.ts` + `computeAnalysis.ts`, consumed by `frameDraw.ts` and both `start*Playback.ts`). Layout half structurally landed in `0f0019e` but behaviourally regressed — tracked as #427 above. Close this once #427 is green. |
 | P1 (reopen?) | [#411](https://github.com/ford442/mod-player/issues/411) | Closed 2026-09-05 by #426, but only the deploy-awareness slice shipped. Still in tree: `?nativeCtx=legacy` / `isNativeLegacyAudioContext`, unlocked shared `AudioContext` sampleRate, and `native-engine-bench-notes.md` with no measured numbers. |
-| P1 | [#415](https://github.com/ford442/mod-player/issues/415) | Resolve WebGL2 contradiction: revive `?renderer=webgl2` as a real viz session **or** delete the deferred path and retarget smoke/capture/docs. |
+| P1 (done, this branch) | [#415](https://github.com/ford442/mod-player/issues/415) | Resolved via Option A: `?renderer=webgl2` is a real session; WebGPU probe/device failure auto-falls-back to WebGL2 (`applyWebGPUFallback`); Record clip feature-detects a blank WebGPU frame and switches; CI `visual-smoke` ci-profile now covers `webgl2,html`; docs/AGENTS.md updated. |
 
 ## Next (after foundation)
 

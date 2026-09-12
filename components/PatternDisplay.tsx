@@ -164,7 +164,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   crtEnabledRef.current = crtEnabled;
 
   const [webgpuAvailable, setWebgpuAvailable] = useState(true);
-  const { activeBackend, setActiveBackend, setWebgl2Available } =
+  const { activeBackend, setActiveBackend, webgl2Available, setWebgl2Available } =
     usePatternRendererBackend(webgpuAvailable);
 
   const [localTime, setLocalTime] = useState(0);
@@ -486,28 +486,21 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
         </div>
       )}
 
-      {useWebGPU && !webgpuAvailable && (
-        deviceStatus === 'device-failed'
-        || deviceStatus === 'unsupported'
-        || deviceStatus === 'no-adapter'
-      ) && (
+      {useHTML && !webgpuAvailable && !webgl2Available && (
         <div
           className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-black/85 text-red-400 text-sm font-mono p-4 text-center"
           role="alert"
           data-webgpu-viz-hard-fail="true"
         >
-          <div className="font-bold text-red-300">WebGPU visualizer unavailable</div>
+          <div className="font-bold text-red-300">GPU visualizer unavailable</div>
           <div className="text-red-400/90 max-w-md">
-            GPU viz requires WebGPU. WebGL2 shader fallback is deferred — tracker
-            audio can still play. See console / debug panel for probe details
-            (<code className="mx-1">window.__WEBGPU_PROBE__</code>).
+            Neither WebGPU nor WebGL2 could start — showing the DOM tracker grid.
+            Tracker audio can still play. See console / debug panel for probe
+            details (<code className="mx-1">window.__WEBGPU_PROBE__</code>).
           </div>
-          {(deviceStatus === 'unsupported' || deviceStatus === 'no-adapter') && (
+          {typeof window !== 'undefined' && window.__WEBGPU_PROBE__?.browserBrand && (
             <div className="text-[11px] text-gray-400 mt-1">
-              Status: {deviceStatus}
-              {typeof window !== 'undefined' && window.__WEBGPU_PROBE__?.browserBrand
-                ? ` · ${window.__WEBGPU_PROBE__.browserBrand}`
-                : ''}
+              {window.__WEBGPU_PROBE__.browserBrand}
             </div>
           )}
         </div>

@@ -30,11 +30,15 @@
  *
  * Bloom uses `rgba16float` intermediates — filterable without float32-filterable.
  *
- * ## Viz policy (this phase)
+ * ## Viz policy
  *
- * WebGPU is required for the GPU visualizer. Probe / init failure is a **hard
- * fail** for viz — do not auto-start WebGL2/HTML shader backends. After a
- * session hard-fail, this module refuses further `requestDevice()` calls (#395).
+ * WebGPU is the primary GPU visualizer. Probe / device-init failure here does
+ * **not** hard-fail the app — `usePatternRendererBackend` catches it and falls
+ * back to the WebGL2 GLSL reference renderer (or the DOM grid if WebGL2 is also
+ * unavailable). This module itself stays WebGPU-only: after a session
+ * hard-fail it refuses further `requestDevice()` calls this session (#395) so
+ * retries don't hammer a known-bad adapter; the fallback above is what keeps
+ * the visualizer alive for the rest of the session.
  *
  * ## Limits
  *
@@ -365,7 +369,13 @@ export async function requestWebGPUDevice(
  * device, but swapchain contents never composite (createImageBitmap reads as
  * transparent black). Pattern shaders then look "broken" for every file even
  * though pipelines and submit succeed. Call after requestDevice; returns false
- * when presentation is unusable (hard-fail viz; do not start WebGL2 shaders).
+ * when presentation is unusable, which the caller treats as WebGPU init
+ * failure and falls back to WebGL2/HTML (see `applyWebGPUFallback`).
+ *
+ * Uses an offscreen probe canvas configured `alphaMode: 'opaque'` — deliberately
+ * different from the production canvas, which `configureCanvasContext` defaults
+ * to `alphaMode: 'premultiplied'` for correct bezel/overdraw compositing. This
+ * probe only cares whether *any* pixels composite, not alpha blending fidelity.
  */
 export async function probeWebGPUCanvasPresentation(
   device: GPUDevice,

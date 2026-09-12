@@ -79,7 +79,7 @@ export function useWebGPURender(
     if (!canvas) return;
     if (!('gpu' in navigator)) {
       const brand = detectBrowserBrand();
-      console.error(`[Renderer] WebGPU API not available (${brand}) — viz hard-fail (no WebGL2 shader fallback)`);
+      console.error(`[Renderer] WebGPU API not available (${brand}) — falling back to WebGL2/HTML`);
       markWebGPUSessionFailed('api', 'WebGPU API not available in this browser');
       setWebgpuAvailable(false);
       setDeviceStatus('unsupported');
@@ -120,7 +120,7 @@ export function useWebGPURender(
         console.error(
           `[Renderer] WebGPU device init failed (${brand}):`,
           reason,
-          '— viz hard-fail (no WebGL2 shader fallback)',
+          '— falling back to WebGL2/HTML',
         );
         const status = error instanceof WebGPUInitError ? error.status : 'device-failed';
         const stage =

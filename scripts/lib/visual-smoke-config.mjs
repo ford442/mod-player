@@ -176,9 +176,11 @@ export function renderersForProfile(profile) {
   if (process.env.RENDERERS) {
     return process.env.RENDERERS.split(',').map((s) => s.trim()).filter(Boolean);
   }
-  // WebGL2 shader viz is deferred: GPU sessions require WebGPU; HTML is DOM tracker UI.
-  if (profile === 'ci') return ['html'];
-  return ['html', 'webgpu'];
+  // WebGL2 is a real, headless-friendly GPU session — cover it in every profile.
+  // WebGPU is comparatively unreliable in headless CI, so it's only added for 'full'
+  // (and separately, best-effort, in the dedicated webgpu-coverage CI job).
+  if (profile === 'ci') return ['webgl2', 'html'];
+  return ['webgl2', 'html', 'webgpu'];
 }
 
 export function liteModesForProfile(profile) {

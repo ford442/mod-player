@@ -4,13 +4,6 @@ const STORAGE_KEY = 'xasm1_pattern_renderer';
 const WEBGPU_PROBE_CACHE_KEY = 'xasm1_webgpu_adapter_ok';
 const VALID_BACKENDS: ReadonlySet<PatternRendererBackend> = new Set(['webgpu', 'webgl2', 'html']);
 
-/**
- * Phase policy: GPU viz requires WebGPU. Automatic WebGPU → WebGL2/HTML
- * shader fallback is disabled. `?renderer=webgl2` is a no-op (stays WebGPU).
- * Explicit `?renderer=html` still selects the DOM pattern grid (tracker UI).
- */
-export const WEBGPU_VIZ_REQUIRED = true;
-
 /** Global runtime override — set from devtools or tests: `window.DEBUG_RENDERER = 'webgpu'`. */
 declare global {
   interface Window {
@@ -19,7 +12,6 @@ declare global {
 }
 
 let webgpuAdapterProbePromise: Promise<boolean> | null = null;
-/** @deprecated Auto WebGL2 fallback removed — kept for test reset / legacy callers. */
 let webgpuAutoFallbackApplied = false;
 
 function parseBackend(value: string | null | undefined): PatternRendererBackend | null {
@@ -127,11 +119,15 @@ export async function probeWebGPUAdapter(): Promise<boolean> {
 }
 
 /**
- * Resolve pattern renderer backend.
+ * Resolve pattern renderer backend from a stated preference.
  *
- * - Default / `webgpu` → WebGPU (required for GPU viz this phase)
  * - `html` → DOM pattern grid (tracker UI; not a GLSL shader session)
- * - `webgl2` → **no-op**: stays WebGPU (WebGL2 shader path deferred)
+ * - `webgl2` → WebGL2 GLSL reference renderer (real session)
+ * - `webgpu`, or no preference → WebGPU (primary production visuals)
+ *
+ * This only reflects the *stated* preference. Runtime WebGPU probe/device
+ * failure is handled separately by `applyWebGPUFallback`, invoked once
+ * `requestWebGPUDevice` actually fails (see `usePatternRendererBackend`).
  */
 export function resolvePatternRenderer(
   preference: PatternRendererBackend | null = readRendererPreference(),
@@ -139,19 +135,12 @@ export function resolvePatternRenderer(
   const want = preference ?? 'webgpu';
 
   if (want === 'html') return 'html';
-
-  if (want === 'webgl2') {
-    console.warn(
-      '[Renderer] ?renderer=webgl2 is deferred this phase — GPU viz requires WebGPU '
-        + '(WebGL2 shader path will not auto-start). Using webgpu.',
-    );
-    return 'webgpu';
-  }
+  if (want === 'webgl2') return 'webgl2';
 
   return 'webgpu';
 }
 
-/** Async resolver — same policy as sync; no adapter-based downgrade to WebGL2. */
+/** Async resolver — same policy as sync; kept for callers awaiting a promise. */
 export async function resolvePatternRendererAsync(
   preference: PatternRendererBackend | null = readRendererPreference(),
 ): Promise<PatternRendererBackend> {
@@ -159,17 +148,17 @@ export async function resolvePatternRendererAsync(
 }
 
 /**
- * @deprecated Auto WebGL2/HTML shader fallback removed. Records a warning only;
- * always returns `webgpu` so callers cannot silently start WebGL2 shaders.
+ * Called once WebGPU probe/device creation actually fails at runtime.
+ * Downgrades to the WebGL2 GLSL reference renderer when available, otherwise
+ * the DOM pattern grid — never leaves the caller stuck on a dead WebGPU canvas.
  */
 export function applyWebGPUFallback(reason: string): PatternRendererBackend {
+  const fallback = isWebGL2Available() ? 'webgl2' : 'html';
   if (!webgpuAutoFallbackApplied) {
     webgpuAutoFallbackApplied = true;
-    console.warn(
-      `[Renderer] WebGPU unavailable (${reason}); auto WebGL2/HTML shader fallback is disabled — viz hard-fail.`,
-    );
+    console.warn(`[Renderer] WebGPU unavailable (${reason}); falling back to ${fallback}.`);
   }
-  return 'webgpu';
+  return fallback;
 }
 
 /** Returns true if applyWebGPUFallback has been invoked this session. */
@@ -200,12 +189,6 @@ export function notifyRendererPreferenceChanged(): void {
 }
 
 export function setRendererOverride(backend: PatternRendererBackend): void {
-  if (backend === 'webgl2') {
-    console.warn(
-      '[Renderer] WebGL2 shader override deferred — selecting webgpu. Use html for DOM pattern grid only.',
-    );
-    backend = 'webgpu';
-  }
   window.DEBUG_RENDERER = backend;
   persistRendererPreference(backend);
   notifyRendererPreferenceChanged();

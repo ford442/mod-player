@@ -4,8 +4,10 @@ import {
   createCombinedCaptureStream,
   pickRecorderMimeType,
   probeCanvasCaptureSupport,
+  probeCanvasHasVisibleFrame,
   resolveCaptureCanvas,
 } from '../utils/performanceCapture';
+import { isWebGL2Available, setRendererOverride } from '../src/renderers/rendererSelection';
 import type { PatternRendererBackend } from '../src/renderers/types';
 
 export type CaptureStage = 'idle' | 'recording' | 'saving' | 'error';
@@ -27,7 +29,10 @@ export interface PerformanceCaptureOptions {
   audioContext: AudioContext | null;
   /** Node to tap for recording — typically gain or stereo panner before destination. */
   audioTapNode: AudioNode | null;
-  /** When true, prefer WebGL2 canvas for captureStream reliability. */
+  /**
+   * When true (default), feature-detect a blank WebGPU captureStream frame before
+   * recording and switch to WebGL2 (if available) rather than saving an empty clip.
+   */
   preferWebGL2?: boolean;
   frameRate?: number;
   fileName?: string;
@@ -88,10 +93,7 @@ export function usePerformanceCapture() {
   const start = useCallback(async (options: PerformanceCaptureOptions): Promise<boolean> => {
     if (recorderRef.current) return false;
 
-    const { canvas, backend } = resolveCaptureCanvas(
-      options.getRenderer,
-      options.preferWebGL2 ?? true,
-    );
+    const { canvas, backend } = resolveCaptureCanvas(options.getRenderer);
     const support = probeCanvasCaptureSupport(
       backend === 'unknown' ? null : backend,
     );
@@ -103,6 +105,23 @@ export function usePerformanceCapture() {
         elapsedSeconds: 0,
       });
       return false;
+    }
+
+    // WebGPU canvas.captureStream() output is unreliable in some browsers (composites
+    // as blank). Feature-detect a real blank frame before committing to a recording —
+    // if it's blank and WebGL2 is available, switch renderer and ask the caller to retry
+    // rather than silently saving an empty video.
+    if ((options.preferWebGL2 ?? true) && backend === 'webgpu' && isWebGL2Available()) {
+      const hasFrame = await probeCanvasHasVisibleFrame(canvas);
+      if (hasFrame === false) {
+        setRendererOverride('webgl2');
+        setState({
+          stage: 'error',
+          message: 'WebGPU capture produced a blank frame — switched to WebGL2. Click Record again.',
+          elapsedSeconds: 0,
+        });
+        return false;
+      }
     }
 
     if (options.dualAudioContext) {

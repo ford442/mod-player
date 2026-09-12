@@ -7,7 +7,6 @@ import {
   resolvePatternRenderer,
   resolvePatternRendererAsync,
   setRendererOverride,
-  WEBGPU_VIZ_REQUIRED,
 } from '../src/renderers/rendererSelection';
 
 function setSearch(search: string): void {
@@ -30,7 +29,27 @@ function installMemoryLocalStorage(): void {
   });
 }
 
-describe('rendererSelection (WebGPU viz required)', () => {
+function stubWebGL2(available: boolean): () => void {
+  const original = (globalThis as { document?: unknown }).document;
+  Object.defineProperty(globalThis, 'document', {
+    value: {
+      createElement: () => ({
+        getContext: (id: string) => (id === 'webgl2' && available ? {} : null),
+      }),
+    },
+    writable: true,
+    configurable: true,
+  });
+  return () => {
+    Object.defineProperty(globalThis, 'document', {
+      value: original,
+      writable: true,
+      configurable: true,
+    });
+  };
+}
+
+describe('rendererSelection', () => {
   beforeEach(() => {
     resetWebGPUFallbackStateForTests();
     installMemoryLocalStorage();
@@ -44,10 +63,6 @@ describe('rendererSelection (WebGPU viz required)', () => {
     setSearch('');
   });
 
-  it('requires WebGPU for GPU viz this phase', () => {
-    expect(WEBGPU_VIZ_REQUIRED).toBe(true);
-  });
-
   it('defaults to webgpu', () => {
     expect(resolvePatternRenderer(null)).toBe('webgpu');
   });
@@ -56,14 +71,11 @@ describe('rendererSelection (WebGPU viz required)', () => {
     expect(resolvePatternRenderer('html')).toBe('html');
   });
 
-  it('treats webgl2 preference as no-op → webgpu (no auto shader fallback)', () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    expect(resolvePatternRenderer('webgl2')).toBe('webgpu');
-    expect(warn).toHaveBeenCalled();
-    warn.mockRestore();
+  it('allows explicit webgl2 as a real renderer session', () => {
+    expect(resolvePatternRenderer('webgl2')).toBe('webgl2');
   });
 
-  it('does not auto-downgrade when navigator.gpu is missing', () => {
+  it('does not auto-downgrade the stated preference when navigator.gpu is missing', () => {
     const desc = Object.getOwnPropertyDescriptor(navigator, 'gpu');
     Object.defineProperty(navigator, 'gpu', { configurable: true, value: undefined });
     try {
@@ -80,26 +92,40 @@ describe('rendererSelection (WebGPU viz required)', () => {
     }
   });
 
-  it('applyWebGPUFallback does not switch to webgl2/html', () => {
+  it('applyWebGPUFallback switches to webgl2 when available', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    expect(applyWebGPUFallback('test')).toBe('webgpu');
-    expect(hasWebGPUAutoFallbackApplied()).toBe(true);
-    expect(applyWebGPUFallback('again')).toBe('webgpu');
-    warn.mockRestore();
+    const restore = stubWebGL2(true);
+    try {
+      expect(applyWebGPUFallback('test')).toBe('webgl2');
+      expect(hasWebGPUAutoFallbackApplied()).toBe(true);
+      expect(applyWebGPUFallback('again')).toBe('webgl2');
+    } finally {
+      restore();
+      warn.mockRestore();
+    }
   });
 
-  it('async resolver never returns webgl2', async () => {
+  it('applyWebGPUFallback switches to html when webgl2 is also unavailable', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const restore = stubWebGL2(false);
+    try {
+      expect(applyWebGPUFallback('test')).toBe('html');
+    } finally {
+      restore();
+      warn.mockRestore();
+    }
+  });
+
+  it('async resolver mirrors the sync resolver', async () => {
     expect(await resolvePatternRendererAsync(null)).toBe('webgpu');
-    expect(await resolvePatternRendererAsync('webgl2')).toBe('webgpu');
+    expect(await resolvePatternRendererAsync('webgl2')).toBe('webgl2');
     expect(await resolvePatternRendererAsync('html')).toBe('html');
   });
 
-  it('setRendererOverride maps webgl2 → webgpu', () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  it('setRendererOverride passes webgl2 through unchanged', () => {
     setRendererOverride('webgl2');
-    expect(window.DEBUG_RENDERER).toBe('webgpu');
-    expect(readRendererPreference()).toBe('webgpu');
-    warn.mockRestore();
+    expect(window.DEBUG_RENDERER).toBe('webgl2');
+    expect(readRendererPreference()).toBe('webgl2');
   });
 
   it('honors ?renderer=html from URL', () => {
@@ -108,10 +134,9 @@ describe('rendererSelection (WebGPU viz required)', () => {
     expect(resolvePatternRenderer()).toBe('html');
   });
 
-  it('?renderer=webgl2 resolves to webgpu', () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  it('honors ?renderer=webgl2 from URL', () => {
     setSearch('?renderer=webgl2');
-    expect(resolvePatternRenderer()).toBe('webgpu');
-    warn.mockRestore();
+    expect(readRendererPreference()).toBe('webgl2');
+    expect(resolvePatternRenderer()).toBe('webgl2');
   });
 });

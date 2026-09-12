@@ -104,23 +104,73 @@ export function createCombinedCaptureStream(
   };
 }
 
-/** Resolve a recordable canvas, preferring WebGL2 when WebGPU capture is unreliable. */
+/** Resolve the canvas + backend currently exposed by the active pattern renderer. */
 export function resolveCaptureCanvas(
   getRenderer: () => { backend?: PatternRendererBackend; getCanvas: () => HTMLCanvasElement | null } | null,
-  preferWebGL2: boolean,
 ): { canvas: HTMLCanvasElement | null; backend: PatternRendererBackend | 'unknown' } {
   const renderer = getRenderer();
   if (!renderer) {
     return { canvas: null, backend: 'unknown' };
   }
 
-  const backend = renderer.backend ?? 'unknown';
-  const canvas = renderer.getCanvas();
+  return { canvas: renderer.getCanvas(), backend: renderer.backend ?? 'unknown' };
+}
 
-  if (!preferWebGL2 || backend === 'webgl2') {
-    return { canvas, backend };
+declare global {
+  // `grabFrame()` is missing from TS's lib.dom.d.ts even though it's implemented in
+  // Chromium/Edge (not Safari) — merge it onto the existing `ImageCapture` interface.
+  interface ImageCapture {
+    grabFrame(): Promise<ImageBitmap>;
+  }
+}
+
+/**
+ * Feature-detect whether a canvas's `captureStream()` output actually has visible
+ * (non-transparent, non-black) content, by grabbing and sampling one real frame.
+ * Returns `null` when the check itself can't run (no `captureStream`/`ImageCapture`
+ * support, or it timed out) — callers should treat that as inconclusive, not "blank".
+ */
+export async function probeCanvasHasVisibleFrame(
+  canvas: HTMLCanvasElement,
+  timeoutMs = 500,
+): Promise<boolean | null> {
+  if (typeof canvas.captureStream !== 'function' || typeof ImageCapture !== 'function') {
+    return null;
   }
 
-  // When recording, callers may temporarily switch renderer — surface current canvas anyway.
-  return { canvas, backend };
+  let stream: MediaStream | null = null;
+  try {
+    stream = canvas.captureStream(30);
+    const track = stream.getVideoTracks()[0];
+    if (!track) return null;
+
+    const capture = new ImageCapture(track);
+    const bitmap = await Promise.race([
+      capture.grabFrame(),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), timeoutMs)),
+    ]);
+    if (!bitmap) return null;
+
+    const probe = document.createElement('canvas');
+    probe.width = Math.min(bitmap.width, 16) || 1;
+    probe.height = Math.min(bitmap.height, 16) || 1;
+    const ctx = probe.getContext('2d');
+    if (!ctx) return null;
+    ctx.drawImage(bitmap, 0, 0, probe.width, probe.height);
+    bitmap.close?.();
+
+    const { data } = ctx.getImageData(0, 0, probe.width, probe.height);
+    for (let i = 0; i < data.length; i += 4) {
+      const r = data[i] ?? 0;
+      const g = data[i + 1] ?? 0;
+      const b = data[i + 2] ?? 0;
+      const a = data[i + 3] ?? 0;
+      if (a > 0 && (r > 8 || g > 8 || b > 8)) return true;
+    }
+    return false;
+  } catch {
+    return null;
+  } finally {
+    stream?.getTracks().forEach((t) => t.stop());
+  }
 }

@@ -1,8 +1,10 @@
 /**
- * WebGPU boot probe report — hard-fail surface for PatternDisplay.
+ * WebGPU boot probe report — surfaced by PatternDisplay for diagnostics.
  *
- * Phase policy: WebGPU is required for the GPU viz session. Probe fail does
- * **not** auto-start WebGL2/HTML shader backends. Tracker audio may continue.
+ * WebGPU is the preferred GPU viz session. A probe/device failure here feeds
+ * `applyWebGPUFallback` (see `src/renderers/rendererSelection.ts`), which
+ * switches the active backend to WebGL2 (or HTML) rather than hard-failing.
+ * Tracker audio is unaffected either way.
  */
 
 export type WebGPUProbeStage =
