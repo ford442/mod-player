@@ -463,6 +463,12 @@ EXPORTED_FUNCTIONS_FLAT="$(echo "$EXPORTED_FUNCTIONS" | tr -d '\n' | sed 's/  */
 # __cxa_allocate_exception — symbols libopenmpt.a (libopenmpt_c.cpp's try/catch
 # C API boundary) still references.  That is what broke native-full-build.
 #
+# Measured under emsdk 3.1.51 (release, 4-mat_madness fixture build): dropping
+# CXX_ONLY_FLAGS entirely yields a BYTE-IDENTICAL openmpt-native.wasm (1,784,342 B)
+# — libopenmpt.a pulls the exception runtime in either way, so these two flags buy
+# no size at all on the wrapper.  They stay to keep the wrapper honest about being
+# a no-throw C-API shim; do not "optimize" by moving them onto the link line.
+#
 # The link runs through em++ (not emcc): once the inputs are .o files there is
 # no .cpp suffix left for the driver to infer C++ from, so emcc would skip
 # libc++/libc++abi entirely and every `operator new` in libopenmpt.a would be
