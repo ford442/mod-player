@@ -81,18 +81,33 @@ async function waitForModule(page) {
   );
 }
 
+// `▶️ Play` is rendered twice: once by the normal Controls panel and once by the
+// Controls copy inside PerformanceStage's overlay dock, which stays mounted at
+// zero size while stage mode is off. DOM order puts the zero-size one first, so
+// `.first()` picked an element Playwright will never consider clickable. Match on
+// a word boundary too — a bare /play/i also matches the `📋 Playlist` button.
+const PLAY_BUTTON_TEXT = /\bplay\b/i;
+
 async function clickPlay(page, engine) {
   if (engine === 'playwright') {
-    const playBtn = page.locator('button', { hasText: 'Play' }).first();
+    const playBtn = page
+      .locator('button')
+      .filter({ hasText: PLAY_BUTTON_TEXT })
+      .filter({ visible: true })
+      .first();
     if (await playBtn.count()) {
       await playBtn.click();
     }
   } else {
-    await page.evaluate(() => {
-      const buttons = [...document.querySelectorAll('button')];
-      const play = buttons.find((b) => /play/i.test(b.textContent ?? ''));
+    await page.evaluate((pattern) => {
+      const re = new RegExp(pattern.source, pattern.flags);
+      const play = [...document.querySelectorAll('button')].find((b) => {
+        if (!re.test(b.textContent ?? '')) return false;
+        const rect = b.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0;
+      });
       play?.click();
-    });
+    }, { source: PLAY_BUTTON_TEXT.source, flags: PLAY_BUTTON_TEXT.flags });
   }
   await waitForFunction(
     page,
