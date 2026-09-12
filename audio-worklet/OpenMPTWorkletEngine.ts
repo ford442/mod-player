@@ -37,6 +37,15 @@ import {
     nativeModuleFingerprint,
     type NativeModuleFingerprint,
 } from '../utils/workletAudioLifecycle';
+import {
+    OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH,
+    type OpenMPTInterpolationLength,
+} from '../utils/openmptRenderParams';
+
+export {
+    OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH,
+    type OpenMPTInterpolationLength,
+};
 
 // ── Public constants ─────────────────────────────────────────────────
 
@@ -53,11 +62,6 @@ export const NATIVE_RING_BUF_FRAMES = 8192;
  * + NATIVE_RING_BUF_FRAMES × 2 channels × 4 B  (interleaved Float32 stereo)
  */
 export const NATIVE_PCM_CHUNK_FRAMES = 128;
-
-/** libopenmpt.h OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH */
-export const OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH = 3;
-
-export type OpenMPTInterpolationLength = 1 | 2 | 4 | 8;
 
 function writeCString(mod: EmscriptenOpenMPTModule, text: string): number {
     const bytes = new TextEncoder().encode(text);
@@ -466,7 +470,7 @@ export class OpenMPTWorkletEngine extends MiniEventEmitter<EngineEventMap> {
         this.module?._set_channel_mute(channel | 0, muted ? 1 : 0);
     }
 
-    /** Interpolation filter length: 1=nearest, 2=linear, 4=cubic, 8=windowed sinc. */
+    /** Interpolation filter length: 1=nearest, 2=linear, 4=cubic, 8=Sinc+LP. */
     setInterpolationLength(length: OpenMPTInterpolationLength): void {
         this.setRenderParam(OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH, length);
     }

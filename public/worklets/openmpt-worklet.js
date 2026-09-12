@@ -569,12 +569,12 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
       this._fracRowInt = -1;
       this._rowStartPosSec = 0;
 
-      // OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH:
-      // 8 = highest-quality sinc (too heavy for wasm2js AudioWorklet on XM
-      // pattern boundaries with many voices). 4 = windowed sinc — good quality
-      // with far less per-quantum CPU; MOD rarely noticed 8→4, XM pattern
-      // starts often did.
-      lib._openmpt_module_set_render_param(this.modulePtr, 2, 4);
+      // OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH is param 3
+      // (param 2 is STEREOSEPARATION_PERCENT — do not confuse).
+      // 0 / ≥8 = Sinc+LP; 1 = nearest; 2 = linear; 3–7 = cubic.
+      // wasm2js stays on cubic: length 8 is too heavy at XM pattern wraps.
+      const OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH = 3;
+      lib._openmpt_module_set_render_param(this.modulePtr, OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH, 4);
 
       const numCh = lib._openmpt_module_get_num_channels(this.modulePtr);
       // Heavy XM/IT modules: full-band audio-reactive scan at 60 Hz still tips

@@ -20,6 +20,7 @@ import { hasProjectMConsumer } from '../../utils/audioDiagOptions';
 import { broadcastPcmBlock } from '../../utils/projectMBridge';
 import { pcmBusHasSubscribers, publishPcmBlock, setPcmDemandListener } from '../../utils/pcmBus';
 import { workletPatternToMatrix } from '../../audio-worklet/NativePatternReader';
+import { INTERPOLATION_SINC_LP } from '../../utils/openmptRenderParams';
 import { moduleBytesFromFileData, wireMasterOutput } from './masterGraph';
 import type { AudioGraphCallbacks, AudioGraphConfig, AudioGraphRefs } from './types';
 
@@ -55,8 +56,8 @@ export async function startNativePlayback(
 
     engine.setVolume(config.volume);
     engine.setLoop(config.isLooping);
-    // Match the JS worklet: windowed sinc 8 is too heavy for realtime at wraps.
-    engine.setInterpolationLength(4);
+    // Sinc+LP. Render params die with the module — re-apply after every load.
+    engine.setInterpolationLength(INTERPOLATION_SINC_LP);
 
     engine.removeAllListeners();
     const syncPcmCapture = (wanted: boolean) => {

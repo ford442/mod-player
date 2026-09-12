@@ -57,7 +57,7 @@ static char g_ctlVal[256];
 // Per-channel mute bits (32 = MAX_VU_CHANNELS). Main writes; audio thread applies.
 static std::atomic<uint32_t> g_muteBits{0};
 static uint32_t g_appliedMuteBits = 0;
-static int g_interpLength = 4;
+static int g_interpLength = 8; // Sinc+LP; JS host may override after load
 static int g_lastExtraRenderParam = -1;
 static int32_t g_lastExtraRenderValue = 0;
 // Render pause: silence output without AudioContext.suspend() (shared-context safe).
@@ -682,7 +682,7 @@ void cleanup_audio() {
     }
     g_muteBits.store(0, std::memory_order_relaxed);
     g_appliedMuteBits = 0;
-    g_interpLength = 4;
+    g_interpLength = 8;
     g_lastExtraRenderParam = -1;
     g_ctlKey[0] = '\0';
     g_ctlVal[0] = '\0';

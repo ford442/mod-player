@@ -18,7 +18,7 @@ describe('#412 native ctl / mute / one-module parse', () => {
     expect(wrapper).toContain('openmpt_module_ext_create_from_memory');
     expect(wrapper).toContain('set_channel_mute_status');
     expect(wrapper).toContain('openmpt_module_ctl_set_text');
-    expect(wrapper).toContain('OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH, 4');
+    expect(wrapper).toContain('OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH, 8');
   });
 
   it('exports mute / render / ctl KEEPAlives with audio-thread atomics', () => {
@@ -67,8 +67,8 @@ describe('#412 native ctl / mute / one-module parse', () => {
     expect(buildSh).toContain('patch-native-glue.mjs');
   });
 
-  it('native play uses realtime interpolation 4 and demand-driven PCM capture', () => {
-    expect(nativePlay).toContain('setInterpolationLength(4)');
+  it('native play uses Sinc+LP interpolation (length 8) and demand-driven PCM capture', () => {
+    expect(nativePlay).toContain('setInterpolationLength(INTERPOLATION_SINC_LP)');
     expect(nativePlay).toContain('setPcmCapture');
     expect(nativePlay).toContain('setPcmDemandListener');
     expect(nativePlay).toContain('shouldReloadNativeModule');

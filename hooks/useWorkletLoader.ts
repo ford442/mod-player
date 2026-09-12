@@ -57,7 +57,8 @@ export const getWorkletUrl = (): string => {
   // v14: audioDiag records slow-quantum row (no audio-thread console.log)
   // v15: drop get_time_at_position from process() (GetLength grew with order);
   //      O(1) row fraction; wrap-N / callback-gap / heap diag
-  const WORKLET_VERSION = '15';
+  // v16: interpolation uses render param 3 (not 2 / stereo sep); wasm2js cubic
+  const WORKLET_VERSION = '16';
   const url = `${base}worklets/openmpt-worklet.js?v=${WORKLET_VERSION}`;
 
   return url;

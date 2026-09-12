@@ -274,7 +274,7 @@ At pattern starts those extras tipped `process()` past the ~2.9 ms quantum budge
 |--------|--------|
 | Gate helpers | `get_time_at_position`, VU only on ~60 Hz position path |
 | Opt-in PCM | projectm-pcm default false |
-| Interpolation | render param length **8 → 4** (worklet + ScriptProcessor) |
+| Interpolation | intended render param length **8 → 4** (worklet + ScriptProcessor). **v16:** that call used param **2** (stereo sep), so the mixer stayed on library-default Sinc+LP until the index was fixed to **3**. |
 | Order UI | `startTransition` around `setSequencerMatrix` on order change |
 | Cache | `WORKLET_VERSION` → `9` |
 
@@ -382,7 +382,7 @@ called it **every quantum** inside `fillPositionInfo`.
 | Native `audio_process_cb` | Position/VU fill at ~60 Hz (plus cheap `getCurrentRow` for row changes) |
 | Native PCM ring | Allocated on `setPcmCapture(true)` / legacy bridge, not on every attach |
 | Native play | Skip `engine.load` when parse already loaded the same bytes |
-| Interp default | C++ load / `g_interpLength` **4** (was 8 until play() overrode) |
+| Interp default | C++ load / `g_interpLength` **8** (Sinc+LP). JS wasm2js stays on cubic (**4**) via render param **3** (not 2 / stereo sep). |
 
 Ruled out by production timings: GPU `updateMatrix` (0.4–1.2 ms), React
 `order-change-ui` (0.19 ms), wrap-quantum DSP, PCM stream, native 16 ms

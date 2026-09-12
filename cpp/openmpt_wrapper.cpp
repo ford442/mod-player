@@ -63,10 +63,9 @@ bool OpenMPTModule::load(const uint8_t* data, size_t length) {
         std::fprintf(stderr, "[OpenMPTModule] interactive interface unavailable (mute will no-op)\n");
     }
 
-    // Default: cubic/windowed-sinc 4 — matches realtime JS worklet. Length 8
-    // (max sinc) is too heavy at pattern wraps; offline WAV export can still
-    // override via setRenderParam.
-    openmpt_module_set_render_param(mod_, OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH, 4);
+    // Default: Sinc+LP (length 8). 0 is the same mixer mode (library default).
+    // JS wasm2js live stays on cubic (4); native SIMD can hold 8.
+    openmpt_module_set_render_param(mod_, OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH, 8);
 
     // Default: infinite loop
     openmpt_module_set_repeat_count(mod_, -1);

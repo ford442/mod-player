@@ -18,7 +18,7 @@ Exported WAV length is compared to `openmpt_module_get_duration_seconds()` metad
 |renderedSeconds − metadataSeconds| ≤ 1/30 s   (one 30 fps frame)
 ```
 
-The offline renderer uses 44.1 kHz stereo, windowed-sinc interpolation (length 8), and `set_repeat_count(0)` for a single pass (no loop).
+The offline renderer uses 44.1 kHz stereo, Sinc+LP interpolation (`OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH` = 3, value 8), and `set_repeat_count(0)` for a single pass (no loop).
 
 ## Browser support matrix — canvas + audio recording
 

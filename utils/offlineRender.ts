@@ -6,10 +6,10 @@ import {
   destroyExtModule,
   type OpenMPTExtModule,
 } from './libopenmptExt';
-
-/** Render param: interpolation filter length (windowed sinc, length 8). */
-const RENDER_INTERPOLATIONFILTER_LENGTH = 2;
-const INTERPOLATION_WINDOWED_SINC_8 = 8;
+import {
+  INTERPOLATION_SINC_LP,
+  OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH,
+} from './openmptRenderParams';
 
 const CHUNK_FRAMES = 4096;
 
@@ -84,8 +84,8 @@ export function renderModuleOffline(
 
     lib._openmpt_module_set_render_param(
       modPtr,
-      RENDER_INTERPOLATIONFILTER_LENGTH,
-      INTERPOLATION_WINDOWED_SINC_8,
+      OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH,
+      INTERPOLATION_SINC_LP,
     );
 
     if (request.loop === false) {

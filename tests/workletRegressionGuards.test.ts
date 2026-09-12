@@ -310,10 +310,10 @@ describe('#354 production source invariants', () => {
     expect(lifecycle).toContain('WORKLET_POSITION_REPORT_INTERVAL_SEC');
   });
 
-  it('WORKLET_VERSION stays cache-busted at ≥ 15 after GetLength removal', () => {
+  it('WORKLET_VERSION stays cache-busted at ≥ 16 after interpolation param-index fix', () => {
     const m = useWorkletLoader.match(/WORKLET_VERSION\s*=\s*['"](\d+)['"]/);
     expect(m, 'WORKLET_VERSION must be defined').toBeTruthy();
-    expect(Number(m![1])).toBeGreaterThanOrEqual(15);
+    expect(Number(m![1])).toBeGreaterThanOrEqual(16);
   });
 
   it('process() never calls get_time_at_position (GetLength grew with order)', () => {
@@ -344,9 +344,12 @@ describe('#354 production source invariants', () => {
     expect(workletSource).toMatch(/numCh\s*>\s*16/);
   });
 
-  it('uses real-time-friendly interpolation filter length 4 (not 8)', () => {
-    expect(workletSource).toMatch(/_openmpt_module_set_render_param\(\s*this\.modulePtr\s*,\s*2\s*,\s*4\s*\)/);
-    expect(workletSource).not.toMatch(/_openmpt_module_set_render_param\(\s*this\.modulePtr\s*,\s*2\s*,\s*8\s*\)/);
+  it('uses cubic interpolation on param 3 (not stereo-sep param 2, not Sinc+LP 8)', () => {
+    expect(workletSource).toMatch(/OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH\s*=\s*3/);
+    expect(workletSource).toMatch(
+      /_openmpt_module_set_render_param\(\s*this\.modulePtr\s*,\s*OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH\s*,\s*4\s*\)/,
+    );
+    expect(workletSource).not.toMatch(/_openmpt_module_set_render_param\(\s*this\.modulePtr\s*,\s*2\s*,/);
   });
 });
 

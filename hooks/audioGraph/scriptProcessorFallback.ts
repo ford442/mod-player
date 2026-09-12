@@ -1,5 +1,9 @@
 import { applyWorkletPositionSample } from '../../utils/playheadPrediction';
 import { postPause } from '../../audio-worklet/protocol';
+import {
+  INTERPOLATION_CUBIC,
+  OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH,
+} from '../../utils/openmptRenderParams';
 import { wireMasterOutput } from './masterGraph';
 import type { AudioGraphCallbacks, AudioGraphConfig, AudioGraphRefs } from './types';
 
@@ -34,7 +38,11 @@ export async function runScriptProcessorFallback(
     const rightPtr = lib._malloc(4 * SP_BUFFER);
     refs.spLeftBufPtr.current  = leftPtr;
     refs.spRightBufPtr.current = rightPtr;
-    lib._openmpt_module_set_render_param(modPtr, 2, 4);
+    lib._openmpt_module_set_render_param(
+      modPtr,
+      OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH,
+      INTERPOLATION_CUBIC,
+    );
 
     // Cached heap views — recreate only when Emscripten grows HEAPF32.
     let spHeapBuf: ArrayBuffer | null = null;
