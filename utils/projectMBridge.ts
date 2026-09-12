@@ -15,12 +15,17 @@
  *   contains authentic stereo samples straight from the WASM renderer.
  *   Block size is fixed (~512 samples) as required by Project-M.
  *
- *   ── Legacy (fallback): requestAnimationFrame + AnalyserNode ─────────────
- *   startProjectMBridge() starts a ~60 fps RAF loop that calls
+ *   ── Fallback: requestAnimationFrame + AnalyserNode ───────────────────────
+ *   startProjectMBridge() supervises a ~60 fps RAF loop that calls
  *   AnalyserNode.getFloatTimeDomainData().  This path is retained for
- *   non-worklet engines (ScriptProcessor fallback) and for backward
- *   compatibility, but suffers from variable block sizes, background-tab
- *   throttling, and mono-only output.
+ *   non-worklet engines (ScriptProcessor fallback), but suffers from variable
+ *   block sizes, background-tab throttling, and mono-only output.
+ *
+ *   The loop is not merely silenced while the worklet path is live — it is not
+ *   running at all.  A low-rate supervisor (one timer tick every
+ *   SUPERVISOR_INTERVAL_MS) starts the RAF only once the worklet has gone quiet
+ *   and cancels it again the moment blocks resume, so a healthy worklet session
+ *   costs no per-frame AnalyserNode work.
  *
  * Three delivery channels are used in parallel by both paths:
  *   1. BroadcastChannel('projectm-audio') – same-origin tabs / service workers
@@ -58,6 +63,25 @@ let _workletPcmChannel: BroadcastChannel | null = null;
 // ScriptProcessor fallback), the RAF path resumes within WORKLET_ACTIVE_WINDOW_MS.
 let _lastWorkletBroadcast = 0;
 const WORKLET_ACTIVE_WINDOW_MS = 250;
+
+/**
+ * How often the fallback supervisor re-checks worklet liveness. Deliberately
+ * coarse: switching paths a few hundred milliseconds late is imperceptible to
+ * a visualizer, and this tick runs for the whole page lifetime.
+ */
+const SUPERVISOR_INTERVAL_MS = 500;
+
+/**
+ * True while the worklet path is actively delivering PCM blocks.
+ *
+ * broadcastPcmBlock() carries authentic fixed-size stereo straight from the
+ * WASM renderer; running the AnalyserNode tap on top of it would duplicate PCM
+ * (mono + stereo) into the same receivers, so the fallback loop only exists
+ * while this is false.
+ */
+export function projectMPcmIsLive(): boolean {
+  return performance.now() - _lastWorkletBroadcast < WORKLET_ACTIVE_WINDOW_MS;
+}
 
 /**
  * Broadcast a pre-rendered PCM block to Project-M receivers.
@@ -148,19 +172,10 @@ export function startProjectMBridge(analyser: AnalyserNode | null): () => void {
   const channel = new BroadcastChannel('projectm-audio');
   const analyserNode = analyser;
   const buf = new Float32Array(analyserNode.fftSize || DEFAULT_FFT_SIZE);
-  let rafId: number;
+  let rafId = 0;
+  let rafRunning = false;
 
   function send() {
-    // Yield to the worklet-driven path while it is actively delivering blocks.
-    // broadcastPcmBlock() carries authentic fixed-size stereo straight from the
-    // WASM renderer; sending the AnalyserNode tap on top of it would duplicate
-    // PCM (mono + stereo) into the same receivers. Only fall back to this path
-    // when the worklet has gone quiet (non-worklet engine / ScriptProcessor).
-    if (performance.now() - _lastWorkletBroadcast < WORKLET_ACTIVE_WINDOW_MS) {
-      rafId = requestAnimationFrame(send);
-      return;
-    }
-
     analyserNode.getFloatTimeDomainData(buf);
     // Use slice() so the transfer doesn't detach the reusable buffer
     const copy = buf.slice();
@@ -191,12 +206,33 @@ export function startProjectMBridge(analyser: AnalyserNode | null): () => void {
     rafId = requestAnimationFrame(send);
   }
 
-  rafId = requestAnimationFrame(send);
-  console.log('[ProjectM] Legacy RAF PCM broadcast started');
+  function startRaf() {
+    if (rafRunning) return;
+    rafRunning = true;
+    console.log('[ProjectM] Worklet PCM quiet — starting fallback RAF broadcast');
+    rafId = requestAnimationFrame(send);
+  }
+
+  function stopRaf() {
+    if (!rafRunning) return;
+    rafRunning = false;
+    cancelAnimationFrame(rafId);
+    console.log('[ProjectM] Worklet PCM live — fallback RAF broadcast stopped');
+  }
+
+  // Supervisor: decides whether the fallback loop should exist at all. Runs far
+  // below frame rate because the only thing it watches is a timestamp that the
+  // worklet path refreshes many times per second.
+  const supervise = () => {
+    if (projectMPcmIsLive()) stopRaf();
+    else startRaf();
+  };
+  supervise();
+  const supervisorId = setInterval(supervise, SUPERVISOR_INTERVAL_MS);
 
   return () => {
-    console.log('[ProjectM] Stopping legacy RAF PCM broadcast...');
-    cancelAnimationFrame(rafId);
+    clearInterval(supervisorId);
+    stopRaf();
     channel.close();
   };
 }

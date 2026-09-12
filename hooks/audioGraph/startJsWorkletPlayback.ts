@@ -62,12 +62,11 @@ export async function startJsWorkletPlayback(
           setTimeout(() => reject(new Error('Worklet module load timeout (30s)')), 30000);
         });
 
-        const protocolUrl = withBase('worklets/worklet-protocol-constants.js?v=2');
+        // One addModule: openmpt-worklet.js is bundled from
+        // src/worklets/openmpt-processor.ts with the protocol constants and the
+        // main→worklet guard compiled in (no separate bootstrap script).
         await Promise.race([
-          (async () => {
-            await ctx.audioWorklet.addModule(protocolUrl);
-            await ctx.audioWorklet.addModule(workletUrl);
-          })(),
+          ctx.audioWorklet.addModule(workletUrl),
           loadTimeout,
         ]);
 

@@ -47,6 +47,7 @@ export interface UseWorkletLoaderOptions {
 export const getWorkletUrl = (): string => {
   const base = detectRuntimeBase();
   // BUMP this version whenever openmpt-worklet.js changes to bust browser caches
+  // (the generated file — rebuild it with `npm run build:worklet-js`)
   // v9: XM pattern-boundary stutter — gate VU/time_at_position behind 60 Hz;
   //     opt-in projectm-pcm; interpolation filter length 8→4
   // v10: zero-alloc sample copy (no subarray/GC); skip position WASM queries on
@@ -58,7 +59,10 @@ export const getWorkletUrl = (): string => {
   // v15: drop get_time_at_position from process() (GetLength grew with order);
   //      O(1) row fraction; wrap-N / callback-gap / heap diag
   // v16: interpolation uses render param 3 (not 2 / stereo sep); wasm2js cubic
-  const WORKLET_VERSION = '16';
+  // v17: worklet is generated from src/worklets/openmpt-processor.ts (esbuild);
+  //      protocol constants + main→worklet guard are bundled in, so the separate
+  //      worklet-protocol-constants.js addModule is gone
+  const WORKLET_VERSION = '17';
   const url = `${base}worklets/openmpt-worklet.js?v=${WORKLET_VERSION}`;
 
   return url;

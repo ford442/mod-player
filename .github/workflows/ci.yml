@@ -32,6 +32,12 @@ jobs:
       - name: Type check
         run: npm run typecheck
       
+      - name: Type check AudioWorklet sources (no DOM lib)
+        run: npm run typecheck:worklet
+      
+      - name: Verify generated worklets match src/worklets/**
+        run: npm run verify:worklet-js
+      
       - name: Type check tests
         run: npm run typecheck:tests
       

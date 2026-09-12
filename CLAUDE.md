@@ -50,7 +50,15 @@ mod-player/
 │
 ├── audio-worklet/
 │   ├── OpenMPTWorkletEngine.ts  # WASM engine wrapper for the worklet thread
+│   ├── workletProtocolConstants.ts # Canonical postMessage type strings
+│   ├── mainToWorkletMessages.ts # Zero-dep main→worklet types + guard + send helpers
+│   ├── protocol.ts              # zod worklet→main schemas; re-exports the above
 │   └── types.ts                 # Worklet-specific types (WorkletPatternRow, EngineState, etc.)
+│
+├── src/worklets/                # TypeScript SOURCE OF RECORD for AudioWorklet processors
+│   ├── openmpt-processor.ts     # → public/worklets/openmpt-worklet.js (generated)
+│   ├── native-bridge.ts         # → public/worklets/native-bridge-processor.js (generated)
+│   └── audioworklet-env.d.ts    # AudioWorkletGlobalScope ambients (no DOM lib)
 │
 ├── utils/
 │   ├── geometryConstants.ts     # Canvas layout constants, polar ring geometry, layout detection
@@ -64,7 +72,7 @@ mod-player/
 ├── shaders/                     # WGSL source shaders (~56 files, e.g. patternv0.45.wgsl)
 ├── shaders-enhanced/            # Experimental enhanced shader variants
 ├── public/
-│   ├── worklets/                # openmpt-processor.js — runs on Audio Worklet thread (static asset)
+│   ├── worklets/                # GENERATED classic scripts (npm run build:worklet-js) + vendor wasm2js glue
 │   ├── shaders/                 # Public-served copies of shaders
 │   └── utils/                   # Static utility scripts
 │
@@ -84,6 +92,9 @@ npm run dev          # Start Vite dev server at http://localhost:5173
 npm run build        # tsc + Vite production build → dist/ (uses 4 GB heap)
 npm run preview      # Preview production build locally
 npm run typecheck    # TypeScript type-check only (no emit)
+npm run typecheck:worklet  # Type-check src/worklets/** (ES2020, no DOM lib)
+npm run build:worklet-js   # esbuild src/worklets/*.ts → public/worklets/*.js (predev/prebuild)
+npm run verify:worklet-js  # CI gate: generated worklets match their TS sources
 npm run lint         # ESLint (max 43 warnings budget; hard CI gate)
 npm run build:emcc   # Native C++ worklet → openmpt-native.* (scripts/build-wasm.sh, emsdk 3.1.51)
 npm run build:worklet # Alias of build:emcc (never overwrites openmpt-worklet.js)
@@ -118,7 +129,8 @@ Audio logic is split strictly between two contexts that **cannot share state dir
 - Reads current row/channel state from WASM, double-buffers via mutable refs (`channelStatesRef`) to avoid React re-render floods
 - Performs drift detection and timing correction for audio-visual sync
 
-### Worklet Thread (`public/worklets/openmpt-processor.js`)
+### Worklet Thread (`src/worklets/openmpt-processor.ts` → `public/worklets/openmpt-worklet.js`)
+- **Generated.** Edit the TypeScript source; `npm run build:worklet-js` bundles it (esbuild, IIFE, no minify) with the protocol constants, the main→worklet guard and the audio-reactive SAB layout compiled in — one `addModule()`, no hand-mirrored classic script.
 - Runs the actual libopenmpt render loop at audio sample rate (44.1 kHz)
 - Sends position + VU data back to the main thread every ~16 ms (60 fps)
 - **Rule:** No React state, no DOM APIs inside the worklet. All communication is strictly via `port.postMessage()`.
@@ -202,7 +214,7 @@ EngineState           // Worklet engine lifecycle state
 
 ## Common Pitfalls & Warnings
 
-1. **Worklet cache:** Browsers cache AudioWorklet files aggressively. After editing `openmpt-processor.js`, hard-refresh or disable cache in DevTools.
+1. **Worklet cache:** Browsers cache AudioWorklet files aggressively. After editing `src/worklets/openmpt-processor.ts`, run `npm run build:worklet-js`, bump `WORKLET_VERSION`, then hard-refresh or disable cache in DevTools.
 
 2. **Shader-uniform coupling:** Shaders are **not** pure assets — they are tightly coupled to TypeScript host code. Any change to a shader's `struct Uniforms {}` requires a matching change in `createUniformPayload` in `PatternDisplay.tsx`.
 
@@ -220,7 +232,9 @@ EngineState           // Worklet engine lifecycle state
 
 9. **Race conditions in audio-visual sync:** `channelStatesRef` is a double-buffered mutable ref. Do not replace it with React state — it will cause jank.
 
-10. **MOD/XM playback regressions (#329 / #330):** libopenmpt must init **once** per `AudioWorkletGlobalScope`; reuse the worklet node on module reload; never `suspend()` `AudioContext` on normal stop; throttle worklet `position` postMessage to ~60 Hz; skip `node.disconnect()` on hot reload. Bump `WORKLET_VERSION` when editing `openmpt-worklet.js`. See `docs/WORKLET_AUDIO_BUG.md` and `tests/workletAudioLifecycle.test.ts`.
+10. **MOD/XM playback regressions (#329 / #330):** libopenmpt must init **once** per `AudioWorkletGlobalScope`; reuse the worklet node on module reload; never `suspend()` `AudioContext` on normal stop; throttle worklet `position` postMessage to ~60 Hz; skip `node.disconnect()` on hot reload. Bump `WORKLET_VERSION` when the generated `openmpt-worklet.js` changes. See `docs/WORKLET_AUDIO_BUG.md` and `tests/workletAudioLifecycle.test.ts`.
+
+11. **Generated worklets are pattern-matched by tests:** `scripts/build-worklet-js.mjs` never minifies, because `tests/workletRegressionGuards.test.ts` asserts against the emitted JS (60 Hz position gate, no per-quantum allocation, cubic interpolation on render param 3). Keep those shapes intact in the TS source.
 
 ---
 
@@ -289,4 +303,6 @@ All shared canvas layout values live here:
 - **Do not** remove the Vite CORS headers (breaks SharedArrayBuffer / WASM workers)
 - **Do not** assume WebGPU is available — always check for fallback paths
 - **Do not** commit Emscripten `a.out` / `a.out.*` — native outputs are only `public/worklets/openmpt-native.*` (gitignored build artifacts from `npm run build:emcc`)
+- **Do not** hand-edit `public/worklets/openmpt-worklet.js` or `native-bridge-processor.js` — edit `src/worklets/*.ts` and regenerate
+- **Do not** import zod (or anything DOM) into `src/worklets/**` — it is bundled onto the audio thread
 - **Do not** commit agent scratch files (`.swarm-state.md`, `weekly_plan.md`) — use `docs/planning/ROADMAP.md` and GitHub issues

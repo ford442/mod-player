@@ -1,0 +1,32 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    /* Classic-script output: fields must be plain constructor assignments, not
+       [[Define]] semantics — keeps the generated processor byte-for-byte close
+       to the hand-written original that tests/*.test.ts pattern-match. */
+    "useDefineForClassFields": false,
+    /* No DOM on purpose. AudioWorkletGlobalScope has no window/document/fetch;
+       everything the processor may touch is declared in
+       src/worklets/audioworklet-env.d.ts, so a stray DOM call fails to compile. */
+    "lib": ["ES2020"],
+    "types": [],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "skipLibCheck": true,
+    "isolatedModules": true,
+    "noEmit": true,
+
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true
+  },
+  "include": [
+    "src/worklets/**/*.ts",
+    "audio-worklet/workletProtocolConstants.ts",
+    "audio-worklet/mainToWorkletMessages.ts",
+    "utils/audioReactive.ts"
+  ]
+}

@@ -65,7 +65,7 @@ npm run lint
 
 ### Native C++ audio engine (optional)
 
-Production audio uses the tracked **JS** AudioWorklet at `public/worklets/openmpt-worklet.js`. Do not overwrite it.
+Production audio uses the tracked **JS** AudioWorklet at `public/worklets/openmpt-worklet.js`. That file is **generated** from `src/worklets/openmpt-processor.ts` (`npm run build:worklet-js`) — edit the TypeScript source, not the output, and never let the native Emscripten build overwrite it.
 
 The optional native engine is built with a **single** supported path:
 

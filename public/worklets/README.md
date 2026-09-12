@@ -2,12 +2,43 @@
 
 Self-hosted worklet and libopenmpt assets served from `public/worklets/` (copied to `dist/worklets/` on build).
 
+> ⚠️ **`openmpt-worklet.js` and `native-bridge-processor.js` are generated — do not hand-edit them.**
+> Their source of record is `src/worklets/*.ts`; `scripts/build-worklet-js.mjs` (esbuild, IIFE, no
+> minify) compiles them. See [Generated worklets](#generated-worklets) below.
+
 ## Production JS worklet path (default)
 
-| File | Role |
-|------|------|
-| `openmpt-worklet.js` | `AudioWorkletProcessor` — renders module audio in `process()` |
-| `libopenmpt-audioworklet.js` | **wasm2js** Emscripten glue (~5 MB). Runtime is **embedded in JS** |
+| File | Role | Source |
+|------|------|--------|
+| `openmpt-worklet.js` | `AudioWorkletProcessor` — renders module audio in `process()` | generated from `src/worklets/openmpt-processor.ts` |
+| `native-bridge-processor.js` | SAB ring-buffer bridge for the native C++ engine | generated from `src/worklets/native-bridge.ts` |
+| `libopenmpt-audioworklet.js` | **wasm2js** Emscripten glue (~5 MB). Runtime is **embedded in JS** | vendor blob — never typechecked or rebuilt |
+
+<a id="generated-worklets"></a>
+### Generated worklets
+
+```bash
+npm run build:worklet-js    # regenerate (also runs as predev / prebuild)
+npm run verify:worklet-js   # CI gate: fails if the tracked output is stale
+npm run typecheck:worklet   # tsc -p tsconfig.worklet.json (ES2020, no DOM lib)
+```
+
+Why compile instead of hand-writing: `AudioWorkletGlobalScope` cannot `import()` or
+`importScripts()`, so the processor used to duplicate the message-type constants and the
+main→worklet receive guard as a second classic script
+(`worklet-protocol-constants.js`, removed). Bundling lets the processor share the real TS
+modules — `audio-worklet/workletProtocolConstants.ts`,
+`audio-worklet/mainToWorkletMessages.ts`, `utils/audioReactive.ts` — so adding a message type
+is one TypeScript change, and there is a single `addModule()` at load time.
+
+`tsconfig.worklet.json` compiles with `lib: ["ES2020"]` and **no DOM lib**: a `document` /
+`fetch` / `window` reference in the processor is a compile error, not a runtime crash on the
+audio thread. Ambient worklet globals live in `src/worklets/audioworklet-env.d.ts`.
+
+Output is never minified — `tests/workletRegressionGuards.test.ts` and
+`tests/workletAudioLifecycle.test.ts` pattern-match the generated file to keep the
+#329 / #330 / #354 invariants locked. **Bump `WORKLET_VERSION` in `hooks/useWorkletLoader.ts`
+whenever the generated file changes.**
 
 There is **no** sibling `libopenmpt.wasm` for this path. The glue is compiled with wasm2js (`isWasm2js: true`); a separate binary is neither loaded nor required.
 

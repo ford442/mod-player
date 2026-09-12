@@ -10,7 +10,8 @@ What is **production** vs **supporting** vs **ignored/experimental**.
 | `utils/shaderRegistry.ts`, `appConfig.ts` | Shader capabilities + picker |
 | `shaders/`, `public/shaders/` | WGSL sources (keep in sync via `npm run sync:shaders`) |
 | `src/renderers/` | WebGPU / WebGL2 / HTML renderer chain |
-| `public/worklets/` | Tracked JS AudioWorklet (`openmpt-worklet.js`); native `openmpt-native.*` is build output |
+| `src/worklets/` | **TypeScript source of record** for the AudioWorklet processors (`tsconfig.worklet.json`, no DOM lib) |
+| `public/worklets/` | Tracked, **generated** JS AudioWorklets (`openmpt-worklet.js`, `native-bridge-processor.js` — `npm run build:worklet-js`); native `openmpt-native.*` is build output |
 | `cpp/` | Optional Emscripten native engine |
 | `deploy.py` | Production deploy (storage API → VPS) |
 

@@ -8,6 +8,7 @@ import { useLibrary, useSaveSong, useSyncLibrary } from './hooks/useLibrary';
 import { useLocalLibrary } from './hooks/useLocalLibrary';
 import { useRateShader } from './hooks/useRateShader';
 import { startProjectMBridge } from './utils/projectMBridge';
+import { startAnalyserAnalysis } from './utils/audioAnalysisBus';
 import { isNativeLegacyAudioContext } from './utils/audioEngineSelection';
 import { supportsStepsLength, usesOscilloscope } from './utils/shaderVersion';
 import { preserveWindowScroll } from './utils/scrollContainer';
@@ -197,6 +198,11 @@ function App() {
     const stopBridge = startProjectMBridge(analyserNode);
     return stopBridge;
   }, [analyserNode]);
+
+  // Fallback producer for the analysis bus. Parks itself while the WebGPU
+  // compute pass is publishing, so on a GPU-capable session this costs one idle
+  // RAF tick and no analyser reads; in lite mode it is the only producer.
+  useEffect(() => startAnalyserAnalysis(analyserNode), [analyserNode]);
 
   const {
     mediaVisible,

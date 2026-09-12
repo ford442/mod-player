@@ -1,9 +1,11 @@
 /**
  * Canonical message-type strings for the JS AudioWorklet postMessage boundary.
  *
- * Imported by audio-worklet/protocol.ts (types + zod) and mirrored in
- * public/worklets/worklet-protocol-constants.js for the classic-script worklet.
- * tests/workletProtocol.test.ts enforces parity between the two files.
+ * Imported by audio-worklet/protocol.ts (worklet→main zod schemas),
+ * audio-worklet/mainToWorkletMessages.ts (main→worklet guard + send helpers),
+ * and — via scripts/build-worklet-js.mjs — compiled straight into
+ * public/worklets/openmpt-worklet.js. There is no classic-script mirror to keep
+ * in sync; tests/workletProtocol.test.ts checks the generated bundle instead.
  */
 
 /** Main thread → AudioWorklet processor */

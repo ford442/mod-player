@@ -29,6 +29,7 @@ import {
   type AudioBandSnapshot,
 } from '../../../utils/audioReactive';
 import { subscribePcm, type PcmBlock } from '../../../utils/pcmBus';
+import { publishAnalysis } from '../../../utils/audioAnalysisBus';
 import type { GpuTimestampRecorder } from './timestampQuery';
 
 /** Stereo frames retained for analysis. 2048 @ 44.1 kHz ≈ 46 ms of audio. */
@@ -261,6 +262,19 @@ export class ComputeAnalysis {
   private readbackEncoded = false;
   private unsubscribePcm: (() => void) | null = null;
   private lastPcmAt = 0;
+  /**
+   * The most recent block as it arrived, kept verbatim for the analysis bus.
+   * The ring is the GPU's view (unwrapped, fixed capacity); consumers of the
+   * bus want the block the audio clock actually produced.
+   */
+  private lastPcmBlock: PcmBlock | null = null;
+  /**
+   * Frames pushed since the last reset, divided by the sample rate to give the
+   * bus an audio-clock timestamp. ComputeAnalysis holds no AudioContext, and
+   * the PCM it is handed is exactly what the audio clock rendered, so counting
+   * it is the audio clock — free of the RAF jitter a wall clock would add.
+   */
+  private pcmFramesSeen = 0;
   private disposed = false;
 
   private constructor(
@@ -416,6 +430,8 @@ export class ComputeAnalysis {
       this.unsubscribePcm?.();
       this.unsubscribePcm = null;
       this.pcm.reset();
+      this.lastPcmBlock = null;
+      this.pcmFramesSeen = 0;
       this.snapshot = null;
     }
   }
@@ -450,6 +466,8 @@ export class ComputeAnalysis {
     if (!this.pcm.write(block.samples, block.channels, block.sampleRate)) return;
     this.pcmDirty = true;
     this.lastPcmAt = now();
+    this.lastPcmBlock = block;
+    this.pcmFramesSeen += block.frameCount;
   }
 
   /**
@@ -564,6 +582,7 @@ export class ComputeAnalysis {
         const next = foldBandsToSnapshot(meta, beat);
         next.bins.set(this.binsSnapshot);
         this.snapshot = next;
+        this.publishToAnalysisBus(next);
       })
       .catch(() => {
         /* buffer destroyed or device lost — keep the previous snapshot */
@@ -575,6 +594,27 @@ export class ComputeAnalysis {
         }
         this.readbackPending = false;
       });
+  }
+
+  /**
+   * Hand the readback to the app-wide analysis bus so the channel scope, the
+   * 3D stage and the Project-M bridge read the FFT this pass already did
+   * instead of each opening its own AnalyserNode. No-op when nothing listens.
+   */
+  private publishToAnalysisBus(snapshot: SpectrumSnapshot): void {
+    const block = this.lastPcmBlock;
+    if (!block) return;
+    publishAnalysis({
+      audioTime: block.sampleRate > 0 ? this.pcmFramesSeen / block.sampleRate : 0,
+      sampleRate: block.sampleRate,
+      pcm: block.samples,
+      channels: block.channels,
+      bands: snapshot.bands,
+      rms: snapshot.rmsL,
+      peak: snapshot.peakL,
+      bins32: snapshot.bins,
+      source: 'gpu-compute',
+    });
   }
 
   /**
