@@ -35,6 +35,11 @@
 # Release opts (Phases 2–3): thin LTO, -msimd128, section GC, emmalloc, fixed heap,
 # wrapper -fno-exceptions/-fno-rtti, STACK_SIZE=128KiB (main thread; matches worklet stack).
 # libopenmpt.a keeps exceptions (C API try/catch in libopenmpt_c.cpp).
+#
+# The build is TWO emcc phases: -fno-exceptions/-fno-rtti are compile-only, and the
+# link runs through em++. Collapsing them back into one emcc call is what made
+# native-full-build red (DISABLE_EXCEPTION_THROWING=1 vs __cxa_throw). See the
+# comment above the compile/link block before touching COMPILE_FLAGS.
 # After changing release flags, delete vendor/.../bin/libopenmpt.a to force rebuild.
 #   npm run build:emcc                   # preferred package.json entry
 #   npm run build:worklet                # deprecated alias → this script
@@ -114,7 +119,12 @@ done
 # Phase 2: SIMD, thin LTO, WASM feature flags, section GC, emmalloc.
 # Wrapper: -fno-exceptions -fno-rtti. libopenmpt.a keeps C++ exceptions (C API).
 # Phase 3: fixed heap (ALLOW_MEMORY_GROWTH=0) to avoid growth pauses during audio.
+#
+# COMPILE_FLAGS are shared by BOTH phases (ThinLTO does codegen at link time, so
+# -msimd128/-matomics/-flto must be repeated there or SIMD is silently dropped).
+# CXX_ONLY_FLAGS are compile-only on purpose — see the two-phase note below.
 COMPILE_FLAGS=()
+CXX_ONLY_FLAGS=()
 LINK_FLAGS=()
 EMSCRIPTEN_FLAGS=()
 
@@ -124,15 +134,18 @@ STACK_SIZE_FLAG=-sSTACK_SIZE=131072
 
 if [[ "$DEBUG_MODE" -eq 1 ]]; then
     # ASSERTIONS=2: expensive runtime checks — CI/debug builds only
-    COMPILE_FLAGS=(-O0 -g -DDEBUG -fno-exceptions -fno-rtti)
+    # -mbulk-memory/-matomics are NOT optional here: WASM_WORKERS links with
+    # --shared-memory, and wasm-ld rejects objects built without those features.
+    # (Debug deliberately keeps -msimd128 and LTO off for readable stack traces.)
+    COMPILE_FLAGS=(-O0 -g -DDEBUG -mbulk-memory -matomics)
+    CXX_ONLY_FLAGS=(-fno-exceptions -fno-rtti)
     EMSCRIPTEN_FLAGS=(
         -sASSERTIONS=2
         -sALLOW_MEMORY_GROWTH=1
         -sINITIAL_MEMORY=128mb
         -sMAXIMUM_MEMORY=256mb
         "$STACK_SIZE_FLAG"
-        # Catching stays enabled: libopenmpt.a (libopenmpt_c.cpp) requires try/catch.
-        # Wrapper objects are still compiled with -fno-exceptions.
+        -sDISABLE_EXCEPTION_CATCHING=1
     )
     echo "🔧 Building in DEBUG mode (ASSERTIONS=2)"
 else
@@ -143,9 +156,8 @@ else
         -mbulk-memory -matomics -mnontrapping-fptoint -msign-ext
         -mtune=wasm32
         -ffunction-sections -fdata-sections
-        -fno-exceptions
-        -fno-rtti
     )
+    CXX_ONLY_FLAGS=(-fno-exceptions -fno-rtti)
     LINK_FLAGS=(-Wl,--gc-sections)
     EMSCRIPTEN_FLAGS=(
         -sASSERTIONS=0
@@ -153,8 +165,7 @@ else
         -sALLOW_MEMORY_GROWTH=0
         -sINITIAL_MEMORY=128mb
         "$STACK_SIZE_FLAG"
-        # Catching stays enabled: libopenmpt.a (libopenmpt_c.cpp) requires try/catch.
-        # Wrapper objects are still compiled with -fno-exceptions.
+        -sDISABLE_EXCEPTION_CATCHING=1
     )
     echo "🔧 Building in RELEASE mode (SIMD + LTO + emmalloc + fixed 128mb heap)"
 fi
@@ -170,6 +181,12 @@ fi
 # libopenmpt static lib must be built with matching release opts (LTO + SIMD + atomics for WASM_WORKERS).
 # Do NOT add -fno-exceptions here: libopenmpt_c.cpp uses try/catch as the C API error boundary
 # and will not compile. Wrapper/worklet still use -fno-exceptions (C API only, no throw).
+#
+# Note what that boundary is actually worth at runtime: the link resolves
+# -lc++abi-ww-noexcept (DISABLE_EXCEPTION_CATCHING=1), so libopenmpt_c.cpp's catch
+# blocks are dead code and a throw aborts the module instead of returning null.
+# That has been true of every green build here; keeping -fno-exceptions off the
+# libopenmpt CXXFLAGS is about compiling it at all, not about live error recovery.
 LIBOPENMPT_RELEASE_CXXFLAGS='-O3 -DNDEBUG -msimd128 -flto=thin -mbulk-memory -matomics'
 LIBOPENMPT_RELEASE_CFLAGS='-O3 -DNDEBUG -msimd128 -flto=thin -mbulk-memory -matomics'
 
@@ -438,21 +455,49 @@ EOF
 # Collapse to single line for emcc
 EXPORTED_FUNCTIONS_FLAT="$(echo "$EXPORTED_FUNCTIONS" | tr -d '\n' | sed 's/  */ /g')"
 
-# ── Compile ──────────────────────────────────────────────────────────
-echo "🔨 Compiling C++ → WebAssembly (openmpt-native)..."
+# ── Compile + link (TWO phases, on purpose) ──────────────────────────
+#
+# -fno-exceptions / -fno-rtti are COMPILE-ONLY (CXX_ONLY_FLAGS).  Passing them
+# to a combined compile+link emcc call makes Emscripten infer
+# DISABLE_EXCEPTION_THROWING=1 at link, which drops __cxa_throw /
+# __cxa_allocate_exception — symbols libopenmpt.a (libopenmpt_c.cpp's try/catch
+# C API boundary) still references.  That is what broke native-full-build.
+#
+# The link runs through em++ (not emcc): once the inputs are .o files there is
+# no .cpp suffix left for the driver to infer C++ from, so emcc would skip
+# libc++/libc++abi entirely and every `operator new` in libopenmpt.a would be
+# undefined.  COMPILE_FLAGS are repeated on the link line because ThinLTO does
+# codegen at link time — drop -msimd128 there and verify:native-simd goes red.
+OBJ_DIR="$(mktemp -d "${TMPDIR:-/tmp}/openmpt-native-obj.XXXXXX")"
+cleanup_obj_dir() { rm -rf "$OBJ_DIR"; }
+trap cleanup_obj_dir EXIT
 
-emcc \
+echo "🔨 Compiling C++ objects (-fno-exceptions -fno-rtti)..."
+
+OBJECTS=()
+for src in openmpt_wrapper worklet_processor; do
+    obj="$OBJ_DIR/${src}.o"
+    em++ \
+        "${COMPILE_FLAGS[@]}" \
+        "${CXX_ONLY_FLAGS[@]+"${CXX_ONLY_FLAGS[@]}"}" \
+        "${EXTRA_SANITIZER_FLAGS[@]+"${EXTRA_SANITIZER_FLAGS[@]}"}" \
+        -std=c++17 \
+        -I"$LIBOPENMPT_INCLUDE" \
+        -c "$CPP_DIR/${src}.cpp" \
+        -o "$obj"
+    OBJECTS+=("$obj")
+done
+
+echo "🔗 Linking native worklet (em++; exceptions left enabled for libopenmpt.a)..."
+
+em++ \
     "${COMPILE_FLAGS[@]}" \
     "${LINK_FLAGS[@]+"${LINK_FLAGS[@]}"}" \
     "${EXTRA_SANITIZER_FLAGS[@]+"${EXTRA_SANITIZER_FLAGS[@]}"}" \
-    -std=c++17 \
     \
-    -I"$LIBOPENMPT_INCLUDE" \
+    "${OBJECTS[@]}" \
     -L"$LIBOPENMPT_LIB" \
     -lopenmpt \
-    \
-    "$CPP_DIR/openmpt_wrapper.cpp" \
-    "$CPP_DIR/worklet_processor.cpp" \
     \
     -sAUDIO_WORKLET=1 \
     -sWASM_WORKERS=1 \

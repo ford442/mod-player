@@ -122,6 +122,9 @@ public:
     /** Post-load ctl_set_text (e.g. render.resampler.emulate_amiga). */
     void ctlSetText(const char* key, const char* value);
 
+    /** True if this libopenmpt build lists `key` in openmpt_module_get_ctls(). */
+    bool supportsCtl(const char* key) const;
+
     // ── Position / metadata queries ─────────────────────────────────
 
     void fillPositionInfo(PositionInfo& out) const;
