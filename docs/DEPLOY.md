@@ -1,16 +1,29 @@
-# Deployment — xm-player (test.1ink.us)
+# Deployment — xm-player (test.1ink.us + go.1ink.us)
 
 ## Quick start
 
 ```bash
-npm run deploy                   # build (xm-player profile), validate, upload zip
+npm run deploy                   # test.1ink.us/xm-player → full shader catalog + picker
+npm run deploy:go                # go.1ink.us/xm-player → public lock (v0.30b only, no picker)
 # or step by step:
-npm run build:xm-player:verify   # build + validate dist/
-python deploy.py --no-build      # upload an already-validated dist/
+npm run build:xm-player:verify   # test host build: full catalog + picker
+npm run build:go:verify          # go host build: VITE_PUBLIC_MODE=1 public lock
+python deploy.py                 # same as npm run deploy
+python deploy.py --site go       # same as npm run deploy:go
+python deploy.py --no-build      # upload an already-validated test-profile dist/
+python deploy.py --site go --no-build   # upload an already-validated go-profile dist/
 python deploy.py --dry-run --no-build   # local classify/validate; never upload
 ```
 
-Deploy target: `https://test.1ink.us/xm-player/` via `storage.noahcohn.com` bundle API.
+Deploy targets via `storage.noahcohn.com` bundle API:
+
+- `https://test.1ink.us/xm-player/` ← `npm run build:xm-player` ← full shader catalog + picker
+- `https://go.1ink.us/xm-player/` ← `npm run build:go` (`VITE_PUBLIC_MODE=1`) ← only `patternv0.30b.wgsl` (“Note-On Disc”), no picker
+
+Both hosts keep the same `/xm-player/` base path.
+
+> [!WARNING]
+> `dist/` is a single folder. Do **not** use `--no-build` to upload a test-profile `dist/` to `go`, or a go-profile `dist/` to `test`; rebuild for the matching `--site` first.
 
 ## Native audio engine (optional)
 
