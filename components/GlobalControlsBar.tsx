@@ -23,7 +23,7 @@ export function GlobalControlsBar() {
     editMode,
     toggleEditMode,
     stageMode,
-    setStageMode,
+    toggleStageMode,
   } = usePlayerUiStore();
   const {
     storedShader: shaderFile,
@@ -138,7 +138,7 @@ export function GlobalControlsBar() {
           </button>
         )}
         <button
-          onClick={() => setStageMode(!stageMode)}
+          onClick={() => toggleStageMode()}
           className={cn(
             'px-4 py-2 text-sm font-mono rounded-lg shadow-lg transition-colors border',
             stageMode

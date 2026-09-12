@@ -34,14 +34,16 @@ describe('playerCommands', () => {
     expect(called).toBe(true);
   });
 
-  it('blocks keyboard when input is focused but not MIDI', () => {
-    let called = false;
-    playerCommands.register('transport.playPause', () => { called = true; });
-    playerCommands.setState({ inputFocused: true });
-    expect(playerCommands.dispatch('transport.playPause', 'keyboard').blocked).toBe(true);
-    expect(called).toBe(false);
-    expect(playerCommands.dispatch('transport.playPause', 'midi').handled).toBe(true);
-    expect(called).toBe(true);
+  it('blocks stage.toggle keyboard when cheatsheet is open but allows stage.exit', () => {
+    let toggled = false;
+    let exited = false;
+    playerCommands.register('stage.toggle', () => { toggled = true; });
+    playerCommands.register('stage.exit', () => { exited = true; });
+    playerCommands.setState({ cheatsheetOpen: true });
+    expect(playerCommands.dispatch('stage.toggle', 'keyboard').blocked).toBe(true);
+    expect(toggled).toBe(false);
+    expect(playerCommands.dispatch('stage.exit', 'keyboard').handled).toBe(true);
+    expect(exited).toBe(true);
   });
 });
 

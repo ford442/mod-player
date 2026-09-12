@@ -25,7 +25,9 @@ export type PlayerCommandId =
   | 'debug.toggle'
   | 'cheatsheet.toggle'
   | 'cheatsheet.close'
-  | 'shader.selectByIndex';
+  | 'shader.selectByIndex'
+  | 'stage.toggle'
+  | 'stage.exit';
 
 export interface CommandPayloadMap {
   'seek.jumpToOrder': { order: number };
@@ -73,6 +75,7 @@ const KEYBOARD_BLOCKED_COMMANDS_WHEN_CHEATSHEET = new Set<PlayerCommandId>([
   'debug.toggle',
   'cheatsheet.toggle',
   'shader.selectByIndex',
+  'stage.toggle',
 ]);
 
 class PlayerCommandBus {
@@ -156,6 +159,8 @@ export const COMMAND_LABELS: Record<PlayerCommandId, string> = {
   'cheatsheet.toggle': 'Toggle shortcuts help',
   'cheatsheet.close': 'Close shortcuts help',
   'shader.selectByIndex': 'Select shader by program #',
+  'stage.toggle': 'Toggle stage mode',
+  'stage.exit': 'Exit stage mode',
 };
 
 export function isTextInputFocused(): boolean {

@@ -76,6 +76,10 @@ export function useKeyboardShortcuts({ cheatsheetOpen }: KeyboardShortcutOptions
         case 'D':
           dispatch('debug.toggle');
           break;
+        case 's':
+        case 'S':
+          dispatch('stage.toggle');
+          break;
         case '?':
           dispatch('cheatsheet.toggle');
           break;
@@ -87,6 +91,8 @@ export function useKeyboardShortcuts({ cheatsheetOpen }: KeyboardShortcutOptions
         case 'Escape':
           if (cheatsheetOpen) {
             dispatch('cheatsheet.close');
+          } else {
+            dispatch('stage.exit');
           }
           break;
         default:

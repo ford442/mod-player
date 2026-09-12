@@ -25,6 +25,8 @@ export interface PlayerCommandHandlers {
   onToggleDebugPanel: () => void;
   onToggleCheatsheet: () => void;
   onCloseCheatsheet: () => void;
+  onToggleStageMode: () => void;
+  onExitStageMode: () => void;
   onShaderSelectByIndex?: (index: number) => void;
 }
 
@@ -77,6 +79,8 @@ export function registerPlayerCommands(handlers: PlayerCommandHandlers): () => v
   bind('debug.toggle', () => { handlers.onToggleDebugPanel(); });
   bind('cheatsheet.toggle', () => { handlers.onToggleCheatsheet(); });
   bind('cheatsheet.close', () => { handlers.onCloseCheatsheet(); });
+  bind('stage.toggle', () => { handlers.onToggleStageMode(); });
+  bind('stage.exit', () => { handlers.onExitStageMode(); });
   if (handlers.onShaderSelectByIndex) {
     bind('shader.selectByIndex', (payload) => {
       if (payload && typeof payload === 'object' && 'index' in payload) {
@@ -117,6 +121,8 @@ export function useRegisterPlayerCommands(handlers: PlayerCommandHandlers): void
       onToggleDebugPanel: () => handlersRef.current.onToggleDebugPanel(),
       onToggleCheatsheet: () => handlersRef.current.onToggleCheatsheet(),
       onCloseCheatsheet: () => handlersRef.current.onCloseCheatsheet(),
+      onToggleStageMode: () => handlersRef.current.onToggleStageMode(),
+      onExitStageMode: () => handlersRef.current.onExitStageMode(),
       onShaderSelectByIndex: (index) => handlersRef.current.onShaderSelectByIndex?.(index),
     });
   }, []);

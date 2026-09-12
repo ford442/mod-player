@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import type { AppTheme } from '../appConfig';
 import { DEVICE_CAPABILITIES } from '../utils/deviceCapabilities';
 import { readLocalStorage, writeLocalStorage } from '../utils/localStorageIO';
+import { resolveStageModePreference, STAGE_MODE_STORAGE_KEY } from '../utils/stageModeSelection';
 
 export interface PlayerUiState {
   theme: AppTheme;
@@ -62,7 +63,7 @@ export const usePlayerUiStore = create<PlayerUiState>((set) => ({
   showLibraryBrowser: false,
   showLocalLibrary: false,
   editMode: false,
-  stageMode: readLocalStorage<boolean>('xasm1_stage_mode', false),
+  stageMode: resolveStageModePreference(),
   selectedInstrumentIndex: null,
   selectedSampleIndex: null,
   setTheme: (theme) => {
@@ -95,14 +96,14 @@ export const usePlayerUiStore = create<PlayerUiState>((set) => ({
   setEditMode: (editMode) => set({ editMode }),
   toggleEditMode: () => set((state) => ({ editMode: !state.editMode })),
   setStageMode: (stageMode) => {
-    writeLocalStorage('xasm1_stage_mode', stageMode);
-    set((state) => ({ stageMode, editMode: stageMode ? false : state.editMode }));
+    writeLocalStorage(STAGE_MODE_STORAGE_KEY, stageMode);
+    set({ stageMode });
   },
   toggleStageMode: () => {
     set((state) => {
       const stageMode = !state.stageMode;
-      writeLocalStorage('xasm1_stage_mode', stageMode);
-      return { stageMode, editMode: stageMode ? false : state.editMode };
+      writeLocalStorage(STAGE_MODE_STORAGE_KEY, stageMode);
+      return { stageMode };
     });
   },
   setSelectedInstrumentIndex: (selectedInstrumentIndex) => set({ selectedInstrumentIndex }),

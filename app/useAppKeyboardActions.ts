@@ -3,6 +3,7 @@ import { useRegisterPlayerCommands } from '../hooks/useRegisterPlayerCommands';
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
 import { AVAILABLE_SHADERS } from '../appConfig';
 import type { PatternMatrix } from '../types';
+import { usePlayerUiStore } from '../store/playerUiStore';
 
 export interface UseAppKeyboardActionsParams {
   isPlaying: boolean;
@@ -98,6 +99,14 @@ export function useAppKeyboardActions(params: UseAppKeyboardActionsParams) {
   const onKbdToggleDebugPanel = useCallback(() => setDebugPanelOpen(!debugPanelOpen), [setDebugPanelOpen, debugPanelOpen]);
   const onKbdToggleCheatsheet = useCallback(() => setCheatsheetOpen(!cheatsheetOpen), [setCheatsheetOpen, cheatsheetOpen]);
   const onKbdCloseCheatsheet = useCallback(() => setCheatsheetOpen(false), [setCheatsheetOpen]);
+  const onKbdToggleStageMode = useCallback(() => {
+    usePlayerUiStore.getState().toggleStageMode();
+  }, []);
+  const onKbdExitStageMode = useCallback(() => {
+    if (usePlayerUiStore.getState().stageMode) {
+      usePlayerUiStore.getState().setStageMode(false);
+    }
+  }, []);
 
   const onKbdVolumeSet = useCallback((value: number) => setVolume(Math.max(0, Math.min(1, value))), [setVolume]);
   const onKbdPanSet = useCallback((value: number) => setPan(Math.max(-1, Math.min(1, value))), [setPan]);
@@ -125,6 +134,8 @@ export function useAppKeyboardActions(params: UseAppKeyboardActionsParams) {
     onToggleDebugPanel: onKbdToggleDebugPanel,
     onToggleCheatsheet: onKbdToggleCheatsheet,
     onCloseCheatsheet: onKbdCloseCheatsheet,
+    onToggleStageMode: onKbdToggleStageMode,
+    onExitStageMode: onKbdExitStageMode,
     onShaderSelectByIndex: onKbdShaderSelectByIndex,
   });
 

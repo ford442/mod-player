@@ -19,8 +19,9 @@ const SHORTCUTS: Array<[string, string]> = [
   ['M', 'Mute / unmute'],
   ['F', 'Toggle fullscreen'],
   ['D', 'Toggle debug panel'],
+  ['S', 'Toggle stage mode'],
   ['?', 'Toggle this help overlay'],
-  ['Escape', 'Close this help overlay'],
+  ['Escape', 'Close this help overlay, or exit stage mode'],
   ['MIDI', 'See MIDI / Hardware panel — works when keyboard is blocked'],
 ];
 

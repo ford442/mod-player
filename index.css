@@ -141,3 +141,30 @@ button:disabled {
   /* FIX: Replaced '@apply bg-gray-500' with plain CSS */
   background-color: #6b7280;
 }
+
+/* Stage mode: hide chrome in-place; keep PerformanceStage mounted at a fixed sibling index. */
+[data-stage-mode="on"] .stage-chrome {
+  display: none;
+}
+
+[data-stage-mode="on"] .performance-stage {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  width: 100vw;
+  height: 100vh;
+  margin: 0;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  overflow: hidden;
+  background: #000;
+}
+
+.stage-overlay {
+  display: none;
+}
+
+[data-stage-mode="on"] .stage-overlay {
+  display: contents;
+}
