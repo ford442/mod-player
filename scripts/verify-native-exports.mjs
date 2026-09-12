@@ -202,10 +202,35 @@ if (existsSync(glue)) {
     errors.push('public/worklets/openmpt-native.js must export Module.emscriptenRegisterAudioObject');
   }
 }
-if (/-sDISABLE_EXCEPTION_CATCHING=1/.test(buildSh)) {
+// Exception contract. -fno-exceptions/-fno-rtti must stay COMPILE-only: on the
+// link line Emscripten infers DISABLE_EXCEPTION_THROWING=1 and then wasm-ld
+// cannot resolve __cxa_throw from libopenmpt.a (native-full-build red, #412).
+if (!/CXX_ONLY_FLAGS=\(-fno-exceptions -fno-rtti\)/.test(buildSh)) {
   errors.push(
-    'scripts/build-wasm.sh must not set DISABLE_EXCEPTION_CATCHING=1 (libopenmpt_c.cpp try/catch)',
+    'scripts/build-wasm.sh must keep -fno-exceptions/-fno-rtti in CXX_ONLY_FLAGS (compile-only)',
   );
+}
+for (const mode of ['COMPILE_FLAGS', 'LINK_FLAGS']) {
+  const block = buildSh.match(new RegExp(`${mode}=\\(([^)]*)\\)`, 'g')) ?? [];
+  if (block.some((b) => /-fno-exceptions|-fno-rtti/.test(b))) {
+    errors.push(
+      `${mode} must not carry -fno-exceptions/-fno-rtti (it reaches the link and drops __cxa_throw)`,
+    );
+  }
+}
+if (!/-sDISABLE_EXCEPTION_CATCHING=1/.test(buildSh)) {
+  errors.push(
+    'scripts/build-wasm.sh must set -sDISABLE_EXCEPTION_CATCHING=1 explicitly (do not rely on the emcc default)',
+  );
+}
+// The link must go through em++: with .o inputs there is no .cpp suffix left for
+// emcc to infer C++ from, so libc++/libc++abi would be skipped and every
+// `operator new` in libopenmpt.a would come back undefined.
+if (!/^em\+\+ \\$/m.test(buildSh)) {
+  errors.push('scripts/build-wasm.sh must link the native worklet with em++ (not emcc)');
+}
+if (!/-c "\$CPP_DIR\/\$\{src\}\.cpp"/.test(buildSh)) {
+  errors.push('scripts/build-wasm.sh must compile C++ to .o objects before linking (two-phase build)');
 }
 
 // Strip comments before scanning shell for dangerous command patterns
