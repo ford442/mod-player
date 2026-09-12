@@ -2,7 +2,7 @@
 
 Living pointer to active work. **Do not** append agent run diaries here — use GitHub issues and PRs for status.
 
-**Last reconciled:** 2026-09-11. Foundation issues #401 / #402 / #404 are **closed** (code landed; leftovers filed as #411–#415). #411 was closed 2026-09-05 by #426.
+**Last reconciled:** 2026-09-12 (#412 closed; CI break 3 fixed). Foundation issues #401 / #402 / #404 are **closed** (code landed; leftovers filed as #411–#415). #411 was closed 2026-09-05 by #426.
 
 ## 🔴 CI was red on `main` for 7 consecutive runs (2026-09-05 → 2026-09-11)
 
@@ -12,9 +12,16 @@ Runs 597–603 of `ci.yml`. Three **independent** breaks, all introduced by dire
 |---|-------|--------|
 | 1 | `65c0885` deleted **512 lines** from `package-lock.json` with no `package.json` change, stripping the nested `vitest/node_modules/@esbuild/*@0.28.2` subtree plus top-level `netbsd-arm64` / `openbsd-arm64` / `openharmony-arm64`. **All six jobs** died in ~45 s at `npm ci` ("Missing: @esbuild/…@0.28.2 from lock file"). | **Fixed** — lockfile restored to pre-deletion content (exact 512-line reversal, no version drift). |
 | 2 | `tests/resolveNativeFactory.test.ts` declared an unused `obj` param → `typecheck:tests` TS6133 under `noUnusedParameters`. | **Fixed** — renamed `_obj`, matching the convention in `nativePatternReader.test.ts`. |
-| 3 | `7572ef8` put `-fno-exceptions` in `COMPILE_FLAGS`, which `scripts/build-wasm.sh` passes to the **single combined compile+link** `emcc` invocation (line ~445). emcc then infers `DISABLE_EXCEPTION_THROWING=1` at link, which collides with `__cxa_throw` pulled in from `libopenmpt.a`. `native-full-build` has been red since 2026-09-05; `native-wasm-scheduled.yml` run 9 (2026-09-07) also failed. | **Open — see #412.** |
+| 3 | `7572ef8` put `-fno-exceptions` in `COMPILE_FLAGS`, which `scripts/build-wasm.sh` passes to the **single combined compile+link** `emcc` invocation (line ~445). emcc then infers `DISABLE_EXCEPTION_THROWING=1` at link, which collides with `__cxa_throw` pulled in from `libopenmpt.a`. `native-full-build` has been red since 2026-09-05; `native-wasm-scheduled.yml` run 9 (2026-09-07) also failed. | **Fixed** — `build-wasm.sh` now compiles and links in two phases (#412). |
 
-Break 3 contradicts the script's own documented contract ("Catching stays enabled: libopenmpt.a requires try/catch. Wrapper objects are still compiled with `-fno-exceptions`"). Throwing was disabled *implicitly*, which was never intended. Candidate fix: add `-sDISABLE_EXCEPTION_THROWING=0` to `EMSCRIPTEN_FLAGS` in both the debug and release branches — it appears after `COMPILE_FLAGS` on the command line, so it re-enables throw support at link while wrapper objects keep `-fno-exceptions`. **Requires emsdk 3.1.51 to verify; not yet compile-tested.**
+Break 3 contradicts the script's own documented contract ("Catching stays enabled: libopenmpt.a requires try/catch. Wrapper objects are still compiled with `-fno-exceptions`"). Throwing was disabled *implicitly*, which was never intended.
+
+Fixed 2026-09-12 under #412, **verified against emsdk 3.1.51** (release and `--debug` both link). The candidate fix noted here (`-sDISABLE_EXCEPTION_THROWING=0`) was not taken — it would have linked full throw support back in to satisfy a `libopenmpt.a` boundary that is dead code anyway. Instead the build is now two `em++` phases: `-fno-exceptions`/`-fno-rtti` live in `CXX_ONLY_FLAGS` and never reach the link line. Two things the reconciliation got wrong and are worth recording:
+
+- **The documented contract was already false.** The link resolves `libc++abi-ww-noexcept` (`DISABLE_EXCEPTION_CATCHING` defaults to 1), so `libopenmpt_c.cpp`'s `try`/`catch` blocks have never been live in any green build here — a throw aborts the module rather than returning an error code. The flag is now set **explicitly** in `EMSCRIPTEN_FLAGS` so this stops depending on an emcc default. (Rebuilding `libopenmpt.a` itself with `-fno-exceptions` remains impossible — verified: `libopenmpt_c.cpp` fails with "cannot use 'try' with exceptions disabled".)
+- **`--debug` was broken independently.** Its `COMPILE_FLAGS` lacked `-mbulk-memory -matomics`, and `wasm-ld` rejects `--shared-memory` against objects without those features. Break 3 masked it; both are fixed.
+
+Because a throw is an `abort()`, argument validation is not optional in `cpp/openmpt_wrapper.cpp`. Three reachable aborts were found and fixed while closing #412: `setChannelMute` past the module's channel count (the worklet replays a 32-bit mute mask across module loads), an unknown `set_render_param` id, and an unknown `ctl_set_text` key. Each one killed the whole worklet.
 
 **Lesson worth keeping:** `npm ci` is the first step of every job in `ci.yml`. A hand-edited lockfile takes the whole matrix down and every failure looks identical, which hides the two unrelated breaks underneath it. Regenerate lockfiles with npm, never by editing.
 
@@ -45,7 +52,7 @@ Fix per #427: render both subtrees unconditionally in a structurally invariant o
 | Priority | Issue | Summary |
 |----------|-------|---------|
 | **P1 — Fix First** | [#427](https://github.com/ford442/mod-player/issues/427) | `stageMode` canvas-remount regression: replace the `{stageMode ? <PerformanceStage/> : <ChromeLayout/>}` subtree swap at `MainLayout.tsx:19` with always-rendered children + CSS-only stage mode, and stop `setStageMode` mutating `editMode`. Landed in `0f0019e` against the issue's one governing rule. |
-| **P1 — Fix First** | [#412](https://github.com/ford442/mod-player/issues/412) | `-fno-exceptions` reaches the combined compile+link `emcc` call → `DISABLE_EXCEPTION_THROWING=1` vs `__cxa_throw` from `libopenmpt.a`. `native-full-build` red since 2026-09-05. Also the original scope: `STACK_SIZE`, interactive `ctl`/mute, third wasm2js module. |
+| ~~P1~~ **done** | [#412](https://github.com/ford442/mod-player/issues/412) | Two-phase `em++` compile/link fixes the `__cxa_throw` break (and `--debug`'s missing `-matomics`); `STACK_SIZE`, explicit `DISABLE_EXCEPTION_CATCHING=1`, interactive `ctl`/mute and the one-module native parse were already in tree. Mute/interpolation verified against the real wrapper on emsdk 3.1.51. Unblocks #416. |
 | P1 | [#413](https://github.com/ford442/mod-player/issues/413) | Compile `openmpt-worklet.js` / native-bridge from TypeScript (single protocol source). |
 | P1 | [#414](https://github.com/ford442/mod-player/issues/414) | Bus half **done** (`utils/pcmBus.ts` + `computeAnalysis.ts`, consumed by `frameDraw.ts` and both `start*Playback.ts`). Layout half structurally landed in `0f0019e` but behaviourally regressed — tracked as #427 above. Close this once #427 is green. |
 | P1 (reopen?) | [#411](https://github.com/ford442/mod-player/issues/411) | Closed 2026-09-05 by #426, but only the deploy-awareness slice shipped. Still in tree: `?nativeCtx=legacy` / `isNativeLegacyAudioContext`, unlocked shared `AudioContext` sampleRate, and `native-engine-bench-notes.md` with no measured numbers. |
@@ -56,7 +63,7 @@ Fix per #427: render both subtrees unconditionally in a structurally invariant o
 | Priority | Issue | Summary |
 |----------|-------|---------|
 | P2 | [#403](https://github.com/ford442/mod-player/issues/403) | Tracker studio: inspector waveforms, S3M extract, **audible** pattern edits via a sample-audition worklet (libopenmpt cannot write cells). |
-| P2 | [#416](https://github.com/ford442/mod-player/issues/416) | Live channel mute/solo through JS + native (export-only today). Blocked on #412 for native; JS engine can ship first. Distinct from #403. |
+| P2 | [#416](https://github.com/ford442/mod-player/issues/416) | Live channel mute/solo through JS + native (export-only today). **Unblocked** — `_set_channel_mute` is exported and range-safe as of #412. Distinct from #403. |
 | P2 | [#417](https://github.com/ford442/mod-player/issues/417) | Performance instrument: MIDI/chassis on `playerCommands`, `stageMode`, WebCodecs music-video (`mp4-muxer` optional). Depends on #414 + #415 decision. |
 
 ## Landed (do not re-open)

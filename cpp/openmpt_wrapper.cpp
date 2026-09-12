@@ -125,23 +125,65 @@ void OpenMPTModule::setVolume(float vol) {
     volume_ = std::max(0.0f, std::min(1.0f, vol));
 }
 
+// libopenmpt reports bad arguments by throwing, and this binary links
+// libc++abi-noexcept (see scripts/build-wasm.sh) — so a throw is an abort(),
+// not a return code, and an abort inside audio_process_cb takes the whole
+// worklet down. Every setter below therefore validates before it calls in.
+
 void OpenMPTModule::setChannelMute(int channel, bool muted) {
     if (!interactiveReady_ || !modExt_ || !interactive_.set_channel_mute_status) {
+        return;
+    }
+    // Channel count is per-module: the worklet replays a 32-bit mute mask after
+    // every load, so a mask set on a 32-channel IT must not abort on a 4ch MOD.
+    if (channel < 0 || channel >= openmpt_module_get_num_channels(mod_)) {
         return;
     }
     interactive_.set_channel_mute_status(modExt_, channel, muted ? 1 : 0);
 }
 
 void OpenMPTModule::setRenderParam(int param, int32_t value) {
-    if (mod_) {
-        openmpt_module_set_render_param(mod_, param, value);
+    if (!mod_) return;
+    // Only the four documented ids (libopenmpt.h); an unknown id throws.
+    // Out-of-range *values* are clamped by libopenmpt and are safe to pass.
+    switch (param) {
+        case OPENMPT_MODULE_RENDER_MASTERGAIN_MILLIBEL:
+        case OPENMPT_MODULE_RENDER_STEREOSEPARATION_PERCENT:
+        case OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH:
+        case OPENMPT_MODULE_RENDER_VOLUMERAMPING_STRENGTH:
+            break;
+        default:
+            std::fprintf(stderr, "[OpenMPTModule] ignoring unknown render param %d\n", param);
+            return;
     }
+    openmpt_module_set_render_param(mod_, param, value);
+}
+
+bool OpenMPTModule::supportsCtl(const char* key) const {
+    if (!mod_ || !key || !key[0]) return false;
+    // Semicolon-separated list of the ctls this build actually understands.
+    const char* ctls = openmpt_module_get_ctls(mod_);
+    if (!ctls) return false;
+    const size_t keyLen = std::strlen(key);
+    bool found = false;
+    for (const char* p = ctls; *p && !found; ) {
+        const char* end = std::strchr(p, ';');
+        const size_t len = end ? static_cast<size_t>(end - p) : std::strlen(p);
+        if (len == keyLen && std::strncmp(p, key, keyLen) == 0) found = true;
+        if (!end) break;
+        p = end + 1;
+    }
+    openmpt_free_string(ctls);
+    return found;
 }
 
 void OpenMPTModule::ctlSetText(const char* key, const char* value) {
-    if (mod_ && key && value) {
-        openmpt_module_ctl_set_text(mod_, key, value);
+    if (!mod_ || !key || !value) return;
+    if (!supportsCtl(key)) {
+        std::fprintf(stderr, "[OpenMPTModule] ignoring unsupported ctl '%s'\n", key);
+        return;
     }
+    openmpt_module_ctl_set_text(mod_, key, value);
 }
 
 // ── Position / metadata ─────────────────────────────────────────────

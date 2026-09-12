@@ -57,7 +57,7 @@ describe('#412 native ctl / mute / one-module parse', () => {
   it('emcc contract includes STACK_SIZE, no-exceptions, and new exports', () => {
     expect(buildSh).toContain('-sSTACK_SIZE=131072');
     expect(buildSh).toContain('-fno-exceptions');
-    expect(buildSh).not.toContain('-sDISABLE_EXCEPTION_CATCHING=1');
+    expect(buildSh).toContain('-sDISABLE_EXCEPTION_CATCHING=1');
     expect(buildSh).toContain('libopenmpt_c.cpp');
     expect(buildSh).toContain("'_set_channel_mute'");
     expect(buildSh).toContain("'_set_render_param'");
@@ -67,12 +67,65 @@ describe('#412 native ctl / mute / one-module parse', () => {
     expect(buildSh).toContain('patch-native-glue.mjs');
   });
 
+  // Regression: 7572ef8 put -fno-exceptions in COMPILE_FLAGS, which the single
+  // combined compile+link emcc call forwarded to the link. Emscripten then set
+  // DISABLE_EXCEPTION_THROWING=1 and wasm-ld could not resolve __cxa_throw /
+  // __cxa_allocate_exception from libopenmpt.a. native-full-build red 2026-09-05.
+  it('keeps -fno-exceptions/-fno-rtti off the link line (two-phase build)', () => {
+    expect(buildSh).toContain('CXX_ONLY_FLAGS=(-fno-exceptions -fno-rtti)');
+    for (const group of ['COMPILE_FLAGS', 'LINK_FLAGS']) {
+      for (const block of buildSh.match(new RegExp(`${group}=\\(([^)]*)\\)`, 'g')) ?? []) {
+        expect(block).not.toMatch(/-fno-exceptions|-fno-rtti/);
+      }
+    }
+  });
+
+  it('links with em++ so libc++/libc++abi back libopenmpt.a', () => {
+    // With .o inputs there is no .cpp suffix left for emcc to infer C++ from,
+    // so it would skip libc++ and `operator new` would come back undefined.
+    expect(buildSh).toMatch(/^em\+\+ \\$/m);
+    expect(buildSh).toContain('-c "$CPP_DIR/${src}.cpp"');
+  });
+
+  it('compiles debug objects with the atomics/bulk-memory WASM_WORKERS needs', () => {
+    // wasm-ld rejects --shared-memory against objects built without these.
+    const debugFlags = buildSh.match(/COMPILE_FLAGS=\(-O0 -g -DDEBUG[^)]*\)/)?.[0] ?? '';
+    expect(debugFlags).toContain('-mbulk-memory');
+    expect(debugFlags).toContain('-matomics');
+  });
+
   it('native play uses Sinc+LP interpolation (length 8) and demand-driven PCM capture', () => {
     expect(nativePlay).toContain('setInterpolationLength(INTERPOLATION_SINC_LP)');
     expect(nativePlay).toContain('setPcmCapture');
     expect(nativePlay).toContain('setPcmDemandListener');
     expect(nativePlay).toContain('shouldReloadNativeModule');
     expect(nativePlay).toContain('ensurePcmRing');
+  });
+
+  // libopenmpt signals bad arguments by throwing, and the native build links
+  // libc++abi-noexcept — so a throw is abort(), which inside audio_process_cb
+  // kills the worklet. Verified against the real wrapper: setChannelMute past
+  // the module's channel count, an unknown render param id, and an unknown ctl
+  // key each aborted the wasm module before these guards.
+  it('validates ctl/mute/render arguments before calling libopenmpt', () => {
+    const mute = wrapper.slice(
+      wrapper.indexOf('void OpenMPTModule::setChannelMute'),
+      wrapper.indexOf('void OpenMPTModule::setRenderParam'),
+    );
+    expect(mute).toContain('openmpt_module_get_num_channels');
+    expect(mute).toMatch(/channel < 0 \|\| channel >= /);
+
+    const render = wrapper.slice(
+      wrapper.indexOf('void OpenMPTModule::setRenderParam'),
+      wrapper.indexOf('bool OpenMPTModule::supportsCtl'),
+    );
+    expect(render).toContain('OPENMPT_MODULE_RENDER_MASTERGAIN_MILLIBEL');
+    expect(render).toContain('OPENMPT_MODULE_RENDER_VOLUMERAMPING_STRENGTH');
+    expect(render).toContain('default:');
+
+    expect(wrapper).toContain('openmpt_module_get_ctls');
+    const ctl = wrapper.slice(wrapper.indexOf('void OpenMPTModule::ctlSetText'));
+    expect(ctl).toContain('supportsCtl(key)');
   });
 
   it('does not call GetLength/time-at-row on the audio thread', () => {
