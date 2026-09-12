@@ -156,12 +156,6 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   const gpuDeviceRef = useRef<GPUDevice | null>(null);
   const gpuContextRef = useRef<GPUCanvasContext | null>(null);
 
-  useEffect(() => {
-    const w = window as Window & { __PATTERN_DISPLAY_MOUNTS?: number };
-    w.__PATTERN_DISPLAY_MOUNTS = (w.__PATTERN_DISPLAY_MOUNTS ?? 0) + 1;
-    console.log('PatternDisplay mount', w.__PATTERN_DISPLAY_MOUNTS);
-  }, []);
-
   const themeBlendRef = useRef<number>(nightModeEnabled ? 1.0 : 0.0);
   const nightModeTargetRef = useRef<number>(nightModeEnabled ? 1.0 : 0.0);
   nightModeTargetRef.current = nightModeEnabled ? 1.0 : 0.0;
