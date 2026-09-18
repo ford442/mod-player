@@ -10,6 +10,7 @@
 
 import { useCallback, useRef, useState } from 'react';
 import { detectRuntimeBase, withBase } from '../src/lib/paths';
+import workletVersionData from '../audio-worklet/js/worklet-version.generated.json';
 
 export { withBase };
 
@@ -46,19 +47,11 @@ export interface UseWorkletLoaderOptions {
  */
 export const getWorkletUrl = (): string => {
   const base = detectRuntimeBase();
-  // BUMP this version whenever openmpt-worklet.js changes to bust browser caches
-  // v9: XM pattern-boundary stutter — gate VU/time_at_position behind 60 Hz;
-  //     opt-in projectm-pcm; interpolation filter length 8→4
-  // v10: zero-alloc sample copy (no subarray/GC); skip position WASM queries on
-  //      non-report quanta; audio-reactive SAB only at ~60 Hz; reuse VU array
-  // v11: audioDiag uses Date.now() (performance.now is frozen per quantum in worklet)
-  // v12: auto audio-lite for >16ch modules; playhead quantum compensation on main thread
-  // v13: setChannelMute / setRenderParam / ctlSetText protocol stubs (#412)
-  // v14: audioDiag records slow-quantum row (no audio-thread console.log)
-  // v15: drop get_time_at_position from process() (GetLength grew with order);
-  //      O(1) row fraction; wrap-N / callback-gap / heap diag
-  // v16: interpolation uses render param 3 (not 2 / stereo sep); wasm2js cubic
-  const WORKLET_VERSION = '16';
+  // Cache-bust with a content hash of the compiled processor (written by
+  // scripts/build-js-worklet.mjs to worklet-version.generated.json) instead
+  // of a hand-maintained version counter — it changes exactly when the
+  // generated openmpt-worklet.js changes, no manual bump required.
+  const WORKLET_VERSION = workletVersionData.version;
   const url = `${base}worklets/openmpt-worklet.js?v=${WORKLET_VERSION}`;
 
   return url;

@@ -23,6 +23,6 @@
     "exactOptionalPropertyTypes": true
   },
   "include": ["."],
-  "exclude": ["node_modules", "dist", "vite.config.ts", "vitest.config.ts", "archive", "jules_patch", "tests"],
+  "exclude": ["node_modules", "dist", "vite.config.ts", "vitest.config.ts", "archive", "jules_patch", "tests", "audio-worklet/js"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }

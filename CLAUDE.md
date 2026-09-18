@@ -87,6 +87,7 @@ npm run typecheck    # TypeScript type-check only (no emit)
 npm run lint         # ESLint (max 43 warnings budget; hard CI gate)
 npm run build:emcc   # Native C++ worklet → openmpt-native.* (scripts/build-wasm.sh, emsdk 3.1.51)
 npm run build:worklet # Alias of build:emcc (never overwrites openmpt-worklet.js)
+npm run build:js-worklet # Compile audio-worklet/js/openmpt-processor.ts → public/worklets/openmpt-worklet.js (esbuild)
 python3 deploy.py    # Build + SFTP upload to production server
 ```
 
@@ -220,11 +221,13 @@ EngineState           // Worklet engine lifecycle state
 
 9. **Race conditions in audio-visual sync:** `channelStatesRef` is a double-buffered mutable ref. Do not replace it with React state — it will cause jank.
 
-10. **MOD/XM playback regressions (#329 / #330):** libopenmpt must init **once** per `AudioWorkletGlobalScope`; reuse the worklet node on module reload; never `suspend()` `AudioContext` on normal stop; throttle worklet `position` postMessage to ~60 Hz; skip `node.disconnect()` on hot reload. Bump `WORKLET_VERSION` when editing `openmpt-worklet.js`. See `docs/WORKLET_AUDIO_BUG.md` and `tests/workletAudioLifecycle.test.ts`.
+10. **MOD/XM playback regressions (#329 / #330):** libopenmpt must init **once** per `AudioWorkletGlobalScope`; reuse the worklet node on module reload; never `suspend()` `AudioContext` on normal stop; throttle worklet `position` postMessage to ~60 Hz; skip `node.disconnect()` on hot reload. See `docs/WORKLET_AUDIO_BUG.md` and `tests/workletAudioLifecycle.test.ts`.
+
+11. **JS worklet is generated (#413):** `public/worklets/openmpt-worklet.js` is compiled from `audio-worklet/js/openmpt-processor.ts` via `npm run build:js-worklet` (esbuild → classic IIFE script; AudioWorklet globals still can't `import()` reliably). It carries a `// generated — do not edit` header; edit the TS source instead, then rebuild. CI fails if the committed file drifts from a fresh build. `hooks/useWorkletLoader.ts`'s cache-busting `?v=` comes from a content hash in `audio-worklet/js/worklet-version.generated.json` (also written by the build script) — no manual version bump. `audio-worklet/workletProtocolConstants.ts` is the single source of message-type strings, imported by both `audio-worklet/protocol.ts` (main thread) and the processor source (bundled in) — there is no separate classic-script mirror.
 
 ---
 
-11. **One `AudioContext` per page session:** `utils/audioContextFactory.ts`
+12. **One `AudioContext` per page session:** `utils/audioContextFactory.ts`
     (`createPlayerAudioContext` / `getSharedPlayerAudioContext`) is the only
     place a context is constructed. `sampleRate` is locked to **48000** (the
     `--grow` native heap build and wasm2js both render there, and the playhead
@@ -235,7 +238,7 @@ EngineState           // Worklet engine lifecycle state
     `init_audio_with_context`; `init_audio()` is a headless-harness export only.
     `tests/audioContextFactory.test.ts` fails the build on a second call site.
 
-12. **Native engine: one resident `OpenMPTModule`:** `cpp/worklet_processor.cpp`
+13. **Native engine: one resident `OpenMPTModule`:** `cpp/worklet_processor.cpp`
     parses a **transient** `g_metaModule` in `load_module()` (pattern cells,
     channel/order counts, duration) and `commit_module()` unloads it *before*
     the audio thread builds `g_module`. Never leave both resident — the release

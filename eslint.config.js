@@ -49,4 +49,13 @@ export default tseslint.config(
       ],
     },
   },
+  {
+    // Ambient global declarations require `var` — `globalThis.foo` is only
+    // typed when `foo` is declared with `var` (TS mirrors the real JS
+    // semantics: `let`/`const` never become globalThis properties).
+    files: ['**/*.d.ts'],
+    rules: {
+      'no-var': 'off',
+    },
+  },
 );

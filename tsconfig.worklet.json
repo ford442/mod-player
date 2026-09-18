@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "lib": ["ES2020"],
+    "types": [],
+    "noEmit": true
+  },
+  "include": ["audio-worklet/js/**/*.ts", "audio-worklet/workletProtocolConstants.ts"],
+  "exclude": ["node_modules", "dist", "archive", "jules_patch"]
+}

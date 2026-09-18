@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -26,37 +26,7 @@ import { AUDIO_SAB_BYTES } from '../utils/audioReactive';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 
-function readBootstrapConstants(): {
-  MAIN_TO_WORKLET: Record<string, string>;
-  WORKLET_TO_MAIN: Record<string, string>;
-} {
-  const src = readFileSync(
-    join(ROOT, 'public/worklets/worklet-protocol-constants.js'),
-    'utf8',
-  );
-  const mainMatch = src.match(/var MAIN_TO_WORKLET = Object\.freeze\(\{([\s\S]*?)\}\)/);
-  const workletMatch = src.match(/var WORKLET_TO_MAIN = Object\.freeze\(\{([\s\S]*?)\}\)/);
-  expect(mainMatch, 'MAIN_TO_WORKLET block').toBeTruthy();
-  expect(workletMatch, 'WORKLET_TO_MAIN block').toBeTruthy();
-
-  const parseBlock = (block: string) =>
-    Object.fromEntries(
-      [...block.matchAll(/(\w+):\s*'([^']+)'/g)].map((m) => [m[1], m[2]]),
-    );
-
-  return {
-    MAIN_TO_WORKLET: parseBlock(mainMatch![1]!),
-    WORKLET_TO_MAIN: parseBlock(workletMatch![1]!),
-  };
-}
-
-describe('workletProtocol constants parity', () => {
-  it('bootstrap JS mirrors TypeScript canonical constants', () => {
-    const bootstrap = readBootstrapConstants();
-    expect(bootstrap.MAIN_TO_WORKLET).toEqual(MAIN_TO_WORKLET);
-    expect(bootstrap.WORKLET_TO_MAIN).toEqual(WORKLET_TO_MAIN);
-  });
-
+describe('workletProtocol constants — single source of truth', () => {
   it('hooks import protocol helpers instead of raw type literals', () => {
     const useAudioGraph = readAudioGraphSources(ROOT);
     const useLibOpenMPT = readLibOpenMPTSources(ROOT);
@@ -67,12 +37,33 @@ describe('workletProtocol constants parity', () => {
     expect(useLibOpenMPT).not.toMatch(/as SharedArrayBuffer/);
   });
 
-  it('worklet references WorkletProtocolConstants bootstrap', () => {
+  it('there is no hand-mirrored classic-script constants file anymore', () => {
+    expect(existsSync(join(ROOT, 'public/worklets/worklet-protocol-constants.js'))).toBe(false);
+  });
+
+  it('processor source imports the same constants module as protocol.ts (no duplicate literals)', () => {
+    const processorSource = readFileSync(
+      join(ROOT, 'audio-worklet/js/openmpt-processor.ts'),
+      'utf8',
+    );
+    expect(processorSource).toMatch(
+      /from ['"]\.\.\/workletProtocolConstants['"]/,
+    );
+    expect(processorSource).toContain('MAIN_TO_WORKLET');
+    expect(processorSource).toContain('WORKLET_TO_MAIN');
+  });
+
+  it('generated worklet bundles the constants directly and is marked generated', () => {
     const worklet = readFileSync(join(ROOT, 'public/worklets/openmpt-worklet.js'), 'utf8');
-    expect(worklet).toContain('WorkletProtocolConstants');
+    expect(worklet).toContain('generated — do not edit');
+    expect(worklet).not.toContain('WorkletProtocolConstants');
     expect(worklet).toContain('parseMainToWorklet');
     expect(worklet).toContain('WT.position');
     expect(worklet).toContain('MT.load');
+    // The bundled constant values must match the canonical TS module.
+    for (const value of Object.values(MAIN_TO_WORKLET)) {
+      expect(worklet).toContain(`"${value}"`);
+    }
   });
 });
 

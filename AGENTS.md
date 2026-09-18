@@ -36,7 +36,8 @@ Managed by `hooks/useLibOpenMPT.ts`. Responsibilities:
 
 ### 2. JS AudioWorklet Engine
 Files: `public/worklets/openmpt-worklet.js` + `libopenmpt-audioworklet.js` (tracked in git)
-- Processor is an `AudioWorkletProcessor` loaded via `audioWorklet.addModule()` (cache-busted `?v=` from `useWorkletLoader.ts`).
+- `openmpt-worklet.js` is **generated** from `audio-worklet/js/openmpt-processor.ts` via `npm run build:js-worklet` (esbuild) — edit the TS source, never the generated file (#413).
+- Processor is an `AudioWorkletProcessor` loaded via `audioWorklet.addModule()` (cache-busted `?v=` — a content hash from `audio-worklet/js/worklet-version.generated.json`, via `useWorkletLoader.ts`).
 - Main thread fetches `libopenmpt-audioworklet.js` and posts `{ type: 'initLib', scriptText }` into the worklet; the worklet evaluates it with `new Function` (classic scripts cannot `import()` / `importScripts()`).
 - **`libopenmpt-audioworklet.js` is wasm2js** (~5 MB): the runtime is embedded in JS. There is **no** sibling `libopenmpt.wasm` on this path. Do not re-add a fake/HTML `.wasm`.
 - Runs the `libopenmpt` render loop, reports position (~60 Hz) back to the main thread, and handles seek/load messages.
@@ -68,7 +69,7 @@ Production silent-playback and MOD/XM switch failures were fixed in PRs **#329**
 | MOD hiccups / main-thread jank | `position` postMessage every audio quantum (~350 Hz) | Worklet throttles position reports to ~60 Hz; main thread extrapolates via `playheadPrediction` |
 | Hot reload glitches | `node.disconnect()` on every `play()` | Skip reconnect when `canReuseWorkletNode` |
 
-**When editing `openmpt-worklet.js`:** bump `WORKLET_VERSION` in `hooks/useWorkletLoader.ts`. Run `npm test` — `tests/workletAudioLifecycle.test.ts` enforces suspend/initLib invariants.
+**When editing the worklet:** edit `audio-worklet/js/openmpt-processor.ts`, then run `npm run build:js-worklet` to regenerate `openmpt-worklet.js` (also bumps the cache-bust version automatically). Run `npm test` — `tests/workletAudioLifecycle.test.ts` enforces suspend/initLib invariants.
 
 **Manual audible checklist** (CI cannot assert speakers): default MOD play → file picker `.mod`/`.xm` → MOD↔XM switch while playing → stop→play. See `docs/WORKLET_AUDIO_BUG.md`.
 

@@ -22,19 +22,25 @@ jobs:
       
       - name: Install dependencies
         run: npm ci
-      
+
       - name: Verify WASM assets (reject HTML-as-.wasm stubs)
         run: npm run verify:wasm
-      
+
+      - name: Verify generated JS worklet is up to date (#413)
+        run: npm run build:js-worklet && git diff --exit-code
+
       - name: Lint
         run: npm run lint
-      
+
       - name: Type check
         run: npm run typecheck
-      
+
+      - name: Type check JS worklet source
+        run: npm run typecheck:worklet
+
       - name: Type check tests
         run: npm run typecheck:tests
-      
+
       - name: Unit tests (Vitest)
         run: npm test
       
