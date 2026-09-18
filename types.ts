@@ -317,6 +317,7 @@ declare global {
       startPlayback: () => void;
       getIsPlaying: () => boolean;
       getAudioContextState: () => string;
+      getAudioContextSampleRate: () => number;
       setPlayheadFraction: (value: number) => void;
       isModuleLoaded: () => boolean;
       getPatternRenderer: () => import('./src/renderers/types').CurrentPatternRenderer | null;

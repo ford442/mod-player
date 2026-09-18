@@ -386,8 +386,18 @@ static void worklet_thread_initialized(EMSCRIPTEN_WEBAUDIO_T audioCtx, EM_BOOL s
 extern "C" {
 
 /**
- * Initialize the audio system. Creates an AudioContext and starts
- * the AudioWorklet thread.
+ * Initialize the audio system standalone: creates its OWN AudioContext and
+ * starts the AudioWorklet thread.
+ *
+ * **Headless / unit-test harness only.** The player has exactly one
+ * AudioContext per page session, built by `utils/audioContextFactory.ts`, and
+ * production always attaches via `init_audio_with_context()` below. A second
+ * context silently blocks MediaRecorder capture and puts the native frame
+ * clock in a different domain from the main graph, so nothing in the app may
+ * call this. Kept as a KEEPALIVE export (and in
+ * `scripts/verify-native-exports.mjs`) so a headless harness can render
+ * without a JS-side graph.
+ *
  * @param sampleRate  Desired sample rate (0 = browser default)
  * @return 1 on success, 0 on failure
  */
@@ -465,7 +475,8 @@ int get_ring_write_head() {
 /**
  * Initialise audio using an externally-provided AudioContext handle.
  *
- * Unlike init_audio(), this function does NOT create a new AudioContext.
+ * This is the only production path. Unlike the headless-only init_audio(),
+ * it does NOT create a new AudioContext.
  * Instead it accepts a handle obtained by the caller via
  * emscriptenRegisterAudioObject(existingCtx) and starts the worklet thread
  * on that context.  The AudioWorkletNode is NOT auto-connected to destination;

@@ -1,4 +1,5 @@
 import { logWorkletDiagnostics } from '../../audio-worklet/diagnostics';
+import { closeSharedPlayerAudioContext } from '../../utils/audioContextFactory';
 import { OpenMPTWorkletEngine } from '../../audio-worklet/OpenMPTWorkletEngine';
 import {
   resolveAudioEnginePreference,
@@ -219,9 +220,9 @@ export function cleanupLibOpenMPT(refs: LibOpenMPTRefs) {
   }
   if (refs.audioWorkletNodeRef.current) refs.audioWorkletNodeRef.current.disconnect();
   if (refs.stereoPannerRef.current) refs.stereoPannerRef.current.disconnect();
-  if (refs.audioContextRef.current && refs.audioContextRef.current.state !== 'closed') {
-    refs.audioContextRef.current.close();
-  }
+  // Close through the factory so its singleton does not keep a dead context.
+  closeSharedPlayerAudioContext();
+  refs.audioContextRef.current = null;
   if (refs.currentModulePtr.current !== 0 && refs.libopenmptRef.current) {
     refs.libopenmptRef.current._openmpt_module_destroy(refs.currentModulePtr.current);
   }

@@ -32,7 +32,6 @@ export interface PerformanceCaptureOptions {
   frameRate?: number;
   fileName?: string;
   /** Native engine uses a separate AudioContext — audio tap may be unavailable. */
-  dualAudioContext?: boolean;
 }
 
 export function usePerformanceCapture() {
@@ -100,15 +99,6 @@ export function usePerformanceCapture() {
       setState({
         stage: 'error',
         message: support.notes[0] ?? 'Canvas capture is not available for this renderer',
-        elapsedSeconds: 0,
-      });
-      return false;
-    }
-
-    if (options.dualAudioContext) {
-      setState({
-        stage: 'error',
-        message: 'Native engine uses a separate AudioContext — switch to JS (?engine=js or engine toggle) to record audio+video together',
         elapsedSeconds: 0,
       });
       return false;

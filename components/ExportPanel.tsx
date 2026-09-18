@@ -21,7 +21,6 @@ interface ExportPanelProps {
   captureState: PerformanceCaptureState;
   isRecording: boolean;
   rendererBackend: PatternRendererBackend | null | undefined;
-  dualAudioContext: boolean;
 }
 
 function formatTime(seconds: number): string {
@@ -46,7 +45,6 @@ export function ExportPanel({
   captureState,
   isRecording,
   rendererBackend,
-  dualAudioContext,
 }: ExportPanelProps) {
   const captureSupport = useMemo(
     () => probeCanvasCaptureSupport(rendererBackend),
@@ -151,16 +149,10 @@ export function ExportPanel({
             {captureSupport.notes[0] ?? 'Canvas capture unavailable'}
           </p>
         )}
-        {dualAudioContext && (
-          <p className="text-xs text-amber-400 font-mono">
-            Native engine uses a separate AudioContext — recording is blocked.
-            Switch to JS worklet (?engine=js or engine toggle) before Record clip.
-          </p>
-        )}
         <div className="flex gap-2">
           <button
             type="button"
-            disabled={!isModuleLoaded || isExporting || isRecording || !captureSupport.captureStream || dualAudioContext}
+            disabled={!isModuleLoaded || isExporting || isRecording || !captureSupport.captureStream}
             onClick={onStartCapture}
             className={cn(
               'flex-1 px-3 py-2 rounded-lg font-medium transition-colors disabled:opacity-50',

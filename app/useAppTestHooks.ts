@@ -59,6 +59,9 @@ export function useAppTestHooks(params: UseAppTestHooksParams): void {
       startPlayback: () => playGuarded(),
       getIsPlaying: () => isPlaying,
       getAudioContextState: () => getAudioContext()?.state ?? 'none',
+      // #411 acceptance: a JS play and an ?engine=native play in the same tab
+      // must report the same state and rate — there is one context per session.
+      getAudioContextSampleRate: () => getAudioContext()?.sampleRate ?? 0,
       isModuleLoaded: () => isModuleLoaded,
       getPatternRenderer: () => window.currentPatternRenderer,
       loadModuleFromUrl: async (url: string) => {

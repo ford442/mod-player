@@ -113,7 +113,7 @@ Audio logic is split strictly between two contexts that **cannot share state dir
 ### Main Thread (`hooks/useLibOpenMPT.ts`)
 - Initializes libopenmpt WASM from CDN (`window.libopenmptReady` promise)
 - Loads module files into WASM memory (`libopenmpt_module_create_from_memory2()`)
-- Creates `AudioContext` and attempts to use `AudioWorkletNode`; falls back to `ScriptProcessorNode`
+- Acquires the one shared `AudioContext` from `utils/audioContextFactory.ts` and attempts to use `AudioWorkletNode`; falls back to `ScriptProcessorNode`
 - Sends control messages to the worklet via `port.postMessage()`
 - Reads current row/channel state from WASM, double-buffers via mutable refs (`channelStatesRef`) to avoid React re-render floods
 - Performs drift detection and timing correction for audio-visual sync
@@ -224,6 +224,17 @@ EngineState           // Worklet engine lifecycle state
 
 ---
 
+11. **One `AudioContext` per page session:** `utils/audioContextFactory.ts`
+    (`createPlayerAudioContext` / `getSharedPlayerAudioContext`) is the only
+    place a context is constructed. `sampleRate` is locked to **48000** (the
+    `--grow` native heap build and wasm2js both render there, and the playhead
+    math `samplesWritten / sampleRate` needs a fixed rate); `latencyHint` is a
+    *create-time* choice — `playback`, or `interactive` under stage mode /
+    `?latency=interactive` — and is never re-applied by recreating the context.
+    The native C++ engine attaches to the same context via
+    `init_audio_with_context`; `init_audio()` is a headless-harness export only.
+    `tests/audioContextFactory.test.ts` fails the build on a second call site.
+
 ## Critical Data Flows
 
 ### Module Load → Playback
@@ -287,6 +298,7 @@ All shared canvas layout values live here:
 - **Do not** use DOM APIs inside the AudioWorklet processor
 - **Do not** add broad glob patterns to `tailwind.config.js`
 - **Do not** remove the Vite CORS headers (breaks SharedArrayBuffer / WASM workers)
+- **Do not** add a second `new AudioContext` call site — `utils/audioContextFactory.ts` is the only one (see pitfall 11)
 - **Do not** assume WebGPU is available — always check for fallback paths
 - **Do not** commit Emscripten `a.out` / `a.out.*` — native outputs are only `public/worklets/openmpt-native.*` (gitignored build artifacts from `npm run build:emcc`)
 - **Do not** commit agent scratch files (`.swarm-state.md`, `weekly_plan.md`) — use `docs/planning/ROADMAP.md` and GitHub issues

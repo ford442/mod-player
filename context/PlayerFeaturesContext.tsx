@@ -90,7 +90,6 @@ export interface PlayerFeaturesValue {
   captureState: PerformanceCaptureState;
   isRecording: boolean;
   getRendererBackend: () => import('../src/renderers/types').PatternRendererBackend | null;
-  dualAudioContext: boolean;
 }
 
 const PlayerFeaturesContext = createContext<PlayerFeaturesValue | null>(null);

@@ -78,7 +78,7 @@ localStorage.setItem('xasm1_audio_engine', 'native')
 
 **projectM PCM chunks** are posted from both engines: JS `projectm-pcm` and native ring copy → `broadcastPcmBlock`.
 
-**Performance capture (MediaRecorder)** uses the shared main `AudioContext` on default native (`?engine=native`). Dual-context (`?nativeCtx=legacy`) still blocks Record clip. See `docs/EXPORT.md`.
+**Performance capture (MediaRecorder)** uses the one shared `AudioContext` (`utils/audioContextFactory.ts`) on both engines, so `?engine=native` records like JS. The dual-context `?nativeCtx=legacy` path and its `native-bridge-processor.js` are removed. See `docs/EXPORT.md`.
 
 **Heap:** release native WASM is a **fixed 128mb** heap. Use `npm run build:emcc -- --grow` for huge ITs (`MAXIMUM_MEMORY=512mb`).
 
@@ -90,7 +90,7 @@ npm run verify:native-exports
 ```
 
 - **Every PR:** script clobber greps + export audit (`ci.yml` → `wasm-smoke-test`); JS `playhead-smoke`.
-- **Path-filtered PR / push:** full `build:emcc` when `cpp/**`, `scripts/build-wasm.sh`, `audio-worklet/**`, `hooks/audioGraph/**`, or `native-bridge-processor.js` change — caches `vendor/libopenmpt-0.8.4+release` (`libopenmpt.a`) — then **`smoke:playhead` with `AUDIO_ENGINE=native`** (requires active engine `native-worklet`, lag median &lt; 1 row).
+- **Path-filtered PR / push:** full `build:emcc` when `cpp/**`, `scripts/build-wasm.sh`, `audio-worklet/**`, or `hooks/audioGraph/**` change — caches `vendor/libopenmpt-0.8.4+release` (`libopenmpt.a`) — then **`smoke:playhead` with `AUDIO_ENGINE=native`** (requires active engine `native-worklet`, lag median &lt; 1 row).
 - **Weekly schedule:** `native-wasm-scheduled.yml` full build + artifact upload + **native playhead parity** (same cache).
 
 Never commit failed download bodies (404 HTML) as `.wasm`. Never commit `openmpt-native.*` into git.

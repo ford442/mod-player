@@ -71,11 +71,6 @@ function writeCString(mod: EmscriptenOpenMPTModule, text: string): number {
     return ptr;
 }
 
-export interface NativeEngineAttachOptions {
-    /** `?engine=native&nativeCtx=legacy` — C++ creates its own AudioContext. */
-    legacy?: boolean;
-}
-
 // ── Construction options ──────────────────────────────────────────────
 
 /**
@@ -145,7 +140,7 @@ export class OpenMPTWorkletEngine extends MiniEventEmitter<EngineEventMap> {
     private sharedOutputBuffer: SharedArrayBuffer | null;
     /** WASM heap byte offset of the allocated ring buffer (0 = not allocated). */
     private ringBufPtr = 0;
-    /** True after attachAudioContext / legacy _init_audio. */
+    /** True after attachAudioContext. */
     private audioAttached = false;
     private attachedContext: AudioContext | null = null;
     /** Fingerprint of the last successful load() — skip duplicate parse on play. */
@@ -178,7 +173,7 @@ export class OpenMPTWorkletEngine extends MiniEventEmitter<EngineEventMap> {
 
     /**
      * Load the Emscripten glue + WASM. Does **not** create an AudioContext.
-     * Call `attachAudioContext` on play with the shared main-thread context.
+     * Call `attachAudioContext` on play with the one player AudioContext.
      */
     async init(_sampleRate = 0): Promise<void> {
         if (this.module) return; // Already initialized
@@ -214,13 +209,14 @@ export class OpenMPTWorkletEngine extends MiniEventEmitter<EngineEventMap> {
     }
 
     /**
-     * Start the C++ AudioWorklet thread on `ctx` (shared graph) or, when
-     * `legacy` is set, let C++ create its own AudioContext.
+     * Start the C++ AudioWorklet thread on `ctx` — the single player
+     * AudioContext from `utils/audioContextFactory.ts`.
+     *
+     * Always `init_audio_with_context`: the engine never creates a context of
+     * its own. (`init_audio()` remains a C++ export for the headless harness
+     * only — see `cpp/worklet_processor.cpp`.)
      */
-    async attachAudioContext(
-        ctx: AudioContext,
-        options: NativeEngineAttachOptions = {},
-    ): Promise<void> {
+    async attachAudioContext(ctx: AudioContext): Promise<void> {
         if (!this.module) {
             throw new Error('Engine not initialized');
         }
@@ -229,24 +225,18 @@ export class OpenMPTWorkletEngine extends MiniEventEmitter<EngineEventMap> {
             return;
         }
 
-        const legacy = options.legacy === true;
-        let result = 0;
-        if (legacy) {
-            result = this.module._init_audio(ctx.sampleRate || 0);
-        } else {
-            const register = resolveEmscriptenRegisterAudioObject(this.module);
-            if (!register) {
-                throw new Error(
-                    'emscriptenRegisterAudioObject is not exported — rebuild native with AUDIO_WORKLET runtime methods',
-                );
-            }
-            const handle = register(ctx);
-            const initWithCtx = this.module._init_audio_with_context;
-            if (typeof initWithCtx !== 'function') {
-                throw new Error('_init_audio_with_context missing from native WASM');
-            }
-            result = initWithCtx(handle);
+        const register = resolveEmscriptenRegisterAudioObject(this.module);
+        if (!register) {
+            throw new Error(
+                'emscriptenRegisterAudioObject is not exported — rebuild native with AUDIO_WORKLET runtime methods',
+            );
         }
+        const handle = register(ctx);
+        const initWithCtx = this.module._init_audio_with_context;
+        if (typeof initWithCtx !== 'function') {
+            throw new Error('_init_audio_with_context missing from native WASM');
+        }
+        const result = initWithCtx(handle);
         if (!result) {
             throw new Error('Failed to initialize native AudioWorklet');
         }
@@ -259,16 +249,11 @@ export class OpenMPTWorkletEngine extends MiniEventEmitter<EngineEventMap> {
             throw new Error('Native AudioWorklet thread failed to start');
         }
 
-        // PCM ring is demand-driven (setPcmCapture / legacy bridge). Writing
+        // PCM ring is demand-driven (setPcmCapture). Writing
         // it every quantum on the audio thread contended with the mixer.
         this.startPolling();
         this.audioAttached = true;
         this.attachedContext = ctx;
-    }
-
-    /** Allocate the WASM PCM ring if missing (capture or legacy bridge). */
-    ensurePcmRing(): void {
-        this.allocatePcmRing();
     }
 
     private allocatePcmRing(): void {
@@ -569,9 +554,9 @@ export class OpenMPTWorkletEngine extends MiniEventEmitter<EngineEventMap> {
     /**
      * Waits for the C++ worklet thread to create its AudioWorkletNode and returns it.
      *
-     * Background: `init_audio()` starts the worklet thread asynchronously.
+     * Background: `init_audio_with_context()` starts the worklet thread asynchronously.
      * The node handle stored in `g_workletNode` (C++ side) is set by the
-     * `worklet_thread_initialized` callback some milliseconds after `init_audio()`
+     * `worklet_thread_initialized` callback some milliseconds after attach
      * returns.  This method polls until the handle is non-zero.
      *
      * @param timeoutMs  Maximum wait time in milliseconds (default 5 000).
@@ -596,62 +581,6 @@ export class OpenMPTWorkletEngine extends MiniEventEmitter<EngineEventMap> {
         }
         console.warn('[OpenMPTWorkletEngine] getOutputNode() timed out after', timeoutMs, 'ms');
         return null;
-    }
-
-    /**
-     * Bridge the native engine's AudioWorkletNode to an external audio graph via
-     * a MediaStream.  This allows the C++ engine (which runs on its own AudioContext)
-     * to feed audio through the main-thread GainNode / AnalyserNode chain.
-     *
-     * Flow:
-     *   C++ AudioWorkletNode
-     *     → MediaStreamDestinationNode  (on C++ AudioContext)
-     *     → MediaStream (audio track)
-     *     → MediaStreamAudioSourceNode  (on mainCtx)
-     *     → destNode  (e.g. AnalyserNode on mainCtx)
-     *
-     * @param mainCtx   Main-thread AudioContext to create the source node on.
-     * @param destNode  First node in the main-thread chain (typically AnalyserNode).
-     * @returns         The MediaStreamAudioSourceNode, or null on failure.
-     */
-    async bridgeToAudioGraph(
-        mainCtx: AudioContext,
-        destNode: AudioNode,
-    ): Promise<MediaStreamAudioSourceNode | null> {
-        if (!this.module) return null;
-
-        // Wait for the worklet thread to produce a node handle
-        const cppNode = await this.getOutputNode(3000);
-        if (!cppNode) {
-            console.warn('[OpenMPTWorkletEngine] bridgeToAudioGraph: getOutputNode() timed out');
-            return null;
-        }
-
-        const ctxHandle = this.module._get_audio_context();
-        if (!ctxHandle || typeof this.module.emscriptenGetAudioObject !== 'function') {
-            console.warn('[OpenMPTWorkletEngine] bridgeToAudioGraph: cannot resolve C++ AudioContext');
-            return null;
-        }
-
-        const cppCtx = this.module.emscriptenGetAudioObject(ctxHandle) as AudioContext | null;
-        if (!cppCtx || typeof cppCtx.createMediaStreamDestination !== 'function') {
-            console.warn('[OpenMPTWorkletEngine] bridgeToAudioGraph: C++ AudioContext not resolvable');
-            return null;
-        }
-
-        // disconnect() throws InvalidStateError if the node is already disconnected.
-        // That is expected and harmless here — the caller may have disconnected it already.
-        try { cppNode.disconnect(); } catch (_e) { /* node not connected — safe to ignore */ }
-
-        // Route via MediaStream so the audio crosses AudioContext boundaries
-        const mediaDest = cppCtx.createMediaStreamDestination();
-        cppNode.connect(mediaDest);
-
-        const mediaSrc = mainCtx.createMediaStreamSource(mediaDest.stream);
-        mediaSrc.connect(destNode);
-
-        console.log('[OpenMPTWorkletEngine] MediaStream bridge established: C++ → MediaStream → main graph');
-        return mediaSrc;
     }
 
     // ── Cleanup ──────────────────────────────────────────────────────

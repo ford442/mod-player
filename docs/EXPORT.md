@@ -37,14 +37,21 @@ The offline renderer uses 44.1 kHz stereo, Sinc+LP interpolation (`OPENMPT_MODUL
 |--------|---------------------|----------|
 | JS AudioWorklet | Tap `stereoPanner` → `MediaStreamDestination` in main `AudioContext` | **Required for capture** |
 | ScriptProcessor fallback | Same main-context tap | Supported |
-| Native C++ worklet (default) | Same shared `AudioContext`; C++ node in the master graph | **Record clip works** (`?engine=native`) |
-| Native legacy dual-context | `?engine=native&nativeCtx=legacy` | **Recording blocked** — switch off legacy or use JS |
+| Native C++ worklet | Same shared `AudioContext`; C++ node in the master graph | **Record clip works** (`?engine=native`) |
 
-**Switch to JS (or drop `nativeCtx=legacy`) only if Record clip is disabled:**
+There is now exactly **one** `AudioContext` per page session, built by
+`utils/audioContextFactory.ts` (`latencyHint` from the stage-mode / `?latency=`
+profile, `sampleRate` locked to 48 000). Both engines attach to it — the C++
+engine via `init_audio_with_context` — so MediaRecorder always taps the same
+graph that is being heard and **no engine blocks Record clip**.
 
-- URL: `?engine=js`
-- Or debug panel engine toggle (persists `localStorage.xasm1_audio_engine=js`)
-- Offline WAV export does **not** need this — it uses a worker, not MediaRecorder
+The old `?engine=native&nativeCtx=legacy` dual-context path (C++ owning a
+second `AudioContext`, PCM bridged over a ring / MediaStream) has been removed.
+It silently blocked capture and put the native frame clock in a different
+domain from the main graph. The param is now ignored.
+
+Offline WAV export never depended on any of this — it uses a worker, not
+MediaRecorder.
 
 Cross-origin isolation (`crossOriginIsolated`) is required for SharedArrayBuffer / native engine but does not block `MediaRecorder` when using the JS worklet path.
 
@@ -55,12 +62,13 @@ Cross-origin isolation (`crossOriginIsolated`) is required for SharedArrayBuffer
 exportWav({ fileData, fileName, muteMask?, startSeconds?, endSeconds? })
 
 // hooks/usePerformanceCapture.ts
-start({ getRenderer, audioContext, audioTapNode, preferWebGL2, dualAudioContext })
+start({ getRenderer, audioContext, audioTapNode, preferWebGL2 })
 stop() / cancel()
 ```
 
 ## Files
 
+- `utils/audioContextFactory.ts` — the one `AudioContext` both engines share
 - `utils/wavEncoder.ts` — PCM float → 16-bit WAV
 - `utils/offlineRender.ts` — libopenmpt offline render loop
 - `utils/libopenmptExt.ts` — interactive channel mute via ext interface
@@ -72,5 +80,7 @@ stop() / cancel()
 1. Load `4-mat_madness.mod`, open Export panel, click **Download WAV** — file plays in an external player.
 2. Mute channel 1, export again — kick/snare balance should change vs full mix.
 3. Play module, click **Record clip**, wait ~5 s, **Stop** — WebM contains audio + visuals (WebGL2 renderer).
-4. `?engine=native` (default single context) — Record clip should work without switching to JS. `?nativeCtx=legacy` still shows the dual-context warning.
+4. `?engine=native` — Record clip works without switching to JS, and no dual-context warning appears.
+   The debug panel should report the same `AudioContext.state` / `sampleRate` (48 000) as a JS-engine
+   play in the same tab; `?nativeCtx=legacy` is ignored.
 5. Offline WAV still works on either engine (worker path).

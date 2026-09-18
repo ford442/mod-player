@@ -45,7 +45,6 @@ export function SidePanelGrid() {
     captureState,
     isRecording,
     getRendererBackend,
-    dualAudioContext,
   } = features;
 
   return (
@@ -111,7 +110,6 @@ export function SidePanelGrid() {
               captureState={captureState}
               isRecording={isRecording}
               rendererBackend={getRendererBackend()}
-              dualAudioContext={dualAudioContext}
             />
           </Panel>
         )}

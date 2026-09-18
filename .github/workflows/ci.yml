@@ -327,7 +327,7 @@ jobs:
               - 'utils/nativeClockAnchor.ts'
               - 'utils/nativeParityGate.ts'
               - 'utils/workletPositionAdapter.ts'
-              - 'public/worklets/native-bridge-processor.js'
+              - 'utils/audioContextFactory.ts'
               - '.github/workflows/ci.yml'
               - '.github/workflows/native-wasm-scheduled.yml'
 

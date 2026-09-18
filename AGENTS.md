@@ -49,9 +49,10 @@ Files: `audio-worklet/OpenMPTWorkletEngine.ts`, `cpp/openmpt_wrapper.cpp`, `cpp/
 - Emscripten flags: `-sAUDIO_WORKLET=1`, `-sWASM_WORKERS=1`, `-sMODULARIZE=1`, `-sEXPORT_NAME=createOpenMPTModule`.
 - Outputs: `public/worklets/openmpt-native.js`, `.wasm`, `.aw.js` (these are `.gitignore`d until built).
 - **Engine selection** (`utils/audioEngineSelection.ts`): `?engine=js|native` → `localStorage.xasm1_audio_engine` (`js`\|`native`\|`auto`) → auto (default **JS**). Native only when explicitly preferred (`?engine=native` / storage `native`) and glue is present. Soft-fail to JS if `?engine=native` without artifacts. UI toggle persists override. See `public/worklets/README.md`.
-- `useLibOpenMPT.ts` probes for `openmpt-native.js` at startup; if present and preference allows, it instantiates `OpenMPTWorkletEngine`, which creates its own `AudioContext` + worklet thread in C++ land.
+- `useLibOpenMPT.ts` probes for `openmpt-native.js` at startup; if present and preference allows, it instantiates `OpenMPTWorkletEngine`, which starts its worklet thread on the **shared** `AudioContext` via `init_audio_with_context` (never its own).
+- **`AudioContext` is constructed in exactly one place:** `utils/audioContextFactory.ts` (`createPlayerAudioContext` / `getSharedPlayerAudioContext`). One context per page session, `sampleRate` locked to **48000**, `latencyHint` = `playback` unless stage mode / `?latency=interactive`. Do **not** add another `new AudioContext` call site — `tests/audioContextFactory.test.ts` fails the build if you do.
 - The native engine polls a shared-memory `PositionInfo` struct for row/BPM/channel VU data; main thread applies via shared `utils/workletPositionAdapter.ts` (same path as JS worklet).
-- **Capture:** MediaRecorder taps the shared main graph on default native (same as JS). Dual-context capture is only blocked for `?nativeCtx=legacy`. See `docs/EXPORT.md`.
+- **Capture:** MediaRecorder taps the shared main graph on both engines, so nothing blocks Record clip. The `?nativeCtx=legacy` dual-context path is deleted. See `docs/EXPORT.md`.
 
 ### Fallback Path
 If the JS AudioWorklet fails to initialize WASM, `hooks/useAudioGraph.ts` falls back to a `ScriptProcessorNode` on the main thread (deprecated but functional). This is triggered by the worklet posting an `error` message.
@@ -221,7 +222,7 @@ python3 deploy.py
   1. `lint-and-build` – `npm ci` → `verify:wasm` → `npm run lint` (hard fail) → `npm run typecheck` → `npm run typecheck:tests` → **`npm test`** → `npm run test:shader-registry` → `npm run build` → artifact + `verify:build` checks.
   2. `visual-smoke` – Build, preview server, Playwright smoke (`smoke:visual:ci`) on WebGL2 + HTML renderers.
   3. `wasm-smoke-test` – Installs Emscripten **3.1.51**, verifies safe native build scripts, `verify:native-exports`, `bash -n`, and that tracked `openmpt-worklet.js` still looks like the JS processor.
-  4. `native-full-build` – Path-filtered full `npm run build:emcc` when `cpp/**`, `scripts/build-wasm.sh`, `audio-worklet/**`, or `native-bridge-processor.js` change; caches `vendor/libopenmpt-0.8.4+release`.
+  4. `native-full-build` – Path-filtered full `npm run build:emcc` when `cpp/**`, `scripts/build-wasm.sh`, or `audio-worklet/**` change; caches `vendor/libopenmpt-0.8.4+release`.
   5. `native-wasm-scheduled.yml` – Weekly (and manual) full `npm run build:emcc` with the same libopenmpt cache; uploads `openmpt-native.*` artifacts and asserts the JS worklet is unchanged.
 
 ## Security & CORS Considerations

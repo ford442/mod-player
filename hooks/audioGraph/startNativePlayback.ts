@@ -1,5 +1,3 @@
-import { withBase } from '../../src/lib/paths';
-import { NATIVE_RING_BUF_FRAMES } from '../../audio-worklet/OpenMPTWorkletEngine';
 import type { PatternMatrix } from '../../types';
 import type { NativePcmChunk, WorkletPositionData } from '../../audio-worklet/types';
 import { getAudioHeardTime } from '../../utils/playheadPrediction';
@@ -10,12 +8,7 @@ import {
 import {
   shouldReloadNativeModule,
 } from '../../utils/workletAudioLifecycle';
-import {
-  createNativeClockAnchor,
-  NATIVE_BRIDGE_LATENCY_MEDIASTREAM_SEC,
-  NATIVE_BRIDGE_LATENCY_RING_SEC,
-} from '../../utils/nativeClockAnchor';
-import { isNativeLegacyAudioContext } from '../../utils/audioEngineSelection';
+import { createNativeClockAnchor } from '../../utils/nativeClockAnchor';
 import { hasProjectMConsumer } from '../../utils/audioDiagOptions';
 import { broadcastPcmBlock } from '../../utils/projectMBridge';
 import { pcmBusHasSubscribers, publishPcmBlock, setPcmDemandListener } from '../../utils/pcmBus';
@@ -28,8 +21,13 @@ export type NativePlaybackResult = 'started' | 'fallback-to-js';
 
 /**
  * Start native C++/Wasm AudioWorklet on the shared main AudioContext.
- * Default: C++ node → analyser → panner → gain → destination.
- * Legacy (`?nativeCtx=legacy`): C++ owns a second context + MediaStream/ring bridge.
+ * C++ node → analyser → panner → gain → destination.
+ *
+ * There is exactly one AudioContext per page session (see
+ * `utils/audioContextFactory.ts`); the C++ engine always attaches to it via
+ * `init_audio_with_context`. The old `?nativeCtx=legacy` dual-context +
+ * MediaStream/ring bridge path is gone — it silently blocked MediaRecorder
+ * capture and fought the main graph for the playhead clock domain.
  */
 export async function startNativePlayback(
   refs: AudioGraphRefs,
@@ -40,9 +38,8 @@ export async function startNativePlayback(
   console.log('[PLAY] Using native C++/Wasm AudioWorklet engine...');
   try {
     const engine = refs.nativeEngineRef.current!;
-    const legacy = isNativeLegacyAudioContext();
 
-    await engine.attachAudioContext(ctx, { legacy });
+    await engine.attachAudioContext(ctx);
 
     const buf = moduleBytesFromFileData(refs.fileDataRef.current);
     if (buf) {
@@ -68,70 +65,19 @@ export async function startNativePlayback(
       syncPcmCapture(wanted);
     });
 
-    let bridgeEstablished = false;
-    let bridgeLatencySec = 0;
-
-    if (legacy) {
-      engine.ensurePcmRing();
-      bridgeLatencySec = NATIVE_BRIDGE_LATENCY_MEDIASTREAM_SEC;
-      const wasmSAB = engine.getWasmMemory();
-      const ringByteOffset = engine.getRingBufByteOffset();
-      if (wasmSAB && ringByteOffset > 0) {
-        try {
-          const bridgeUrl = withBase('worklets/native-bridge-processor.js');
-          await ctx.audioWorklet.addModule(bridgeUrl);
-          const bridgeNode = new AudioWorkletNode(ctx, 'native-bridge-processor', {
-            numberOfInputs: 0,
-            numberOfOutputs: 1,
-            outputChannelCount: [2],
-            processorOptions: {
-              wasmMemory: wasmSAB,
-              ringBufByteOffset: ringByteOffset,
-              frameCapacity: NATIVE_RING_BUF_FRAMES,
-            },
-          });
-          bridgeNode.connect(refs.analyserRef.current!);
-          wireMasterOutput(ctx, refs, config.volume, config.panValue);
-          refs.audioWorkletNodeRef.current = bridgeNode;
-          bridgeEstablished = true;
-          bridgeLatencySec = NATIVE_BRIDGE_LATENCY_RING_SEC;
-          console.log('[PLAY] Native engine: legacy ring-buffer bridge active');
-        } catch (ringErr) {
-          console.warn('[PLAY] Legacy ring-buffer bridge failed, trying MediaStream:', ringErr);
-        }
-      }
-      if (!bridgeEstablished) {
-        try {
-          const mediaSrc = await engine.bridgeToAudioGraph(ctx, refs.analyserRef.current!);
-          if (mediaSrc) {
-            wireMasterOutput(ctx, refs, config.volume, config.panValue);
-            bridgeEstablished = true;
-            console.log('[PLAY] Native engine: legacy MediaStream bridge active');
-          }
-        } catch (msErr) {
-          console.warn('[PLAY] MediaStream bridge failed:', msErr);
-        }
-      }
-    } else {
-      const cppNode = await engine.getOutputNode(3000);
-      if (!cppNode) {
-        throw new Error('Native AudioWorkletNode not available');
-      }
-      try { cppNode.disconnect(); } catch { /* not yet connected */ }
-      cppNode.connect(refs.analyserRef.current!);
-      wireMasterOutput(ctx, refs, config.volume, config.panValue);
-      refs.audioWorkletNodeRef.current = cppNode;
-      bridgeEstablished = true;
-      bridgeLatencySec = 0;
-      console.log('[PLAY] Native engine: C++ node on shared AudioContext');
+    const cppNode = await engine.getOutputNode(3000);
+    if (!cppNode) {
+      throw new Error('Native AudioWorkletNode not available');
     }
+    try { cppNode.disconnect(); } catch { /* not yet connected */ }
+    cppNode.connect(refs.analyserRef.current!);
+    wireMasterOutput(ctx, refs, config.volume, config.panValue);
+    refs.audioWorkletNodeRef.current = cppNode;
+    console.log('[PLAY] Native engine: C++ node on shared AudioContext');
 
-    if (!bridgeEstablished) {
-      console.warn('[PLAY] Native engine audio not routed through main graph');
-    }
-
-    refs.nativeBridgeLatencyRef.current = bridgeLatencySec;
-    refs.nativeClockAnchorRef.current = createNativeClockAnchor(ctx, bridgeLatencySec);
+    // Shared context: no bridge, so no extra output delay to compensate for.
+    refs.nativeBridgeLatencyRef.current = 0;
+    refs.nativeClockAnchorRef.current = createNativeClockAnchor(ctx, 0);
 
     engine.on('position', (data: WorkletPositionData) => {
       const heardFallback = getAudioHeardTime(ctx);

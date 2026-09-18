@@ -7,6 +7,11 @@
 
 import { detectRuntimeBase } from '../src/lib/paths';
 
+import {
+  createPlayerAudioContext,
+  getSharedPlayerAudioContext,
+} from '../utils/audioContextFactory';
+
 export interface WorkletDiagnostics {
   audioContextSupported: boolean;
   audioWorkletSupported: boolean;
@@ -131,10 +136,12 @@ export async function testWorkletLoading(workletUrl: string): Promise<WorkletLoa
     };
   }
   
-  // Try to create AudioContext and load worklet
+  // Load the worklet on the one player AudioContext (utils/audioContextFactory).
+  // Never construct a probe context here — a second context is exactly the bug
+  // this diagnostic is meant to help find, and closing it would kill playback.
   try {
-    const ctx = new AudioContext({ latencyHint: 'playback' });
-    
+    const ctx = getSharedPlayerAudioContext() ?? createPlayerAudioContext();
+
     // Resume context (required for audio to work)
     if (ctx.state === 'suspended') {
       await ctx.resume();
@@ -144,10 +151,7 @@ export async function testWorkletLoading(workletUrl: string): Promise<WorkletLoa
     await ctx.audioWorklet.addModule(workletUrl);
     
     const loadTimeMs = Math.round(performance.now() - startTime);
-    
-    // Clean up
-    await ctx.close();
-    
+
     return {
       success: true,
       loadTimeMs,
