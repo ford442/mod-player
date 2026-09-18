@@ -311,7 +311,7 @@ describe('#354 production source invariants', () => {
   });
 
   it('WORKLET_VERSION cache-busts from the generated build artifact, not a hand-edited counter', () => {
-    // #413: stop hand-bumping a version comment list on every worklet edit —
+    // #435: stop hand-bumping a version comment list on every worklet edit —
     // derive the `?v=` cache-bust from a content hash of the compiled
     // processor (scripts/build-js-worklet.mjs), so it only changes when the
     // generated openmpt-worklet.js actually changes.

@@ -6,7 +6,7 @@ Self-hosted worklet and libopenmpt assets served from `public/worklets/` (copied
 
 | File | Role |
 |------|------|
-| `openmpt-worklet.js` | `AudioWorkletProcessor` — renders module audio in `process()`. **Generated** (`// generated — do not edit` header) from `audio-worklet/js/openmpt-processor.ts` by `npm run build:js-worklet` (esbuild) — edit the TS source, not this file. See `docs/WORKLET_AUDIO_BUG.md` § "Compiled TypeScript worklet source (#413)". |
+| `openmpt-worklet.js` | `AudioWorkletProcessor` — renders module audio in `process()`. **Generated** (`// generated — do not edit` header) from `audio-worklet/js/openmpt-processor.ts` by `npm run build:js-worklet` (esbuild) — edit the TS source, not this file. See `docs/WORKLET_AUDIO_BUG.md` § "Compiled TypeScript worklet source (#435)". |
 | `libopenmpt-audioworklet.js` | **wasm2js** Emscripten glue (~5 MB). Runtime is **embedded in JS** |
 
 There is **no** sibling `libopenmpt.wasm` for this path. The glue is compiled with wasm2js (`isWasm2js: true`); a separate binary is neither loaded nor required.

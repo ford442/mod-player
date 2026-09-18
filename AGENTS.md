@@ -36,7 +36,7 @@ Managed by `hooks/useLibOpenMPT.ts`. Responsibilities:
 
 ### 2. JS AudioWorklet Engine
 Files: `public/worklets/openmpt-worklet.js` + `libopenmpt-audioworklet.js` (tracked in git)
-- `openmpt-worklet.js` is **generated** from `audio-worklet/js/openmpt-processor.ts` via `npm run build:js-worklet` (esbuild) — edit the TS source, never the generated file (#413).
+- `openmpt-worklet.js` is **generated** from `audio-worklet/js/openmpt-processor.ts` via `npm run build:js-worklet` (esbuild) — edit the TS source, never the generated file (#435).
 - Processor is an `AudioWorkletProcessor` loaded via `audioWorklet.addModule()` (cache-busted `?v=` — a content hash from `audio-worklet/js/worklet-version.generated.json`, via `useWorkletLoader.ts`).
 - Main thread fetches `libopenmpt-audioworklet.js` and posts `{ type: 'initLib', scriptText }` into the worklet; the worklet evaluates it with `new Function` (classic scripts cannot `import()` / `importScripts()`).
 - **`libopenmpt-audioworklet.js` is wasm2js** (~5 MB): the runtime is embedded in JS. There is **no** sibling `libopenmpt.wasm` on this path. Do not re-add a fake/HTML `.wasm`.

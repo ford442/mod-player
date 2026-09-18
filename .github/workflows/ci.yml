@@ -26,7 +26,7 @@ jobs:
       - name: Verify WASM assets (reject HTML-as-.wasm stubs)
         run: npm run verify:wasm
 
-      - name: Verify generated JS worklet is up to date (#413)
+      - name: Verify generated JS worklet is up to date (#435)
         run: npm run build:js-worklet && git diff --exit-code
 
       - name: Lint
