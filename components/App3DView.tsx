@@ -1,13 +1,11 @@
-import React from 'react';
 import { cn } from '../utils/cn';
 import { Studio3D } from './Studio3D';
 import { Header } from './Header';
-import { PatternDisplay } from './PatternDisplay';
 import { Controls } from './Controls';
 import { MediaOverlay } from './MediaOverlay';
 import { KeyboardShortcutHelp } from './KeyboardShortcutHelp';
 import type { AppTheme } from '../appConfig';
-import type { PatternMatrix, ChannelShadowState, PlaybackState, SyncDebugInfo, MediaItem } from '../types';
+import type { ChannelShadowState, SyncDebugInfo, MediaItem } from '../types';
 import type { BloomPreset, ColorScheme } from '../types/bloomPresets';
 
 interface App3DViewProps {
@@ -20,34 +18,27 @@ interface App3DViewProps {
   status: string;
   isModuleLoaded: boolean;
   syncDebug: SyncDebugInfo;
-  sequencerMatrix: PatternMatrix | null;
-  playbackRowFraction: number;
   isPlaying: boolean;
   playbackSeconds: number;
   channelStates: ChannelShadowState[];
-  beatPhase: number;
-  grooveAmount: number;
-  kickTrigger: number;
-  activeChannels: number[];
   volume: number;
   pan: number;
   isLooping: boolean;
-  totalPatternRows: number;
   play: () => void;
   stopMusic: (v: boolean) => void;
-  seekToStep: (step: number) => void;
   setIsLooping: (v: boolean | ((prev: boolean) => boolean)) => void;
   setVolume: (v: number | ((prev: number) => number)) => void;
   setPan: (v: number) => void;
   handleFileSelected: (file: File) => void;
   handleMediaAdd: (file: File) => void;
   handleRemoteMediaSelect: (item: MediaItem) => void;
-  analyserNode: AnalyserNode | null;
-  debugPanelOpen: boolean;
-  setDebugPanelOpen: (v: boolean | ((prev: boolean) => boolean)) => void;
-  playbackStateRef: React.MutableRefObject<PlaybackState>;
-  channelStatesRef: React.MutableRefObject<ChannelShadowState[]>;
-  oscBufferRef: React.MutableRefObject<Float32Array | null>;
+  /**
+   * Ref callback for the 3D pattern-display panel's host div. PerformanceStage
+   * teleports the *same* PatternDisplay instance (and WebGPU device) into
+   * this node instead of App3DView constructing a second one — see Problem A
+   * in the WebGPU teardown/init unification effort.
+   */
+  onStudioDisplayHostChange: (node: HTMLDivElement | null) => void;
   bloomPreset: BloomPreset;
   setBloomPreset: (v: BloomPreset) => void;
   colorScheme: ColorScheme;
@@ -72,34 +63,21 @@ export function App3DView({
   status,
   isModuleLoaded,
   syncDebug,
-  sequencerMatrix,
-  playbackRowFraction,
   isPlaying,
   playbackSeconds,
   channelStates,
-  beatPhase,
-  grooveAmount,
-  kickTrigger,
-  activeChannels,
   volume,
   pan,
   isLooping,
-  totalPatternRows,
   play,
   stopMusic,
-  seekToStep,
   setIsLooping,
   setVolume,
   setPan,
   handleFileSelected,
   handleMediaAdd,
   handleRemoteMediaSelect,
-  analyserNode,
-  debugPanelOpen,
-  setDebugPanelOpen,
-  playbackStateRef,
-  channelStatesRef,
-  oscBufferRef,
+  onStudioDisplayHostChange,
   bloomPreset,
   setBloomPreset,
   colorScheme,
@@ -113,8 +91,6 @@ export function App3DView({
   cheatsheetOpen,
   setCheatsheetOpen,
 }: App3DViewProps) {
-  const shader3D = viewMode === 'wall' ? 'patternv0.21.wgsl' : 'patternv0.38.wgsl';
-
   return (
     <>
       <Studio3D
@@ -153,50 +129,7 @@ export function App3DView({
           </div>
           </div>
         }
-        patternDisplayContent={
-          <div className="scale-75 origin-center">
-            <PatternDisplay
-              key={shader3D}
-              matrix={sequencerMatrix}
-              playheadRow={playbackRowFraction}
-              isPlaying={isPlaying}
-              bpm={120}
-              timeSec={playbackSeconds}
-              tickOffset={playbackRowFraction % 1}
-              channels={channelStates}
-              beatPhase={beatPhase}
-              grooveAmount={grooveAmount}
-              kickTrigger={kickTrigger}
-              activeChannels={activeChannels}
-              isModuleLoaded={isModuleLoaded}
-              shaderFile={shader3D}
-              volume={volume}
-              pan={pan}
-              isLooping={isLooping}
-              totalRows={totalPatternRows}
-              onPlay={play}
-              onStop={() => stopMusic(false)}
-              onFileSelected={handleFileSelected}
-              onLoopToggle={() => setIsLooping(!isLooping)}
-              onSeek={(row) => seekToStep(row)}
-              onVolumeChange={setVolume}
-              onPanChange={setPan}
-              externalVideoSource={null}
-              dimFactor={dimFactor}
-              analyserNode={analyserNode}
-              debugPanelOpen={debugPanelOpen}
-              onCloseDebug={() => setDebugPanelOpen(false)}
-              onOpenDebug={() => setDebugPanelOpen(true)}
-              // PERFORMANCE OPTIMIZATION: Pass ref for high-frequency updates
-              playbackStateRef={playbackStateRef}
-              channelStatesRef={channelStatesRef}
-              oscBufferRef={oscBufferRef}
-              // Bloom settings from preset
-              bloomIntensity={bloomPreset.intensity}
-              bloomThreshold={bloomPreset.threshold}
-            />
-          </div>
-        }
+        onPatternHostRef={onStudioDisplayHostChange}
         controlsContent={
           <div className="scale-75 origin-top-left">
             <Controls

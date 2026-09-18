@@ -3,7 +3,17 @@ import { ChromeLayout } from './ChromeLayout';
 import { cn } from '../utils/cn';
 import { usePlayerUiStore } from '../store/playerUiStore';
 
-export function MainLayout() {
+export interface MainLayoutProps {
+  /**
+   * DOM node inside the R3F 3D studio's pattern-display panel, when 3D mode
+   * is open. Threaded down to PerformanceStage, which teleports its live
+   * PatternDisplay into this node instead of 3D mode constructing a second
+   * instance (and a second WebGPU device) — see Problem A.
+   */
+  studioDisplayHost?: HTMLDivElement | null;
+}
+
+export function MainLayout({ studioDisplayHost }: MainLayoutProps = {}) {
   const { stageMode, cheatsheetOpen, setCheatsheetOpen } = usePlayerUiStore();
 
   return (
@@ -15,7 +25,7 @@ export function MainLayout() {
         !stageMode && 'min-h-screen bg-panel-base p-4 flex flex-col items-center',
       )}
     >
-      <ChromeLayout />
+      <ChromeLayout studioDisplayHost={studioDisplayHost ?? null} />
       {cheatsheetOpen && <KeyboardShortcutHelp onClose={() => setCheatsheetOpen(false)} />}
     </div>
   );

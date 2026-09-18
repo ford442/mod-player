@@ -233,11 +233,73 @@ export function buildSoftRequiredLimits(
   return applied;
 }
 
+let latestDeviceRequest: Promise<WebGPUDeviceResult> | null = null;
+
+/**
+ * Snapshot of whichever `requestWebGPUDevice()` call is currently in flight
+ * (or has most recently resolved), if any. This is the one real
+ * `requestAdapter`/`requestDevice` call site in production code — other
+ * modules that only need a capability hint (the renderer-selection probe,
+ * `deviceCapabilities.ts`'s lite-mode heuristic) should peek this instead of
+ * calling `navigator.gpu.requestAdapter()` themselves, so a dual-GPU laptop
+ * never binds an iGPU probe adapter ahead of the dGPU the real device ends up
+ * using. Cleared on rejection so a later peek doesn't replay a stale error.
+ */
+export function peekInFlightWebGPUDeviceRequest(): Promise<WebGPUDeviceResult> | null {
+  return latestDeviceRequest;
+}
+
+/**
+ * One-off adapter-info peek for early device-capability heuristics
+ * (`utils/deviceCapabilities.ts`'s integrated-GPU → lite-mode refinement).
+ * Prefers the adapter from an in-flight/settled `requestWebGPUDevice()` call
+ * over issuing a second `requestAdapter()`; falls back to a fresh low-power
+ * request only when no real device request has started yet. Never throws.
+ */
+export async function peekAdapterInfoForCapabilityHint(
+  powerPreference: GPUPowerPreference = 'low-power',
+): Promise<GPUAdapterInfo | undefined> {
+  const inFlight = latestDeviceRequest;
+  if (inFlight) {
+    try {
+      const result = await inFlight;
+      return result.adapter.info as GPUAdapterInfo | undefined;
+    } catch {
+      /* real device request failed — fall through to a fresh probe below */
+    }
+  }
+
+  if (!isWebGPUApiAvailable()) return undefined;
+  try {
+    const adapter = await navigator.gpu.requestAdapter({ powerPreference });
+    return adapter?.info as GPUAdapterInfo | undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Request a GPUAdapter + GPUDevice with production feature policy, soft limits,
  * and power preference. Throws WebGPUInitError on hard failure.
+ *
+ * The only production call site for `requestAdapter`/`requestDevice` — see
+ * `peekInFlightWebGPUDeviceRequest` / `peekAdapterInfoForCapabilityHint` for
+ * how other modules observe this instead of requesting their own adapter.
  */
 export async function requestWebGPUDevice(
+  options: RequestWebGPUDeviceOptions = {},
+): Promise<WebGPUDeviceResult> {
+  const requestPromise = requestWebGPUDeviceUncached(options);
+  latestDeviceRequest = requestPromise;
+  requestPromise.catch(() => {
+    if (latestDeviceRequest === requestPromise) {
+      latestDeviceRequest = null;
+    }
+  });
+  return requestPromise;
+}
+
+async function requestWebGPUDeviceUncached(
   options: RequestWebGPUDeviceOptions = {},
 ): Promise<WebGPUDeviceResult> {
   // #395 — after a hard probe fail, never call requestDevice again this session.
@@ -366,6 +428,12 @@ export async function requestWebGPUDevice(
  * transparent black). Pattern shaders then look "broken" for every file even
  * though pipelines and submit succeed. Call after requestDevice; returns false
  * when presentation is unusable (hard-fail viz; do not start WebGL2 shaders).
+ *
+ * Configures via `configureCanvasContext` — the same helper the real
+ * swapchain uses — so the probe and runtime never disagree on alphaMode /
+ * usage / format (bloom, screenshot and createImageBitmap paths all assume
+ * one configuration). The probe's clear is fully opaque (a=1), so
+ * premultiplied vs. opaque compositing reads back identically here.
  */
 export async function probeWebGPUCanvasPresentation(
   device: GPUDevice,
@@ -381,12 +449,7 @@ export async function probeWebGPUCanvasPresentation(
 
   const fmt = format ?? navigator.gpu.getPreferredCanvasFormat();
   try {
-    context.configure({
-      device,
-      format: fmt,
-      alphaMode: 'opaque',
-      usage: DEFAULT_CANVAS_USAGE,
-    });
+    configureCanvasContext({ device, context, format: fmt });
 
     const tex = context.getCurrentTexture();
     const encoder = device.createCommandEncoder();
@@ -453,6 +516,11 @@ export async function probeWebGPUCanvasPresentation(
 /**
  * Configure a canvas GPUCanvasContext with explicit usage for rendering and
  * optional screenshot copy-out. Re-call after canvas resize.
+ *
+ * Default `alphaMode` is `'premultiplied'`, not `'opaque'`: the chassis/bezel
+ * pass and bloom composite the pattern canvas over dark HTML chrome, and
+ * `probeWebGPUCanvasPresentation` shares this exact helper so the boot probe
+ * never disagrees with the runtime swapchain about how alpha is composited.
  */
 export function configureCanvasContext(options: ConfigureCanvasOptions): GPUTextureFormat {
   const format =
