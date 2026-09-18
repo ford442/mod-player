@@ -8,11 +8,17 @@ import { LibraryAndPlaylistSection } from './LibraryAndPlaylistSection';
 import { usePlayerSession } from '../context/PlayerSessionContext';
 import { usePlayerUiStore } from '../store/playerUiStore';
 
+export interface ChromeLayoutProps {
+  /** See MainLayoutProps.studioDisplayHost — forwarded to PerformanceStage. */
+  studioDisplayHost?: HTMLDivElement | null;
+}
+
 /**
  * Invariant page tree: chrome wrappers stay mounted; PerformanceStage is always
  * child index 1. Stage mode is CSS (`data-stage-mode` on MainLayout), not a subtree swap.
+ * 3D mode is likewise CSS/overlay (App.tsx renders it as a sibling), never a subtree swap.
  */
-export function ChromeLayout() {
+export function ChromeLayout({ studioDisplayHost = null }: ChromeLayoutProps = {}) {
   const { status, isModuleLoaded } = usePlayerSession();
   const { stageMode } = usePlayerUiStore();
 
@@ -23,7 +29,7 @@ export function ChromeLayout() {
         <GlobalControlsBar />
       </div>
 
-      <PerformanceStage />
+      <PerformanceStage studioDisplayHost={studioDisplayHost} />
 
       <div className="stage-chrome" aria-hidden={stageMode}>
         <TransportBar />

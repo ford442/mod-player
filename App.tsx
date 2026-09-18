@@ -73,6 +73,10 @@ function App() {
   const [is3DMode, setIs3DMode] = useState<boolean>(false);
   const isDarkMode = !LIGHT_THEMES.has(theme);
   const [viewMode, setViewMode] = useState<'device' | 'wall'>('device');
+  // DOM node inside the R3F 3D studio's pattern-display panel (when open).
+  // PerformanceStage teleports its live PatternDisplay into this node instead
+  // of App3DView constructing a second instance — see Problem A.
+  const [studioDisplayHost, setStudioDisplayHost] = useState<HTMLDivElement | null>(null);
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
@@ -505,69 +509,53 @@ function App() {
     );
   }
 
-  if (is3DMode && !IS_PUBLIC_MODE) {
-    return (
-      <App3DModeShell
-        isDarkMode={isDarkMode}
-        viewMode={viewMode}
-        setViewMode={setViewMode}
-        setIs3DMode={setIs3DMode}
-        setTheme={setTheme}
-        dimFactor={dimFactor}
-        status={status}
-        isModuleLoaded={isModuleLoaded}
-        syncDebug={syncDebug}
-        sequencerMatrix={sequencerMatrix}
-        playbackRowFraction={playbackRowFraction}
-        isPlaying={isPlaying}
-        playbackSeconds={playbackSeconds}
-        channelStates={channelStates}
-        beatPhase={beatPhase}
-        grooveAmount={grooveAmount}
-        kickTrigger={kickTrigger}
-        activeChannels={activeChannels}
-        volume={volume}
-        pan={pan}
-        isLooping={isLooping}
-        totalPatternRows={totalPatternRows}
-        play={playGuarded}
-        stopMusic={stopMusic}
-        seekToStep={seekToStep}
-        setIsLooping={setIsLooping}
-        setVolume={setVolume}
-        setPan={setPan}
-        handleFileSelected={handleFileSelected}
-        handleMediaAdd={handleMediaAdd}
-        handleRemoteMediaSelect={handleRemoteMediaSelect}
-        analyserNode={analyserNode}
-        debugPanelOpen={debugPanelOpen}
-        setDebugPanelOpen={setDebugPanelOpen}
-        playbackStateRef={playbackStateRef}
-        channelStatesRef={channelStatesRef}
-        oscBufferRef={oscBufferRef}
-        bloomPreset={bloomPreset}
-        setBloomPreset={setBloomPreset}
-        colorScheme={colorScheme}
-        setColorScheme={setColorScheme}
-        mediaItem={mediaItem}
-        mediaVisible={mediaVisible}
-        setMediaVisible={setMediaVisible}
-        setMediaItem={setMediaItem}
-        mediaFades={mediaFades}
-        isReady={isReady}
-        cheatsheetOpen={cheatsheetOpen}
-        setCheatsheetOpen={setCheatsheetOpen}
-      />
-    );
-  }
-
   return (
     <>
       <PlayerSessionProvider value={playerSession}>
         <PlayerFeaturesProvider value={playerFeatures}>
-          <MainLayout />
+          <MainLayout studioDisplayHost={studioDisplayHost} />
         </PlayerFeaturesProvider>
       </PlayerSessionProvider>
+      {is3DMode && !IS_PUBLIC_MODE && (
+        <App3DModeShell
+          isDarkMode={isDarkMode}
+          viewMode={viewMode}
+          setViewMode={setViewMode}
+          setIs3DMode={setIs3DMode}
+          setTheme={setTheme}
+          dimFactor={dimFactor}
+          status={status}
+          isModuleLoaded={isModuleLoaded}
+          syncDebug={syncDebug}
+          isPlaying={isPlaying}
+          playbackSeconds={playbackSeconds}
+          channelStates={channelStates}
+          volume={volume}
+          pan={pan}
+          isLooping={isLooping}
+          play={playGuarded}
+          stopMusic={stopMusic}
+          setIsLooping={setIsLooping}
+          setVolume={setVolume}
+          setPan={setPan}
+          handleFileSelected={handleFileSelected}
+          handleMediaAdd={handleMediaAdd}
+          handleRemoteMediaSelect={handleRemoteMediaSelect}
+          onStudioDisplayHostChange={setStudioDisplayHost}
+          bloomPreset={bloomPreset}
+          setBloomPreset={setBloomPreset}
+          colorScheme={colorScheme}
+          setColorScheme={setColorScheme}
+          mediaItem={mediaItem}
+          mediaVisible={mediaVisible}
+          setMediaVisible={setMediaVisible}
+          setMediaItem={setMediaItem}
+          mediaFades={mediaFades}
+          isReady={isReady}
+          cheatsheetOpen={cheatsheetOpen}
+          setCheatsheetOpen={setCheatsheetOpen}
+        />
+      )}
       <ToastStack toasts={toasts} onDismiss={dismissToast} />
     </>
   );

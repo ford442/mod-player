@@ -8,7 +8,14 @@ import { ChannelShadowState } from '../types';
 
 interface Studio3DProps {
   headerContent?: React.ReactNode;
-  patternDisplayContent?: React.ReactNode;
+  /**
+   * Ref callback for the pattern-display panel's host div. The *same*
+   * PatternDisplay instance that's mounted in PerformanceStage is teleported
+   * here (via a stable-container portal, see PerformanceStage.tsx) rather
+   * than a second instance being constructed — 3D reuses the one WebGPU
+   * device instead of tearing it down and requesting another.
+   */
+  onPatternHostRef?: (node: HTMLDivElement | null) => void;
   controlsContent?: React.ReactNode;
   mediaOverlayContent?: React.ReactNode;
   darkMode?: boolean;
@@ -184,7 +191,7 @@ const ChannelLEDStrip: React.FC<{
 // ─── Studio3D (main export) ───────────────────────────────────────────────────
 export const Studio3D: React.FC<Studio3DProps> = ({
   headerContent,
-  patternDisplayContent,
+  onPatternHostRef,
   controlsContent,
   mediaOverlayContent,
   darkMode = false,
@@ -227,7 +234,10 @@ export const Studio3D: React.FC<Studio3DProps> = ({
   const btnInactive = 'bg-gray-700 border-gray-600 hover:bg-gray-600';
 
   return (
-    <div style={{ width: '100%', height: '100vh', position: 'relative' }}>
+    // MainLayout stays mounted underneath (never unmounted for 3D — see
+    // App.tsx / Problem A); this fixed overlay covers the full viewport so
+    // nothing behind it is visible or reachable while the studio is open.
+    <div style={{ position: 'fixed', inset: 0, zIndex: 1000 }}>
 
       {/* ── Top-left: exit button ── */}
       <div style={{ position: 'absolute', top: 16, left: 16, zIndex: 1000 }}>
@@ -356,18 +366,16 @@ export const Studio3D: React.FC<Studio3DProps> = ({
             </Panel3D>
           )}
 
-          {/* Main pattern display */}
-          {patternDisplayContent && (
-            <Panel3D
-              position={viewMode === 'wall' ? [0, 2, -15] : [0, -0.8, 2]}
-              rotation={viewMode === 'wall' ? [0, 0, 0] : [Math.PI / 8, 0, 0]}
-              width={viewMode === 'wall' ? 16 : 10}
-              height={viewMode === 'wall' ? 12 : 6}
-              darkMode={darkMode}
-            >
-              {patternDisplayContent}
-            </Panel3D>
-          )}
+          {/* Main pattern display — hosts the teleported (not remounted) 2D PatternDisplay */}
+          <Panel3D
+            position={viewMode === 'wall' ? [0, 2, -15] : [0, -0.8, 2]}
+            rotation={viewMode === 'wall' ? [0, 0, 0] : [Math.PI / 8, 0, 0]}
+            width={viewMode === 'wall' ? 16 : 10}
+            height={viewMode === 'wall' ? 12 : 6}
+            darkMode={darkMode}
+          >
+            <div ref={onPatternHostRef} style={{ width: '100%', height: '100%' }} />
+          </Panel3D>
 
           {/* Controls panel */}
           {controlsContent && (
