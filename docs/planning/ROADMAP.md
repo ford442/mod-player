@@ -43,7 +43,7 @@ Fix per #427: render both subtrees unconditionally in a structurally invariant o
 
 **#427 is therefore not done.** Its acceptance criteria on canvas remount, prefs round-trip and URL-param precedence are unmet. #414's layout half is structurally complete but behaviourally regressed.
 
-**#411 leftovers are still in the tree** despite the issue being closed: `?nativeCtx=legacy` / `isNativeLegacyAudioContext` remain live in `App.tsx`, `app/usePlayerFeaturesValue.ts`, `hooks/audioGraph/startNativePlayback.ts` and `utils/nativeClockAnchor.ts`; `docs/planning/native-engine-bench-notes.md` is still methodology-only (dated 2026-07-25, no measured numbers). Re-file under #412 or reopen — do not assume closed means done.
+**#411 audio-graph leftovers are now cleared:** `utils/audioContextFactory.ts` is the single `AudioContext` construction site (one context per page session, `sampleRate` locked to 48000, `latencyHint` from the stage-mode / `?latency=` profile), and the `?nativeCtx=legacy` dual-context path — `parseNativeCtxQueryParam`, `isNativeLegacyAudioContext`, the dual-context capture block and `public/worklets/native-bridge-processor.js` — is deleted. Still outstanding on #411: `docs/planning/native-engine-bench-notes.md` is methodology-only (dated 2026-07-25, no measured numbers).
 
 **Build on foundation before new content.** Do not start #417 (performance instrument) or new shaders until P1 rows below have a decision/PR. #403 (tracker studio) can proceed in parallel with P1 except live-audition audio, which should wait for typed worklets (#413) if it adds a new AudioWorklet.
 
@@ -53,9 +53,9 @@ Fix per #427: render both subtrees unconditionally in a structurally invariant o
 |----------|-------|---------|
 | **P1 — Fix First** | [#427](https://github.com/ford442/mod-player/issues/427) | `stageMode` canvas-remount regression: replace the `{stageMode ? <PerformanceStage/> : <ChromeLayout/>}` subtree swap at `MainLayout.tsx:19` with always-rendered children + CSS-only stage mode, and stop `setStageMode` mutating `editMode`. Landed in `0f0019e` against the issue's one governing rule. |
 | ~~P1~~ **done** | [#412](https://github.com/ford442/mod-player/issues/412) | Two-phase `em++` compile/link fixes the `__cxa_throw` break (and `--debug`'s missing `-matomics`); `STACK_SIZE`, explicit `DISABLE_EXCEPTION_CATCHING=1`, interactive `ctl`/mute and the one-module native parse were already in tree. Mute/interpolation verified against the real wrapper on emsdk 3.1.51. Unblocks #416. |
-| P1 | [#413](https://github.com/ford442/mod-player/issues/413) | Compile `openmpt-worklet.js` / native-bridge from TypeScript (single protocol source). |
+| P1 | [#413](https://github.com/ford442/mod-player/issues/413) | Compile `openmpt-worklet.js` from TypeScript (single protocol source). The native-bridge worklet it also named is gone with the dual-context path. |
 | P1 | [#414](https://github.com/ford442/mod-player/issues/414) | Bus half **done** (`utils/pcmBus.ts` + `computeAnalysis.ts`, consumed by `frameDraw.ts` and both `start*Playback.ts`). Layout half structurally landed in `0f0019e` but behaviourally regressed — tracked as #427 above. Close this once #427 is green. |
-| P1 (reopen?) | [#411](https://github.com/ford442/mod-player/issues/411) | Closed 2026-09-05 by #426, but only the deploy-awareness slice shipped. Still in tree: `?nativeCtx=legacy` / `isNativeLegacyAudioContext`, unlocked shared `AudioContext` sampleRate, and `native-engine-bench-notes.md` with no measured numbers. |
+| P1 (reopen?) | [#411](https://github.com/ford442/mod-player/issues/411) | Audio-graph half **done**: single `AudioContext` factory (48 kHz locked, profiled `latencyHint`) and the `?nativeCtx=legacy` dual-context path deleted. Remaining: `native-engine-bench-notes.md` still has no measured numbers. |
 | P1 | [#415](https://github.com/ford442/mod-player/issues/415) | Resolve WebGL2 contradiction: revive `?renderer=webgl2` as a real viz session **or** delete the deferred path and retarget smoke/capture/docs. |
 
 ## Next (after foundation)

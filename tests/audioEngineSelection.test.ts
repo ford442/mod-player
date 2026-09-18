@@ -1,8 +1,6 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 import {
   parseEngineQueryParam,
-  parseNativeCtxQueryParam,
-  isNativeLegacyAudioContext,
   resolveAudioEnginePreference,
   shouldPromoteNativeEngine,
   writeStoredAudioEngineOverride,
@@ -50,11 +48,16 @@ describe('audioEngineSelection', () => {
     expect(parseEngineQueryParam('?engine=bogus')).toBeNull();
   });
 
-  it('parses ?nativeCtx=legacy', () => {
-    expect(parseNativeCtxQueryParam('?engine=native&nativeCtx=legacy')).toBe('legacy');
-    expect(parseNativeCtxQueryParam('?nativeCtx=shared')).toBeNull();
-    expect(isNativeLegacyAudioContext('?engine=native')).toBe(false);
-    expect(isNativeLegacyAudioContext('?nativeCtx=legacy')).toBe(true);
+  // ?nativeCtx=legacy (dual-context native path) was removed — there is one
+  // AudioContext per session now. The param must be inert, not resurrected.
+  it('ignores the removed ?nativeCtx param', async () => {
+    const selection = await import('../utils/audioEngineSelection');
+    expect('parseNativeCtxQueryParam' in selection).toBe(false);
+    expect('isNativeLegacyAudioContext' in selection).toBe(false);
+    expect(parseEngineQueryParam('?engine=native&nativeCtx=legacy')).toBe('native');
+    expect(resolveAudioEnginePreference('?engine=native&nativeCtx=legacy'))
+      .toEqual({ mode: 'prefer-native' });
+    expect(resolveAudioEnginePreference('?nativeCtx=legacy')).toEqual({ mode: 'auto' });
   });
 
   it('URL overrides localStorage', () => {

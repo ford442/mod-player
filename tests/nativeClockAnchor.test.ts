@@ -3,12 +3,14 @@ import {
   createNativeClockAnchor,
   mapNativeFrameClockToHeardTime,
   nativeFrameSecondsFromData,
-  NATIVE_BRIDGE_LATENCY_MEDIASTREAM_SEC,
 } from '../utils/nativeClockAnchor';
 
 function fakeCtx(currentTime: number, baseLatency = 0.01, outputLatency = 0.02): AudioContext {
   return { currentTime, baseLatency, outputLatency } as AudioContext;
 }
+
+/** Arbitrary non-zero output offset — exercises the subtraction, not a real path. */
+const BRIDGE_LATENCY_SEC = 0.006;
 
 describe('nativeClockAnchor', () => {
   it('maps frame clock onto main heard-time via anchor', () => {
@@ -25,10 +27,10 @@ describe('nativeClockAnchor', () => {
     const anchor = {
       frameSecondsAtAnchor: 0,
       mainHeardTimeAtAnchor: 10,
-      bridgeLatencySec: NATIVE_BRIDGE_LATENCY_MEDIASTREAM_SEC,
+      bridgeLatencySec: BRIDGE_LATENCY_SEC,
     };
     expect(mapNativeFrameClockToHeardTime(1.0, anchor, 0)).toBeCloseTo(
-      10 + 1.0 - NATIVE_BRIDGE_LATENCY_MEDIASTREAM_SEC,
+      10 + 1.0 - BRIDGE_LATENCY_SEC,
       6,
     );
   });

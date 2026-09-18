@@ -36,7 +36,7 @@ Optional debug hook (future): expose `window.__ENGINE_BENCH__` with poll/message
 | Position to main | `postMessage` every quantum (~350 Hz possible; UI applies ~as received) | Shared-memory poll ~16 ms (~60 Hz) |
 | Main-thread decode of position | Message handler + shared `applyNormalizedPosition` | Poll + same apply path |
 | projectM PCM chunks | Yes (`projectm-pcm`) | Yes (ring copy → `broadcastPcmBlock`) |
-| Dual AudioContext | No | Only with `?nativeCtx=legacy` |
+| Dual AudioContext | No | No — both attach to the one `utils/audioContextFactory.ts` context |
 
 Native should typically show **lower main-thread message overhead** (poll vs high-rate postMessage) and **higher one-time init cost** (glue + wasm compile). Large ITs stress pattern extract / matrix packing more than the engine apply path.
 

@@ -128,6 +128,11 @@ export interface EmscriptenOpenMPTModule {
     _free: (ptr: number) => void;
 
     // Exported C functions
+    /**
+     * Headless / unit-test harness only — creates a standalone AudioContext in
+     * C++. Production always uses `_init_audio_with_context` against the one
+     * player context (`utils/audioContextFactory.ts`). Do not call from the app.
+     */
     _init_audio: (sampleRate: number) => number;
     _load_module: (dataPtr: number, length: number) => number;
     _resume_audio: () => void;

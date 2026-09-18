@@ -99,7 +99,10 @@ describe('#412 native ctl / mute / one-module parse', () => {
     expect(nativePlay).toContain('setPcmCapture');
     expect(nativePlay).toContain('setPcmDemandListener');
     expect(nativePlay).toContain('shouldReloadNativeModule');
-    expect(nativePlay).toContain('ensurePcmRing');
+    // The ring is allocated on demand by setPcmCapture — the old eager
+    // ensurePcmRing() call existed only for the deleted dual-context bridge.
+    expect(nativePlay).not.toContain('ensurePcmRing');
+    expect(engine).toContain('allocatePcmRing');
   });
 
   // libopenmpt signals bad arguments by throwing, and the native build links
@@ -143,13 +146,14 @@ describe('#412 native ctl / mute / one-module parse', () => {
     const gate = worklet.slice(cbIdx, fillIdx);
     expect(gate).toContain('timeSinceLastReport');
     expect(gate).toContain('1.0 / 60.0');
+    // attachAudioContext must not eagerly allocate the PCM ring — writing it
+    // every quantum on the audio thread contends with the mixer.
     const attachIdx = engine.indexOf('async attachAudioContext');
-    const ensureIdx = engine.indexOf('ensurePcmRing');
+    const allocIdx = engine.indexOf('private allocatePcmRing');
     expect(attachIdx).toBeGreaterThan(0);
-    expect(ensureIdx).toBeGreaterThan(attachIdx);
-    const attachBody = engine.slice(attachIdx, ensureIdx);
+    expect(allocIdx).toBeGreaterThan(attachIdx);
+    const attachBody = engine.slice(attachIdx, allocIdx);
     expect(attachBody).not.toContain('this.allocatePcmRing()');
     expect(engine).toContain('setPcmCapture');
-    expect(engine).toContain('ensurePcmRing');
   });
 });

@@ -15,7 +15,7 @@ The C++/Emscripten engine exists end-to-end:
 | C++ core | `cpp/openmpt_wrapper.*`, `cpp/worklet_processor.cpp` | libopenmpt render + `PositionInfo` shared memory; **zeros frame clock on load/seek** |
 | Build | `scripts/build-wasm.sh` → `npm run build:emcc` | emsdk **3.1.51**, outputs `openmpt-native.{js,wasm,aw.js}` |
 | TS wrapper | `audio-worklet/OpenMPTWorkletEngine.ts` | Dynamic import of glue; polls `_poll_position` |
-| Ring bridge | `public/worklets/native-bridge-processor.js` | SAB ring → main-thread graph |
+| Audio context | `utils/audioContextFactory.ts` | The one `AudioContext` per page session (48 kHz locked); both engines attach to it |
 | Main hook | `hooks/useLibOpenMPT.ts` + `hooks/audioGraph/*` | Probe; auto-prefer only if parity gate open |
 
 **Production default remains the JS worklet** (`openmpt-worklet.js` + wasm2js `libopenmpt-audioworklet.js`). Native artifacts are **gitignored** and only appear after a local or CI build. Auto-prefer requires `VITE_NATIVE_PARITY_GATE=1` (or local parity marker) — never ship gate without green `smoke:playhead:native`.
@@ -40,7 +40,7 @@ The C++/Emscripten engine exists end-to-end:
 | Feature flag / auto-detect documented | **Done** — `?engine=` / localStorage / public-mode force-JS / parity gate | Keep README + AGENTS in sync |
 | A/V sync ≥ JS worklet (post-prediction) | Frame clock + anchor + **load/seek frame reset**; smoke hard-requires `native-worklet` + non-frozen playhead | Green `report-native.json` after AudioWorklet thread start (aligned stack + `aw.js` path rewrite + real `WebAssembly`). Fill measured lag in `accurate_playback.md` |
 | No filename collision with JS worklet | **Done** — `openmpt-native.*` only; build refuses clobber | Keep guards + scheduled integrity check |
-| Export / capture | Default native shares one `AudioContext`; MediaRecorder works | `?nativeCtx=legacy` still dual-context / blocked |
+| Export / capture | **Done** — both engines share the one `AudioContext`; MediaRecorder works | Dual-context `?nativeCtx=legacy` deleted (#411 follow-up) |
 
 ---
 
@@ -97,7 +97,7 @@ INIT (utils/audioEngineSelection.ts):
 - C++ writes `PositionInfo` (shared memory); TS polls ~16 ms and emits `position` as `WorkletPositionData` (ABI `currentOrder`/`currentRow` plus `order`/`row` aliases).
 - Adapter maps frame clock through `nativeClockAnchor` onto the **shared** AudioContext quantum-start domain (`audioTime` / `workletTime`), not poll-time `currentTime`.
 - PCM: ring copy at poll cadence → `broadcastPcmBlock` / `publishPcmBlock` (same shape as JS `projectm-pcm`).
-- Default graph: C++ AudioWorkletNode on the main context (no dual-context). `?nativeCtx=legacy` keeps the old auto-context + bridge.
+- Graph: C++ AudioWorkletNode on the one shared context via `init_audio_with_context` — no dual-context path exists any more.
 
 Implication: two adapters in `useAudioGraph` (message handler vs `engine.on('position')`). Unification goal is a **single normalized sample type** + optional PCM tap adapter, not necessarily postMessage from C++.
 
@@ -165,7 +165,7 @@ Workflow changes:
    - Optional second matrix cell: `npm run build:emcc -- --debug` (timeout budget)
 
 2. **`ci.yml` path-filtered job** (or extend `wasm-smoke-test` when paths match)
-   - Paths: `cpp/**`, `scripts/build-wasm.sh`, `audio-worklet/**`, `public/worklets/native-bridge-processor.js`
+   - Paths: `cpp/**`, `scripts/build-wasm.sh`, `audio-worklet/**`, `utils/audioContextFactory.ts`
    - Same cache + full `build:emcc` + artifact optional (short retention)
    - Always: `verify:native-exports` (already every PR)
 
@@ -218,9 +218,11 @@ Introduce a single adapter module (name TBD, e.g. `utils/workletPositionAdapter.
 - Short term: document that projectM PCM is JS-worklet-only; native uses ring buffer + AnalyserNode.
 - Medium term: optional native PCM path — either:
   - **A.** Main thread reads ring buffer copy at ~60 Hz and emits synthetic `projectm-pcm` (simple, slight lag), or
-  - **B.** Extend `native-bridge-processor.js` to postMessage PCM chunks (closer to JS schema).
+  - **B.** Have the C++ node postMessage PCM chunks directly (closer to JS schema).
 
 Prefer **B** if projectM quality on native is required; otherwise A is enough for meters.
+(The old ring-bridge worklet that option B was originally written against is gone —
+the C++ node now sits in the main graph directly.)
 
 **Do not** force C++ to speak JS postMessage types; keep shared memory for position (lower main-thread cost — a primary reason for native).
 
@@ -319,9 +321,9 @@ Fixtures: one large `.it` in `public/` or downloadable test asset (do not bloat 
 - **Acceptance:** prediction tests green; manual accurate_playback checklist on native ≤ ~1 row lag
 
 ### PR4 — Optional PCM parity (projectM)
-- **Files:** `public/worklets/native-bridge-processor.js`, `hooks/useAudioGraph.ts`
+- **Files:** `cpp/worklet_processor.cpp`, `hooks/audioGraph/startNativePlayback.ts`
 - **Deps:** PR3 recommended
-- **Work:** bridge posts `projectm-pcm`-compatible messages from ring reads
+- **Work:** C++ node posts `projectm-pcm`-compatible messages instead of ring-read polling
 - **Acceptance:** projectM (if enabled) receives PCM on native without Analyser-only path
 
 ### PR5 — Main-thread benchmark harness

@@ -2,6 +2,7 @@
 // Thin orchestrator: engine paths live under hooks/audioGraph/.
 
 import { logWorkletDiagnostics } from '../audio-worklet/diagnostics';
+import { createPlayerAudioContext } from '../utils/audioContextFactory';
 import { postLoad, postPause, postPlay } from '../audio-worklet/protocol';
 import {
   canReuseWorkletNode,
@@ -100,19 +101,12 @@ export async function startAudioPlayback(
 
   try {
     if (!refs.audioContextRef.current) {
-      console.log('[PLAY] Creating new AudioContext...');
-      refs.audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ latencyHint: 'playback' });
+      // Single construction site for the page session — see
+      // utils/audioContextFactory.ts. Locked to 48 kHz; `latencyHint` comes
+      // from the stage-mode / ?latency= profile resolved at create time.
+      console.log('[PLAY] Acquiring shared player AudioContext...');
+      refs.audioContextRef.current = createPlayerAudioContext();
       refs.workletLoadedRef.current = false;
-
-      // AUDIO-001 FIX COMPLETE: Detailed log right after AudioContext creation
-      const ctx = refs.audioContextRef.current;
-      console.log('[AudioEngine] AudioContext created', {
-        state: ctx.state,
-        sampleRate: ctx.sampleRate,
-        baseLatency: ctx.baseLatency,
-        outputLatency: ctx.outputLatency ?? 0,
-        timestamp: performance.now(),
-      });
     }
 
     const ctx = refs.audioContextRef.current;
