@@ -1,4 +1,5 @@
 import type { PatternRendererBackend } from './types';
+import { isWebGPUApiAvailable, peekInFlightWebGPUDeviceRequest } from '../../utils/webgpuDevice';
 
 const STORAGE_KEY = 'xasm1_pattern_renderer';
 const WEBGPU_PROBE_CACHE_KEY = 'xasm1_webgpu_adapter_ok';
@@ -95,8 +96,13 @@ export function isWebGL2Available(): boolean {
 }
 
 /**
- * Real WebGPU adapter probe (cached per session). Returns false when the API exists
- * but `requestAdapter()` yields null or throws.
+ * WebGPU availability probe (cached per session). `utils/webgpuDevice.ts` is
+ * the only production module allowed to call `requestAdapter()` /
+ * `requestDevice()` (a second call site here used to race the real device
+ * request with a different power preference and could bind a different GPU
+ * on a dual-GPU laptop). This probe instead reuses whatever real device
+ * request is already in flight/settled, or — when none has started yet —
+ * degrades to a cheap `navigator.gpu` surface check with no adapter at all.
  */
 export async function probeWebGPUAdapter(): Promise<boolean> {
   if (!isWebGPUAvailable()) {
@@ -110,13 +116,12 @@ export async function probeWebGPUAdapter(): Promise<boolean> {
   if (!webgpuAdapterProbePromise) {
     webgpuAdapterProbePromise = (async () => {
       try {
-        const adapter = await navigator.gpu.requestAdapter();
-        const ok = adapter != null;
+        const inFlight = peekInFlightWebGPUDeviceRequest();
+        const ok = inFlight
+          ? await inFlight.then(() => true, () => false)
+          : isWebGPUApiAvailable();
         writeWebGPUProbeCache(ok);
         return ok;
-      } catch {
-        writeWebGPUProbeCache(false);
-        return false;
       } finally {
         webgpuAdapterProbePromise = null;
       }
