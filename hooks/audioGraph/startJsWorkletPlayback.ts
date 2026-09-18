@@ -62,14 +62,7 @@ export async function startJsWorkletPlayback(
           setTimeout(() => reject(new Error('Worklet module load timeout (30s)')), 30000);
         });
 
-        const protocolUrl = withBase('worklets/worklet-protocol-constants.js?v=2');
-        await Promise.race([
-          (async () => {
-            await ctx.audioWorklet.addModule(protocolUrl);
-            await ctx.audioWorklet.addModule(workletUrl);
-          })(),
-          loadTimeout,
-        ]);
+        await Promise.race([ctx.audioWorklet.addModule(workletUrl), loadTimeout]);
 
         refs.workletLoadedRef.current = true;
         console.log('[PLAY] ✅ AudioWorklet module loaded successfully');

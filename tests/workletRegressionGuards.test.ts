@@ -310,10 +310,21 @@ describe('#354 production source invariants', () => {
     expect(lifecycle).toContain('WORKLET_POSITION_REPORT_INTERVAL_SEC');
   });
 
-  it('WORKLET_VERSION stays cache-busted at ≥ 16 after interpolation param-index fix', () => {
-    const m = useWorkletLoader.match(/WORKLET_VERSION\s*=\s*['"](\d+)['"]/);
-    expect(m, 'WORKLET_VERSION must be defined').toBeTruthy();
-    expect(Number(m![1])).toBeGreaterThanOrEqual(16);
+  it('WORKLET_VERSION cache-busts from the generated build artifact, not a hand-edited counter', () => {
+    // #435: stop hand-bumping a version comment list on every worklet edit —
+    // derive the `?v=` cache-bust from a content hash of the compiled
+    // processor (scripts/build-js-worklet.mjs), so it only changes when the
+    // generated openmpt-worklet.js actually changes.
+    expect(useWorkletLoader).toMatch(
+      /from ['"]\.\.\/audio-worklet\/js\/worklet-version\.generated\.json['"]/,
+    );
+    expect(useWorkletLoader).toContain('WORKLET_VERSION = workletVersionData.version');
+
+    const versionJson = JSON.parse(
+      readFileSync(join(ROOT, 'audio-worklet/js/worklet-version.generated.json'), 'utf8'),
+    );
+    expect(typeof versionJson.version).toBe('string');
+    expect(versionJson.version.length).toBeGreaterThan(0);
   });
 
   it('process() never calls get_time_at_position (GetLength grew with order)', () => {

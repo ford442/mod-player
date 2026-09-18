@@ -56,7 +56,7 @@ python3 deploy.py                                # Build + SFTP upload to produc
 - Sends control messages to worklet via `port.postMessage()`
 - Reads playback state via mutable refs (`channelStatesRef`) to avoid 60 Hz re-render floods
 
-#### 2. Audio Worklet Thread (`public/worklets/openmpt-worklet.js`)
+#### 2. Audio Worklet Thread (`public/worklets/openmpt-worklet.js`, generated from `audio-worklet/js/openmpt-processor.ts` via `npm run build:js-worklet` — edit the TS source)
 - Runs the libopenmpt render loop at audio sample rate (44.1 kHz)
 - Sends position + VU data back to main thread every ~16 ms (60 fps)
 - **Critical rule:** No React state, no DOM APIs. All communication via `port.postMessage()`
