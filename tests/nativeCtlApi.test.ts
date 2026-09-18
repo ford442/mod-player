@@ -62,7 +62,7 @@ describe('#412 native ctl / mute / one-module parse', () => {
     expect(buildSh).toContain("'_set_channel_mute'");
     expect(buildSh).toContain("'_set_render_param'");
     expect(buildSh).toContain("'_ctl_set_text'");
-    expect(buildSh).toContain('g_module on the AudioWorklet thread + g_metaModule');
+    expect(buildSh).toContain('ONE resident C++ OpenMPTModule');
     expect(buildSh).toContain('--post-js');
     expect(buildSh).toContain('patch-native-glue.mjs');
   });
@@ -129,6 +129,95 @@ describe('#412 native ctl / mute / one-module parse', () => {
     expect(wrapper).toContain('openmpt_module_get_ctls');
     const ctl = wrapper.slice(wrapper.indexOf('void OpenMPTModule::ctlSetText'));
     expect(ctl).toContain('supportsCtl(key)');
+  });
+
+  // ── One resident OpenMPTModule under the 128mb cap ──────────────────
+  //
+  // load_module() used to keep g_module (audio thread), g_metaModule (main
+  // thread) and a third malloc'd copy of the file bytes alive at once, so a
+  // large IT hit `malloc failed (heap exhausted)` instead of a UI error.
+  describe('single resident module', () => {
+    it('commit_module unloads the metadata parse before the audio thread loads', () => {
+      expect(worklet).toContain('int commit_module()');
+      const commit = worklet.slice(worklet.indexOf('int commit_module()'));
+      const unloadIdx = commit.indexOf('g_metaModule.unload()');
+      const cmdIdx = commit.indexOf('g_cmdLoad.store(1');
+      expect(unloadIdx).toBeGreaterThan(-1);
+      expect(cmdIdx).toBeGreaterThan(unloadIdx);
+    });
+
+    it('load_module adopts the JS buffer instead of copying it a third time', () => {
+      const load = worklet.slice(
+        worklet.indexOf('int load_module('),
+        worklet.indexOf('int commit_module()'),
+      );
+      expect(load).not.toContain('std::memcpy(g_moduleData');
+      expect(load).toContain('g_moduleData     = data; // adopted');
+      // The engine must not free a pointer C++ now owns.
+      const loadTs = engine.slice(engine.indexOf('async load(data: ArrayBuffer)'));
+      expect(loadTs.slice(0, loadTs.indexOf('loadedFingerprint'))).not.toContain('_free(ptr)');
+    });
+
+    it('play() and both host load paths commit the staged module', () => {
+      expect(worklet).toMatch(/void resume_audio\(\) \{[\s\S]{0,200}commit_module\(\);/);
+      expect(engine).toContain('commitModule()');
+      expect(moduleActions).toContain('nativeEngineEarly.commitModule()');
+      expect(nativePlay).toContain('engine.commitModule()');
+    });
+
+    it('mute / render param / ctl only target the audio-thread module', () => {
+      for (const fn of ['void set_channel_mute(', 'void set_render_param(', 'void ctl_set_text(']) {
+        const idx = worklet.indexOf(fn);
+        expect(idx).toBeGreaterThan(0);
+        const body = worklet.slice(idx, worklet.indexOf('\n}', idx));
+        expect(body).not.toContain('g_metaModule');
+      }
+    });
+
+    it('keeps GetLength (duration / bpm) off the audio-thread module', () => {
+      // openmpt_module_get_duration_seconds seeks the module and restores play
+      // state — running it on g_module would corrupt playback mid-render.
+      expect(worklet).toContain('metaOnlyModule()');
+      for (const fn of ['double get_duration_seconds()', 'double get_initial_bpm()']) {
+        const body = worklet.slice(worklet.indexOf(fn), worklet.indexOf('\n}', worklet.indexOf(fn)));
+        expect(body).toContain('metaOnlyModule()');
+        expect(body).not.toContain('patternQueryModule()');
+      }
+    });
+  });
+
+  // ── No abort across the no-catch ABI ────────────────────────────────
+  it('turns load failures into typed, pollable errors instead of fprintf', () => {
+    expect(worklet).toContain('const char* get_last_error()');
+    expect(worklet).toContain('void clear_last_error()');
+    for (const code of ['ERR_BAD_ARGS', 'ERR_OUT_OF_MEMORY', 'ERR_UNSUPPORTED_MODULE', 'ERR_AUDIO_LOAD']) {
+      expect(worklet).toContain(code);
+    }
+    // libopenmpt signals allocation failure by throwing, which is abort() under
+    // DISABLE_EXCEPTION_CATCHING=1 — so the heap has to be probed with malloc
+    // (which returns null) before the parse is attempted.
+    const load = worklet.slice(
+      worklet.indexOf('int load_module('),
+      worklet.indexOf('int commit_module()'),
+    );
+    const probeIdx = load.indexOf('malloc(static_cast<size_t>(length) * 4u)');
+    const parseIdx = load.indexOf('g_metaModule.load(');
+    expect(probeIdx).toBeGreaterThan(-1);
+    expect(parseIdx).toBeGreaterThan(probeIdx);
+    expect(load).not.toContain('-sDISABLE_EXCEPTION_CATCHING=0');
+    // and the engine surfaces the code on its error event …
+    expect(engine).toContain('takeNativeError()');
+    expect(engine).toContain('nativeErrorCode(detail)');
+    // … while the load path shows it to the user instead of a generic message.
+    expect(moduleActions).toContain('getLastErrorMessage()');
+  });
+
+  it('keeps the headless init_audio on the TS factory 48000 / playback lock', () => {
+    const init = worklet.slice(worklet.indexOf('int init_audio(int sampleRate)'));
+    expect(init.slice(0, 600)).toContain('LOCKED_SAMPLE_RATE = 48000');
+    expect(init.slice(0, 600)).toContain('attrs.latencyHint   = "playback"');
+    // Production must still go through the shared context.
+    expect(engine).toContain('_init_audio_with_context');
   });
 
   it('does not call GetLength/time-at-row on the audio thread', () => {

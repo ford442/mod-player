@@ -1,7 +1,8 @@
 # Native vs JS worklet — informal main-thread cost notes
 
-**Status:** Methodology + expected shape (run locally after `npm run build:emcc`).  
-**Date:** 2026-07-25  
+**Status:** Methodology + one recorded JS baseline row. The native column needs
+an emsdk 3.1.51 host (see *Recorded runs*).  
+**Date:** 2026-07-25 (methodology) / 2026-09-18 (first recorded row)  
 **Fixture:** Prefer a large multi-channel IT (e.g. 16+ channels). Do not commit multi‑MB modules; use a local file or downloadable test asset.
 
 ## Goal
@@ -40,26 +41,45 @@ Optional debug hook (future): expose `window.__ENGINE_BENCH__` with poll/message
 
 Native should typically show **lower main-thread message overhead** (poll vs high-rate postMessage) and **higher one-time init cost** (glue + wasm compile). Large ITs stress pattern extract / matrix packing more than the engine apply path.
 
-## Results template
+## Recorded runs
 
-Fill in after a local run (example placeholders):
+### 2026-09-18 — default module, headless Chromium (CI-style container)
+
+`npm run build && npm run preview -- --port 4173 && npm run bench:engine`,
+`PLAY_MS=4000`, 241 samples, `?renderer=webgl2&lite=0`.
 
 | Metric | JS (`?engine=js`) | Native (`?engine=native`) |
 |--------|-------------------|---------------------------|
-| Module | _(name / channels / patterns)_ | same |
-| Load → first audio (ms) | | |
-| Position updates/s | | |
-| Median RAF updateUI (ms) | | |
-| Long tasks >50 ms (count / 60 s) | | |
-| Notes | | |
+| Module | default bundled module (not a large IT) | — |
+| Observed engine | `worklet` | not run |
+| Median `getPlayheadDebug` (ms) | **0.005** | — |
+| Mean / max (ms) | 0.005 / 0.035 | — |
+| Notes | Playhead read is free at this module size — the RAF budget is spent elsewhere (pattern packing, GPU upload), so this row is a floor, not a comparison. | `nativeArtifactsPresent: false` |
+
+The native column is blank because `public/worklets/openmpt-native.*` is a
+gitignored build artifact and the recording host had no **emsdk 3.1.51**, which
+`npm run build:emcc` requires. The harness detects this and skips the native leg
+rather than reporting a bogus row.
+
+**Won't-measure (native column), with the reason:** a native-vs-JS row cannot be
+produced anywhere the toolchain is absent — that includes the default CI job and
+any container without emsdk. It needs an operator (or a job that installs emsdk
+3.1.51) to run `npm run build:emcc` first, on a large IT rather than the default
+module. Until someone with that setup records one, the native column stays empty
+on purpose; it is **not** a release gate and nothing should wait on it.
+
+To add a row: run the command above with a large multi-channel IT loaded, and
+paste the numbers from `artifacts/engine-bench/report.json` into a new dated
+subsection.
 
 ## Acceptance for epic #09
 
 - [x] Methodology documented
 - [x] Harness: `npm run bench:engine` → `artifacts/engine-bench/`
-- [ ] Numbers filled from at least one large-IT local run (operator) — **not a release gate**
+- [x] At least one recorded row (JS baseline, 2026-09-18 above)
+- [ ] Native column — **won't-measure without emsdk 3.1.51**; operator-filled, not a release gate
 
-Harness: `npm run bench:engine` compares JS postMessage vs native poll. After a large-IT run, paste median `getPlayheadDebug` / load→audio into the table above. Default-module smoke is enough to keep the script green; large-IT numbers remain operator-filled.
+Harness: `npm run bench:engine` compares JS postMessage vs native poll. After a large-IT run, paste median `getPlayheadDebug` / load→audio into a new dated subsection above. Default-module smoke is enough to keep the script green; large-IT numbers remain operator-filled.
 
 CI does **not** gate on this benchmark. A/V parity is gated by `smoke:playhead:native` (path-filtered + scheduled). This note is DX/perf awareness only; do not flip defaults on vibes alone.
 
@@ -72,4 +92,4 @@ npm run bench:engine
 # → artifacts/engine-bench/report.json (median getPlayheadDebug ms per engine)
 ```
 
-Paste results into the table above after a local run on a large IT when available.
+Add a dated subsection under *Recorded runs* after a local run on a large IT when available.

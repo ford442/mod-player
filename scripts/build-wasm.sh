@@ -26,9 +26,14 @@
 #   ./scripts/build-wasm.sh --grow       # ALLOW_MEMORY_GROWTH=1 MAXIMUM_MEMORY=512mb (huge ITs)
 #
 # Heap contract (release, ALLOW_MEMORY_GROWTH=0):
-#   INITIAL_MEMORY=128mb is a HARD CAP shared by BOTH C++ OpenMPTModule instances
-#   (g_module on the AudioWorklet thread + g_metaModule on the main thread), the
-#   8192-frame stereo ring, the 128 KiB worklet stack, and pattern metadata.
+#   INITIAL_MEMORY=128mb is a HARD CAP covering ONE resident C++ OpenMPTModule,
+#   the file bytes staged for it, the 8192-frame stereo ring, the 128 KiB worklet
+#   stack, and pattern metadata. load_module() parses a transient g_metaModule on
+#   the main thread and commit_module() unloads it *before* the audio thread
+#   creates g_module on the AudioWorklet thread, so the two are never resident at
+#   the same time. load_module() also heap-probes and returns a typed
+#   ERR_OUT_OF_MEMORY (get_last_error) rather than letting libopenmpt throw into
+#   the no-catch ABI.
 #   --grow (MAXIMUM_MEMORY=512mb) is the escape hatch for huge ITs. Do not raise
 #   the default 128mb cap here.
 #
@@ -128,7 +133,7 @@ CXX_ONLY_FLAGS=()
 LINK_FLAGS=()
 EMSCRIPTEN_FLAGS=()
 
-# Main-thread C stack (g_metaModule.parse). Worklet thread stack is a separate
+# Main-thread C stack (the transient g_metaModule parse). Worklet stack is a separate
 # memalign(16, 128*1024) buffer in worklet_processor.cpp — not this flag.
 STACK_SIZE_FLAG=-sSTACK_SIZE=131072
 
@@ -420,11 +425,19 @@ mkdir -p "$OUTPUT_DIR"
 # Must match EMSCRIPTEN_KEEPALIVE in cpp/worklet_processor.cpp and
 # usage in audio-worklet/OpenMPTWorkletEngine.ts (+ types.ts).
 # Keep in sync; CI runs scripts/verify-native-exports.mjs.
+#
+# _init_audio is headless-harness only (it builds its own AudioContext at the
+# same locked 48000/'playback' as utils/audioContextFactory.ts so benches stay
+# comparable). Production always uses _init_audio_with_context; nothing in the
+# app may call _init_audio.
 EXPORTED_FUNCTIONS=$(cat <<'EOF'
 [
   '_init_audio',
   '_init_audio_with_context',
   '_load_module',
+  '_commit_module',
+  '_get_last_error',
+  '_clear_last_error',
   '_resume_audio',
   '_suspend_audio',
   '_seek_order_row',

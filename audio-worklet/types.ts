@@ -130,11 +130,30 @@ export interface EmscriptenOpenMPTModule {
     // Exported C functions
     /**
      * Headless / unit-test harness only — creates a standalone AudioContext in
-     * C++. Production always uses `_init_audio_with_context` against the one
-     * player context (`utils/audioContextFactory.ts`). Do not call from the app.
+     * C++ at the same locked 48000 / `playback` settings as the TS factory.
+     * Production always uses `_init_audio_with_context` against the one player
+     * context (`utils/audioContextFactory.ts`). Do not call from the app; it is
+     * optional here so a build that drops it still type-checks.
      */
-    _init_audio: (sampleRate: number) => number;
+    _init_audio?: (sampleRate: number) => number;
+    /**
+     * Stage a module and parse its metadata on the main thread.
+     *
+     * **Takes ownership of `dataPtr`** (which must come from `_malloc`): the
+     * caller must NOT `_free` it, on success or failure. Returns 1 on success,
+     * 0 on failure — call `_get_last_error` for a typed reason.
+     */
     _load_module: (dataPtr: number, length: number) => number;
+    /**
+     * Release the transient metadata parse and hand the staged bytes to the
+     * audio thread, which builds the single resident render instance. Idempotent;
+     * `_resume_audio` calls it implicitly. Returns 1 if something was committed.
+     */
+    _commit_module?: () => number;
+    /** Pointer to a NUL-terminated typed error string, or 0 when there is none. */
+    _get_last_error?: () => number;
+    /** Drop any pending error string. */
+    _clear_last_error?: () => void;
     _resume_audio: () => void;
     _suspend_audio: () => void;
     _seek_order_row: (order: number, row: number) => void;

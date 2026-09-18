@@ -172,12 +172,22 @@ export function createProcessModuleData(deps: ModuleActionsDeps) {
         onParseProgress?.('patterns');
         const nativeBuf = new Uint8Array(fileDataCopy.byteLength);
         nativeBuf.set(fileDataCopy);
-        await nativeEngineEarly.load(nativeBuf.buffer);
+        const nativeLoaded = await nativeEngineEarly.load(nativeBuf.buffer);
         const nativeMod = nativeEngineEarly.getNativeModule();
-        if (!nativeMod || nativeMod._get_num_orders() <= 0) {
-          throw new Error('Native pattern reader: module not ready after load');
+        if (!nativeLoaded || !nativeMod || nativeMod._get_num_orders() <= 0) {
+          // The native build cannot catch exceptions, so load_module predicts
+          // its failures (heap headroom, unparseable bytes) and reports a typed
+          // ERR_* string instead of aborting the worklet. Surface it verbatim.
+          throw new Error(
+            nativeEngineEarly.getLastErrorMessage()
+            ?? 'Native pattern reader: module not ready after load',
+          );
         }
         const parsed = parseModuleWithNative(nativeMod, fileDataCopy, fileName);
+        // Pattern/metadata reads are done: release the transient main-thread
+        // parse so the audio thread's render instance is the only libopenmpt
+        // module resident under the native build's 128mb heap cap.
+        nativeEngineEarly.commitModule();
         patternMatrices = parsed.patternMatrices;
         metadata = parsed.metadata;
         loadedInstrumentTable = parsed.instrumentTable ?? emptyInstrumentTable();

@@ -46,6 +46,9 @@ export async function startNativePlayback(
       if (shouldReloadNativeModule(engine.getLoadedFingerprint(), buf)) {
         console.log('[PLAY] Sending module data to native engine:', buf.byteLength, 'bytes');
         await engine.load(buf);
+        // Nothing reads patterns on this path, so drop the transient
+        // main-thread parse immediately (one resident module during playback).
+        engine.commitModule();
       } else {
         console.log('[PLAY] Native module already loaded — skipping duplicate parse');
       }
