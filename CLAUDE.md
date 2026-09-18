@@ -235,6 +235,18 @@ EngineState           // Worklet engine lifecycle state
     `init_audio_with_context`; `init_audio()` is a headless-harness export only.
     `tests/audioContextFactory.test.ts` fails the build on a second call site.
 
+12. **Native engine: one resident `OpenMPTModule`:** `cpp/worklet_processor.cpp`
+    parses a **transient** `g_metaModule` in `load_module()` (pattern cells,
+    channel/order counts, duration) and `commit_module()` unloads it *before*
+    the audio thread builds `g_module`. Never leave both resident — the release
+    build's `INITIAL_MEMORY=128mb` is a hard cap with `ALLOW_MEMORY_GROWTH=0`.
+    `load_module()` **adopts** the `_malloc`'d pointer (the caller must not
+    `_free` it) and returns 0 with a typed `ERR_*` string from
+    `get_last_error()` rather than letting libopenmpt throw — a throw aborts the
+    worklet under `DISABLE_EXCEPTION_CATCHING=1`. Mute / ctl / render params go
+    to `g_module` via atomics only; poking the metadata parse changes nothing
+    you can hear. `scripts/verify-native-exports.mjs` enforces all of this.
+
 ## Critical Data Flows
 
 ### Module Load → Playback

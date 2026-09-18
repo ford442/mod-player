@@ -63,6 +63,16 @@ export const NATIVE_RING_BUF_FRAMES = 8192;
  */
 export const NATIVE_PCM_CHUNK_FRAMES = 128;
 
+/**
+ * Map a native error string onto the engine's `error` event code.
+ * Native messages are `ERR_CODE: human detail`; older builds have no string at
+ * all, which stays the generic LOAD_FAILED.
+ */
+function nativeErrorCode(detail: string | null): string {
+    const code = detail?.match(/^(ERR_[A-Z_]+)/)?.[1];
+    return code ?? 'LOAD_FAILED';
+}
+
 function writeCString(mod: EmscriptenOpenMPTModule, text: string): number {
     const bytes = new TextEncoder().encode(text);
     const ptr = mod._malloc(bytes.length + 1);
@@ -145,6 +155,8 @@ export class OpenMPTWorkletEngine extends MiniEventEmitter<EngineEventMap> {
     private attachedContext: AudioContext | null = null;
     /** Fingerprint of the last successful load() — skip duplicate parse on play. */
     private loadedFingerprint: NativeModuleFingerprint | null = null;
+    /** Last native error string (see getLastErrorMessage). */
+    private lastErrorMessage: string | null = null;
 
     /**
      * @param options  Construction options, including an optional basePath and
@@ -158,6 +170,41 @@ export class OpenMPTWorkletEngine extends MiniEventEmitter<EngineEventMap> {
 
     getNativeModule(): EmscriptenOpenMPTModule | null {
         return this.module;
+    }
+
+    /**
+     * Read and clear the native typed error string (ERR_OUT_OF_MEMORY,
+     * ERR_UNSUPPORTED_MODULE, …). Returns null when the native build predates
+     * the export or there is no pending error.
+     */
+    takeNativeError(): string | null {
+        const get = this.module?._get_last_error;
+        if (!this.module || typeof get !== 'function') return null;
+        const ptr = get();
+        if (!ptr) return null;
+        const message = this.module.UTF8ToString(ptr);
+        this.module._clear_last_error?.();
+        this.lastErrorMessage = message || null;
+        return this.lastErrorMessage;
+    }
+
+    /**
+     * The most recent native error message, kept after `takeNativeError()` has
+     * cleared it on the C++ side so a caller that only sees a null return from
+     * `load()` can still report why.
+     */
+    getLastErrorMessage(): string | null {
+        return this.lastErrorMessage;
+    }
+
+    /**
+     * Release the transient main-thread metadata parse and hand the module to
+     * the audio thread. Call it as soon as pattern extraction is done so only
+     * one libopenmpt instance is ever resident (the 128mb heap is sized for one).
+     * Idempotent — `play()` commits implicitly for hosts that never read patterns.
+     */
+    commitModule(): void {
+        this.module?._commit_module?.();
     }
 
     /** Current engine state */
@@ -305,11 +352,15 @@ export class OpenMPTWorkletEngine extends MiniEventEmitter<EngineEventMap> {
             if (!ptr) throw new Error('Failed to allocate WASM memory');
 
             this.module.HEAPU8.set(uint8, ptr);
+            // _load_module adopts ptr — do not _free it here (see types.ts).
             const result = this.module._load_module(ptr, uint8.length);
-            this.module._free(ptr);
 
             if (!result) {
-                this.emit('error', { message: 'Invalid module format', code: 'LOAD_FAILED' });
+                const detail = this.takeNativeError();
+                this.emit('error', {
+                    message: detail ?? 'Invalid module format',
+                    code: nativeErrorCode(detail),
+                });
                 return null;
             }
 
@@ -367,11 +418,15 @@ export class OpenMPTWorkletEngine extends MiniEventEmitter<EngineEventMap> {
                     }
                 }
 
+                // _load_module adopts ptr — do not _free it here (see types.ts).
                 const result = this.module._load_module(ptr, offset);
-                this.module._free(ptr);
 
                 if (!result) {
-                    this.emit('error', { message: 'Invalid module format', code: 'LOAD_FAILED' });
+                    const detail = this.takeNativeError();
+                    this.emit('error', {
+                        message: detail ?? 'Invalid module format',
+                        code: nativeErrorCode(detail),
+                    });
                     return null;
                 }
 
@@ -405,6 +460,8 @@ export class OpenMPTWorkletEngine extends MiniEventEmitter<EngineEventMap> {
     /** Resume/start playback. Requires a user gesture on first call. */
     play(): void {
         if (!this.module) return;
+        // No-op when the host already committed after pattern extraction.
+        this.commitModule();
         this.module._resume_audio();
         this.setState('playing');
     }

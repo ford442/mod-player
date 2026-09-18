@@ -18,6 +18,7 @@
 #include <emscripten/atomic.h>
 #include <emscripten/heap.h>
 
+#include <cstdarg>
 #include <cstring>
 #include <cstdio>
 #include <cstdlib>
@@ -33,15 +34,23 @@
 // Accessed from BOTH main thread and audio worklet thread.
 // Atomics or single-writer patterns are used to avoid races.
 
-// The render instance lives on the worklet thread (created there after
-// receiving module data from main thread via shared buffer).
+// The ONE render instance. Lives on the worklet thread (created there after
+// receiving module data from main thread via shared buffer). Every audible
+// control — mute, ctl, render param, volume — must land here.
 static OpenMPTModule g_module;
-// Main-thread copy for pattern/metadata reads (does not wait for the worklet).
+// TRANSIENT main-thread parse used only between load_module() and
+// commit_module(): pattern cells, channel/order counts and duration are read
+// from it, then it is unloaded *before* the audio thread ever creates
+// g_module. The 128mb heap cap is sized for one resident module, not two.
 static OpenMPTModule g_metaModule;
 
-// Shared buffer for transferring module file data from main → worklet
+// Module file bytes owned by C++ (transferred from JS by load_module) and
+// consumed + freed by the audio thread once g_cmdLoad is raised.
 static uint8_t*        g_moduleData     = nullptr;
 static size_t          g_moduleDataSize = 0;
+// 1 = bytes are staged for the audio thread but commit_module() has not run yet
+// (g_metaModule is still resident and answering pattern queries).
+static std::atomic<int> g_modulePending{0};
 
 // Atomic flags for cross-thread commands
 static std::atomic<int> g_cmdLoad{0};    // 1 = new module data ready
@@ -141,14 +150,35 @@ static void apply_mute_bits(OpenMPTModule& m, uint32_t bits, uint32_t previous) 
     }
 }
 
-static void log_heap_exhausted(int requested) {
+// ── Error reporting ─────────────────────────────────────────────────
+//
+// The link sets -sDISABLE_EXCEPTION_CATCHING=1, so a libopenmpt throw is an
+// abort() that takes the whole worklet down — there is no way to report it
+// after the fact. Every failure path therefore has to be *predicted* and
+// turned into a typed, pollable string here instead. Codes are stable:
+//   ERR_BAD_ARGS / ERR_OUT_OF_MEMORY / ERR_UNSUPPORTED_MODULE / ERR_AUDIO_LOAD
+static char g_lastError[320] = {0};
+// Raised by the audio thread; folded into get_last_error() by the main thread.
+static std::atomic<int> g_workletLoadFailed{0};
+
+__attribute__((format(printf, 1, 2)))
+static void set_errorf(const char* fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    std::vsnprintf(g_lastError, sizeof(g_lastError), fmt, ap);
+    va_end(ap);
+    std::fprintf(stderr, "[C++] %s\n", g_lastError);
+}
+
+/** Append live allocator numbers to the pending error string (best effort). */
+static void append_heap_detail() {
     const size_t heap = emscripten_get_heap_size();
     const struct mallinfo mi = mallinfo();
-    std::fprintf(stderr,
-        "[C++] load_module: malloc(%d) failed (heap exhausted) "
-        "heap_size=%zu arena=%lu uordblks=%lu fordblks=%lu "
-        "(128MiB cap includes g_module + g_metaModule)\n",
-        requested, heap,
+    const size_t len = std::strlen(g_lastError);
+    if (len + 2 >= sizeof(g_lastError)) return;
+    std::snprintf(g_lastError + len, sizeof(g_lastError) - len,
+        " [heap=%zu arena=%lu uordblks=%lu fordblks=%lu]",
+        heap,
         static_cast<unsigned long>(mi.arena),
         static_cast<unsigned long>(mi.uordblks),
         static_cast<unsigned long>(mi.fordblks));
@@ -181,6 +211,9 @@ EM_BOOL audio_process_cb(
                 apply_persisted_controls(g_module);
                 g_appliedMuteBits = g_muteBits.load(std::memory_order_acquire);
             } else {
+                // Main thread already parsed these bytes successfully, so this
+                // is an OOM on the audio thread. Surface it via get_last_error().
+                g_workletLoadFailed.store(1, std::memory_order_release);
                 std::fprintf(stderr, "[worklet] Failed to load module\n");
             }
         }
@@ -398,15 +431,23 @@ extern "C" {
  * `scripts/verify-native-exports.mjs`) so a headless harness can render
  * without a JS-side graph.
  *
- * @param sampleRate  Desired sample rate (0 = browser default)
+ * The context it builds mirrors `utils/audioContextFactory.ts` exactly —
+ * `latencyHint: 'playback'` at a locked 48000 Hz — so a headless bench run is
+ * comparable with the in-app engine instead of measuring a different mixer.
+ * `sampleRate` is honoured only as an explicit override; 0 means "use the lock".
+ *
+ * @param sampleRate  Sample rate override (0 = the locked 48000)
  * @return 1 on success, 0 on failure
  */
 EMSCRIPTEN_KEEPALIVE
 int init_audio(int sampleRate) {
+    // Must stay in sync with PLAYER_SAMPLE_RATE in utils/audioContextFactory.ts.
+    constexpr int LOCKED_SAMPLE_RATE = 48000;
+
     EmscriptenWebAudioCreateAttributes attrs;
     std::memset(&attrs, 0, sizeof(attrs));
     attrs.latencyHint   = "playback";
-    attrs.sampleRate    = sampleRate > 0 ? sampleRate : 0; // 0 = default
+    attrs.sampleRate    = sampleRate > 0 ? sampleRate : LOCKED_SAMPLE_RATE;
 
     g_audioCtx = emscripten_create_audio_context(&attrs);
     if (!g_audioCtx) {
@@ -513,39 +554,118 @@ int init_audio_with_context(int ctxHandle) {
 }
 
 /**
- * Load a module from a memory buffer.
- * Copies data to shared memory and signals the worklet thread.
- * @param data    Pointer to module file data
- * @param length  Size in bytes
- * @return 1 on success (data queued), 0 on failure
+ * Poll the last typed error (or NULL when there is none).
+ *
+ * The native build cannot catch exceptions, so libopenmpt failures are either
+ * predicted and reported here or they abort the module. Every code is stable
+ * and safe to branch on from TypeScript:
+ *   ERR_BAD_ARGS           – caller passed a null/empty buffer
+ *   ERR_OUT_OF_MEMORY      – not enough heap for this module (use the --grow build)
+ *   ERR_UNSUPPORTED_MODULE – libopenmpt could not parse the bytes
+ *   ERR_AUDIO_LOAD         – the audio thread failed to build the render instance
+ *
+ * The returned pointer is a static buffer; copy it (UTF8ToString) before the
+ * next native call.
  */
 EMSCRIPTEN_KEEPALIVE
-int load_module(const uint8_t* data, int length) {
-    if (!data || length <= 0) return 0;
-
-    // Free previous transfer buffer
-    if (g_moduleData) {
-        free(g_moduleData);
+const char* get_last_error() {
+    if (g_workletLoadFailed.exchange(0, std::memory_order_acq_rel)) {
+        set_errorf("ERR_AUDIO_LOAD: audio thread could not create the render module");
+        append_heap_detail();
     }
+    return g_lastError[0] ? g_lastError : nullptr;
+}
 
-    // Copy data for the worklet thread to consume
-    g_moduleData = (uint8_t*)malloc(length);
-    if (!g_moduleData) {
-        log_heap_exhausted(length);
+/** Drop any pending error string. */
+EMSCRIPTEN_KEEPALIVE
+void clear_last_error() {
+    g_lastError[0] = '\0';
+    g_workletLoadFailed.store(0, std::memory_order_release);
+}
+
+/**
+ * Stage a module for playback and parse its metadata on the main thread.
+ *
+ * **Ownership:** `data` MUST come from `_malloc` and is adopted by C++ — the
+ * caller never frees it, on success or on failure. That removes the third full
+ * copy of the file bytes the old copy-in contract kept alive under the 128mb cap.
+ *
+ * Only ONE module is resident at a time. This call leaves a transient
+ * `g_metaModule` up so the host can read channel counts, orders, duration and
+ * pattern cells; `commit_module()` (called explicitly, or implicitly by
+ * `resume_audio()`) unloads it and hands the bytes to the audio thread, which
+ * then builds the single render instance.
+ *
+ * @param data    Module file data, allocated with _malloc (ownership transferred)
+ * @param length  Size in bytes
+ * @return 1 on success, 0 on failure (see get_last_error())
+ */
+EMSCRIPTEN_KEEPALIVE
+int load_module(uint8_t* data, int length) {
+    clear_last_error();
+
+    if (!data || length <= 0) {
+        set_errorf("ERR_BAD_ARGS: load_module(data=%s, length=%d)",
+                   data ? "ptr" : "null", length);
+        free(data);
         return 0;
     }
-    std::memcpy(g_moduleData, data, length);
-    g_moduleDataSize = length;
+
+    // Release the previous generation *first* so peak residency never exceeds
+    // one parsed module plus one file buffer.
+    g_modulePending.store(0, std::memory_order_release);
+    if (g_moduleData) {
+        free(g_moduleData);
+        g_moduleData = nullptr;
+        g_moduleDataSize = 0;
+    }
+    g_metaModule.unload();
+
+    // Heap probe. libopenmpt's parsed representation runs several times the
+    // file size (unpacked samples + pattern store) and it signals allocation
+    // failure by throwing — which, with DISABLE_EXCEPTION_CATCHING=1, is an
+    // abort(). malloc() just returns null, so reserve-and-release first and
+    // turn "this will not fit" into a typed error the UI can show.
+    void* probe = malloc(static_cast<size_t>(length) * 4u);
+    if (!probe) {
+        set_errorf("ERR_OUT_OF_MEMORY: %d-byte module needs ~%zu bytes of heap; "
+                   "rebuild with --grow (512mb) for modules this large",
+                   length, static_cast<size_t>(length) * 4u);
+        append_heap_detail();
+        free(data);
+        return 0;
+    }
+    free(probe);
 
     if (!g_metaModule.load(data, static_cast<size_t>(length))) {
-        std::fprintf(stderr, "[C++] load_module: metadata parse failed (%d bytes)\n", length);
-    } else {
-        apply_persisted_controls(g_metaModule);
+        set_errorf("ERR_UNSUPPORTED_MODULE: libopenmpt could not parse %d bytes", length);
+        free(data);
+        return 0;
     }
 
-    // Signal the worklet thread to load
-    g_cmdLoad.store(1, std::memory_order_release);
+    g_moduleData     = data; // adopted
+    g_moduleDataSize = static_cast<size_t>(length);
+    g_modulePending.store(1, std::memory_order_release);
+    return 1;
+}
 
+/**
+ * Release the transient metadata parse and hand the staged bytes to the audio
+ * thread, which creates the single resident render instance.
+ *
+ * Idempotent and safe to call when nothing is staged. Call it as soon as the
+ * host has finished reading pattern data; `resume_audio()` calls it for you so
+ * a host that never reads patterns still plays.
+ *
+ * @return 1 if a staged module was committed, 0 if there was nothing to do.
+ */
+EMSCRIPTEN_KEEPALIVE
+int commit_module() {
+    if (!g_modulePending.exchange(0, std::memory_order_acq_rel)) return 0;
+    // Unload BEFORE raising g_cmdLoad: the audio thread must never allocate its
+    // module while this one is still holding samples under the 128mb cap.
+    g_metaModule.unload();
+    g_cmdLoad.store(1, std::memory_order_release);
     return 1;
 }
 
@@ -555,6 +675,8 @@ int load_module(const uint8_t* data, int length) {
  */
 EMSCRIPTEN_KEEPALIVE
 void resume_audio() {
+    // Safety net for hosts that load and play without reading pattern data.
+    commit_module();
     g_paused.store(0, std::memory_order_release);
     if (g_audioCtx) {
         EM_ASM({
@@ -599,8 +721,13 @@ void set_volume(float vol) {
 }
 
 /**
- * Mute/unmute a tracker channel (interactive ext). Applied on g_metaModule
- * immediately; g_module sees the bitmask on the audio thread.
+ * Mute/unmute a tracker channel (interactive ext).
+ *
+ * The bitmask is the single source of truth and is applied to `g_module` — the
+ * instance that is actually mixed — on the audio thread. It is deliberately NOT
+ * applied to `g_metaModule`: that one is a short-lived parse that renders
+ * nothing, so muting it changed the reported state without changing what you
+ * hear. Bits set before a load are replayed by apply_persisted_controls().
  */
 EMSCRIPTEN_KEEPALIVE
 void set_channel_mute(int channel, int muted) {
@@ -612,13 +739,11 @@ void set_channel_mute(int channel, int muted) {
         bits &= ~(1u << channel);
     }
     g_muteBits.store(bits, std::memory_order_release);
-    if (g_metaModule.isLoaded()) {
-        g_metaModule.setChannelMute(channel, muted != 0);
-    }
 }
 
 /**
  * Set a libopenmpt render param (e.g. OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH).
+ * Applied to the audio-thread module; persisted so it survives the next load.
  */
 EMSCRIPTEN_KEEPALIVE
 void set_render_param(int param, int32_t value) {
@@ -630,13 +755,11 @@ void set_render_param(int param, int32_t value) {
     }
     g_cmdRenderValue.store(value, std::memory_order_relaxed);
     g_cmdRenderParam.store(param, std::memory_order_release);
-    if (g_metaModule.isLoaded()) {
-        g_metaModule.setRenderParam(param, value);
-    }
 }
 
 /**
- * Post-load ctl_set_text. Strings are copied into fixed buffers for the audio thread.
+ * Post-load ctl_set_text. Strings are copied into fixed buffers and applied to
+ * the audio-thread module (the only one that renders).
  */
 EMSCRIPTEN_KEEPALIVE
 void ctl_set_text(const char* key, const char* value) {
@@ -645,9 +768,6 @@ void ctl_set_text(const char* key, const char* value) {
     g_ctlKey[sizeof(g_ctlKey) - 1] = '\0';
     std::strncpy(g_ctlVal, value, sizeof(g_ctlVal) - 1);
     g_ctlVal[sizeof(g_ctlVal) - 1] = '\0';
-    if (g_metaModule.isLoaded()) {
-        g_metaModule.ctlSetText(g_ctlKey, g_ctlVal);
-    }
     g_cmdCtl.store(1, std::memory_order_release);
 }
 
@@ -691,6 +811,10 @@ void cleanup_audio() {
         free(g_moduleData);
         g_moduleData = nullptr;
     }
+    g_moduleDataSize = 0;
+    g_modulePending.store(0, std::memory_order_relaxed);
+    g_cmdLoad.store(0, std::memory_order_relaxed);
+    clear_last_error();
     g_muteBits.store(0, std::memory_order_relaxed);
     g_appliedMuteBits = 0;
     g_interpLength = 8;
@@ -707,8 +831,18 @@ void cleanup_audio() {
 // These allow the JS engine to build a PatternMatrix for the current
 // module without shipping pattern bytes through the PositionInfo struct.
 
+// Pattern tables, channel/order/pattern counts: immutable for the lifetime of a
+// module, so reading them off g_module after commit_module() does not disturb
+// the mixer. Before commit the transient main-thread parse answers instead.
 static OpenMPTModule& patternQueryModule() {
     return g_metaModule.isLoaded() ? g_metaModule : g_module;
+}
+
+// Duration / initial BPM go through libopenmpt's GetLength, which seeks the
+// module and restores play state — an O(song) mutation. It must NEVER touch the
+// audio-thread instance, so these answer 0 once the metadata parse is gone.
+static OpenMPTModule* metaOnlyModule() {
+    return g_metaModule.isLoaded() ? &g_metaModule : nullptr;
 }
 
 /**
@@ -734,12 +868,14 @@ int get_num_patterns() {
 
 EMSCRIPTEN_KEEPALIVE
 double get_duration_seconds() {
-    return patternQueryModule().getDurationSeconds();
+    OpenMPTModule* m = metaOnlyModule();
+    return m ? m->getDurationSeconds() : 0.0;
 }
 
 EMSCRIPTEN_KEEPALIVE
 double get_initial_bpm() {
-    return patternQueryModule().getBPM();
+    OpenMPTModule* m = metaOnlyModule();
+    return m ? m->getBPM() : 0.0;
 }
 
 /**

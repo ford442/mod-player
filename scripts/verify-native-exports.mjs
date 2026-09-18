@@ -94,7 +94,6 @@ for (const m of types.matchAll(/^\s*_([a-z0-9_]+)\??\s*:/gim)) {
 
 // Always required from engine (hard calls without optional chaining type guard)
 const requiredByEngine = [
-  'init_audio',
   'load_module',
   'resume_audio',
   'suspend_audio',
@@ -116,6 +115,12 @@ const requiredByEngine = [
 
 // Optional but should be exported if present in C++
 const optionalButExport = [
+  // Headless harness only — production attaches via init_audio_with_context.
+  // Still exported so a bench can render without a JS-side audio graph.
+  'init_audio',
+  'commit_module',
+  'get_last_error',
+  'clear_last_error',
   'set_ring_buffer',
   'get_ring_write_head',
   'init_audio_with_context',
@@ -150,6 +155,39 @@ for (const name of exported) {
   if (name === 'malloc' || name === 'free') continue;
   if (!keepalive.has(name)) {
     warnings.push(`exported _${name} has no EMSCRIPTEN_KEEPALIVE in worklet_processor.cpp`);
+  }
+}
+
+// Single resident OpenMPTModule (#412 follow-up). load_module parses a transient
+// g_metaModule on the main thread; commit_module() must unload it BEFORE raising
+// g_cmdLoad so the audio thread never allocates its instance alongside it.
+if (!/int commit_module\(\)/.test(cpp)) {
+  errors.push('cpp/worklet_processor.cpp must export commit_module() (hands the module to the audio thread)');
+} else {
+  const commitBody = cpp.slice(cpp.indexOf('int commit_module()'));
+  const unloadIdx = commitBody.indexOf('g_metaModule.unload()');
+  const cmdIdx = commitBody.indexOf('g_cmdLoad.store(1');
+  if (unloadIdx < 0 || cmdIdx < 0 || unloadIdx > cmdIdx) {
+    errors.push('commit_module() must g_metaModule.unload() before g_cmdLoad.store(1) (two modules resident otherwise)');
+  }
+}
+
+// Mute must reach the instance that is actually mixed, not the metadata parse.
+{
+  const muteIdx = cpp.indexOf('void set_channel_mute(');
+  const muteBody = muteIdx >= 0 ? cpp.slice(muteIdx, cpp.indexOf('\n}', muteIdx)) : '';
+  if (muteIdx < 0) {
+    errors.push('cpp/worklet_processor.cpp missing set_channel_mute');
+  } else if (/g_metaModule/.test(muteBody)) {
+    errors.push('set_channel_mute must not touch g_metaModule (it renders nothing — mute would be inaudible)');
+  }
+}
+
+// load_module failure has to be pollable: fprintf is invisible to the UI and a
+// libopenmpt throw is an abort() under DISABLE_EXCEPTION_CATCHING=1.
+for (const code of ['ERR_BAD_ARGS', 'ERR_OUT_OF_MEMORY', 'ERR_UNSUPPORTED_MODULE', 'ERR_AUDIO_LOAD']) {
+  if (!cpp.includes(code)) {
+    errors.push(`cpp/worklet_processor.cpp must report a typed ${code} via get_last_error()`);
   }
 }
 
