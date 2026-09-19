@@ -46,8 +46,10 @@ function polyfillLibStrings(lib: import('../../types').LibOpenMPT) {
       return str;
     };
   }
+  // The real-WASM glue deliberately does NOT export stringToUTF8: Emscripten's version has a
+  // different (str, outPtr, maxBytes) signature than this (str) → ptr helper that every call
+  // site uses (scripts/build-js-libopenmpt.sh, verified by verify-js-libopenmpt --smoke).
   if (!lib.stringToUTF8) {
-    console.warn('Polyfilling libopenmpt.stringToUTF8...');
     lib.stringToUTF8 = (jsString) => {
       const length = (jsString.length << 2) + 1;
       const ptr = lib._malloc(length);

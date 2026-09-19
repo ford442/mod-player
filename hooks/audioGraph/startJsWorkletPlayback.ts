@@ -1,5 +1,5 @@
 import { getWorkletUrl } from '../useWorkletLoader';
-import { detectRuntimeBase, withBase } from '../../src/lib/paths';
+import { detectRuntimeBase } from '../../src/lib/paths';
 import { broadcastPcmBlock } from '../../utils/projectMBridge';
 import {
   pcmBusHasSubscribers,
@@ -7,6 +7,9 @@ import {
   setPcmDemandListener,
 } from '../../utils/pcmBus';
 import { shouldPostInitLib } from '../../utils/workletAudioLifecycle';
+import { fetchWorkletLibAssets } from '../../utils/workletLibAssets';
+import { resolveJsInterpolationLength } from '../../utils/jsInterpolation';
+import { OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH } from '../../utils/openmptRenderParams';
 import {
   parseWorkletToMainMessageOrWarn,
   postInitLib,
@@ -14,6 +17,7 @@ import {
   postPlay,
   postSetAudioDiag,
   postSetProjectmPcm,
+  postSetRenderParam,
 } from '../../audio-worklet/protocol';
 import {
   hasProjectMConsumer,
@@ -143,72 +147,22 @@ export async function startJsWorkletPlayback(
 
       console.log('[PLAY] AudioWorkletNode created:', node);
 
-      // Fetch libopenmpt glue on the main thread and forward to the worklet.
-      // AudioWorklet classic scripts cannot use import() or importScripts(), so we
-      // do the fetch here where fetch() is always available.
-      //
-      // Production glue (`libopenmpt-audioworklet.js`) is a wasm2js build: the
-      // entire runtime is embedded in the ~5 MB JS file. A sibling
-      // `libopenmpt.wasm` is NOT required and must NOT be seeded as wasmBinary
-      // (that overwrites wasm2js's empty binary and can break init).
-      // Optional real `.wasm` is only fetched when the glue is a classic
-      // Emscripten binary build (no isWasm2js marker).
+      // Fetch the real-WASM libopenmpt pair on the main thread and forward it to the worklet.
+      // AudioWorklet classic scripts cannot use import() or importScripts() and the worklet
+      // scope has no fetch(), so both files are downloaded here (in parallel) and validated
+      // (\0asm magic, not-wasm2js, not an HTML 404) before anything is posted.
       console.log('[PLAY] Fetching libopenmpt assets for worklet...');
-      const workletBaseUrl = withBase('worklets/');
       try {
-        const jsResp = await fetch(workletBaseUrl + 'libopenmpt-audioworklet.js');
-        if (!jsResp.ok) {
-          throw new Error(`HTTP ${jsResp.status} for libopenmpt-audioworklet.js`);
-        }
-        libJsText = await jsResp.text();
-        if (!libJsText.trim()) {
-          throw new Error('libopenmpt-audioworklet.js is empty');
-        }
-
-        // Emscripten wasm2js emits `isWasm2js:!0` (minified) or `isWasm2js: true`.
-        const isWasm2js =
-          /isWasm2js\s*:\s*!\s*0/.test(libJsText) ||
-          /isWasm2js\s*:\s*true/.test(libJsText);
-
-        if (isWasm2js) {
-          console.log(
-            '[PLAY] libopenmpt-audioworklet.js is wasm2js — JS only,',
-            libJsText.length,
-            'chars; skipping sibling .wasm fetch',
-          );
-        } else {
-          const wasmResp = await fetch(workletBaseUrl + 'libopenmpt.wasm');
-          if (!wasmResp.ok) {
-            throw new Error(`HTTP ${wasmResp.status} for libopenmpt.wasm`);
-          }
-          libWasmBuffer = await wasmResp.arrayBuffer();
-          const head = new Uint8Array(libWasmBuffer, 0, Math.min(8, libWasmBuffer.byteLength));
-          // WebAssembly binary magic: \0asm (0x00 0x61 0x73 0x6d)
-          const isWasmMagic =
-            head.length >= 4 &&
-            head[0] === 0x00 &&
-            head[1] === 0x61 &&
-            head[2] === 0x73 &&
-            head[3] === 0x6d;
-          if (!isWasmMagic) {
-            const preview = new TextDecoder('utf-8', { fatal: false })
-              .decode(head)
-              .replace(/\s+/g, ' ')
-              .slice(0, 40);
-            throw new Error(
-              `libopenmpt.wasm is not a valid WebAssembly binary ` +
-                `(missing \\0asm magic; starts with ${JSON.stringify(preview)}). ` +
-                `Refusing to seed corrupt HTML/text as wasmBinary.`,
-            );
-          }
-          console.log(
-            '[PLAY] libopenmpt assets fetched — JS:',
-            libJsText.length,
-            'chars, WASM:',
-            libWasmBuffer.byteLength,
-            'bytes',
-          );
-        }
+        const assets = await fetchWorkletLibAssets();
+        libJsText = assets.scriptText;
+        libWasmBuffer = assets.wasmBytes;
+        console.log(
+          '[PLAY] libopenmpt assets fetched — JS:',
+          libJsText.length,
+          'chars, WASM:',
+          libWasmBuffer.byteLength,
+          'bytes',
+        );
       } catch (fetchErr) {
         console.error('[PLAY] Failed to fetch libopenmpt assets:', fetchErr);
         throw fetchErr;
@@ -312,18 +266,23 @@ export async function startJsWorkletPlayback(
       }
     };
 
-    // Send glue (+ optional real WASM) to worklet first (must arrive before 'load').
-    // Transfer wasm buffer only when present; wasm2js path sends JS alone.
-    if (shouldPostInitLib(reuseWorkletNode, libJsText) && libJsText) {
-      if (libWasmBuffer) {
-        node.port.postMessage(
-          postInitLib(libJsText, libWasmBuffer),
-          [libWasmBuffer],
-        );
-      } else {
-        node.port.postMessage(postInitLib(libJsText));
-      }
+    // Send glue + real WASM to the worklet first (must arrive before 'load'). The wasm buffer is
+    // transferred (not copied); a reused node already has libopenmpt, so nothing is re-sent.
+    if (shouldPostInitLib(reuseWorkletNode, libJsText) && libJsText && libWasmBuffer) {
+      node.port.postMessage(
+        postInitLib(libJsText, libWasmBuffer),
+        [libWasmBuffer],
+      );
     }
+
+    // Interpolation filter (default Sinc+LP; ?interp=4 opts down to cubic). Re-sent for a reused
+    // node too so a changed ?interp= / localStorage value takes effect on the next load.
+    node.port.postMessage(
+      postSetRenderParam(
+        OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH,
+        resolveJsInterpolationLength(),
+      ),
+    );
 
     // Opt-in per-quantum extras. Both default to off inside the worklet, so
     // these must be re-sent for a reused node as well.
@@ -362,7 +321,7 @@ export async function startJsWorkletPlayback(
     wireMasterOutput(ctx, refs, config.volume, config.panValue);
 
     refs.audioWorkletNodeRef.current = node;
-    // Show a loading state while the 4.8 MB WASM finishes initialising.
+    // Show a loading state while the WASM finishes initialising.
     // isPlaying will be set to true via the 'loaded' message handler above.
     callbacks.setStatus("Loading audio engine...");
     console.log('[PLAY] AudioWorklet setup complete – waiting for WASM loaded event');

@@ -1,6 +1,6 @@
 /**
  * Read pattern matrices from the native C++ worklet WASM (KEEPALIVE exports)
- * so module load does not instantiate a second wasm2js libopenmpt.
+ * so module load does not instantiate a second (JS-engine) libopenmpt.
  */
 
 import type { PatternCell, PatternMatrix, WorkerParseMetadata, WorkerParseResponse } from '../types';

@@ -1,0 +1,20 @@
+{
+  "schema": 1,
+  "libopenmpt": "0.8.4",
+  "emsdk": "3.1.51",
+  "variant": "eh-wasm",
+  "exceptions": "wasm",
+  "simd": false,
+  "version": "10a45149b9",
+  "glue": {
+    "file": "libopenmpt-worklet.js",
+    "bytes": 103775,
+    "integrity": "sha384-WndwaEEX7ixgAPI59H7K2Imcfi7QyeBYqYP5JfhdO4vhhS+3mA5ZbIlfwdSfVkam"
+  },
+  "wasm": {
+    "file": "libopenmpt-worklet.wasm",
+    "bytes": 1736825,
+    "integrity": "sha384-8SqBQahia8iPE9y33IfoKPEL7Smk4JlOOT4U+mwAqb8Dm9np5NO4x5kHLUxfB5nm"
+  },
+  "cExportCount": 113
+}

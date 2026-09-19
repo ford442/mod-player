@@ -1,9 +1,7 @@
-import { describe, expect, it, afterEach } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import {
-  getNativeWebAssembly,
   resolveCreateOpenMPTModule,
   resolveEmscriptenRegisterAudioObject,
-  withNativeWebAssembly,
   withPreservedMainThreadTimers,
 } from '../audio-worklet/resolveNativeFactory';
 
@@ -64,32 +62,5 @@ describe('withPreservedMainThreadTimers', () => {
       }) as typeof setTimeout;
     });
     expect(globalThis.setTimeout).toBe(real);
-  });
-});
-
-describe('getNativeWebAssembly / withNativeWebAssembly', () => {
-  const g = globalThis as typeof globalThis & { __NATIVE_WEBASSEMBLY__?: typeof WebAssembly };
-
-  afterEach(() => {
-    delete g.__NATIVE_WEBASSEMBLY__;
-  });
-
-  it('prefers the pre-wasm2js snapshot', () => {
-    g.__NATIVE_WEBASSEMBLY__ = WebAssembly;
-    expect(getNativeWebAssembly()).toBe(WebAssembly);
-  });
-
-  it('installs the snapshot and leaves it in place for wasm workers', async () => {
-    const real = WebAssembly;
-    g.__NATIVE_WEBASSEMBLY__ = real;
-    const stub = { isWasm2js: true, Memory: function Memory() { return {}; } };
-    (globalThis as { WebAssembly: unknown }).WebAssembly = stub as unknown as typeof WebAssembly;
-    try {
-      const seen = await withNativeWebAssembly(async () => globalThis.WebAssembly);
-      expect(seen).toBe(real);
-      expect(globalThis.WebAssembly).toBe(real);
-    } finally {
-      (globalThis as { WebAssembly: typeof WebAssembly }).WebAssembly = real;
-    }
   });
 });

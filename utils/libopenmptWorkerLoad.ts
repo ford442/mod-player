@@ -1,4 +1,5 @@
 import type { LibOpenMPT } from '../types';
+import { waitForRuntimeInitialized } from '../audio-worklet/libRuntimeReady';
 import { createLibOpenMPTLocateFile, getLibOpenMPTJsUrl } from './libopenmptAssets';
 
 const LIB_FETCH_TIMEOUT_MS = 30_000;
@@ -7,6 +8,7 @@ const RUNTIME_INIT_TIMEOUT_MS = 30_000;
 type LibOpenMPTGlobal = LibOpenMPT & {
   calledRun?: boolean;
   onRuntimeInitialized?: () => void;
+  onAbort?: (what: unknown) => void;
 };
 
 /**
@@ -47,25 +49,9 @@ export async function loadLibOpenMPTInWorker(): Promise<LibOpenMPT> {
     throw new Error('globalThis.libopenmpt not set after script evaluation');
   }
 
-  if (!lib._openmpt_module_create_from_memory2 && !(lib as LibOpenMPT & { _openmpt_module_create_from_memory?: unknown })._openmpt_module_create_from_memory) {
-    await new Promise<void>((resolve, reject) => {
-      const timeout = self.setTimeout(
-        () => reject(new Error('WASM onRuntimeInitialized timeout in worker')),
-        RUNTIME_INIT_TIMEOUT_MS,
-      );
-      if (lib.calledRun) {
-        self.clearTimeout(timeout);
-        resolve();
-        return;
-      }
-      const prev = lib.onRuntimeInitialized;
-      lib.onRuntimeInitialized = () => {
-        self.clearTimeout(timeout);
-        if (typeof prev === 'function') prev();
-        resolve();
-      };
-    });
-  }
+  // Always wait for the runtime: the real-wasm glue defines lazy `_openmpt_*` stubs at eval time,
+  // so their presence does not mean the module is instantiated (audio-worklet/libRuntimeReady.ts).
+  await waitForRuntimeInitialized(lib, RUNTIME_INIT_TIMEOUT_MS, 'WASM (worker)');
 
   if (!lib.UTF8ToString) {
     lib.UTF8ToString = (ptr: number) => {

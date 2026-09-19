@@ -30,6 +30,9 @@ function mockLib(): NonNullable<WorkletLibGlobals['__openmptWorkletLib']> {
   return { _openmpt_module_create_from_memory2: () => 1 };
 }
 
+/** Smallest thing with the \0asm magic — the singleton only checks the header, never instantiates. */
+const WASM_BYTES = new Uint8Array([0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00]);
+
 describe('workletAudioLifecycle (#329 hot reload)', () => {
   it('reuses worklet node when JS engine is loaded and node exists', () => {
     expect(
@@ -95,8 +98,8 @@ describe('workletLibSingleton (#329 shared-scope init)', () => {
       globals.__openmptWorkletLib = mockLib();
     };
 
-    await ensureSharedLibOpenMPT(globals, 'fake-glue', null, evalScript);
-    await ensureSharedLibOpenMPT(globals, 'other-glue', null, evalScript);
+    await ensureSharedLibOpenMPT(globals, 'fake-glue', WASM_BYTES, evalScript);
+    await ensureSharedLibOpenMPT(globals, 'other-glue', WASM_BYTES, evalScript);
 
     expect(evalCount).toBe(1);
     expect(globals.__openmptWorkletLib).toBeDefined();
@@ -113,12 +116,43 @@ describe('workletLibSingleton (#329 shared-scope init)', () => {
     };
 
     const [a, b] = await Promise.all([
-      ensureSharedLibOpenMPT(globals, 'glue', null, evalScript),
-      ensureSharedLibOpenMPT(globals, 'glue', null, evalScript),
+      ensureSharedLibOpenMPT(globals, 'glue', WASM_BYTES, evalScript),
+      ensureSharedLibOpenMPT(globals, 'glue', WASM_BYTES, evalScript),
     ]);
 
     expect(evalCount).toBe(1);
     expect(a).toBe(b);
+  });
+
+  it('seeds the real wasm bytes as Module.wasmBinary before evaluating the glue', async () => {
+    const globals: WorkletLibGlobals = {};
+    let seenBinary: unknown;
+    await ensureSharedLibOpenMPT(globals, 'glue', WASM_BYTES, (_text, g) => {
+      seenBinary = g.libopenmpt?.wasmBinary;
+      g.__openmptWorkletLib = mockLib();
+    });
+    expect(seenBinary).toBe(WASM_BYTES);
+  });
+
+  it('requires real wasm bytes — there is no wasm2js (JS-only) init path', async () => {
+    const globals: WorkletLibGlobals = {};
+    let evalCount = 0;
+    const evalScript = () => { evalCount += 1; };
+
+    await expect(ensureSharedLibOpenMPT(globals, 'glue', null, evalScript)).rejects.toThrow(/missing wasmBytes/);
+    resetWorkletLibSingleton(globals);
+    await expect(
+      ensureSharedLibOpenMPT(globals, 'glue', new Uint8Array(0), evalScript),
+    ).rejects.toThrow(/missing wasmBytes/);
+    expect(evalCount).toBe(0);
+  });
+
+  it('rejects wasmBytes without the \\0asm magic (e.g. an HTML 404 body)', async () => {
+    const globals: WorkletLibGlobals = {};
+    const html = new TextEncoder().encode('<!doctype html><title>404</title>');
+    await expect(
+      ensureSharedLibOpenMPT(globals, 'glue', html, () => {}),
+    ).rejects.toThrow(/missing \\0asm magic/);
   });
 
   it('reuses existing lib without re-evaluating when already initialised', async () => {

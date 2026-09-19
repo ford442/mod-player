@@ -150,11 +150,10 @@ curl -sI https://test.1ink.us/xm-player/index.html | grep -i cross-origin
 |---|----------|-------|
 | 1 | `index-*.js` / `index-*.css` | Vite bundle |
 | 2 | esm.sh React importmap | `preconnect` in `index.html` |
-| 3 | `wasm.noahcohn.com/libmpt/libopenmptjs.js` | Main-thread audio WASM |
-| 4 | Same CDN in parser worker | Pattern matrix extraction |
-| 5 | `/xm-player/worklets/*` | AudioWorklet processors |
+| 3 | `/xm-player/worklets/libopenmpt-worklet.{js,wasm}` | Self-hosted real-WASM libopenmpt — main-thread `<script>`, parser worker and AudioWorklet all use it (ship both files; `.wasm` as `application/wasm`) |
+| 4 | `/xm-player/worklets/openmpt-worklet.js` | AudioWorklet processor |
 
-CDN must return `Cross-Origin-Resource-Policy: cross-origin` (or equivalent) if COEP is ever tightened.
+libopenmpt is same-origin, so it has no CORP requirement even if COEP is tightened to `require-corp`.
 
 ## Post-deploy smoke check
 

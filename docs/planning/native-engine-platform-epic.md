@@ -18,7 +18,7 @@ The C++/Emscripten engine exists end-to-end:
 | Audio context | `utils/audioContextFactory.ts` | The one `AudioContext` per page session (48 kHz locked); both engines attach to it |
 | Main hook | `hooks/useLibOpenMPT.ts` + `hooks/audioGraph/*` | Probe; auto-prefer only if parity gate open |
 
-**Production default remains the JS worklet** (`openmpt-worklet.js` + wasm2js `libopenmpt-audioworklet.js`). Native artifacts are **gitignored** and only appear after a local or CI build. Auto-prefer requires `VITE_NATIVE_PARITY_GATE=1` (or local parity marker) — never ship gate without green `smoke:playhead:native`.
+**Production default remains the JS worklet** (`openmpt-worklet.js` + real-WASM `libopenmpt-worklet.{js,wasm}`, built by `npm run build:js-libopenmpt`). Native artifacts are **gitignored** and only appear after a local or CI build. Auto-prefer requires `VITE_NATIVE_PARITY_GATE=1` (or local parity marker) — never ship gate without green `smoke:playhead:native`.
 
 ---
 

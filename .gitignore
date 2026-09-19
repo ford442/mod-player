@@ -62,7 +62,8 @@ git.sh
 /dist/worklets/openmpt-native.js
 /dist/worklets/openmpt-native.wasm
 /dist/worklets/openmpt-native.aw.js
-# openmpt-worklet.js and libopenmpt-audioworklet.js are tracked JS files
+# openmpt-worklet.js (generated from TS) and libopenmpt-worklet.{js,wasm} (real-WASM JS engine,
+# scripts/build-js-libopenmpt.sh) are tracked
 # (the C++ WASM build outputs .wasm and .aw.js — those remain ignored)
 /public/worklets/openmpt-worklet.wasm
 /public/worklets/openmpt-worklet.aw.js

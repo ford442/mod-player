@@ -71,7 +71,7 @@ declare function registerProcessor(
 ): void;
 
 /**
- * Shape of the evaluated libopenmpt wasm2js glue (`globalThis.libopenmpt`
+ * Shape of the evaluated libopenmpt real-wasm glue (`globalThis.libopenmpt`
  * after `new Function(scriptText)` runs). Only the members the processor
  * actually calls are declared — the real Emscripten module object has many
  * more (Module.HEAP*, etc.) that are irrelevant here.
@@ -79,6 +79,7 @@ declare function registerProcessor(
 interface LibOpenMPT {
   calledRun?: boolean;
   onRuntimeInitialized?: (() => void) | undefined;
+  onAbort?: ((what: unknown) => void) | undefined;
   HEAPU8: Uint8Array;
   HEAPF32: Float32Array;
   _malloc(size: number): number;

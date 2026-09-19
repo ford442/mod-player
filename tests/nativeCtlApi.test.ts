@@ -47,7 +47,7 @@ describe('#412 native ctl / mute / one-module parse', () => {
     expect(pollBody).toContain('if (this.pcmCapture)');
   });
 
-  it('skips wasm2js parser worker when native parse is active', () => {
+  it('skips the JS-engine parser worker when native parse is active', () => {
     expect(moduleActions).toContain("activeEngineRef.current === 'native-worklet'");
     expect(moduleActions).toContain('!useNativeParse && !isLibReadyForParse');
     expect(moduleActions).toContain('parseModuleWithNative');

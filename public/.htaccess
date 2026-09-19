@@ -1,9 +1,9 @@
 # Apache overrides for xm-player static deploy (copied to dist/ root by Vite).
 # Ensures CSS is served as UTF-8 text, not mis-detected utf-16.
-# COOP/COEP match Vite dev (credentialless) so WASM workers and CDN libopenmpt load.
+# COOP/COEP match Vite dev (credentialless) so WASM workers load.
 
 <IfModule mod_headers.c>
-  # Parent vhost may set require-corp; unset so credentialless wins (CDN libopenmpt, esm.sh).
+  # Parent vhost may set require-corp; unset so credentialless wins (esm.sh).
   Header always unset Cross-Origin-Embedder-Policy
   Header set Cross-Origin-Opener-Policy "same-origin"
   Header always set Cross-Origin-Embedder-Policy "credentialless"
@@ -14,6 +14,10 @@
 </IfModule>
 
 <IfModule mod_mime.c>
+  # libopenmpt-worklet.wasm is on the default JS engine's critical path. The right MIME type lets
+  # the main-thread glue use WebAssembly.instantiateStreaming (it falls back to ArrayBuffer
+  # instantiation with a console warning otherwise).
+  AddType application/wasm .wasm
   AddType text/css .css
   RemoveCharset .css
   AddType text/html .html

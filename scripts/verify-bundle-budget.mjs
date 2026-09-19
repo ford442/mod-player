@@ -13,6 +13,13 @@ const BUILD_DIR = process.env.BUILD_DIR || 'dist';
 /** Main entry chunk max size (minified, bytes). Tuned after three-r3f split (~1.5 MB → ~900 KB). */
 const MAX_ENTRY_BYTES = Number(process.env.MAX_ENTRY_BYTES || 950 * 1024);
 const THREE_CHUNK_PREFIX = 'three-r3f';
+/**
+ * JS-engine assets under worklets/ (everything except the optional, gitignored openmpt-native.*):
+ * libopenmpt-worklet.{js,wasm} + the generated processor. Was ~5 MB of wasm2js JS (fetched a
+ * second time for the main thread as libmpt/libopenmptjs.js); real WASM is ~1.8 MB in total.
+ */
+const MAX_JS_ENGINE_BYTES = Number(process.env.MAX_JS_ENGINE_BYTES || 2.5 * 1024 * 1024);
+const MAX_LIBOPENMPT_GLUE_BYTES = Number(process.env.MAX_LIBOPENMPT_GLUE_BYTES || 256 * 1024);
 
 function resolveAssetHref(href) {
   let path = (href || '').trim();
@@ -107,6 +114,30 @@ if (threeChunks.length > 0 && new RegExp(`modulepreload[^>]*href=["'][^"']*${THR
   );
 }
 
+// JS engine assets: budget the shipped worklets/ dir (minus optional native engine files).
+let jsEngineBytes = 0;
+{
+  const workletsDir = join(BUILD_DIR, 'worklets');
+  if (!existsSync(workletsDir)) {
+    errors.push('dist/worklets missing');
+  } else {
+    for (const f of readdirSync(workletsDir)) {
+      if (f.startsWith('openmpt-native') || f.endsWith('.md')) continue;
+      const size = statSync(join(workletsDir, f)).size;
+      jsEngineBytes += size;
+      if (f === 'libopenmpt-worklet.js' && size > MAX_LIBOPENMPT_GLUE_BYTES) {
+        errors.push(`worklets/${f} is ${size} bytes (budget ${MAX_LIBOPENMPT_GLUE_BYTES}) — wasm2js glue crept back in?`);
+      }
+    }
+    if (jsEngineBytes > MAX_JS_ENGINE_BYTES) {
+      errors.push(`JS engine worklet assets total ${jsEngineBytes} bytes (budget ${MAX_JS_ENGINE_BYTES})`);
+    }
+    if (existsSync(join(workletsDir, 'libopenmpt-audioworklet.js'))) {
+      errors.push('worklets/libopenmpt-audioworklet.js (5 MB wasm2js glue) is still shipped');
+    }
+  }
+}
+
 if (errors.length > 0) {
   console.error('verify-bundle-budget FAILED:');
   for (const e of errors) console.error(`  - ${e}`);
@@ -117,5 +148,6 @@ const threeKb = threeChunks.reduce((sum, f) => sum + statSync(join(assetsDir, f)
 console.log(
   `verify-bundle-budget OK: entry=${(entryBytes / 1024).toFixed(1)} KiB, ` +
     `three-r3f=${(threeKb / 1024).toFixed(1)} KiB (${threeChunks.length} file(s)), ` +
-    `App3DView lazy chunk present`,
+    `App3DView lazy chunk present, ` +
+    `js-engine worklets/=${(jsEngineBytes / 1024).toFixed(1)} KiB`,
 );

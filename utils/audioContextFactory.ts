@@ -15,7 +15,7 @@
  *    call `new AudioContext` (and the native engine never calls
  *    `emscripten_create_audio_context`).
  * 2. **`sampleRate` is locked to 48000.** The `--grow` native heap build and
- *    the wasm2js fallback both render at this rate, and the JS worklet's
+ *    the JS engine's libopenmpt worklet both render at this rate, and the JS worklet's
  *    interpolation / playhead math (`samplesWritten / sampleRate`) is only
  *    stable when the rate does not depend on whatever the OS defaulted to.
  *    If the constructor rejects the explicit rate (rare — some Firefox / older
@@ -31,7 +31,7 @@ import { resolveStageModePreference } from './stageModeSelection';
 
 export type AudioGraphProfile = 'playback' | 'interactive';
 
-/** Locked render rate. Native (`--grow`) and wasm2js both render here. */
+/** Locked render rate. Native (`--grow`) and the JS engine both render here. */
 export const PLAYER_SAMPLE_RATE = 48000;
 
 export type PlayerSampleRate = 44100 | 48000;

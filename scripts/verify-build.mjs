@@ -7,6 +7,7 @@
  *   BUILD_DIR=dist node scripts/verify-build.mjs
  */
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import {
@@ -133,30 +134,51 @@ for (const href of scriptHrefs) {
   }
 }
 
-const libopenmptScript = [
-  ...html.matchAll(/<script[^>]+src=["']([^"']*libopenmptjs\.js)["']/gi),
-].map((m) => m[1]);
-if (libopenmptScript.length === 0) {
-  errors.push('index.html has no libopenmptjs.js script tag');
-} else {
-  for (const href of libopenmptScript) {
-    if (href.includes('wasm.noahcohn.com') && !process.env.VITE_LIBOPENMPT_CDN_URL) {
-      errors.push(
-        `libopenmpt script still points at CDN (${href}); expected self-hosted libmpt/`,
-      );
+// Real-WASM libopenmpt (scripts/build-js-libopenmpt.sh): one glue + wasm pair serves the main
+// thread (<script> below), the parser worker and the AudioWorklet. The tag must carry the same
+// ?v= and SRI as the bytes that actually ship in dist/, or the browser blocks the script.
+{
+  const manifestPath = join('audio-worklet', 'js', 'libopenmpt-worklet.generated.json');
+  const manifest = existsSync(manifestPath) ? JSON.parse(readFileSync(manifestPath, 'utf8')) : null;
+  if (!manifest) {
+    errors.push(`missing ${manifestPath} (run npm run build:js-libopenmpt)`);
+  } else {
+    const tags = [...html.matchAll(/<script\b[^>]*\bsrc=["']([^"']*libopenmpt-worklet\.js[^"']*)["'][^>]*>/gi)];
+    if (tags.length === 0) {
+      errors.push('index.html has no libopenmpt-worklet.js script tag');
     }
-    const rel = resolveAssetHref(href);
-    const filePath = join(BUILD_DIR, rel);
-    if (!href.startsWith('http') && !existsSync(filePath)) {
-      errors.push(`libopenmpt script missing on disk: ${rel}`);
+    for (const [tag, href] of tags) {
+      if (href.includes('wasm.noahcohn.com')) {
+        errors.push(`libopenmpt script points at an external CDN (${href}); expected self-hosted worklets/`);
+      }
+      if (!href.includes(`v=${manifest.version}`)) {
+        errors.push(`libopenmpt script ${href} lacks ?v=${manifest.version} (stale cache-bust)`);
+      }
+      const integrity = /\bintegrity=["']([^"']+)["']/i.exec(tag)?.[1];
+      if (integrity !== manifest.glue.integrity) {
+        errors.push(`libopenmpt script SRI (${integrity}) does not match manifest (${manifest.glue.integrity})`);
+      }
     }
-  }
-}
 
-for (const wasmRel of ['libmpt/libopenmpt.wasm', 'libmpt/libopenmptjs.js']) {
-  const filePath = join(BUILD_DIR, wasmRel);
-  if (!existsSync(filePath)) {
-    errors.push(`missing self-hosted libopenmpt asset: ${wasmRel}`);
+    for (const { file, integrity, bytes } of [manifest.glue, manifest.wasm]) {
+      const filePath = join(BUILD_DIR, 'worklets', file);
+      if (!existsSync(filePath)) {
+        errors.push(`missing libopenmpt asset in build: worklets/${file}`);
+        continue;
+      }
+      const buf = readFileSync(filePath);
+      const actual = `sha384-${createHash('sha384').update(buf).digest('base64')}`;
+      if (buf.length !== bytes || actual !== integrity) {
+        errors.push(`worklets/${file} in the build does not match the manifest (rebuilt without updating it?)`);
+      }
+    }
+
+    // The 5 MB wasm2js glue clobbered globalThis.WebAssembly and pinned the mixer to cubic.
+    for (const stale of ['worklets/libopenmpt-audioworklet.js', 'libmpt']) {
+      if (existsSync(join(BUILD_DIR, stale))) {
+        errors.push(`stale wasm2js-era asset still shipped: ${stale}`);
+      }
+    }
   }
 }
 
@@ -190,8 +212,8 @@ if (existsSync(assetsDir)) {
 }
 
 // Reject HTML-masquerading or tiny .wasm under dist/ (and public/ for source tree).
-// See scripts/verify-wasm-assets.mjs — production JS worklet is wasm2js and does
-// not need a sibling libopenmpt.wasm.
+// See scripts/verify-wasm-assets.mjs — libopenmpt-worklet.wasm is a real binary now, so a
+// corrupt/HTML body there would kill the JS engine.
 try {
   const wasmCheck = spawnSync(
     process.execPath,

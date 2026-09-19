@@ -30,7 +30,6 @@ import {
     installNativeAwJsModuleRewrite,
     resolveCreateOpenMPTModule,
     resolveEmscriptenRegisterAudioObject,
-    withNativeWebAssembly,
     withPreservedMainThreadTimers,
 } from './resolveNativeFactory';
 import {
@@ -237,12 +236,10 @@ export class OpenMPTWorkletEngine extends MiniEventEmitter<EngineEventMap> {
             }
 
             this.module = await withPreservedMainThreadTimers(() =>
-                withNativeWebAssembly(() =>
-                    createModule({
-                        wasmBasePath: this.basePath,
-                        locateFile: (path: string) => `${this.basePath}${path}`,
-                    } as Partial<EmscriptenOpenMPTModule>),
-                ),
+                createModule({
+                    wasmBasePath: this.basePath,
+                    locateFile: (path: string) => `${this.basePath}${path}`,
+                } as Partial<EmscriptenOpenMPTModule>),
             );
 
             installNativeAwJsModuleRewrite(this.basePath);

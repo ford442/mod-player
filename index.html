@@ -39,12 +39,8 @@
     A promise is used to signal readiness to the React application.
   -->
   <script>
-    // wasm2js libopenmptjs.js replaces global WebAssembly with a stub whose
-    // Memory() always returns a non-shared ArrayBuffer. Snapshot the real API
-    // so the optional native C++ engine can instantiate shared wasm workers.
-    if (typeof WebAssembly !== 'undefined' && !WebAssembly.isWasm2js) {
-      window.__NATIVE_WEBASSEMBLY__ = WebAssembly;
-    }
+    // libopenmpt is a real-WASM build (worklets/libopenmpt-worklet.{js,wasm}); it never touches
+    // globalThis.WebAssembly, so the optional native engine needs no snapshot of it.
     window.libopenmptReady = new Promise((resolve, reject) => {
       window.libopenmpt = {
         onRuntimeInitialized: function () {
@@ -58,7 +54,7 @@
     });
   </script>
   <!-- LIBOPENMPT_SCRIPT -->
-  <!-- Injected by vite-plugins/libopenmptHtml.ts — self-hosted under BASE_URL/libmpt/ -->
+  <!-- Injected by vite-plugins/libopenmptHtml.ts — self-hosted under BASE_URL/worklets/ -->
   <!-- /LIBOPENMPT_SCRIPT -->
 </body>
 

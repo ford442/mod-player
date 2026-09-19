@@ -33,6 +33,32 @@
   var ALL_MAIN_TO_WORKLET_TYPES = Object.values(MAIN_TO_WORKLET);
   var ALL_WORKLET_TO_MAIN_TYPES = Object.values(WORKLET_TO_MAIN);
 
+  // audio-worklet/libRuntimeReady.ts
+  function waitForRuntimeInitialized(lib, timeoutMs, what = "WASM") {
+    return new Promise((resolve, reject) => {
+      if (lib.calledRun) {
+        resolve();
+        return;
+      }
+      const timer = setTimeout(
+        () => reject(new Error(`${what} onRuntimeInitialized timeout (${timeoutMs} ms)`)),
+        timeoutMs
+      );
+      const prevInit = lib.onRuntimeInitialized;
+      lib.onRuntimeInitialized = () => {
+        clearTimeout(timer);
+        if (typeof prevInit === "function") prevInit();
+        resolve();
+      };
+      const prevAbort = lib.onAbort;
+      lib.onAbort = (reason) => {
+        clearTimeout(timer);
+        if (typeof prevAbort === "function") prevAbort(reason);
+        reject(new Error(`${what} aborted during init: ${String(reason)}`));
+      };
+    });
+  }
+
   // audio-worklet/js/openmpt-processor.ts
   if (typeof globalThis.crypto === "undefined" || !globalThis.crypto) {
     globalThis.crypto = {
@@ -66,6 +92,8 @@
   }
   var DEBUG = false;
   var WORKLET_DEV = false;
+  var OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH = 3;
+  var DEFAULT_INTERPOLATION_LENGTH = 8;
   function log(...args) {
     if (DEBUG) console.log("[Worklet]", ...args);
   }
@@ -160,6 +188,10 @@
   function hasWasmBytes(wasmBytes) {
     return wasmBytes != null && wasmBytes.byteLength > 0;
   }
+  function hasWasmMagic(wasmBytes) {
+    const head = wasmBytes instanceof Uint8Array ? wasmBytes : new Uint8Array(wasmBytes, 0, Math.min(4, wasmBytes.byteLength));
+    return head.length >= 4 && head[0] === 0 && head[1] === 97 && head[2] === 115 && head[3] === 109;
+  }
   function utf8Bytes(str) {
     const escaped = unescape(encodeURIComponent(str));
     const bytes = new Uint8Array(escaped.length);
@@ -185,12 +217,17 @@
         if (!scriptText) {
           throw new Error("initLib missing scriptText");
         }
-        const wasmByteLength = hasWasmBytes(wasmBytes) ? wasmBytes.byteLength : 0;
+        if (!hasWasmBytes(wasmBytes)) {
+          throw new Error("initLib missing wasmBytes (libopenmpt-worklet.wasm) \u2014 the JS engine is real WebAssembly");
+        }
+        if (!hasWasmMagic(wasmBytes)) {
+          throw new Error("initLib wasmBytes is not a WebAssembly binary (missing \\0asm magic)");
+        }
         log(
-          "Evaluating libopenmpt-audioworklet.js (",
+          "Evaluating libopenmpt-worklet.js (",
           scriptText.length,
           " chars, wasmBytes:",
-          wasmByteLength,
+          wasmBytes.byteLength,
           ")\u2026"
         );
         if (typeof globalThis.performance === "undefined") {
@@ -206,10 +243,7 @@
             }
           };
         }
-        globalThis.libopenmpt = { noInitialRun: true };
-        if (hasWasmBytes(wasmBytes)) {
-          globalThis.libopenmpt.wasmBinary = wasmBytes;
-        }
+        globalThis.libopenmpt = { noInitialRun: true, wasmBinary: wasmBytes };
         const cleanedScript = scriptText.replace(/^\s*export\s+(default\s+)?/gm, "");
         const fn = new Function(cleanedScript);
         fn.call(globalThis);
@@ -217,28 +251,8 @@
         if (!lib || typeof lib !== "object") {
           throw new Error("globalThis.libopenmpt not set after script evaluation");
         }
-        if (!lib._openmpt_module_create_from_memory2) {
-          log("Waiting for WASM onRuntimeInitialized\u2026");
-          await new Promise((resolve, reject) => {
-            const timeout = setTimeout(
-              () => reject(new Error("WASM onRuntimeInitialized timeout")),
-              25e3
-            );
-            if (lib.calledRun) {
-              clearTimeout(timeout);
-              resolve();
-            } else {
-              const prev = lib.onRuntimeInitialized;
-              lib.onRuntimeInitialized = () => {
-                clearTimeout(timeout);
-                if (typeof prev === "function") prev();
-                resolve();
-              };
-            }
-          });
-        } else {
-          log("WASM already initialised (functions present)");
-        }
+        log("Waiting for WASM onRuntimeInitialized\u2026");
+        await waitForRuntimeInitialized(lib, 25e3);
         globalThis.__openmptWorkletLib = lib;
         return lib;
       })();
@@ -302,6 +316,8 @@
           this._resolveLib = resolve;
           this._rejectLib = reject;
         });
+        this._libInitPromise.catch(() => {
+        });
         this._libInitTimeout = setTimeout(() => {
           this._rejectLib(new Error("WASM init timeout: initLib message never received"));
           this.port.postMessage({ type: WT.error, message: "WASM library init timeout" });
@@ -363,6 +379,9 @@
             throw new Error("setChannelMute not implemented for JS engine yet (TODO #416)");
           }
         } else if (type === MT.setRenderParam) {
+          if (msg.param === OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH) {
+            this._interpolationLength = msg.value;
+          }
           if (this.modulePtr && this.lib && typeof this.lib._openmpt_module_set_render_param === "function") {
             this.lib._openmpt_module_set_render_param(this.modulePtr, msg.param, msg.value);
           }
@@ -393,6 +412,7 @@
       this.oscWritePtr = 0;
       this._audioLite = false;
       this._audioLiteExplicit = false;
+      this._interpolationLength = DEFAULT_INTERPOLATION_LENGTH;
       this._audioDiag = false;
       this._resetAudioDiag();
       this._channelVuArr = [];
@@ -529,14 +549,11 @@
       meta[AR_BEAT] = beat;
     }
     // ── libopenmpt bootstrap via main-thread-fetched assets ────────────
-    // AudioWorklet classic scripts cannot use import() or importScripts().
-    // Main thread fetches libopenmpt-audioworklet.js (+ optional real .wasm)
-    // and posts them here. We evaluate the JS via new Function().
-    //
-    // wasm2js: do NOT set Module.wasmBinary — the glue clears wasmBinary to []
-    // and embeds the runtime in JS. Seeding HTML/garbage overwrites that and
-    // can break init. Classic binary builds: seed wasmBinary so Emscripten
-    // skips its own network fetch of the sibling .wasm.
+    // AudioWorklet classic scripts cannot use import() or importScripts(), and
+    // this scope has no fetch(). Main thread fetches libopenmpt-worklet.js and
+    // libopenmpt-worklet.wasm and posts both here. We evaluate the JS via
+    // new Function() and seed Module.wasmBinary so Emscripten instantiates the
+    // bytes directly instead of trying to fetch its sibling .wasm.
     async _handleInitLib({ scriptText, wasmBytes }) {
       try {
         if (this._libInitTimeout != null) clearTimeout(this._libInitTimeout);
@@ -554,7 +571,10 @@
     // ── Module loading ─────────────────────────────────────────────────
     async loadModule(moduleData) {
       log("loadModule: awaiting WASM ready\u2026");
-      await this._libInitPromise;
+      try {
+        await this._libInitPromise;
+      } catch {
+      }
       if (!this.isLibReady || !this.lib) {
         error("WASM library never became ready");
         this.port.postMessage({ type: WT.error, message: "WASM library init timeout" });
@@ -603,8 +623,11 @@
         this._rightHeapView = null;
         this._fracRowInt = -1;
         this._rowStartPosSec = 0;
-        const OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH = 3;
-        lib._openmpt_module_set_render_param(this.modulePtr, OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH, 4);
+        lib._openmpt_module_set_render_param(
+          this.modulePtr,
+          OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH,
+          this._interpolationLength
+        );
         const numCh = lib._openmpt_module_get_num_channels(this.modulePtr);
         if (numCh > 16 && !this._audioLiteExplicit) {
           this._audioLite = true;

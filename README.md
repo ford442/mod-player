@@ -130,7 +130,7 @@ Project structure (important files)
 
 Notes and configuration
 
-- libopenmpt: Self-hosted under `public/libmpt/` (libopenmpt **0.8.4**). Loaded via `index.html` with BASE_URL-aware paths; optional CDN override with `VITE_LIBOPENMPT_CDN_URL`. See `public/libmpt/README.md`.
+- libopenmpt: Self-hosted real WebAssembly build of libopenmpt **0.8.4** — `public/worklets/libopenmpt-worklet.{js,wasm}` — shared by the AudioWorklet, the main thread (`index.html`, BASE_URL-aware, SRI-pinned) and the parser worker. Rebuild with `npm run build:js-libopenmpt` (emsdk 3.1.51). See `public/worklets/README.md`.
 - Tailwind: A CDN helper script is present in `index.html` to bring in utility styles quickly in development. For production builds you may want to use the PostCSS/Tailwind config in the repo.
 - **Pattern renderers:** GPU viz requires **WebGPU** (hard-fail on probe/device failure — no auto WebGL2/HTML **shader** session). Explicit `?renderer=html` selects the DOM pattern grid. WebGL2 GLSL reference remains in-tree but is deferred for viz sessions. Probe breadcrumb: `window.__WEBGPU_PROBE__`.
 - **WebGPU → WebGL2 porting (deferred viz):** Shared packing lives in `utils/gpuPacking.ts`; WebGL2 GLSL mirrors `hooks/webGLShaders.ts`. Chassis/night mode/bloom approximations are in `src/renderers/webgl2/shaders/`.

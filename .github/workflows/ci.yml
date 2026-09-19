@@ -26,6 +26,11 @@ jobs:
       - name: Verify WASM assets (reject HTML-as-.wasm stubs)
         run: npm run verify:wasm
 
+      - name: Verify real-WASM JS engine (libopenmpt-worklet.{js,wasm})
+        # Static checks + boots the glue the way the AudioWorklet does: renders audio, corrupt
+        # input returns NULL (not an abort), heap growth refreshes the views, global WebAssembly untouched.
+        run: npm run verify:js-libopenmpt
+
       - name: Verify generated JS worklet is up to date (#435)
         run: npm run build:js-worklet && git diff --exit-code
 
@@ -301,6 +306,71 @@ jobs:
           test -f public/worklets/openmpt-worklet.js
           grep -q 'registerProcessor\|AudioWorkletProcessor' public/worklets/openmpt-worklet.js
           echo "✅ Tracked JS worklet intact"
+
+  # Rebuild the committed real-WASM libopenmpt pair (JS engine) with the pinned emsdk and fail on
+  # drift. The build is byte-reproducible (verified from a clean tree: identical sha256, no absolute
+  # paths embedded), so committed artifacts must equal a fresh build — same contract as the
+  # generated JS worklet (#435). Path-filtered: only runs when its inputs change.
+  js-libopenmpt-rebuild:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Detect JS-engine libopenmpt path changes
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            jsengine:
+              - 'scripts/build-js-libopenmpt.sh'
+              - 'scripts/jsEngineArtifacts.mjs'
+              - 'scripts/verify-js-libopenmpt.mjs'
+              - 'public/worklets/libopenmpt-worklet.js'
+              - 'public/worklets/libopenmpt-worklet.wasm'
+              - 'audio-worklet/js/libopenmpt-worklet.generated.json'
+              - '.github/workflows/ci.yml'
+
+      - name: Setup Emscripten
+        if: steps.filter.outputs.jsengine == 'true'
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: '3.1.51'
+
+      - name: Setup Node.js
+        if: steps.filter.outputs.jsengine == 'true'
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      # libopenmpt.a for this variant is keyed by the build script (it owns every flag).
+      - name: Cache libopenmpt static library (JS engine variant)
+        if: steps.filter.outputs.jsengine == 'true'
+        uses: actions/cache@v6
+        with:
+          path: vendor/libopenmpt-0.8.4+release-jsengine-eh-wasm-emsdk3.1.51
+          key: libopenmpt-js-engine-${{ runner.os }}-emsdk-3.1.51-v0.8.4-${{ hashFiles('scripts/build-js-libopenmpt.sh') }}
+
+      - name: Rebuild libopenmpt-worklet.{js,wasm} (emsdk 3.1.51)
+        if: steps.filter.outputs.jsengine == 'true'
+        run: bash scripts/build-js-libopenmpt.sh
+
+      - name: Committed artifacts must equal a fresh build
+        if: steps.filter.outputs.jsengine == 'true'
+        run: |
+          if ! git diff --exit-code -- public/worklets/libopenmpt-worklet.js public/worklets/libopenmpt-worklet.wasm audio-worklet/js/libopenmpt-worklet.generated.json; then
+            echo "::error::libopenmpt-worklet.{js,wasm} drifted from scripts/build-js-libopenmpt.sh output. Run 'npm run build:js-libopenmpt' with emsdk 3.1.51 and commit the result."
+            exit 1
+          fi
+          echo "✅ committed real-WASM libopenmpt matches a fresh emsdk 3.1.51 build"
+
+      - name: Verify rebuilt artifacts
+        if: steps.filter.outputs.jsengine == 'true'
+        run: node scripts/verify-js-libopenmpt.mjs --smoke
 
   # Full native link when C++/build/audio-worklet surfaces change.
   # Uses cached libopenmpt.a so PR wall time stays reasonable on cache hits.

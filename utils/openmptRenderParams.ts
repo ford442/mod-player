@@ -20,9 +20,9 @@ export const OPENMPT_MODULE_RENDER_STEREOSEPARATION_PERCENT = 2;
 export const OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH = 3;
 export const OPENMPT_MODULE_RENDER_VOLUMERAMPING_STRENGTH = 4;
 
-/** Cubic. JS wasm2js / ScriptProcessor live playback. */
+/** Cubic. ScriptProcessor fallback, and the JS worklet's opt-down (`?interp=4`) for weak devices. */
 export const INTERPOLATION_CUBIC = 4;
-/** Sinc+LP. Native live playback and offline HQ export. */
+/** Sinc+LP. Default for native and JS-worklet live playback, and offline HQ export. */
 export const INTERPOLATION_SINC_LP = 8;
 
 export type OpenMPTInterpolationLength = 1 | 2 | 4 | 8;

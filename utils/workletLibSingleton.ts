@@ -1,6 +1,6 @@
 /**
  * Shared-scope libopenmpt singleton for the JS AudioWorklet path (#329).
- * Testable mirror of ensureSharedLibOpenMPT in public/worklets/openmpt-worklet.js.
+ * Testable mirror of ensureSharedLibOpenMPT in audio-worklet/js/openmpt-processor.ts.
  */
 
 export interface WorkletLibHandle {
@@ -15,9 +15,16 @@ export interface WorkletLibGlobals {
 
 export type WorkletLibEvalFn = (scriptText: string, globals: WorkletLibGlobals) => void | Promise<void>;
 
-function hasWasmBytes(wasmBytes: ArrayBuffer | Uint8Array | null | undefined): boolean {
+function hasWasmBytes(wasmBytes: ArrayBuffer | Uint8Array | null | undefined): wasmBytes is ArrayBuffer | Uint8Array {
   if (!wasmBytes) return false;
   return wasmBytes.byteLength > 0;
+}
+
+function hasWasmMagic(wasmBytes: ArrayBuffer | Uint8Array): boolean {
+  const head = wasmBytes instanceof Uint8Array
+    ? wasmBytes
+    : new Uint8Array(wasmBytes, 0, Math.min(4, wasmBytes.byteLength));
+  return head.length >= 4 && head[0] === 0x00 && head[1] === 0x61 && head[2] === 0x73 && head[3] === 0x6d;
 }
 
 /**
@@ -41,10 +48,16 @@ export async function ensureSharedLibOpenMPT(
         throw new Error('initLib missing scriptText');
       }
 
-      globals.libopenmpt = { noInitialRun: true };
-      if (hasWasmBytes(wasmBytes)) {
-        globals.libopenmpt.wasmBinary = wasmBytes as ArrayBuffer;
+      // Real WebAssembly only: the worklet scope has no fetch(), so the glue must be seeded with
+      // the bytes (mirrors the guards in audio-worklet/js/openmpt-processor.ts).
+      if (!hasWasmBytes(wasmBytes)) {
+        throw new Error('initLib missing wasmBytes (libopenmpt-worklet.wasm) — the JS engine is real WebAssembly');
       }
+      if (!hasWasmMagic(wasmBytes)) {
+        throw new Error('initLib wasmBytes is not a WebAssembly binary (missing \\0asm magic)');
+      }
+
+      globals.libopenmpt = { noInitialRun: true, wasmBinary: wasmBytes };
 
       await evalScript(scriptText, globals);
 

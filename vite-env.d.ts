@@ -41,8 +41,6 @@ interface MIDIMessageEvent extends Event {
 }
 
 interface Window {
-  /** Real WebAssembly API snapshotted before wasm2js libopenmptjs.js loads. */
-  __NATIVE_WEBASSEMBLY__?: typeof WebAssembly;
   /** Native engine test hook (?engine=native) — mute / interpolation, not mixer UI. */
   __XASM1_NATIVE__?: {
     setChannelMute: (channel: number, muted: boolean) => void;
@@ -53,8 +51,6 @@ interface Window {
 
 interface ImportMetaEnv {
   readonly VITE_STORAGE_API_URL?: string;
-  /** Optional CDN override for libopenmpt JS/WASM (dev / experiments). */
-  readonly VITE_LIBOPENMPT_CDN_URL?: string;
   /** Bake minimal public UI into production builds (`build:xm-player`). */
   readonly VITE_PUBLIC_MODE?: string;
 }

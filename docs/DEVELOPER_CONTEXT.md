@@ -136,7 +136,7 @@ The app needs **cross-origin isolation** so Emscripten can use `SharedArrayBuffe
 
 **Keep dev and production aligned on `credentialless`.** Older Apache configs used `require-corp`, which blocks any cross-origin script, WASM, or worker asset that does not send `Cross-Origin-Resource-Policy` (CORP) or proper CORS. That can break:
 
-- Main-thread `libopenmptjs.js` from CDN
+- (Historical) main-thread `libopenmptjs.js` from a CDN — libopenmpt is now self-hosted, see below
 - The same script fetched again inside `openmpt-parser.worker`
 - esm.sh React importmap modules
 
@@ -146,31 +146,25 @@ If production must use `require-corp`, every external dependency below must sati
 
 1. Vite bundle (`index-*.js`, `index-*.css`)
 2. esm.sh React importmap (`react`, `react-dom/client`)
-3. `https://wasm.noahcohn.com/libmpt/libopenmptjs.js` (main thread, `index.html`)
-4. Same CDN URL inside `workers/openmpt-parser.worker.ts` (worker thread)
-5. Audio worklet scripts under `/xm-player/worklets/`
+3. `/xm-player/worklets/libopenmpt-worklet.js` + `.wasm` (**self-hosted**, same-origin; main thread `<script>` in `index.html`, the parser worker, and the AudioWorklet all use this one pair)
+4. Audio worklet scripts under `/xm-player/worklets/`
 
-`index.html` includes `preconnect` hints for `wasm.noahcohn.com` and `esm.sh`.
+`index.html` includes a `preconnect` hint for `esm.sh` (there is no third-party libopenmpt host any more).
 
 ### CORP / CORS Requirements
 
 | Resource | URL | Required for `credentialless` | Required for `require-corp` |
 |----------|-----|------------------------------|----------------------------|
-| libopenmpt JS + WASM | `wasm.noahcohn.com/libmpt/*` | CORS or CORP `cross-origin` (current CDN ✅) | CORP `cross-origin` on JS **and** `.wasm` |
+| libopenmpt JS + WASM | `/xm-player/worklets/libopenmpt-worklet.{js,wasm}` | Same-origin | Same-origin |
 | React (importmap) | `esm.sh/react@18.2.0` | Typically works under `credentialless` | Verify CORP on each esm.sh response |
 | App static assets | `/xm-player/assets/*` | Same-origin | Same-origin |
 | Worklets | `/xm-player/worklets/*` | Same-origin | Same-origin |
 
-**Operational risk:** If the CDN drops `Cross-Origin-Resource-Policy: cross-origin`, parser worker or main-thread WASM init can fail under strict COEP. The parser path falls back to main-thread parse when the worker errors, but audio still depends on the CDN script in `index.html`.
+**Operational note:** libopenmpt is self-hosted, so COEP no longer depends on a third party for audio. The `.wasm` must be served as `application/wasm` (else Emscripten falls back from streaming to ArrayBuffer instantiation with a console warning); every request carries a content-hash `?v=` and the `<script>` tag is SRI-pinned from `audio-worklet/js/libopenmpt-worklet.generated.json`.
 
-### Self-hosting libopenmpt (recommended for reproducible deploys)
+### libopenmpt (self-hosted real WASM)
 
-To remove CDN dependency:
-
-1. Copy `libopenmptjs.js` and its `.wasm` sibling into `public/libmpt/` (or vendor from a pinned libopenmpt release).
-2. Point `index.html` and `workers/openmpt-parser.worker.ts` at `${import.meta.env.BASE_URL}libmpt/libopenmptjs.js`.
-3. Serve with `Cross-Origin-Resource-Policy: cross-origin` if COEP is ever `require-corp`.
-4. Optionally add SRI (`integrity=`) on the script tag once the file hash is pinned.
+`public/worklets/libopenmpt-worklet.{js,wasm}` is built by `npm run build:js-libopenmpt` (emsdk 3.1.51) and committed; it is one artifact shared by the AudioWorklet, the main thread and the parser worker. Details, rebuild steps and the flags rationale: `public/worklets/README.md`.
 
 ### Stale `/assets/` on the server
 

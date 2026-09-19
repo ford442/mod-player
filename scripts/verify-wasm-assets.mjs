@@ -14,11 +14,11 @@
  * Exit 1 on any corrupt / tiny / HTML file.
  *
  * Notes on the JS worklet path:
- *   public/worklets/libopenmpt-audioworklet.js is a **wasm2js** build — the
- *   runtime is embedded in the JS. A sibling libopenmpt.wasm is NOT required
- *   and must not be a fake HTML file. Optional native engine outputs
- *   (openmpt-native.wasm, openmpt-worklet.wasm) are gitignored until built;
- *   when present they are also validated. Presence of the native trio is
+ *   The default JS engine ships a REAL WebAssembly build:
+ *   worklets/libopenmpt-worklet.wasm (+ libopenmpt-worklet.js glue). Under every scanned
+ *   root that has a worklets/ directory it is REQUIRED — a missing or HTML-bodied file there
+ *   means no audio at all. Optional native engine outputs (openmpt-native.wasm) are gitignored
+ *   until built; when present they are also validated. Presence of the native trio is
  *   classified by scripts/verify-build.mjs (absent OK; partial/invalid fail).
  */
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
@@ -115,8 +115,18 @@ function validateWasmFile(filePath) {
 }
 
 for (const root of ROOTS) {
-  for (const file of walk(root)) {
+  const found = walk(root);
+  for (const file of found) {
     validateWasmFile(file);
+  }
+  if (
+    existsSync(join(root, 'worklets')) &&
+    !found.some((f) => f.endsWith(join('worklets', 'libopenmpt-worklet.wasm')))
+  ) {
+    errors.push(
+      `${root}/worklets/libopenmpt-worklet.wasm is missing — the default JS engine needs it ` +
+        `(npm run build:js-libopenmpt, or restore the committed file).`,
+    );
   }
 }
 
@@ -124,8 +134,8 @@ if (errors.length > 0) {
   console.error('verify-wasm-assets FAILED:');
   for (const e of errors) console.error(`  - ${e}`);
   console.error(
-    `\nHint: production JS worklet uses wasm2js (libopenmpt-audioworklet.js); ` +
-      `a sibling libopenmpt.wasm is not required. Do not commit HTML 404 bodies as .wasm.`,
+    `\nHint: the JS engine's libopenmpt-worklet.wasm is real WebAssembly (npm run ` +
+      `build:js-libopenmpt). Do not commit HTML 404 bodies as .wasm.`,
   );
   process.exit(1);
 }
@@ -134,7 +144,7 @@ if (checked.length === 0) {
   console.log(
     'verify-wasm-assets OK: no .wasm files under',
     ROOTS.join(', '),
-    '(wasm2js / unbuilt native engine is fine)',
+    '(no worklets/ directory to require the JS engine wasm in)',
   );
 } else {
   console.log(

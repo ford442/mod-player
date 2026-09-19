@@ -75,7 +75,8 @@ Before modifying the worklet or AudioWorklet-related code:
 - [ ] **Never add a `setTimeout` polyfill** that ignores the `delay` argument. Chrome 116+ has native `setTimeout` in AudioWorklet; for older browsers, use `currentTime`-based timing in `process()` instead.
 - [ ] **Never `import()` an AudioWorklet processor file on the main thread.** Use `audioContext.audioWorklet.addModule()` for JS processors, or Emscripten's native API for `AUDIO_WORKLET` builds.
 - [ ] **Verify line numbers in browser console.** After deploy, a hard refresh (`Ctrl+Shift+R` / `Cmd+Shift+R`) should show line numbers matching the current source (e.g., ~250), not the old stub (~130).
-- [ ] **Never commit HTML/404 bodies as `*.wasm`.** Production glue is wasm2js (`libopenmpt-audioworklet.js`); a sibling `libopenmpt.wasm` is not required. Run `npm run verify:wasm` before commit/deploy.
+- [ ] **Never commit HTML/404 bodies as `*.wasm`.** The JS engine is real WebAssembly (`libopenmpt-worklet.wasm`) — a corrupt file there means no audio at all, and `initLib` refuses it. Run `npm run verify:wasm` and `npm run verify:js-libopenmpt` before commit/deploy.
+- [ ] **Never infer libopenmpt readiness from `_openmpt_*` being defined.** With real wasm, newer emsdk defines lazy export stubs at glue-eval time (`typeof lib._openmpt_module_create_from_memory2 === 'function'` is true long before instantiate finishes, and `_malloc` may still be missing). Wait on `calledRun` / `onRuntimeInitialized` — `audio-worklet/libRuntimeReady.ts` (regression: `tests/jsWorkletProcessor.integration.test.ts`).
 - [ ] **Run `npm test`** — Vitest guards in `tests/workletAudioLifecycle.test.ts` cover #329 (shared-scope libopenmpt singleton / hot `load`) and #330 (no `AudioContext.suspend()` on normal `stopMusic(false)`). `tests/workletRegressionGuards.test.ts` covers #354 (≤~60 Hz position throttle + hot-reload node reuse / load-token ack).
 
 ### Automated regression harness (#329 / #330 / #354)
@@ -84,7 +85,8 @@ Before modifying the worklet or AudioWorklet-related code:
 |-------|-----------------|
 | `utils/workletAudioLifecycle.ts` + `tests/workletAudioLifecycle.test.ts` | `play()` re-sending `initLib` on module reload; `stopMusic` suspending the context; #354 helper smoke |
 | `tests/workletRegressionGuards.test.ts` | Position postMessage flood (fake-clock ≤~60 Hz); hot-reload disconnect; stale `loaded` ack token; SP structural immunity |
-| `utils/workletLibSingleton.ts` | Re-evaluating ~5 MB wasm2js glue when `__openmptWorkletLib` already exists |
+| `utils/workletLibSingleton.ts` | Re-evaluating the glue / re-instantiating the wasm when `__openmptWorkletLib` already exists (mirror also enforces the real-wasm-bytes contract) |
+| `tests/jsWorkletProcessor.integration.test.ts` | The **compiled** processor + the **real** committed wasm in a fake `AudioWorkletGlobalScope`: cold `initLib`, MOD→XM→MOD, hot-reload second node with no `initLib`, corrupt file then recovery, pause/play, seek, interpolation |
 | Source invariants | `stopMusic` body must not call `.suspend()`; worklet must keep `ensureSharedLibOpenMPT` singleton + position throttle `if`; hooks must call token helpers |
 
 CI runs the full Vitest suite (`npm test`) on every PR via `lint-and-build`.
@@ -109,8 +111,8 @@ Headless CI cannot assert speaker output. After audio-path changes, verify **wit
 
 Shared waits go through `scripts/lib/browser-launch.mjs` `waitForFunction`, which passes
 Playwright options as the **third** argument (not the second — second is `arg`). First-play
-init can take tens of seconds while the ~5 MB wasm2js glue loads; set `TIMEOUT` (default 90s)
-if a slow runner needs more headroom.
+init used to take seconds (the ~5 MB wasm2js glue) and is now ~0.2 s with real wasm; the default
+`TIMEOUT` (90s) is kept as headroom for slow runners.
 
 | Check | Automated? | How |
 |-------|------------|-----|
@@ -133,7 +135,54 @@ The smoke **compounds** with `tests/workletAudioLifecycle.test.ts` and
 
 ---
 
-## Worklet asset path (wasm2js) — 2026-07 fix
+## Real-WASM JS engine — 2026-09 (supersedes "Worklet asset path (wasm2js)" below)
+
+### Problem
+
+The default JS engine ran a **wasm2js** libopenmpt: ~5 MB of JS "pretending to be WASM", evaluated in the worklet
+via `new Function`, plus a second copy of the same glue for the main thread / parser worker
+(`public/libmpt/libopenmptjs.js`) that **replaced `globalThis.WebAssembly` with a stub**. Costs:
+
+- first-play `initLib` measured at **~4.1 s median** (2.7–5.6 s) in headless Chrome on a fast box (much worse on
+  real devices) and a **~513 MiB** heap reserved up front;
+- the mixer was capped at cubic interpolation (sinc-8 overran the quantum budget), so live A/B against the native
+  engine's sinc-8 was apples-to-oranges;
+- the stub broke native instantiate unless `index.html` snapshotted the real API (`window.__NATIVE_WEBASSEMBLY__`)
+  and `resolveNativeFactory.ts` put it back;
+- `verify:wasm` existed because HTML 404 bodies had been committed as `.wasm` to paper over wasm2js.
+
+### Fix
+
+| Change | Detail |
+|--------|--------|
+| `scripts/build-js-libopenmpt.sh` | Builds **real WASM** libopenmpt 0.8.4 (C API only, no AudioWorklet/WASM workers, no C++ wrapper) → `public/worklets/libopenmpt-worklet.{js,wasm}` + `audio-worklet/js/libopenmpt-worklet.generated.json`. emsdk 3.1.51 pin (6.x also verified). Native wasm exceptions, **no SIMD**, 32 MiB initial heap + growth. Own libopenmpt tree — never touches the native `.a`. |
+| One artifact pair for all consumers | AudioWorklet (`initLib {scriptText, wasmBytes}`), main thread (`<script>`), parser worker (`locateFile`). `public/libmpt/`, the 5 MB `libopenmpt-audioworklet.js`, `scripts/vendor-libopenmpt.mjs` and the CDN override (`VITE_LIBOPENMPT_CDN_URL`; the CDN serves the wasm2js build) are **deleted**. |
+| `index.html` / `resolveNativeFactory.ts` | `__NATIVE_WEBASSEMBLY__` snapshot, `getNativeWebAssembly` / `installNativeWebAssembly` / `withNativeWebAssembly` **removed** — nothing replaces `WebAssembly` any more. |
+| `openmpt-processor.ts` | `initLib` **requires** `wasmBytes` (`\0asm`-checked); waits on `onRuntimeInitialized` via `audio-worklet/libRuntimeReady.ts`; interpolation defaults to **8** and is remembered across loads (`setRenderParam` 3). Init failures no longer raise unhandled rejections. |
+| `utils/workletLibAssets.ts` | Main-thread fetch + validation: HTML-as-wasm, wasm2js glue, empty glue are rejected with specific messages. |
+| Versioning | Every request carries `?v=<content hash>` (also on the `.wasm` via `locateFile`), the `<script>` tag carries SRI from the manifest, `public/sw.js` no longer precaches unversioned lib files (cache `v6`). |
+| Guards | `tests/jsEngineArtifacts.test.ts`, `tests/jsWorkletProcessor.integration.test.ts`, `tests/workletLibAssets.test.ts`, `tests/libRuntimeReady.test.ts`, `tests/libopenmptHtmlPlugin.test.ts`; `verify-build` checks tag path / `?v=` / SRI against the shipped bytes and rejects stale wasm2js-era assets; `verify-bundle-budget` budgets `worklets/`. |
+
+### Verified
+
+Rendered PCM is **bit-identical** to the old wasm2js engine at both cubic and sinc-8 (same libopenmpt 0.8.4,
+deterministic float ops; sha256 of 10 s of `4-mat_madness.mod` matches). Numbers, methodology and the
+old-vs-new table: `docs/planning/native-engine-bench-notes.md` § "JS engine: real WASM vs wasm2js".
+
+### Lessons
+
+- **Readiness ≠ export presence.** The first real-wasm build failed in Chrome with `_malloc is not a function`:
+  the processor (and both worker loaders) decided the runtime was ready because `_openmpt_module_create_from_memory2`
+  existed — true for wasm2js, but emsdk 3.1.51 defines lazy stubs at eval time. A Node harness that awaits
+  `onRuntimeInitialized` explicitly *masked* it; only the real worklet flow caught it. The integration test now drives
+  the compiled processor, and was mutation-checked (reinstating the old heuristic fails 8 tests).
+- **Pin the glue's incoming-Module contract.** Newer emsdk dropped `wasmBinary` from the default
+  `INCOMING_MODULE_JS_API`, silently ignoring the seeded bytes; the link now lists the incoming API explicitly.
+- **`stringToUTF8` must not be exported** (the app's polyfill has a different signature); `verify:js-libopenmpt` enforces it.
+
+---
+
+## Worklet asset path (wasm2js) — 2026-07 fix *(historical; superseded by the section above)*
 
 ### Problem
 
@@ -270,7 +319,7 @@ After #354 fixed MOD hiccups (position flood), **XM** still glitched at **order/
 - up to 32× `get_current_channel_vu_mono`
 - full `_updateAudioReactive` sample scan
 - `projectm-pcm` allocate + `postMessage` (~88 Hz) even when no Project-M host listens
-- interpolation filter length **8** (max sinc) on wasm2js
+- interpolation filter length **8** (max sinc) on wasm2js (no longer applies: real wasm made sinc-8 cheap, see "Real-WASM JS engine" below)
 
 At pattern starts those extras tipped `process()` past the ~2.9 ms quantum budget → audible underrun / **skip a few notes then crackle to catch up**. MOD (4ch) often stayed under budget.
 
@@ -388,7 +437,7 @@ called it **every quantum** inside `fillPositionInfo`.
 | Native `audio_process_cb` | Position/VU fill at ~60 Hz (plus cheap `getCurrentRow` for row changes) |
 | Native PCM ring | Allocated on `setPcmCapture(true)` / legacy bridge, not on every attach |
 | Native play | Skip `engine.load` when parse already loaded the same bytes |
-| Interp default | C++ load / `g_interpLength` **8** (Sinc+LP). JS wasm2js stays on cubic (**4**) via render param **3** (not 2 / stereo sep). |
+| Interp default | C++ load / `g_interpLength` **8** (Sinc+LP). JS worklet was cubic (**4**) on wasm2js at the time; it is now **8** too on real wasm (render param **3**, not 2 / stereo sep) — see "Real-WASM JS engine". |
 
 Ruled out by production timings: GPU `updateMatrix` (0.4–1.2 ms), React
 `order-change-ui` (0.19 ms), wrap-quantum DSP, PCM stream, native 16 ms
@@ -470,9 +519,10 @@ if it's stale or hand-edited (`npm run build:js-worklet && git diff --exit-code`
 
 `setChannelMute` (for the upcoming live-mute UI) is a typed message the
 processor accepts, but the actual libopenmpt `openmpt_module_ext` interactive
-mute call is **not yet wired** — it needs a dynCall trampoline into the
-wasm2js heap that deserves its own change (tracked as `TODO(#416)` in the
-processor source; throws when `WORKLET_DEV` is flipped on locally, rather
+mute call is **not yet wired** — it needs the ext-module create path plus a
+`dynCall` into the interactive interface's function-pointer table (now possible: the
+real-wasm glue exports `getValue`/`dynCall`; it deserves its own change, tracked as
+`TODO(#416)` in the processor source; throws when `WORKLET_DEV` is flipped on locally, rather
 than silently no-op'ing). `ctlSetText` (e.g.
 `render.resampler.emulate_amiga`) **is** fully wired via
 `_openmpt_module_ctl_set_text`.

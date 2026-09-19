@@ -355,10 +355,11 @@ describe('#354 production source invariants', () => {
     expect(workletSource).toMatch(/numCh\s*>\s*16/);
   });
 
-  it('uses cubic interpolation on param 3 (not stereo-sep param 2, not Sinc+LP 8)', () => {
+  it('applies the interpolation length on param 3 (never stereo-sep param 2); default is Sinc+LP 8 on real wasm', () => {
     expect(workletSource).toMatch(/OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH\s*=\s*3/);
+    expect(workletSource).toMatch(/DEFAULT_INTERPOLATION_LENGTH\s*=\s*8/);
     expect(workletSource).toMatch(
-      /_openmpt_module_set_render_param\(\s*this\.modulePtr\s*,\s*OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH\s*,\s*4\s*\)/,
+      /_openmpt_module_set_render_param\(\s*this\.modulePtr\s*,\s*OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH\s*,\s*this\._interpolationLength\s*,?\s*\)/,
     );
     expect(workletSource).not.toMatch(/_openmpt_module_set_render_param\(\s*this\.modulePtr\s*,\s*2\s*,/);
   });

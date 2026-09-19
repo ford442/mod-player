@@ -1,5 +1,5 @@
 // Polyfill global crypto for AudioWorklet Global Scope if missing
-// This MUST be set on globalThis before libopenmpt-audioworklet.js is evaluated
+// This MUST be set on globalThis before libopenmpt-worklet.js is evaluated
 // so that Emscripten's randomFill can find it.
 if (typeof globalThis.crypto === 'undefined' || !globalThis.crypto) {
   globalThis.crypto = {
@@ -28,13 +28,12 @@ if (typeof self !== 'undefined' && (!self.crypto || !self.crypto.getRandomValues
  *     the loaded module. See docs/WORKLET_AUDIO_BUG.md for the full post-mortem.
  *
  * WASM loading strategy: AudioWorklet classic scripts cannot use import() or
- * importScripts(). Instead, the main thread fetches libopenmpt-audioworklet.js
- * (and, only for classic Emscripten binary builds, libopenmpt.wasm) and sends
- * them via postMessage({ type:'initLib', scriptText, wasmBytes? }).
- *
- * Production glue is **wasm2js** (~5 MB JS with the runtime embedded). In that
- * mode wasmBytes is omitted — do NOT seed a fake/empty sibling .wasm. For a
- * future real-WASM glue, main thread validates \0asm magic before transfer.
+ * importScripts(), and the worklet scope has no fetch(). The main thread fetches
+ * libopenmpt-worklet.js (Emscripten glue, ~100 KB) and libopenmpt-worklet.wasm
+ * (real WebAssembly, \0asm magic-checked before transfer) and sends both via
+ * postMessage({ type:'initLib', scriptText, wasmBytes }). The glue is evaluated
+ * with `new Function` and seeded with Module.wasmBinary, so it instantiates the
+ * bytes directly. There is no wasm2js path: wasmBytes is required.
  *
  * NOTE: Chrome 116+ provides setTimeout in AudioWorkletGlobalScope. Older
  * browsers don't, so we polyfill it below using process()-driven ticks.
@@ -44,6 +43,7 @@ if (typeof self !== 'undefined' && (!self.crypto || !self.crypto.getRandomValues
  */
 
 import { MAIN_TO_WORKLET, WORKLET_TO_MAIN } from '../workletProtocolConstants';
+import { waitForRuntimeInitialized } from '../libRuntimeReady';
 
 const MT = MAIN_TO_WORKLET;
 const WT = WORKLET_TO_MAIN;
@@ -72,6 +72,17 @@ const DEBUG = false;
 // Flip to true only when testing #416 locally — throws instead of silently
 // no-op'ing setChannelMute so the gap is loud, not silent, during development.
 const WORKLET_DEV = false;
+
+// OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH is render param 3 (param 2 is
+// STEREOSEPARATION_PERCENT — do not confuse). 0 / >=8 = Sinc+LP; 1 = nearest; 2 = linear;
+// 3-7 = cubic. Values must match utils/openmptRenderParams.ts.
+const OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH = 3;
+// Real wasm (not wasm2js) makes the high-quality filter affordable: sinc-8 measured at ~4% of the
+// 128-frame quantum budget on a 64-channel stress module (mean; p99 ~11%), vs 37% for the old
+// wasm2js glue at *cubic* — see docs/planning/native-engine-bench-notes.md. The main thread can
+// still ask for 4 (cubic) via setRenderParam / `?interp=4` on weak devices.
+const DEFAULT_INTERPOLATION_LENGTH = 8;
+
 function log(...args: unknown[]): void {
   if (DEBUG) console.log('[Worklet]', ...args);
 }
@@ -259,6 +270,14 @@ function hasWasmBytes(wasmBytes: ArrayBuffer | Uint8Array | null | undefined): w
   return wasmBytes != null && wasmBytes.byteLength > 0;
 }
 
+/** WebAssembly binary magic: \0asm. Guards against an HTML 404 body being seeded as wasmBinary. */
+function hasWasmMagic(wasmBytes: ArrayBuffer | Uint8Array): boolean {
+  const head = wasmBytes instanceof Uint8Array
+    ? wasmBytes
+    : new Uint8Array(wasmBytes, 0, Math.min(4, wasmBytes.byteLength));
+  return head.length >= 4 && head[0] === 0x00 && head[1] === 0x61 && head[2] === 0x73 && head[3] === 0x6d;
+}
+
 /** UTF-8 encode without relying on TextEncoder (not guaranteed in every worklet impl). */
 function utf8Bytes(str: string): Uint8Array {
   const escaped = unescape(encodeURIComponent(str));
@@ -279,8 +298,9 @@ function allocUtf8CString(lib: LibOpenMPT, str: string): number {
 
 /**
  * Initialise libopenmpt once per AudioWorkletGlobalScope.
- * Every AudioWorkletNode shares this scope — re-evaluating the ~5 MB glue on
- * each node creation resets WASM heap state and breaks module reload (XM/MOD).
+ * Every AudioWorkletNode shares this scope — re-evaluating the glue (and
+ * re-instantiating the wasm) on each node creation resets heap state and breaks
+ * module reload (XM/MOD).
  */
 async function ensureSharedLibOpenMPT(
   scriptText: string | undefined,
@@ -298,13 +318,20 @@ async function ensureSharedLibOpenMPT(
         throw new Error('initLib missing scriptText');
       }
 
-      const wasmByteLength = hasWasmBytes(wasmBytes) ? wasmBytes.byteLength : 0;
+      // The worklet scope has no fetch(): the real .wasm must arrive as bytes. Fail loudly (and
+      // early) instead of letting the glue try — and time out on — a network fetch it can't do.
+      if (!hasWasmBytes(wasmBytes)) {
+        throw new Error('initLib missing wasmBytes (libopenmpt-worklet.wasm) — the JS engine is real WebAssembly');
+      }
+      if (!hasWasmMagic(wasmBytes)) {
+        throw new Error('initLib wasmBytes is not a WebAssembly binary (missing \\0asm magic)');
+      }
 
       log(
-        'Evaluating libopenmpt-audioworklet.js (',
+        'Evaluating libopenmpt-worklet.js (',
         scriptText.length,
         ' chars, wasmBytes:',
-        wasmByteLength,
+        wasmBytes.byteLength,
         ')…',
       );
 
@@ -323,10 +350,7 @@ async function ensureSharedLibOpenMPT(
         };
       }
 
-      globalThis.libopenmpt = { noInitialRun: true };
-      if (hasWasmBytes(wasmBytes)) {
-        globalThis.libopenmpt.wasmBinary = wasmBytes;
-      }
+      globalThis.libopenmpt = { noInitialRun: true, wasmBinary: wasmBytes };
 
       const cleanedScript = scriptText.replace(/^\s*export\s+(default\s+)?/gm, '');
       const fn = new Function(cleanedScript);
@@ -337,27 +361,10 @@ async function ensureSharedLibOpenMPT(
         throw new Error('globalThis.libopenmpt not set after script evaluation');
       }
 
-      if (!lib._openmpt_module_create_from_memory2) {
-        log('Waiting for WASM onRuntimeInitialized…');
-        await new Promise<void>((resolve, reject) => {
-          const timeout = setTimeout(
-            () => reject(new Error('WASM onRuntimeInitialized timeout')), 25000,
-          );
-          if (lib.calledRun) {
-            clearTimeout(timeout);
-            resolve();
-          } else {
-            const prev = lib.onRuntimeInitialized;
-            lib.onRuntimeInitialized = () => {
-              clearTimeout(timeout);
-              if (typeof prev === 'function') prev();
-              resolve();
-            };
-          }
-        });
-      } else {
-        log('WASM already initialised (functions present)');
-      }
+      // Always wait: real-wasm glue defines lazy export stubs at eval time, so the presence of
+      // `_openmpt_*` proves nothing (see audio-worklet/libRuntimeReady.ts).
+      log('Waiting for WASM onRuntimeInitialized…');
+      await waitForRuntimeInitialized(lib, 25000);
 
       globalThis.__openmptWorkletLib = lib;
       return lib;
@@ -455,6 +462,8 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
   declare oscWritePtr: number;
   declare _audioLite: boolean;
   declare _audioLiteExplicit: boolean;
+  /** Interpolation filter length; re-applied after every module create (which resets render params). */
+  declare _interpolationLength: number;
   // ?audioDiag=1 — per-quantum process() timing, correlated with row wraps.
   declare _audioDiag: boolean;
   /** Reused channel VU snapshot (length grows once to numChannels, then stable). */
@@ -539,6 +548,9 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
         this._resolveLib = resolve;
         this._rejectLib = reject;
       });
+      // Init failures (missing/corrupt wasm, glue abort, timeout) are reported to the main thread
+      // as WT.error messages; don't ALSO raise an unhandledrejection when nothing is awaiting yet.
+      this._libInitPromise.catch(() => {});
       this._libInitTimeout = setTimeout(() => {
         this._rejectLib(new Error('WASM init timeout: initLib message never received'));
         this.port.postMessage({ type: WT.error, message: 'WASM library init timeout' });
@@ -597,16 +609,21 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
         this._lastProcessTime = -1;
       } else if (type === MT.setChannelMute) {
         // TODO(#416): live channel mute needs the libopenmpt `openmpt_module_ext`
-        // interactive interface (set_channel_mute_status), which requires reading
-        // a function-pointer table out of the wasm2js heap and invoking it via
-        // dynCall — the wasm2js glue only exports ext_create/ext_get_interface
-        // today, not that trampoline. Land it as its own change (#416) rather
-        // than guess at an untested audio-thread FFI here. Native engine mutes
+        // interactive interface (set_channel_mute_status): create the module with
+        // ext_create_from_memory, read the function-pointer table via
+        // ext_get_interface, and call set_channel_mute_status through the exported
+        // Module.dynCall('iiii', …) (the real-wasm glue exports getValue/dynCall;
+        // utils/libopenmptExt.ts already does this on the main thread for offline
+        // render). Land it as its own change (#416) rather than guess at an
+        // untested audio-thread swap of the create path here. Native engine mutes
         // via cpp/openmpt_wrapper.cpp's KEEPAlives in the meantime.
         if (WORKLET_DEV) {
           throw new Error('setChannelMute not implemented for JS engine yet (TODO #416)');
         }
       } else if (type === MT.setRenderParam) {
+        if (msg.param === OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH) {
+          this._interpolationLength = msg.value;
+        }
         if (this.modulePtr && this.lib && typeof this.lib._openmpt_module_set_render_param === 'function') {
           this.lib._openmpt_module_set_render_param(this.modulePtr, msg.param, msg.value);
         }
@@ -640,6 +657,7 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
     this.oscWritePtr = 0;
     this._audioLite = false;
     this._audioLiteExplicit = false;
+    this._interpolationLength = DEFAULT_INTERPOLATION_LENGTH;
     this._audioDiag = false;
     this._resetAudioDiag();
     this._channelVuArr = [];
@@ -793,14 +811,11 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
   }
 
   // ── libopenmpt bootstrap via main-thread-fetched assets ────────────
-  // AudioWorklet classic scripts cannot use import() or importScripts().
-  // Main thread fetches libopenmpt-audioworklet.js (+ optional real .wasm)
-  // and posts them here. We evaluate the JS via new Function().
-  //
-  // wasm2js: do NOT set Module.wasmBinary — the glue clears wasmBinary to []
-  // and embeds the runtime in JS. Seeding HTML/garbage overwrites that and
-  // can break init. Classic binary builds: seed wasmBinary so Emscripten
-  // skips its own network fetch of the sibling .wasm.
+  // AudioWorklet classic scripts cannot use import() or importScripts(), and
+  // this scope has no fetch(). Main thread fetches libopenmpt-worklet.js and
+  // libopenmpt-worklet.wasm and posts both here. We evaluate the JS via
+  // new Function() and seed Module.wasmBinary so Emscripten instantiates the
+  // bytes directly instead of trying to fetch its sibling .wasm.
   async _handleInitLib({ scriptText, wasmBytes }: InitLibMsg): Promise<void> {
     try {
       if (this._libInitTimeout != null) clearTimeout(this._libInitTimeout);
@@ -821,7 +836,11 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
   async loadModule(moduleData: ArrayBuffer | Uint8Array): Promise<void> {
     log('loadModule: awaiting WASM ready…');
 
-    await this._libInitPromise;
+    try {
+      await this._libInitPromise;
+    } catch {
+      // initLib already reported why (WT.error); fall through to the "never became ready" error.
+    }
 
     if (!this.isLibReady || !this.lib) {
       error('WASM library never became ready');
@@ -867,12 +886,11 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
       this._fracRowInt = -1;
       this._rowStartPosSec = 0;
 
-      // OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH is param 3
-      // (param 2 is STEREOSEPARATION_PERCENT — do not confuse).
-      // 0 / ≥8 = Sinc+LP; 1 = nearest; 2 = linear; 3–7 = cubic.
-      // wasm2js stays on cubic: length 8 is too heavy at XM pattern wraps.
-      const OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH = 3;
-      lib._openmpt_module_set_render_param(this.modulePtr, OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH, 4);
+      lib._openmpt_module_set_render_param(
+        this.modulePtr,
+        OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH,
+        this._interpolationLength,
+      );
 
       const numCh = lib._openmpt_module_get_num_channels(this.modulePtr);
       // Heavy XM/IT modules: full-band audio-reactive scan at 60 Hz still tips

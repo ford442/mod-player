@@ -42,15 +42,27 @@ describe('libopenmpt interpolation filter (Sinc+LP)', () => {
     expect(offline).not.toMatch(/_openmpt_module_set_render_param\([^)]*,\s*2\s*,/);
   });
 
-  it('JS wasm2js worklet sets cubic on param 3 after create_from_memory', () => {
+  it('JS worklet defaults to Sinc+LP (8) on param 3 and re-applies the stored length after every create', () => {
     expect(worklet).toMatch(/OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH\s*=\s*3/);
+    // Real wasm makes sinc-8 affordable (docs/planning/native-engine-bench-notes.md); the old
+    // wasm2js glue hard-capped this at 4.
+    expect(worklet).toMatch(/DEFAULT_INTERPOLATION_LENGTH\s*=\s*8/);
     expect(worklet).toMatch(
-      /_openmpt_module_set_render_param\(\s*this\.modulePtr\s*,\s*OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH\s*,\s*4\s*\)/,
+      /_openmpt_module_set_render_param\(\s*this\.modulePtr\s*,\s*OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH\s*,\s*this\._interpolationLength\s*,?\s*\)/,
     );
     expect(worklet).not.toMatch(/_openmpt_module_set_render_param\(\s*this\.modulePtr\s*,\s*2\s*,/);
+    // A main-thread setRenderParam(3, n) must survive module reloads (create resets render params).
+    expect(worklet).toMatch(/this\._interpolationLength\s*=\s*msg\.value/);
   });
 
-  it('ScriptProcessor fallback matches JS worklet (cubic on param 3)', () => {
+  it('JS playback start sends the resolved length (?interp= / default 8) before load', () => {
+    const start = readFileSync(join(ROOT, 'hooks/audioGraph/startJsWorkletPlayback.ts'), 'utf8');
+    expect(start).toContain('resolveJsInterpolationLength()');
+    expect(start).toMatch(/postSetRenderParam\(\s*OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH/);
+    expect(start.indexOf('postSetRenderParam(')).toBeLessThan(start.indexOf('postLoad('));
+  });
+
+  it('ScriptProcessor fallback stays cubic on param 3 (main-thread callback budget)', () => {
     expect(scriptProcessor).toContain('OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH');
     expect(scriptProcessor).toContain('INTERPOLATION_CUBIC');
     expect(scriptProcessor).not.toMatch(/_openmpt_module_set_render_param\([^)]*,\s*2\s*,/);

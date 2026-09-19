@@ -64,7 +64,7 @@ mod-player/
 ├── shaders/                     # WGSL source shaders (~56 files, e.g. patternv0.45.wgsl)
 ├── shaders-enhanced/            # Experimental enhanced shader variants
 ├── public/
-│   ├── worklets/                # openmpt-processor.js — runs on Audio Worklet thread (static asset)
+│   ├── worklets/                # openmpt-worklet.js (AudioWorklet processor) + libopenmpt-worklet.{js,wasm} (real-WASM libopenmpt: worklet, main thread, parser worker) (static assets)
 │   ├── shaders/                 # Public-served copies of shaders
 │   └── utils/                   # Static utility scripts
 │
@@ -88,6 +88,8 @@ npm run lint         # ESLint (max 43 warnings budget; hard CI gate)
 npm run build:emcc   # Native C++ worklet → openmpt-native.* (scripts/build-wasm.sh, emsdk 3.1.51)
 npm run build:worklet # Alias of build:emcc (never overwrites openmpt-worklet.js)
 npm run build:js-worklet # Compile audio-worklet/js/openmpt-processor.ts → public/worklets/openmpt-worklet.js (esbuild)
+npm run build:js-libopenmpt # Real-WASM libopenmpt for the JS engine → public/worklets/libopenmpt-worklet.{js,wasm} (emsdk 3.1.51; committed)
+npm run verify:js-libopenmpt # Static + boot/render/corrupt-input checks of that pair (no emsdk needed)
 python3 deploy.py    # Build + SFTP upload to production server
 ```
 
@@ -209,7 +211,7 @@ EngineState           // Worklet engine lifecycle state
 
 3. **CORS / SharedArrayBuffer:** The Vite dev server sets `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: credentialless`. These are required for Emscripten WASM workers. Do not remove them.
 
-4. **libopenmpt CDN load:** `libopenmptjs.js` is loaded in `index.html` from `https://wasm.noahcohn.com/libmpt/`. The app waits on `window.libopenmptReady` before initializing. This must load before any audio operations.
+4. **libopenmpt is self-hosted real WASM:** `public/worklets/libopenmpt-worklet.{js,wasm}` (built by `npm run build:js-libopenmpt`, emsdk 3.1.51; tracked in git) is loaded in `index.html` (injected by `vite-plugins/libopenmptHtml.ts` with SRI + `?v=`) and is the **same pair** the AudioWorklet and the parser worker use. The app waits on `window.libopenmptReady` before initializing. It never replaces `globalThis.WebAssembly` — do not reintroduce a wasm2js glue or a `__NATIVE_WEBASSEMBLY__` snapshot. Readiness = `onRuntimeInitialized` (`audio-worklet/libRuntimeReady.ts`), never "`_openmpt_*` is defined". Never export a real `stringToUTF8` from the glue (the app polyfills its own with a different signature); `npm run verify:js-libopenmpt` guards this.
 
 5. **Tailwind content paths:** `tailwind.config.js` explicitly scopes content to avoid OOM during builds. Do not add broad glob patterns.
 
@@ -230,7 +232,7 @@ EngineState           // Worklet engine lifecycle state
 12. **One `AudioContext` per page session:** `utils/audioContextFactory.ts`
     (`createPlayerAudioContext` / `getSharedPlayerAudioContext`) is the only
     place a context is constructed. `sampleRate` is locked to **48000** (the
-    `--grow` native heap build and wasm2js both render there, and the playhead
+    `--grow` native heap build and the JS engine's libopenmpt both render there, and the playhead
     math `samplesWritten / sampleRate` needs a fixed rate); `latencyHint` is a
     *create-time* choice — `playback`, or `interactive` under stage mode /
     `?latency=interactive` — and is never re-applied by recreating the context.

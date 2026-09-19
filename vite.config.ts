@@ -18,8 +18,6 @@ export default defineConfig(({ mode }) => {
   // dev default: /
   // deploy build: VITE_APP_BASE_PATH=/xm-player/ npm run build (or .env.production)
   const base = process.env.VITE_APP_BASE_PATH || env.VITE_APP_BASE_PATH || '/'
-  const libopenmptCdnUrl =
-    process.env.VITE_LIBOPENMPT_CDN_URL || env.VITE_LIBOPENMPT_CDN_URL || ''
   const storageApiUrl = process.env.VITE_STORAGE_API_URL || env.VITE_STORAGE_API_URL || 'http://localhost:8000'
   const storageProxyTarget = (() => {
     try {
@@ -31,7 +29,7 @@ export default defineConfig(({ mode }) => {
   
   return {
     base,
-    plugins: [react(), libopenmptHtmlPlugin(base, libopenmptCdnUrl)],
+    plugins: [react(), libopenmptHtmlPlugin(base)],
     server: {
       // The CodeQL scanner leaves behind a self-referential symlink
       // (_codeql_detected_source_root → .) which causes Vite's chokidar FSWatcher
