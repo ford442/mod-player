@@ -20,6 +20,14 @@ jobs:
           node-version: '22'
           cache: 'npm'
       
+      - name: Lockfile metadata guard (integrity/resolved/lockfileVersion)
+        run: npm run verify:lockfile
+
+      - name: Lockfile graph guard (package.json <-> lock in sync)
+        # npm's own validator; names the exact missing specifier in ~2s, offline.
+        # Runs before `npm ci` so a corrupt lockfile fails fast and by name.
+        run: npm ci --dry-run --ignore-scripts
+
       - name: Install dependencies
         run: npm ci
 

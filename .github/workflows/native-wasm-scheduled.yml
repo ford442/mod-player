@@ -32,6 +32,13 @@ jobs:
           node-version: '22'
           cache: 'npm'
 
+      - name: Lockfile guards (metadata + package.json <-> lock in sync)
+        # A bad lockfile on main otherwise surfaces here as a cryptic `npm ci`
+        # failure a week later. ~3s combined.
+        run: |
+          npm run verify:lockfile
+          npm ci --dry-run --ignore-scripts
+
       - name: Install dependencies
         run: npm ci
 
@@ -141,6 +148,13 @@ jobs:
         with:
           node-version: '22'
           cache: 'npm'
+
+      - name: Lockfile guards (metadata + package.json <-> lock in sync)
+        # A bad lockfile on main otherwise surfaces here as a cryptic `npm ci`
+        # failure a week later. ~3s combined.
+        run: |
+          npm run verify:lockfile
+          npm ci --dry-run --ignore-scripts
 
       - name: Install dependencies
         run: npm ci

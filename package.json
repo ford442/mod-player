@@ -24,6 +24,7 @@
     "verify:wasm": "node scripts/verify-wasm-assets.mjs",
     "verify:build": "node scripts/verify-build.mjs",
     "verify:bundle-budget": "node scripts/verify-bundle-budget.mjs",
+    "verify:lockfile": "node scripts/verify-lockfile.mjs",
     "build:xm-player:verify": "npm run build:xm-player && npm run verify:build && npm run verify:bundle-budget",
     "deploy": "python3 deploy.py",
     "deploy:go": "python3 deploy.py --site go",
@@ -54,7 +55,8 @@
     "bench:engine": "node scripts/benchmark-engine-mainthread.mjs",
     "smoke:audio": "node scripts/audio-smoke.mjs",
     "smoke:audio:ci": "AUDIO_SMOKE_HEADLESS=1 node scripts/audio-smoke.mjs",
-    "check:cycles": "madge --circular --extensions ts,tsx src/renderers hooks/useWebGPURender.ts"
+    "check:cycles": "madge --circular --extensions ts,tsx src/renderers hooks/useWebGPURender.ts",
+    "preflight": "npm run verify:lockfile && npm ci --dry-run --ignore-scripts && npm run lint && npm run typecheck && npm run typecheck:tests && npm test && npm run test:shader-registry && npm run build"
   },
   "dependencies": {
     "@react-three/drei": "^9.122.0",
