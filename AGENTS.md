@@ -21,7 +21,12 @@
 - **`tailwind.config.js`** — Explicit `content` paths only (no broad globs) to prevent build OOM. Custom theme extensions for `panel`, `edge`, `accent`, `glow`, `borderColor`, and `boxShadow`.
 - **`postcss.config.js`** — TailwindCSS + Autoprefixer.
 - **`eslint.config.js`** — Ignores `dist`, `public`, `vendor`, `archive`, `node_modules`, `jules_patch`, `subdir`, `scripts`, `cpp`. CI: `npm run lint` (max 43 warnings; ratchet down as debt is paid).
-- **`package-lock.json`** — Committed for reproducible installs. CI uses `npm ci`.
+- **`package-lock.json`** — Committed for reproducible installs. CI uses `npm ci`. Never hand-edit it; regenerate with `npm install`. Guarded by `npm run verify:lockfile` (metadata) plus `npm ci --dry-run --ignore-scripts` (graph), both of which run in CI before `npm ci`.
+
+## Before Committing
+Run `npm run preflight` — one chained command (`verify:lockfile` → `npm ci --dry-run --ignore-scripts` → `lint` → `typecheck` → `typecheck:tests` → `test` → `test:shader-registry` → `build`) that stops at the first failure and mirrors the `lint-and-build` CI job. It does **not** cover the browser/emsdk jobs (`visual-smoke`, `audio-smoke`, `playhead-smoke`, `wasm-smoke-test`, `native-full-build`).
+
+`main` is covered by a repository ruleset: a PR and a passing `lint-and-build` check are required, force-pushes and branch deletion are blocked, and a direct `git push origin main` is refused. Work on a feature branch. See `CONTRIBUTING.md`.
 
 ## Audio Architecture (Three Tiers + Fallback)
 The audio logic is split across the **Main Thread** and the **Audio Worklet Thread**, with an optional high-performance native C++ worklet.

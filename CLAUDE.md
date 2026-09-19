@@ -84,6 +84,8 @@ npm run dev          # Start Vite dev server at http://localhost:5173
 npm run build        # tsc + Vite production build → dist/ (uses 4 GB heap)
 npm run preview      # Preview production build locally
 npm run typecheck    # TypeScript type-check only (no emit)
+npm run preflight    # Run before every commit: the whole `lint-and-build` chain, stops at first failure
+npm run verify:lockfile # package-lock.json metadata guard (lockfileVersion 3, resolved + integrity)
 npm run lint         # ESLint (max 43 warnings budget; hard CI gate)
 npm run build:emcc   # Native C++ worklet → openmpt-native.* (scripts/build-wasm.sh, emsdk 3.1.51)
 npm run build:worklet # Alias of build:emcc (never overwrites openmpt-worklet.js)
@@ -309,7 +311,9 @@ All shared canvas layout values live here:
 
 ## What NOT To Do
 
-- **Do not** push to `master` directly — use feature branches
+- **Do not** push to `main` / `master` directly — `main` is ruleset-protected and a direct push is refused; use a feature branch and open a PR
+- **Do not** commit without running `npm run preflight` first (see Development Commands)
+- **Do not** hand-edit `package-lock.json` — regenerate it with `npm install`
 - **Do not** reintroduce `shaderFile.includes('v0.XX')` chains — extend `ShaderMeta` instead
 - **Do not** replace `channelStatesRef` with React state
 - **Do not** use DOM APIs inside the AudioWorklet processor
