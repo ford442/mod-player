@@ -2,7 +2,9 @@
 
 Living pointer to active work. **Do not** append agent run diaries here — use GitHub issues and PRs for status.
 
-**Last reconciled:** 2026-09-18 (#427 closed — verified fixed in tree; #440 / #441 landed green). Foundation issues #401 / #402 / #404 are **closed** (code landed; leftovers filed as #411–#415, re-cut on 2026-09-15 as #435–#439). CI on `main` is **green** for runs 612 / 614 / 616.
+**Last reconciled:** 2026-09-25. #437 landed via #445 (3D is now a sibling overlay; `webgpuDevice.ts` is the only adapter/device/`configure()` owner), #439 landed as a direct `push fix` (`2d6a4ed`, real-WASM libopenmpt for the JS engine), #442's `preflight` + lockfile guard landed via #446. CI on `main` is **green** (runs 622 / 623 / 625; `native-wasm-scheduled` run 11 green 2026-09-21). No open PRs.
+
+**Foundation state:** stable. The only remaining foundation item is the #436 WebGL2 decision. #437 and #442 are still **open** on GitHub even though their code has landed, so close them (details below).
 
 ## ✅ CI history — three breaks (runs 597–603), all fixed
 
@@ -38,34 +40,29 @@ The `{stageMode ? <PerformanceStage/> : <ChromeLayout/>}` subtree swap recorded 
 
 Landed by `8175cc9` (`fix(stage): URL ?stage= preference, toggle/exit commands, layout`). The file split deviates from the names #427 proposed (`ChromeLayout` / `PerformanceStage` / `GlobalControlsBar` / `TransportBar` / `SidePanelGrid` / `PatternEditorSection` / `LibraryAndPlaylistSection` instead of `components/layout/Chrome*.tsx`), but the governing rule — the `<canvas>` and audio graph must not remount on toggle — is satisfied.
 
-**The same bug class is still live for 3D mode**, which is what #427 originally cited as the anti-pattern: `App.tsx:508` still early-returns `<App3DModeShell />`, and `components/App3DView.tsx:159` remounts `PatternDisplay` again with `key={shader3D}`. Tracked as **#437**, now the P1.
+**The same bug class is still live for 3D mode**, which is what #427 originally cited as the anti-pattern: `App.tsx:508` still early-returns `<App3DModeShell />`, and `components/App3DView.tsx:159` remounts `PatternDisplay` again with `key={shader3D}`. Tracked as **#437**. It landed via #445 on 2026-09-18.
 
 **#411 audio-graph leftovers are now cleared:** `utils/audioContextFactory.ts` is the single `AudioContext` construction site (one context per page session, `sampleRate` locked to 48000, `latencyHint` from the stage-mode / `?latency=` profile), and the `?nativeCtx=legacy` dual-context path — `parseNativeCtxQueryParam`, `isNativeLegacyAudioContext`, the dual-context capture block and `public/worklets/native-bridge-processor.js` — is deleted. Still outstanding on #411: `docs/planning/native-engine-bench-notes.md` now carries the methodology plus **one** recorded JS baseline row (2026-09-18); the native column is still empty and needs an emsdk 3.1.51 host to fill.
 
-**Build on foundation before new content.** Do not start #417 (performance instrument) or the #438 spectrum-shader family until #437 lands and #436 has a decision — both sit on the same WebGPU init surface. #403 (tracker studio) can proceed in parallel with P1; typed worklets (#435) are done, so its sample-audition worklet builds on `audio-worklet/js/` instead of adding more untyped classic JS.
+**Build on foundation before new content.** #437 has landed, so #438 (spectrum-shader family) is unblocked. #417 (performance instrument) still waits on the #436 decision. #403 (tracker studio) can proceed in parallel with P1; typed worklets (#435) are done, so its sample-audition worklet builds on `audio-worklet/js/` instead of adding more untyped classic JS.
 
 ## Active (do now)
 
 | Priority | Issue | Summary |
 |----------|-------|---------|
-| **P1 — do first** | [#437](https://github.com/ford442/mod-player/issues/437) | 3D mode tears down the GPU the way #427 forbade: `App.tsx:508` early-returns `App3DModeShell`, and `App3DView.tsx:159` remounts `PatternDisplay` with `key={shader3D}`. Also three `requestAdapter` call sites (`src/renderers/rendererSelection.ts:113`, `utils/deviceCapabilities.ts:99`, `utils/webgpuDevice.ts:266`) and a probe/runtime `alphaMode` mismatch (`webgpuDevice.ts:387` `opaque` vs `:465` `premultiplied`). |
-| P1 | [#436](https://github.com/ford442/mod-player/issues/436) | Resolve the WebGL2 contradiction: revive `?renderer=webgl2` as a real viz session **or** delete the deferred path and retarget smoke/capture/docs. (Re-cut of #415.) |
-| ~~P1~~ **done** | [#435](https://github.com/ford442/mod-player/issues/435) | `public/worklets/openmpt-worklet.js` now compiles from `audio-worklet/js/openmpt-processor.ts` (`npm run build:js-worklet`, esbuild); `worklet-protocol-constants.js` mirror deleted in favor of a single `workletProtocolConstants.ts` import shared with `protocol.ts`; `WORKLET_VERSION` derives from a build-time content hash instead of a hand-maintained counter. `ctlSetText` is fully wired; `setChannelMute` stays a typed, tracked `TODO(#416)` stub (throws in dev, never silent). (Re-cut of #413.) |
-| P1 (hygiene) | [#442](https://github.com/ford442/mod-player/issues/442) | `npm run preflight` aggregate + `scripts/verify-lockfile.mjs`, wired into `lint-and-build` after `npm ci`. Every red run in 597–610 came from a direct `push fix` to `main`. Scoped to `scripts/` / `package.json` / one `ci.yml` step / docs — no overlap with #437. |
-| ~~P1~~ **done** | [#427](https://github.com/ford442/mod-player/issues/427) | Closed 2026-09-18. CSS-only stage mode, invariant tree, no pref mutation, pinned by `tests/stageModeLayout.test.ts`. 3D remount carried over to #437. |
-| ~~P1~~ **done** | [#412](https://github.com/ford442/mod-player/issues/412) | Two-phase `em++` compile/link fixes the `__cxa_throw` break (and `--debug`'s missing `-matomics`). Mute/interpolation verified against the real wrapper on emsdk 3.1.51. Unblocks #416. |
-| P1 | [#414](https://github.com/ford442/mod-player/issues/414) | Bus half **done** (`utils/pcmBus.ts` + `computeAnalysis.ts`). Layout half done as of #427's close. **Close this.** |
-| P1 (leftover) | [#411](https://github.com/ford442/mod-player/issues/411) | Audio-graph half **done** (single `AudioContext` factory, 48 kHz locked, profiled `latencyHint`; `?nativeCtx=legacy` deleted). Remaining: `native-engine-bench-notes.md` has methodology plus one recorded JS baseline row — the native column still needs an emsdk 3.1.51 host. |
+| P1 | [#436](https://github.com/ford442/mod-player/issues/436) | Resolve the WebGL2 contradiction: revive `?renderer=webgl2` as a real viz session **or** delete the deferred path and retarget smoke/capture/docs. Last open foundation item; #417 still waits on it. |
+| P1 (feature) | [#438](https://github.com/ford442/mod-player/issues/438) | GPU FFT spectrum → chassis shaders (v0.60 family reading `computeAnalysis`). **Unblocked** — #437 landed, so the WebGPU init surface is stable. Newest shader today is v0.59. |
+| P1 (feature) | [#416](https://github.com/ford442/mod-player/issues/416) | Live mute/solo. **JS path unblocked by #439**: the real-WASM glue exports the whole `libopenmpt_ext.h` API plus `dynCall`/`getValue`, and `utils/libopenmptExt.ts` already drives the ext interface on the main thread. Worklet stub is `TODO(#416)` in `audio-worklet/js/openmpt-processor.ts` (`MT.setChannelMute`). |
+| **close** | [#437](https://github.com/ford442/mod-player/issues/437) | Landed in #445 (`c686bc0`). `App.tsx` renders `App3DModeShell` as a sibling of `MainLayout`, not an early return. Adapter/device requests go through `utils/webgpuDevice.ts`, and `configureCanvasContext` defaults the probe and runtime to `premultiplied`. Pinned by `tests/threeDModeLayout.test.ts` and `tests/webgpuDeviceOwnership.test.ts`. |
+| **close / narrow** | [#442](https://github.com/ford442/mod-player/issues/442) | `npm run preflight` + `scripts/verify-lockfile.mjs` landed in #446. The ruleset half needs checking. `CLAUDE.md` says `main` is ruleset-protected, but `2d6a4ed` (a 40-file `push fix`) went straight to `main` on 2026-09-19. Either that push predates the ruleset or the ruleset has a bypass, so check the repo settings before closing. |
 
 ## Next (after foundation)
 
 | Priority | Issue | Summary |
 |----------|-------|---------|
-| P2 | [#403](https://github.com/ford442/mod-player/issues/403) | Tracker studio: inspector waveforms, S3M extract, **audible** pattern edits via a sample-audition worklet (libopenmpt cannot write cells). |
-| P2 | [#416](https://github.com/ford442/mod-player/issues/416) | Live channel mute/solo through JS + native (export-only today). **Unblocked** — `_set_channel_mute` is exported and range-safe as of #412. Distinct from #403. |
-| P2 | [#417](https://github.com/ford442/mod-player/issues/417) | Performance instrument: MIDI/chassis on `playerCommands`, `stageMode`, WebCodecs music-video (`mp4-muxer` optional). `stageMode` is now unblocked; still depends on the #436 decision. |
-| P2 | [#438](https://github.com/ford442/mod-player/issues/438) | Bind the GPU FFT spectrum into the chassis shaders — a v0.60 family that reads `computeAnalysis`. Do after #437 (same WebGPU init surface). |
-| P2 | [#439](https://github.com/ford442/mod-player/issues/439) | Replace the wasm2js JS engine with real libopenmpt WASM; keep the C++ native build as the SIMD path. |
+| P2 | [#403](https://github.com/ford442/mod-player/issues/403) | Tracker studio: inspector waveforms, S3M extract, **audible** pattern edits via a sample-audition worklet (libopenmpt cannot write cells). Build the worklet on `audio-worklet/js/` (typed, #435). |
+| P2 | [#417](https://github.com/ford442/mod-player/issues/417) | Performance instrument: MIDI/chassis on `playerCommands`, `stageMode`, WebCodecs music-video. Waits on the #436 decision. |
+| P2 (leftover) | #411 (closed) | `native-engine-bench-notes.md` native column still empty. Filling it needs an emsdk 3.1.51 host. #439 rewrote the JS baseline notes, so re-baseline both columns together. |
 
 ## Landed (do not re-open)
 
@@ -94,6 +91,10 @@ Landed by `8175cc9` (`fix(stage): URL ?stage= preference, toggle/exit commands, 
 | [#427](https://github.com/ford442/mod-player/issues/427) stage mode without a canvas remount | `8175cc9`, verified 2026-09-18. `MainLayout` + `ChromeLayout` + `tests/stageModeLayout.test.ts`. |
 | Single `AudioContext` factory; `?nativeCtx=legacy` dual-context path deleted | [#440](https://github.com/ford442/mod-player/pull/440), on `main` 2026-09-18 (`cd23f8d`). `utils/audioContextFactory.ts` is the only construction site; `tests/audioContextFactory.test.ts` fails the build on a second one. |
 | One resident native `OpenMPTModule`; typed `ERR_*` load errors; locked `init_audio` | [#441](https://github.com/ford442/mod-player/pull/441), on `main` 2026-09-18 (`21252a9`). Transient `g_metaModule` is unloaded by `commit_module()` before the audio thread builds `g_module`; `scripts/verify-native-exports.mjs` enforces it. |
+| [#435](https://github.com/ford442/mod-player/issues/435) Typed JS worklet | [#444](https://github.com/ford442/mod-player/pull/444), on `main` 2026-09-18. `openmpt-worklet.js` is generated from `audio-worklet/js/openmpt-processor.ts`. |
+| [#437](https://github.com/ford442/mod-player/issues/437) 3D mode keeps `PatternDisplay` mounted; single WebGPU owner | [#445](https://github.com/ford442/mod-player/pull/445), on `main` 2026-09-18 (`c686bc0`). Issue still open, so close it. |
+| [#439](https://github.com/ford442/mod-player/issues/439) Real-WASM libopenmpt for the JS engine (wasm2js glue deleted) | `2d6a4ed` **direct push to `main`**, 2026-09-19 (CI run 623 green). libopenmpt 0.8.4, emsdk 3.1.51, `public/worklets/libopenmpt-worklet.{js,wasm}`, `npm run verify:js-libopenmpt`. Never reviewed as a PR. |
+| [#442](https://github.com/ford442/mod-player/issues/442) `npm run preflight` + lockfile guard | [#446](https://github.com/ford442/mod-player/pull/446), on `main` 2026-09-19 (`11f2ef8`). Ruleset half unverified (see Active). |
 
 ## Planning scratch (local, gitignored)
 
