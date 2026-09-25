@@ -575,6 +575,20 @@ export const SHADER_REGISTRY: Readonly<Record<string, ShaderMeta>> = {
     usesGpuSpectrum: true,
     background: 'bezel_audio.wgsl',
   }),
+
+  // ── v0.60 — spectrum chassis (GPU FFT bins → bezel_spectrum.wgsl) ─────────
+  // LED pass = v0.59. The chassis reads the compute pass's bins buffer directly
+  // (binding 4 background / 9 pattern) instead of the binding-8 SAB uniform.
+  'patternv0.60.wgsl': circularLed({
+    bloomProfile: 'three-emitter',
+    instrumentPalette: true,
+    instrumentHighlight: true,
+    supportsReducedMotion: false,
+    stepsDrivenVisibleRows: true,
+    usesGpuSpectrum: true,
+    spectrumBuffer: true,
+    background: 'bezel_spectrum.wgsl',
+  }),
 };
 
 /** Look up metadata for a shader, or null if the filename is not registered. */

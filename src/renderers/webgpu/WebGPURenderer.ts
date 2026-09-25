@@ -11,6 +11,7 @@ import {
   usesAudioReactive,
   usesAudioReactiveBezel,
   usesGpuSpectrum,
+  usesSpectrumBuffer,
   usesVideoPatternTexture,
   getShaderEntryPoints,
   type LayoutType,
@@ -50,6 +51,7 @@ import {
 import {
   createMainBindGroupLayout,
   refreshMainBindGroup,
+  SPECTRUM_BACKGROUND_BINDING,
   type BindGroupTextureResources,
 } from './bindGroup';
 import { loadBezelTexture, ensureButtonTexture, ensureVideoPlaceholder } from './textures';
@@ -68,7 +70,11 @@ import {
   type FrameDrawScratch,
   type FrameDrawState,
 } from './frameDraw';
-import { ComputeAnalysis, COMPUTE_ANALYSIS_PASS_LABEL } from './computeAnalysis';
+import {
+  ComputeAnalysis,
+  COMPUTE_ANALYSIS_PASS_LABEL,
+  SPECTRUM_BUFFER_BYTES,
+} from './computeAnalysis';
 import { GpuTimestampRecorder, deviceHasTimestampQuery } from './timestampQuery';
 import {
   isPatternDiagEnabled,
@@ -137,6 +143,7 @@ export class WebGPURenderer {
   private bezelHdrPipeline: GPURenderPipeline | null = null;
   private computeState: NoteDurationComputeState | null = null;
   private bezelBindGroup: GPUBindGroup | null = null;
+  private bezelBindLayout: GPUBindGroupLayout | null = null;
   private bezelUniformBuffer: GPUBuffer | null = null;
   private instrumentPaletteTexture: GPUTexture | null = null;
   private instrumentPaletteVersion: Uint8Array | null = null;
@@ -159,6 +166,14 @@ export class WebGPURenderer {
   private computeAnalysisInit: Promise<void> | null = null;
   /** Whether the active shader opted into GPU audio analysis (ShaderMeta flag). */
   private gpuSpectrumWanted = false;
+  /**
+   * Zeroed stand-in for the spectrum bins, bound while ComputeAnalysis has not
+   * resolved (or never will: lite mode, kernel compile failure). Only exists
+   * for `spectrumBuffer` shaders; lives in the pool's 'shader' scope.
+   */
+  private spectrumPlaceholder: GPUBuffer | null = null;
+  /** Spectrum buffer the current bind groups were built over. */
+  private boundSpectrumBuffer: GPUBuffer | null = null;
   /** Skip DURA/cells rebuild when the same pattern is already on the GPU. */
   private lastCellsKey = '';
   /**
@@ -276,12 +291,16 @@ export class WebGPURenderer {
         textureResources: this.textureResources,
         instrumentPaletteTexture: this.instrumentPaletteTexture,
         audioReactiveUniformBuffer: this.audioReactiveUniformBuffer,
+        spectrumBuffer: this.currentSpectrumBuffer(),
         layoutType: this.layoutType,
       },
       this.shaderFile,
       this.deps.oscTextureRef?.current,
     );
     this.bindGroup = group;
+    if (group && usesSpectrumBuffer(this.shaderFile)) {
+      this.boundSpectrumBuffer = this.currentSpectrumBuffer();
+    }
     if (group && usesOscilloscope(this.shaderFile)) {
       this.boundOscTextureGeneration = this.oscTextureGeneration;
     }
@@ -307,17 +326,72 @@ export class WebGPURenderer {
     return group;
   }
 
+  /**
+   * The spectrum bins a `spectrumBuffer` shader should read right now: the live
+   * ComputeAnalysis buffer once it exists, else the zeroed placeholder. Never
+   * a destroyed buffer — `ComputeAnalysis.spectrumBuffer` is null once disposed.
+   */
+  private currentSpectrumBuffer(): GPUBuffer | null {
+    return this.computeAnalysis?.spectrumBuffer ?? this.spectrumPlaceholder;
+  }
+
+  /**
+   * ComputeAnalysis resolves after the first bind groups are built (it compiles
+   * asynchronously, off the critical path) and can disappear on teardown. When
+   * the buffer a spectrum shader should be reading is no longer the one its bind
+   * groups reference, rebuild them — the same pattern the oscilloscope texture
+   * uses. No-op for every shader without the flag.
+   */
+  private syncSpectrumBinding(): void {
+    if (!usesSpectrumBuffer(this.shaderFile) || !this.pipeline) return;
+    if (this.currentSpectrumBuffer() === this.boundSpectrumBuffer) return;
+    this.refreshBezelBindGroup();
+    this.refreshBindGroup();
+  }
+
+  /**
+   * (Re)build the background-pass bind group. Split out of `initShader` so the
+   * spectrum binding can be swapped without recompiling the chassis pipeline.
+   */
+  private refreshBezelBindGroup(): void {
+    const device = this.device;
+    const pool = this.pool;
+    if (!device || !pool || pool.isDisposed) return;
+    if (!this.bezelBindLayout || !this.bezelUniformBuffer || !this.bezelTextureResources) return;
+
+    const entries: GPUBindGroupEntry[] = [
+      { binding: 0, resource: { buffer: this.bezelUniformBuffer } },
+      { binding: 1, resource: this.bezelTextureResources.sampler },
+      { binding: 2, resource: this.bezelTextureResources.view },
+    ];
+    if (usesAudioReactiveBezel(this.shaderFile) && this.audioReactiveUniformBuffer) {
+      entries.push({ binding: 3, resource: { buffer: this.audioReactiveUniformBuffer } });
+    }
+    if (usesSpectrumBuffer(this.shaderFile)) {
+      const spectrum = this.currentSpectrumBuffer();
+      if (!spectrum) return;
+      entries.push({
+        binding: SPECTRUM_BACKGROUND_BINDING,
+        resource: { buffer: spectrum, size: SPECTRUM_BUFFER_BYTES },
+      });
+    }
+    this.bezelBindGroup = device.createBindGroup({ layout: this.bezelBindLayout, entries });
+  }
+
   releaseShaderResources(): void {
     this.renderGeneration = this.lifecycle.bump();
     this.bindGroup = null;
     this.pipeline = null;
     this.hdrPipeline = null;
     this.bezelBindGroup = null;
+    this.bezelBindLayout = null;
     this.bezelPipeline = null;
     this.bezelHdrPipeline = null;
     this.bezelTextureResources = null;
     this.textureResources = null;
     this.instrumentPaletteVersion = null;
+    this.spectrumPlaceholder = null;
+    this.boundSpectrumBuffer = null;
 
     const pool = this.pool;
     if (pool && !pool.isDisposed) {
@@ -601,6 +675,13 @@ export class WebGPURenderer {
         if (usesAudioReactiveBezel(shaderFile)) {
           bezelBindEntries.push({ binding: 3, visibility: GPUShaderStage.FRAGMENT, buffer: { type: 'uniform' } });
         }
+        if (usesSpectrumBuffer(shaderFile)) {
+          bezelBindEntries.push({
+            binding: SPECTRUM_BACKGROUND_BINDING,
+            visibility: GPUShaderStage.FRAGMENT,
+            buffer: { type: 'read-only-storage' },
+          });
+        }
         const bindLayout = device.createBindGroupLayout({ entries: bezelBindEntries });
         const bezelLayout = device.createPipelineLayout({ bindGroupLayouts: [bindLayout] });
         const bezelDescriptor = (format: GPUTextureFormat): GPURenderPipelineDescriptor => ({
@@ -703,6 +784,19 @@ export class WebGPURenderer {
     this.gpuSpectrumWanted = usesGpuSpectrum(activeShaderFile);
     this.computeAnalysis?.setEnabled(this.gpuSpectrumWanted);
 
+    if (usesSpectrumBuffer(activeShaderFile)) {
+      // Created before any bind group so the first frame always has something
+      // valid to bind. WebGPU zero-initialises buffers: this reads as silence.
+      this.spectrumPlaceholder = pool.track(
+        device.createBuffer({
+          label: 'spectrum-placeholder',
+          size: SPECTRUM_BUFFER_BYTES,
+          usage: GPUBufferUsage.STORAGE,
+        }),
+        'shader',
+      );
+    }
+
     if (usesAudioReactive(activeShaderFile) || usesAudioReactiveBezel(activeShaderFile)) {
       this.audioReactiveUniformBuffer = pool.track(
         device.createBuffer({
@@ -715,24 +809,16 @@ export class WebGPURenderer {
 
     if (built.bezel) {
       try {
-        const audioBezel = usesAudioReactiveBezel(activeShaderFile);
         this.bezelUniformBuffer = pool.track(
           device.createBuffer({ size: alignTo(96, 256), usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST }),
           'shader',
         );
         this.bezelTextureResources = await loadBezelTexture(device, pool, activeShaderFile);
         if (isCancelled() || pool.isDisposed) return;
-        const bezelGroupEntries: GPUBindGroupEntry[] = [
-          { binding: 0, resource: { buffer: this.bezelUniformBuffer } },
-          { binding: 1, resource: this.bezelTextureResources.sampler },
-          { binding: 2, resource: this.bezelTextureResources.view },
-        ];
-        if (audioBezel && this.audioReactiveUniformBuffer) {
-          bezelGroupEntries.push({ binding: 3, resource: { buffer: this.audioReactiveUniformBuffer } });
-        }
-        this.bezelBindGroup = device.createBindGroup({ layout: built.bezel.bindLayout, entries: bezelGroupEntries });
+        this.bezelBindLayout = built.bezel.bindLayout;
         this.bezelPipeline = built.bezel.pipeline;
         this.bezelHdrPipeline = built.bezel.hdrPipeline;
+        this.refreshBezelBindGroup();
       } catch (e) {
         console.warn('Failed to initialize bezel shader', e);
       }
@@ -938,6 +1024,10 @@ export class WebGPURenderer {
       this.recoveryAttempts = 0;
       this.deviceStableSince = null;
     }
+
+    // Before the frame snapshot: swap the spectrum placeholder for the live
+    // compute buffer the moment it exists (and back if it goes away).
+    this.syncSpectrumBinding();
 
     const frameState: FrameDrawState = {
       pipeline: this.pipeline,

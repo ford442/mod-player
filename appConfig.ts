@@ -21,6 +21,7 @@ export const SHADER_GROUPS_ALL = {
     { id: 'patternv0.52.wgsl', label: 'v0.52 (Night)' },
     { id: 'patternv0.53.wgsl', label: 'v0.53 (Midnight)' },
     { id: 'patternv0.54.wgsl', label: 'v0.54 (Neon Night)' },
+    { id: 'patternv0.60.wgsl', label: 'v0.60 (Spectrum Chassis)' },
     { id: 'patternv0.58.wgsl', label: 'v0.58 (Reactive Chassis)' },
     { id: 'patternv0.57.wgsl', label: 'v0.57 (Velocity LED)' },
     { id: 'patternv0.59.wgsl', label: 'v0.59 (Instrument Highlight)' },

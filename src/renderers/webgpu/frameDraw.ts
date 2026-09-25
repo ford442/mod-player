@@ -22,6 +22,7 @@ import {
   resolveShaderMeta,
   usesOscilloscope,
   usesGpuSpectrum,
+  usesSpectrumBuffer,
   WEBGL_HYBRID_SHADERS,
 } from '../../../utils/shaderVersion';
 import { GRID_RECT, getPolarRadii } from '../../../utils/geometryConstants';
@@ -415,6 +416,10 @@ export function renderWebGPUFrame(ctx: FrameDrawContext): void {
       bezelData[13] = usesNightModeBezel(shaderFile) ? 0.10 : (isCircShader ? 0.0 : 0.02);
       bezelData[14] = p.dimFactor ?? 1.0;
       bezelData[15] = p.isPlaying ? 1.0 : 0.0;
+      // Slot 23: spectrum-chassis enable, i.e. the Reactive/Static toggle. Reset
+      // to 0 for every other shader — this scratch outlives shader switches, and
+      // a stale 1.0 must never leak into a background that reads slot 23.
+      bezelData[23] = usesSpectrumBuffer(shaderFile) && p.reactiveMode ? 1.0 : 0.0;
 
       if (needsUIFields) {
         const livePlayheadRow = p.playbackStateRef?.current?.playheadRow ?? p.playheadRow;
