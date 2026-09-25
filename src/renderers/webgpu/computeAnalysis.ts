@@ -44,6 +44,9 @@ const WAVEFORM_WORKGROUP_SIZE = 64;
 /** Must match SPECTRUM_BIN_COUNT in shaders/lib/spectrum_bands.wgsl. */
 export const SPECTRUM_BIN_COUNT = 32;
 
+/** Byte size of the spectrum bins buffer a `spectrumBuffer` shader binds. */
+export const SPECTRUM_BUFFER_BYTES = SPECTRUM_BIN_COUNT * 4;
+
 /** f32 slots in the spectrum meta buffer — see compute_analysis.wgsl. */
 const META_FLOATS = 8;
 const META_BASS = 0;
@@ -248,6 +251,8 @@ export class ComputeAnalysis {
   /** Upload staging: the ring unwrapped oldest-first. */
   private readonly pcmScratch = new Float32Array(PCM_FRAME_CAPACITY * 2);
   private pcmDirty = false;
+  /** `bins` holds a live spectrum the idle path still has to zero. */
+  private spectrumDirty = false;
 
   private readonly paramsScratch = new ArrayBuffer(PARAMS_FLOATS * 4);
   private readonly paramsU32 = new Uint32Array(this.paramsScratch);
@@ -344,13 +349,18 @@ export class ComputeAnalysis {
       const oscEnvelope = device.createBuffer({ size: oscSampleCount * 4, usage: STORAGE });
       const oscExtrema = device.createBuffer({ size: oscSampleCount * 8, usage: STORAGE });
       const meta = device.createBuffer({ size: META_FLOATS * 4, usage: STORAGE });
-      const bins = device.createBuffer({ size: SPECTRUM_BIN_COUNT * 4, usage: STORAGE });
+      // COPY_DST: `encode()` clears it when PCM stops, so a spectrum shader
+      // reading it as storage decays to silence instead of freezing on the last frame.
+      const bins = device.createBuffer({
+        size: SPECTRUM_BUFFER_BYTES,
+        usage: STORAGE | GPUBufferUsage.COPY_DST,
+      });
       const metaStaging = device.createBuffer({
         size: META_FLOATS * 4,
         usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
       });
       const binsStaging = device.createBuffer({
-        size: SPECTRUM_BIN_COUNT * 4,
+        size: SPECTRUM_BUFFER_BYTES,
         usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
       });
 
@@ -415,6 +425,19 @@ export class ComputeAnalysis {
     }
   }
 
+  /**
+   * The log-spaced spectrum bins (`SPECTRUM_BIN_COUNT` f32s), for shaders that
+   * bind it read-only-storage. Null once disposed — callers must swap in their
+   * placeholder rather than keep a bind group over a destroyed buffer.
+   *
+   * Written by the compute pass and read by the render pass on the same
+   * encoder; WebGPU scopes usage per pass, so read_write in one and
+   * read-only-storage in the other is valid.
+   */
+  get spectrumBuffer(): GPUBuffer | null {
+    return this.disposed ? null : this.buffers.bins;
+  }
+
   /** Active FFT window length. */
   get windowSize(): FftSize {
     return this.fftSize;
@@ -452,13 +475,18 @@ export class ComputeAnalysis {
    * on the same command encoder. No-op until PCM is flowing.
    */
   encode(encoder: GPUCommandEncoder, timestamps?: GpuTimestampRecorder | null): boolean {
-    if (this.disposed || this.pcm.frames === 0) return false;
+    if (this.disposed) return false;
+    if (this.pcm.frames === 0) {
+      this.zeroSpectrumIfDirty(encoder);
+      return false;
+    }
 
     // Playback stopped (or the worklet fell back to ScriptProcessor): stop
     // reporting a frozen spectrum and let the caller drop back to the CPU path.
     if (now() - this.lastPcmAt > PCM_STALE_MS) {
       this.pcm.reset();
       this.snapshot = null;
+      this.zeroSpectrumIfDirty(encoder);
       return false;
     }
 
@@ -498,6 +526,7 @@ export class ComputeAnalysis {
     pass.setPipeline(this.pipelines.spectrum);
     pass.dispatchWorkgroups(1, 1, 1);
     pass.end();
+    this.spectrumDirty = true;
 
     encoder.copyBufferToTexture(
       { buffer: this.buffers.bins },
@@ -505,6 +534,13 @@ export class ComputeAnalysis {
       { width: SPECTRUM_BIN_COUNT, height: 1, depthOrArrayLayers: 1 },
     );
     return true;
+  }
+
+  /** Zero the bins once after the last live frame; a no-op every frame after. */
+  private zeroSpectrumIfDirty(encoder: GPUCommandEncoder): void {
+    if (!this.spectrumDirty) return;
+    encoder.clearBuffer(this.buffers.bins);
+    this.spectrumDirty = false;
   }
 
   /**
@@ -528,7 +564,7 @@ export class ComputeAnalysis {
   encodeReadback(encoder: GPUCommandEncoder): void {
     if (this.disposed || this.readbackPending || this.pcm.frames === 0) return;
     encoder.copyBufferToBuffer(this.buffers.meta, 0, this.buffers.metaStaging, 0, META_FLOATS * 4);
-    encoder.copyBufferToBuffer(this.buffers.bins, 0, this.buffers.binsStaging, 0, SPECTRUM_BIN_COUNT * 4);
+    encoder.copyBufferToBuffer(this.buffers.bins, 0, this.buffers.binsStaging, 0, SPECTRUM_BUFFER_BYTES);
     this.readbackEncoded = true;
   }
 

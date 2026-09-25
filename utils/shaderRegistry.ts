@@ -34,6 +34,9 @@
  * usesGpuSpectrum     – prefer the WebGPU compute analysis pass (compute_analysis.wgsl)
  *                       over the AnalyserNode / CPU oscilloscope walk when PCM is flowing
  * entryPoints         – WGSL vertex/fragment entry point names (default vs / fs)
+ * spectrumBuffer      – bind the compute pass's 32-bin spectrum buffer read-only-storage
+ *                       (pattern group binding 9, background group binding 4); implies
+ *                       usesGpuSpectrum. A zeroed placeholder is bound until it exists.
  * highPrecisionPacking– PackedA/PackedB + DURA/TRIG packing
  * playheadRowAsFloat  – uniform slot [2] is f32 (not u32)
  * strictPlayheadSustain – playhead-scrolled sustain (v0.45b / v0.30b)
@@ -115,6 +118,19 @@ export interface ShaderMeta {
    * differently (there is no trial-and-error fallback at pipeline creation).
    */
   entryPoints?: ShaderEntryPoints;
+  /**
+   * The shader reads the compute pass's log-spaced spectrum bins directly from a
+   * read-only storage buffer — no CPU readback, no uniform packing. Binds
+   * `SPECTRUM_BIN_COUNT` f32s at pattern-group binding 9 and, for shaders with a
+   * background pass, background-group binding 4. Requires `usesGpuSpectrum`
+   * (that is what turns the PCM stream and the compute pass on) and the
+   * `extended` layout.
+   *
+   * Until ComputeAnalysis has resolved — or if it never does (lite mode,
+   * kernel compile failure) — the renderer binds a zeroed placeholder, so the
+   * shader sees silence rather than a validation error.
+   */
+  spectrumBuffer?: boolean;
   highPrecisionPacking: boolean;
   playheadRowAsFloat: boolean;
   strictPlayheadSustain: boolean;

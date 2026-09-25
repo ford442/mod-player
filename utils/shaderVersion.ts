@@ -113,6 +113,14 @@ export const usesGpuSpectrum = (shaderFile: string): boolean =>
 export const getShaderEntryPoints = (shaderFile: string): Readonly<ShaderEntryPoints> =>
   resolveShaderMeta(shaderFile).entryPoints ?? DEFAULT_SHADER_ENTRY_POINTS;
 
+/**
+ * Shader reads the compute pass's spectrum bins straight from a storage buffer
+ * (see `ShaderMeta.spectrumBuffer`). Drives bind-group layout + wiring only —
+ * whether the compute pass runs at all is `usesGpuSpectrum`.
+ */
+export const usesSpectrumBuffer = (shaderFile: string): boolean =>
+  resolveShaderMeta(shaderFile).spectrumBuffer ?? false;
+
 export const usesBareCanvasChrome = (shaderFile: string): boolean =>
   resolveShaderMeta(shaderFile).bareCanvasChrome;
 
