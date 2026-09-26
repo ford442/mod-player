@@ -311,7 +311,7 @@ All shared canvas layout values live here:
 
 ## What NOT To Do
 
-- **Do not** push to `main` / `master` directly — `main` is ruleset-protected and a direct push is refused; use a feature branch and open a PR
+- **Do not** push to `main` / `master` directly — use a feature branch and open a PR. (A repository ruleset that refuses direct pushes to `main` is the goal but, as of 2026-09-26, does not exist yet — see `CONTRIBUTING.md`. Treat this rule as binding regardless.)
 - **Do not** commit without running `npm run preflight` first (see Development Commands)
 - **Do not** hand-edit `package-lock.json` — regenerate it with `npm install`
 - **Do not** reintroduce `shaderFile.includes('v0.XX')` chains — extend `ShaderMeta` instead
