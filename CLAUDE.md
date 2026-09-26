@@ -254,7 +254,7 @@ EngineState           // Worklet engine lifecycle state
     to `g_module` via atomics only; poking the metadata parse changes nothing
     you can hear. `scripts/verify-native-exports.mjs` enforces all of this.
 
-14. **WebGPU pipelines are async and built before they replace anything (#439):**
+14. **WebGPU pipelines are async and built before they replace anything (#449):**
     every render/compute pipeline goes through `createRenderPipelineChecked` /
     `createComputePipelineChecked` and every shader module through
     `createCheckedShaderModule` (`utils/gpuShaderCompile.ts`). The synchronous

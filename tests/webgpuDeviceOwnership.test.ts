@@ -73,7 +73,7 @@ describe('WebGPU canvas configuration (Problem C — probe/runtime share one con
   });
 });
 
-describe('peekAdapterInfoForCapabilityHint (#439 — no stray low-power adapter)', () => {
+describe('peekAdapterInfoForCapabilityHint (#449 — no stray low-power adapter)', () => {
   it('never issues its own requestAdapter when no device request exists', async () => {
     const { vi } = await import('vitest');
     const requestAdapter = vi.fn(async () => ({ info: { vendor: 'intel' } }));

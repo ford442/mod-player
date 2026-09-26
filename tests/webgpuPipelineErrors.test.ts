@@ -55,7 +55,7 @@ function rendererWithLiveShader(device: GPUDevice) {
   return { renderer, internals, livePipeline, liveBindGroup };
 }
 
-describe('shader compile errors (#439 bug 3)', () => {
+describe('shader compile errors (#449 bug 3)', () => {
   it('createCheckedShaderModule rejects with a readable label:line:col message', async () => {
     const { device } = brokenDevice();
     await expect(createCheckedShaderModule(device, BROKEN_WGSL, 'broken.wgsl'))
@@ -90,7 +90,7 @@ describe('shader compile errors (#439 bug 3)', () => {
   });
 });
 
-describe('uncapturederror routing (#439 bug 3)', () => {
+describe('uncapturederror routing (#449 bug 3)', () => {
   it('formats uncaptured GPU errors for DebugInfo.errors', () => {
     const listeners: Array<(e: Event) => void> = [];
     const device = {
@@ -116,7 +116,7 @@ describe('uncapturederror routing (#439 bug 3)', () => {
   });
 });
 
-describe('device-lost recovery budget (#439 bug 4)', () => {
+describe('device-lost recovery budget (#449 bug 4)', () => {
   function rendererForFrame() {
     const fake = createFakeDevice();
     const renderer = new WebGPURenderer({});
@@ -150,7 +150,7 @@ describe('device-lost recovery budget (#439 bug 4)', () => {
   });
 });
 
-describe('no synchronous pipeline creation (#439 acceptance)', () => {
+describe('no synchronous pipeline creation (#449 acceptance)', () => {
   const SYNC_CALL = /\.create(?:Render|Compute)Pipeline\s*\(/;
   const files = [
     ...readdirSync(join(ROOT, 'src/renderers/webgpu'))

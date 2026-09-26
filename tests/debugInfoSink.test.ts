@@ -42,7 +42,7 @@ function frameUpdate(frame: number) {
   });
 }
 
-describe('DebugInfoSink (#439 bug 2 — PatternDisplay render count)', () => {
+describe('DebugInfoSink (#449 bug 2 — PatternDisplay render count)', () => {
   it('never publishes (re-renders) while the debug panel is closed', () => {
     const { clock, advance } = fakeClock();
     let renders = 0;

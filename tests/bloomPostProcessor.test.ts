@@ -67,7 +67,7 @@ function lastWrite(allOps: RecordedOp[], buffer: FakeBuffer): number[] | undefin
   return data;
 }
 
-describe('BloomPostProcessor blur uniforms (#439 bug 1)', () => {
+describe('BloomPostProcessor blur uniforms (#449 bug 1)', () => {
   it('legacy: H and V blur passes bind different buffers with (1,0) and (0,1)', async () => {
     const { fake, bloom } = await setup(false);
     const frame = renderOnce(fake, bloom);
@@ -129,7 +129,7 @@ describe('BloomPostProcessor blur uniforms (#439 bug 1)', () => {
   });
 });
 
-describe('BloomPostProcessor per-frame allocation (#439)', () => {
+describe('BloomPostProcessor per-frame allocation (#449)', () => {
   it.each([false, true])('render()/updateCRT() allocate no Float32Array after warm-up (layered=%s)', async (layered) => {
     const { fake, bloom } = await setup(layered);
     renderOnce(fake, bloom);
