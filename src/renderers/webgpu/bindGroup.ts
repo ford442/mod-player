@@ -2,11 +2,18 @@ import {
   usesOscilloscope,
   usesInstrumentPalette,
   usesAudioReactive,
+  usesSpectrumBuffer,
   type LayoutType,
 } from '../../../utils/shaderVersion';
 import type { GpuResourcePool } from '../../../utils/gpuResourcePool';
+import { SPECTRUM_BUFFER_BYTES } from './computeAnalysis';
 
 export type { LayoutType };
+
+/** Pattern-group slot for the compute spectrum bins (`ShaderMeta.spectrumBuffer`). */
+export const SPECTRUM_PATTERN_BINDING = 9;
+/** Background-group slot for the same buffer (3 stays the AudioReactive uniform). */
+export const SPECTRUM_BACKGROUND_BINDING = 4;
 
 export interface BindGroupTextureResources {
   sampler: GPUSampler;
@@ -22,6 +29,12 @@ export interface BindGroupState {
   textureResources: BindGroupTextureResources | null;
   instrumentPaletteTexture: GPUTexture | null;
   audioReactiveUniformBuffer: GPUBuffer | null;
+  /**
+   * Spectrum bins for `spectrumBuffer` shaders: the live ComputeAnalysis buffer,
+   * or the renderer's zeroed placeholder. The renderer always supplies one;
+   * absent only for shaders that do not bind it.
+   */
+  spectrumBuffer?: GPUBuffer | null | undefined;
   layoutType: LayoutType;
 }
 
@@ -57,6 +70,13 @@ export function createMainBindGroupLayout(
     }
     if (usesAudioReactive(shaderFile)) {
       extendedEntries.push({ binding: 8, visibility: GPUShaderStage.FRAGMENT, buffer: { type: 'uniform' } });
+    }
+    if (usesSpectrumBuffer(shaderFile)) {
+      extendedEntries.push({
+        binding: SPECTRUM_PATTERN_BINDING,
+        visibility: GPUShaderStage.FRAGMENT,
+        buffer: { type: 'read-only-storage' },
+      });
     }
     return device.createBindGroupLayout({ entries: extendedEntries });
   }
@@ -104,6 +124,16 @@ export function refreshMainBindGroup(
     }
     if (usesAudioReactive(shaderFile) && state.audioReactiveUniformBuffer) {
       entries.push({ binding: 8, resource: { buffer: state.audioReactiveUniformBuffer } });
+    }
+    if (usesSpectrumBuffer(shaderFile)) {
+      // The renderer substitutes a zeroed placeholder until ComputeAnalysis
+      // exists, so a null here is a wiring bug — skip the frame rather than
+      // bind nothing and hand the driver a validation error.
+      if (!state.spectrumBuffer) return null;
+      entries.push({
+        binding: SPECTRUM_PATTERN_BINDING,
+        resource: { buffer: state.spectrumBuffer, size: SPECTRUM_BUFFER_BYTES },
+      });
     }
   } else if (state.layoutType === 'texture') {
     if (!state.textureResources) return null;

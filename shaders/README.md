@@ -38,6 +38,8 @@ The root directory contains **30 actively-used shaders** that are production-rea
 - `patternv0.55.wgsl` — Oscilloscope mode (tier-A includes + binding 6)
 - `patternv0.56.wgsl` / `patternv0.57.wgsl` — instrument palette / velocity LED (tier-A or tier-B body)
 - `patternv0.58.wgsl` — Reactive chassis (tier-B: `circular_led_reactive_body`)
+- `patternv0.59.wgsl` — Instrument highlight (palette + `highlightInstrument`, uniform slot 33)
+- `patternv0.60.wgsl` — **Spectrum chassis**: v0.59 LEDs + `bezel_spectrum.wgsl` lit from the GPU FFT bins (`spectrumBuffer`, see below)
 
 **Video overlay shaders (documented exceptions — no cell-packing path):**
 - `patternv0.23.wgsl` — Clouds (video texture mode)
@@ -46,6 +48,8 @@ The root directory contains **30 actively-used shaders** that are production-rea
 #### **Background/Chassis Shaders** (Device bezel & frame rendering)
 
 - `bezel.wgsl` — Hardware bezel photo (used by circular layouts v0.45+)
+- `bezel_audio.wgsl` — `bezel.wgsl` + multi-band edge lighting from the binding-3 `AudioReactive` uniform (v0.58)
+- `bezel_spectrum.wgsl` — `bezel.wgsl` + 32 radial spectrum bars read straight from the GPU bins buffer (binding 4; v0.60)
 - `chassis_frosted.wgsl` — Procedural frosted panel (used by square layouts)
 - `chassis_video.wgsl` — Video background composite
 - `chassisv0.1.wgsl` — Legacy chassis (very old circular layouts)
@@ -69,8 +73,8 @@ The root directory contains **30 actively-used shaders** that are production-rea
   bind group: `waveform_main` (PCM → oscilloscope min/max tiles) and
   `spectrum_main` (Hann → radix-2 FFT → 4 bands + 32 log bins). Host is
   `src/renderers/webgpu/computeAnalysis.ts`; opted into per shader via the
-  `usesGpuSpectrum` flag on `ShaderMeta`. Reads rendered PCM only — the tracker
-  engine stays on CPU/WASM.
+  `usesGpuSpectrum` flag on `ShaderMeta` (or implied by `spectrumBuffer`). Reads
+  rendered PCM only — the tracker engine stays on CPU/WASM.
 
 ### `legacy/` Subfolder (Archived & Experimental)
 
@@ -138,6 +142,7 @@ Shared WGSL fragments live in `shaders/lib/`. **Canonical composition libs** (pr
 | `lib/emitters_playhead.wgsl` / `lib/lens_cap_playhead.wgsl` | v0.51 playhead variant |
 | `lib/velocity_led.wgsl` | VEL-001 `normalizedCellVolume` |
 | `lib/audio_reactive.wgsl` | REACT-001 multi-band chassis helpers |
+| `lib/spectrum_chassis.wgsl` | v0.60 dB mapping / colour ramp over the GPU spectrum bins (needs the includer to declare `spectrum`) |
 
 **GPU audio analysis libs** (compute only — no bindings, no entry points):
 
@@ -184,6 +189,56 @@ Include directives look like WGSL comments so source files remain valid if loade
 ```
 
 **Publish path (single):** `npm run sync:shaders` (`scripts/sync-shaders.mjs`) expands includes recursively, guards against double-inclusion and cycles, rejects residual `//#include` in output, and writes flat WGSL to `public/shaders/`. Wired as `predev` / `prebuild`. Never hand-edit `public/shaders/`. The `lib/` directory is not copied to public (WebGPU has no includes).
+
+### GPU spectrum binding (`ShaderMeta.spectrumBuffer`)
+
+v0.58 drives its chassis from CPU-side SAB bands through the binding-8 `AudioReactive`
+uniform. v0.60 instead reads the compute pass's **spectrum bins buffer** directly, so the
+chassis has real per-bin frequency detail with no CPU readback.
+
+Set `spectrumBuffer: true` (plus `usesGpuSpectrum: true` — that is what starts the PCM
+stream and the compute pass) on a `circularLed()`/extended-layout `ShaderMeta`, then declare:
+
+```wgsl
+// pattern shader (main bind group)
+@group(0) @binding(9) var<storage, read> spectrum: array<f32>;
+// background/chassis shader (bezel bind group)
+@group(0) @binding(4) var<storage, read> spectrum: array<f32>;
+//#include "lib/spectrum_chassis.wgsl"   // spectrumLevelAt(), spectrumColor(), ...
+```
+
+Slots are fixed by `SPECTRUM_PATTERN_BINDING` / `SPECTRUM_BACKGROUND_BINDING` in
+`src/renderers/webgpu/bindGroup.ts`; both are FRAGMENT-visible `read-only-storage` and
+128 bytes (`SPECTRUM_BUFFER_BYTES`). `tests/spectrumChassis.test.ts` pins the slots, the
+bin count and the uniform slot below against the WGSL.
+
+**Data:** `SPECTRUM_BIN_COUNT` (32) raw peak FFT magnitudes — Hann-windowed, normalised so a
+full-scale sine reads ~1.0, log-spaced 20 Hz … 16 kHz, **not smoothed**. The lowest ~8 bins
+share FFT bins (47 Hz per bin at 1024 points), so they read identically. `lib/spectrum_chassis.wgsl`
+maps magnitude → dB (floor −72, range 60) with a +14 dB high-frequency tilt and a 1.35 gamma.
+
+**Fallback (never a validation error, never a black frame):** until `ComputeAnalysis.create()`
+resolves — or forever in lite mode / on kernel-compile failure — `WebGPURenderer` binds a
+zeroed placeholder buffer, which the lib maps to level 0, so a spectrum shader renders its
+static chassis. Both bind groups are rebuilt once when the live buffer appears (and again
+if it goes away). When PCM stops, `ComputeAnalysis.encode()` zeroes the bins once so the
+chassis decays to rest rather than freezing on the last frame.
+
+**Reactive/Static toggle:** the chassis reads `spectrumEnabled` from **bezel uniform slot 23**,
+written by `frameDraw.ts` (`usesSpectrumBuffer(shader) && reactiveMode`, else 0). The pattern
+pass has no spare uniform slot, so a pattern shader that consumes binding 9 cannot honour the
+toggle without extending `fillUniformPayload`. Do not use slot 23 with `chassis_frosted.wgsl`,
+which writes its own UI value there.
+
+**Chassis blending:** the bezel plate is near-white, so additive light clips invisibly —
+`bezel_spectrum.wgsl` `mix`es the tint into the plate colour instead, masked to the bright
+plate (`luminance` ≥ ~0.8) so the window and the XASM-1 lettering stay untouched.
+
+**`texture_1d` caveat (pre-existing):** the host declares binding 6 (oscilloscope) and 7
+(instrument palette) without a `viewDimension`, i.e. `'2d'`, over 2D textures. A shader that
+declares them `texture_1d` fails `createRenderPipeline` on current Chrome. v0.60 declares the
+palette `texture_2d` and reads it with `textureLoad(palette, vec2<i32>(idx, 0), 0)`; v0.52–v0.56
+and v0.59 still use `texture_1d`. Use `texture_2d` in new shaders.
 
 ### GPU Data Packing
 

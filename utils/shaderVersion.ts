@@ -107,11 +107,23 @@ export const usesAudioReactiveBezel = (shaderFile: string): boolean =>
  * AnalyserNode / CPU oscilloscope walk. Additive — the CPU path stays the
  * fallback whenever the compute pipeline or PCM stream is unavailable.
  */
-export const usesGpuSpectrum = (shaderFile: string): boolean =>
-  resolveShaderMeta(shaderFile).usesGpuSpectrum ?? false;
+export const usesGpuSpectrum = (shaderFile: string): boolean => {
+  const meta = resolveShaderMeta(shaderFile);
+  // A shader that binds the spectrum buffer is useless without the pass that
+  // fills it, so `spectrumBuffer` implies the compute pass even if unset.
+  return (meta.usesGpuSpectrum ?? false) || (meta.spectrumBuffer ?? false);
+};
 
 export const getShaderEntryPoints = (shaderFile: string): Readonly<ShaderEntryPoints> =>
   resolveShaderMeta(shaderFile).entryPoints ?? DEFAULT_SHADER_ENTRY_POINTS;
+
+/**
+ * Shader reads the compute pass's spectrum bins straight from a storage buffer
+ * (see `ShaderMeta.spectrumBuffer`). Drives bind-group layout + wiring only —
+ * whether the compute pass runs at all is `usesGpuSpectrum`.
+ */
+export const usesSpectrumBuffer = (shaderFile: string): boolean =>
+  resolveShaderMeta(shaderFile).spectrumBuffer ?? false;
 
 export const usesBareCanvasChrome = (shaderFile: string): boolean =>
   resolveShaderMeta(shaderFile).bareCanvasChrome;
