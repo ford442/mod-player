@@ -22,7 +22,9 @@ struct CRTUniforms {
 
 @fragment
 fn fs(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
-    let sceneColor = textureSample(sceneTexture, sceneSampler, uv).rgb;
+    // The scene is rgba16float (HDR, unclamped): drop negative / runaway values
+    // that an 8-bit target used to clamp away.
+    let sceneColor = clamp(textureSample(sceneTexture, sceneSampler, uv).rgb, vec3<f32>(0.0), vec3<f32>(64.0));
     let bloomColor = textureSample(bloomTexture, bloomSampler, uv).rgb;
 
     // Linear combine (scene can be SDR; bloom is HDR)

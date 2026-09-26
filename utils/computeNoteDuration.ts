@@ -3,7 +3,7 @@
 
 import type { PatternMatrix } from '../types';
 import { withBase } from '../src/lib/paths';
-import { assertShaderModuleCompiled } from './gpuShaderCompile';
+import { createCheckedShaderModule, createComputePipelineChecked } from './gpuShaderCompile';
 
 const MAX_SHADER_ROWS = 1024; // Must match MAX_ROWS in compute_note_duration.wgsl
 
@@ -61,8 +61,7 @@ export async function initNoteDurationCompute(device: GPUDevice): Promise<NoteDu
   }
   const shaderCode = await shaderResponse.text();
 
-  const module = device.createShaderModule({ code: shaderCode });
-  await assertShaderModuleCompiled(module, 'compute_note_duration.wgsl');
+  const module = await createCheckedShaderModule(device, shaderCode, 'compute_note_duration.wgsl');
 
   const bindGroupLayout = device.createBindGroupLayout({
     entries: [
@@ -72,10 +71,14 @@ export async function initNoteDurationCompute(device: GPUDevice): Promise<NoteDu
     ],
   });
 
-  const pipeline = device.createComputePipeline({
-    layout: device.createPipelineLayout({ bindGroupLayouts: [bindGroupLayout] }),
-    compute: { module, entryPoint: 'main' },
-  });
+  const pipeline = await createComputePipelineChecked(
+    device,
+    {
+      layout: device.createPipelineLayout({ bindGroupLayouts: [bindGroupLayout] }),
+      compute: { module, entryPoint: 'main' },
+    },
+    'compute_note_duration',
+  );
 
   const paramsBuffer = device.createBuffer({
     size: 16, // 3 × u32 padded to 16 bytes

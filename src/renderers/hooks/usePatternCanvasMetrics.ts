@@ -19,6 +19,31 @@ export interface UsePatternCanvasMetricsParams {
   gpuContextRef: React.MutableRefObject<GPUCanvasContext | null>;
 }
 
+/**
+ * Call `onChange` whenever `window.devicePixelRatio` changes. A
+ * `(resolution: Ndppx)` media query only matches the current ratio, so the
+ * listener re-arms itself on the new value after each change. Fallback for
+ * browsers without ResizeObserver `device-pixel-content-box`.
+ */
+export function watchDevicePixelRatio(onChange: () => void): () => void {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return () => {};
+  let query: MediaQueryList | null = null;
+  const handler = () => {
+    arm();
+    onChange();
+  };
+  const arm = () => {
+    query?.removeEventListener('change', handler);
+    query = window.matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`);
+    query.addEventListener('change', handler);
+  };
+  arm();
+  return () => {
+    query?.removeEventListener('change', handler);
+    query = null;
+  };
+}
+
 export function usePatternCanvasMetrics(params: UsePatternCanvasMetricsParams) {
   const {
     containerRef,
@@ -110,12 +135,20 @@ export function usePatternCanvasMetrics(params: UsePatternCanvasMetricsParams) {
     const resizeObserver = new ResizeObserver(() => {
       requestAnimationFrame(() => handleResize());
     });
-    resizeObserver.observe(container);
+    // device-pixel-content-box also fires when only the DPR changes (window
+    // moved to another monitor, browser zoom), which content-box misses.
+    try {
+      resizeObserver.observe(container, { box: 'device-pixel-content-box' });
+    } catch {
+      resizeObserver.observe(container);
+    }
     const handleWindowResize = () => handleResize();
     window.addEventListener('resize', handleWindowResize);
+    const stopDprWatch = watchDevicePixelRatio(handleResize);
     return () => {
       resizeObserver.disconnect();
       window.removeEventListener('resize', handleWindowResize);
+      stopDprWatch();
       if (resizeTimeoutRef.current !== null) window.clearTimeout(resizeTimeoutRef.current);
     };
   }, [handleResize, containerRef, canvasRef]);

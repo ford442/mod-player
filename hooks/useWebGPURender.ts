@@ -169,6 +169,10 @@ export function useWebGPURender(
     setGpuReady(false);
     setVizOffline(false);
     layoutTypeRef.current = getLayoutType(shaderFile);
+    setDebugInfo((prev) => ({
+      ...prev,
+      errors: prev.errors.filter((e) => !e.startsWith('SHADER-INIT')),
+    }));
 
     const initShader = async () => {
       try {
@@ -194,13 +198,18 @@ export function useWebGPURender(
         if (cancelled) return;
         const reason = error instanceof Error ? error.message : String(error);
         console.error('[Renderer] WebGPU shader init failed:', reason);
-        setGpuReady(false);
-        setVizOffline(true);
+        // initShader builds the new pipelines before releasing the old ones, so
+        // a failed switch leaves the previous shader fully drawable.
+        const keptPrevious = renderer.isShaderReady();
+        setGpuReady(keptPrevious);
+        setVizOffline(!keptPrevious);
         setDebugInfo((prev) => ({
           ...prev,
           errors: [
             ...prev.errors.filter((e) => !e.startsWith('SHADER-INIT')),
-            `SHADER-INIT: ${reason}`,
+            keptPrevious
+              ? `SHADER-INIT: ${reason} (kept ${renderer.activeShaderFile})`
+              : `SHADER-INIT: ${reason}`,
           ],
         }));
       }
@@ -210,7 +219,9 @@ export function useWebGPURender(
     return () => {
       cancelled = true;
       setGpuReady(false);
-      renderer.releaseShaderResources();
+      // No releaseShaderResources() here: the next initShader releases the
+      // current shader only once its replacement has built successfully, and
+      // disposeDevice() handles unmount / device teardown.
     };
   }, [shaderFile, deviceAcquired, enabled, liteMode]); // eslint-disable-line react-hooks/exhaustive-deps
 
