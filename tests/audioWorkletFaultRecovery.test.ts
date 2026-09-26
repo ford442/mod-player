@@ -133,4 +133,30 @@ describe('handleWorkletFault (JS worklet crash recovery)', () => {
     expect(scriptProcessorFallback).toHaveBeenCalledTimes(1);
     expect(scriptProcessorFallback).toHaveBeenCalledWith(refs, callbacks, config, ctx, secondNode);
   });
+
+  it('clears the fault only once a render is confirmed (WT.position), not merely on the WT.loaded ack', async () => {
+    // WT.loaded fires before MT.play is even sent, and well before the
+    // worklet's first process() call — clearing there let a module that
+    // traps on its very first render reset restartAttempts to 0 on every
+    // restart, so the attempt>1 fallback branch was never reached.
+    const { readFileSync } = await import('node:fs');
+    const { join, resolve } = await import('node:path');
+    const { fileURLToPath } = await import('node:url');
+    const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
+    const src = readFileSync(join(ROOT, 'hooks/audioGraph/startJsWorkletPlayback.ts'), 'utf8');
+
+    const loadedAcceptedIdx = src.indexOf("case 'loaded-accepted':");
+    const endedIdx = src.indexOf("case 'ended':");
+    expect(loadedAcceptedIdx).toBeGreaterThan(0);
+    expect(endedIdx).toBeGreaterThan(loadedAcceptedIdx);
+    const loadedAcceptedBlock = src.slice(loadedAcceptedIdx, endedIdx);
+    expect(loadedAcceptedBlock).not.toContain('clearAudioFault(');
+
+    const positionIdx = src.indexOf("case 'position':");
+    const loadedStaleIdx = src.indexOf("case 'loaded-stale':");
+    expect(positionIdx).toBeGreaterThan(0);
+    expect(loadedStaleIdx).toBeGreaterThan(positionIdx);
+    const positionBlock = src.slice(positionIdx, loadedStaleIdx);
+    expect(positionBlock).toContain('clearAudioFault(');
+  });
 });
