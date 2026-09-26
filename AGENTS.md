@@ -26,7 +26,7 @@
 ## Before Committing
 Run `npm run preflight` — one chained command (`verify:lockfile` → `npm ci --dry-run --ignore-scripts` → `lint` → `typecheck` → `typecheck:tests` → `test` → `test:shader-registry` → `build`) that stops at the first failure and mirrors the `lint-and-build` CI job. It does **not** cover the browser/emsdk jobs (`visual-smoke`, `audio-smoke`, `playhead-smoke`, `wasm-smoke-test`, `native-full-build`).
 
-`main` is covered by a repository ruleset: a PR and a passing `lint-and-build` check are required, force-pushes and branch deletion are blocked, and a direct `git push origin main` is refused. Work on a feature branch. See `CONTRIBUTING.md`.
+`main` **should** be covered by a repository ruleset (PR + passing `lint-and-build` required, force-push and branch deletion blocked) but as of 2026-09-26 it is not: `GET /repos/ford442/mod-player/rulesets` returns `[]`, and a direct `git push origin main` currently succeeds. An agent session cannot create the ruleset — repo-administration API calls are blocked by the proxy — so this is a manual step for the repo owner (see `CONTRIBUTING.md`). Work on a feature branch regardless; do not rely on the ruleset existing.
 
 ## Audio Architecture (Three Tiers + Fallback)
 The audio logic is split across the **Main Thread** and the **Audio Worklet Thread**, with an optional high-performance native C++ worklet.

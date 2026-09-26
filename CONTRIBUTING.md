@@ -46,11 +46,31 @@ Playwright browser or emsdk 3.1.51 and still only run in CI (or locally via
 
 Regenerate `package-lock.json` with `npm install`; never hand-edit it.
 
-### `main` is protected
+### `main` should be protected, but is not yet
 
-`main` is covered by a repository ruleset: changes land through a pull request
-with the `lint-and-build` status check passing, and force-pushes and branch
-deletion are blocked. Direct `git push origin main` is refused — use a feature
-branch.
+Every one of the thirteen red CI runs behind #442 came from a direct `push
+fix` commit to `main` — this convention alone did not stop them, and never
+will, because it is opt-in. The fix is a **repository ruleset** on `main`:
+require a pull request, require the `lint-and-build` status check, block
+force-pushes, block branch deletion.
+
+Checked directly against the GitHub API on 2026-09-26: `GET
+/repos/ford442/mod-player/rulesets` returns `[]`. No ruleset exists yet, which
+is also why `2d6a4ed` (a 40-file direct push, 2026-09-19) went straight
+through. An agent session cannot create one — GitHub write access here is
+scoped to code operations (push, PR, issues), and a repository-administration
+call such as `POST /rulesets` is rejected by the proxy with "Write access to
+this GitHub API path is not permitted through this proxy." **The repo owner
+has to create it by hand**, once, in the GitHub UI:
+
+Settings → Rules → Rulesets → New branch ruleset, target `main`, enforcement
+Active, then enable: Require a pull request before merging (0 required
+approvals is fine for a solo repo), Require status checks to pass →
+`lint-and-build`, Block force pushes, Restrict deletions. Add yourself to
+"Bypass list" with mode "Always" if you want an emergency hatch — but treat
+that bypass as a last resort, not a substitute for a PR.
+
+Until that ruleset exists, `git push origin main` **will succeed** — treat
+the "use a feature branch" rule as still load-bearing on discipline alone.
 
 See `docs/REPO_LAYOUT.md` for directory map and `AGENTS.md` / `CLAUDE.md` for architecture.
