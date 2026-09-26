@@ -35,7 +35,7 @@ function makeFakeDevice() {
     createShaderModule: () => ({ getCompilationInfo: async () => ({ messages: [] }) }),
     createBindGroupLayout: () => ({}),
     createPipelineLayout: () => ({}),
-    createComputePipeline: () => ({}),
+    createComputePipelineAsync: async () => ({}),
     createBindGroup: () => ({}),
     createTexture: () => ({ destroy: vi.fn() }),
     createBuffer: ({ size, usage }: { size: number; usage: number }) => {
