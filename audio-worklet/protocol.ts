@@ -35,6 +35,10 @@ function isModulePayload(value: unknown): value is ArrayBuffer | Uint8Array {
   return isArrayBuffer(value) || value instanceof Uint8Array;
 }
 
+function isFloat32Array(value: unknown): value is Float32Array {
+  return value instanceof Float32Array;
+}
+
 const moduleDataSchema = z.custom<ArrayBuffer | Uint8Array>(isModulePayload, {
   message: 'moduleData must be ArrayBuffer or Uint8Array',
 });
@@ -73,6 +77,9 @@ const seekAckMessageSchema = z.object({
 const errorMessageSchema = z.object({
   type: z.literal(WORKLET_TO_MAIN.error),
   message: z.string(),
+  /** Set when the worklet caught a wasm trap inside process() and silenced
+   *  output — the node needs a restart, not just a status message. */
+  fatal: z.boolean().optional(),
 });
 
 const oscBufferMessageSchema = z.object({
@@ -252,6 +259,11 @@ const ctlSetTextMessageSchema = z.object({
   value: z.string(),
 });
 
+const returnPcmBufferMessageSchema = z.object({
+  type: z.literal(MAIN_TO_WORKLET.returnPcmBuffer),
+  buffer: z.custom<Float32Array>(isFloat32Array, { message: 'buffer must be Float32Array' }),
+});
+
 /** Legacy no-type load shim used by some callers. */
 const legacyLoadMessageSchema = z.object({
   type: z.undefined().optional(),
@@ -271,6 +283,7 @@ export const mainToWorkletMessageSchema = z.discriminatedUnion('type', [
   setChannelMuteMessageSchema,
   setRenderParamMessageSchema,
   ctlSetTextMessageSchema,
+  returnPcmBufferMessageSchema,
 ]);
 
 export type MainToWorkletMessage = z.infer<typeof mainToWorkletMessageSchema>;
@@ -354,6 +367,11 @@ export function postSetRenderParam(param: number, value: number): MainToWorkletM
 
 export function postCtlSetText(key: string, value: string): MainToWorkletMessage {
   return { type: MAIN_TO_WORKLET.ctlSetText, key, value };
+}
+
+/** Hand a consumed projectm-pcm buffer back to the worklet's allocation pool (transfer its buffer). */
+export function postReturnPcmBuffer(buffer: Float32Array): MainToWorkletMessage {
+  return { type: MAIN_TO_WORKLET.returnPcmBuffer, buffer };
 }
 
 /** Runtime check for oscBuffer handler (replaces unchecked `as SharedArrayBuffer`). */

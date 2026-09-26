@@ -22,6 +22,8 @@ export const MAIN_TO_WORKLET = {
   setChannelMute: 'setChannelMute',
   setRenderParam: 'setRenderParam',
   ctlSetText: 'ctlSetText',
+  /** Hands a consumed projectm-pcm buffer back to the worklet's allocation pool. */
+  returnPcmBuffer: 'returnPcmBuffer',
 } as const;
 
 /** AudioWorklet processor → main thread */

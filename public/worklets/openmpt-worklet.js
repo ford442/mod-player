@@ -16,7 +16,9 @@
     setAudioDiag: "setAudioDiag",
     setChannelMute: "setChannelMute",
     setRenderParam: "setRenderParam",
-    ctlSetText: "ctlSetText"
+    ctlSetText: "ctlSetText",
+    /** Hands a consumed projectm-pcm buffer back to the worklet's allocation pool. */
+    returnPcmBuffer: "returnPcmBuffer"
   };
   var WORKLET_TO_MAIN = {
     position: "position",
@@ -94,6 +96,8 @@
   var WORKLET_DEV = false;
   var OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH = 3;
   var DEFAULT_INTERPOLATION_LENGTH = 8;
+  var PCM_BUFFER_POOL_MAX = 4;
+  var LOAD_FADE_MS = 10;
   function log(...args) {
     if (DEBUG) console.log("[Worklet]", ...args);
   }
@@ -168,6 +172,12 @@
     if (type === MAIN_TO_WORKLET.ctlSetText) {
       if (typeof data.key !== "string" || typeof data.value !== "string") {
         return { ok: false, error: "ctlSetText requires key/value strings" };
+      }
+      return { ok: true, message: data };
+    }
+    if (type === MAIN_TO_WORKLET.returnPcmBuffer) {
+      if (!(data.buffer instanceof Float32Array)) {
+        return { ok: false, error: "returnPcmBuffer requires a Float32Array buffer" };
       }
       return { ok: true, message: data };
     }
@@ -287,6 +297,10 @@
       this.isLibReady = false;
       this.isPlaying = true;
       this.hasEnded = false;
+      this.faulted = false;
+      this._fadeGain = 1;
+      this._fadeTarget = 1;
+      this._fadeStep = 1 / Math.max(1, Math.round(sampleRate * LOAD_FADE_MS / 1e3));
       this.positionReportInterval = 1 / 60;
       this.lastPositionReportTime = 0;
       this._lastReportedRowInt = -1;
@@ -299,6 +313,7 @@
       this.pcmAccumR = new Float32Array(this.pcmChunkSize);
       this.pcmInterleaved = new Float32Array(this.pcmChunkSize * 2);
       this.pcmAccumCount = 0;
+      this.pcmBufferPool = [];
       log("Constructor called, sampleRate:", sampleRate);
       const sharedLib = globalThis.__openmptWorkletLib;
       if (sharedLib && typeof sharedLib._openmpt_module_create_from_memory2 === "function") {
@@ -384,6 +399,10 @@
           }
           if (this.modulePtr && this.lib && typeof this.lib._openmpt_module_set_render_param === "function") {
             this.lib._openmpt_module_set_render_param(this.modulePtr, msg.param, msg.value);
+          }
+        } else if (type === MT.returnPcmBuffer) {
+          if (msg.buffer.length === this.pcmChunkSize * 2 && this.pcmBufferPool.length < PCM_BUFFER_POOL_MAX) {
+            this.pcmBufferPool.push(msg.buffer);
           }
         } else if (type === MT.ctlSetText) {
           const lib = this.lib;
@@ -548,6 +567,19 @@
       this._prevBass = bassNorm;
       meta[AR_BEAT] = beat;
     }
+    /** Per-sample ramp toward `_fadeTarget` (see loadModule()'s output fade). */
+    _applyLoadFade(outL, outR, count) {
+      let gain = this._fadeGain;
+      const target = this._fadeTarget;
+      const step = this._fadeStep;
+      for (let i = 0; i < count; i++) {
+        if (gain < target) gain = Math.min(target, gain + step);
+        else if (gain > target) gain = Math.max(target, gain - step);
+        outL[i] = outL[i] * gain;
+        outR[i] = outR[i] * gain;
+      }
+      this._fadeGain = gain;
+    }
     // ── libopenmpt bootstrap via main-thread-fetched assets ────────────
     // AudioWorklet classic scripts cannot use import() or importScripts(), and
     // this scope has no fetch(). Main thread fetches libopenmpt-worklet.js and
@@ -580,14 +612,23 @@
         this.port.postMessage({ type: WT.error, message: "WASM library init timeout" });
         return;
       }
+      this._fadeTarget = 0;
+      await new Promise((resolve) => {
+        globalThis.setTimeout(resolve, LOAD_FADE_MS);
+      });
       try {
         const lib = this.lib;
         const bytes = moduleBytesFromPayload(moduleData);
         log("Loading module into libopenmpt:", bytes.byteLength, "bytes");
         if (this.modulePtr) {
-          lib._openmpt_module_destroy(this.modulePtr);
+          try {
+            lib._openmpt_module_destroy(this.modulePtr);
+          } catch (destroyErr) {
+            error("destroy of previous module ptr failed (ignored, reloading anyway):", destroyErr);
+          }
           this.modulePtr = 0;
         }
+        this.faulted = false;
         if (this.leftBufPtr) {
           lib._free(this.leftBufPtr);
           this.leftBufPtr = 0;
@@ -638,6 +679,8 @@
       } catch (err) {
         error("loadModule error:", err);
         this.port.postMessage({ type: WT.error, message: String(err) });
+      } finally {
+        this._fadeTarget = 1;
       }
     }
     // ── Audio process loop ─────────────────────────────────────────────
@@ -665,6 +708,29 @@
         outR.fill(0);
         return true;
       }
+      if (this.faulted) {
+        outL.fill(0);
+        outR.fill(0);
+        return true;
+      }
+      try {
+        this._renderQuantum(outL, outR);
+      } catch (err) {
+        outL.fill(0);
+        outR.fill(0);
+        this.faulted = true;
+        error("process() trapped \u2014 silencing output and reporting fault:", err);
+        this.port.postMessage({
+          type: WT.error,
+          message: "PROCESS_FAULT: " + String(err instanceof Error ? err.message : err),
+          fatal: true
+        });
+      }
+      return true;
+    }
+    /** The actual per-quantum render + reporting work. Isolated so process() can wrap it in one try/catch. */
+    _renderQuantum(outL, outR) {
+      if (!this.modulePtr || !this.lib) return;
       const numSamples = outL.length;
       const framesToRead = Math.min(numSamples, this.maxFrames);
       const lib = this.lib;
@@ -714,7 +780,7 @@
           this.hasEnded = true;
           this.port.postMessage({ type: WT.ended });
         }
-        return true;
+        return;
       }
       this.hasEnded = false;
       const heapBuf = lib.HEAPF32.buffer;
@@ -729,6 +795,9 @@
       for (let i = 0; i < samplesWritten; i++) {
         outL[i] = leftSrc[i];
         outR[i] = rightSrc[i];
+      }
+      if (this._fadeGain !== this._fadeTarget) {
+        this._applyLoadFade(outL, outR, samplesWritten);
       }
       if (this.oscView) {
         const framesToCopy = Math.min(128, samplesWritten);
@@ -758,7 +827,8 @@
               interleaved[i * 2] = this.pcmAccumL[i];
               interleaved[i * 2 + 1] = this.pcmAccumR[i];
             }
-            const payload = interleaved.slice();
+            const payload = this.pcmBufferPool.pop() ?? new Float32Array(this.pcmChunkSize * 2);
+            payload.set(interleaved);
             this.port.postMessage(
               {
                 type: WT.projectmPcm,
@@ -863,7 +933,6 @@
       if (shouldReportPosition) {
         this._prevRowInt = rowInt;
       }
-      return true;
     }
   };
   registerProcessor("openmpt-processor", XMPlayerProcessor);

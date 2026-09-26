@@ -12,7 +12,6 @@ export interface AudioGraphRefs {
   analyserRef:         React.MutableRefObject<AnalyserNode | null>;
   audioWorkletNodeRef: React.MutableRefObject<AudioWorkletNode | null>;
   nativeEngineRef:     React.MutableRefObject<OpenMPTWorkletEngine | null>;
-  wasmMemoryRef:       React.MutableRefObject<WebAssembly.Memory | null>;
   workletOrderRef:     React.MutableRefObject<number>;
   workletRowRef:       React.MutableRefObject<number>;
   workletTimeRef:      React.MutableRefObject<number>;

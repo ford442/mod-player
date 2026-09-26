@@ -29,6 +29,14 @@
 
 #include <cstdint>
 
+// AudioWorklet render quantum. emscripten/webaudio.h hardcodes AudioSampleFrame.data
+// to numberOfChannels*128 floats today — Chrome's proposed configurable render
+// quantum (renderSizeHint) would need this raised (and a real frame-count field
+// from Emscripten) before anything above 128 is safe; every fixed-size scratch
+// buffer in audio_process_cb is sized from this one constant so that's a one-line
+// change instead of an audit.
+static constexpr int MAX_QUANTUM = 128;
+
 // ── Shared state ────────────────────────────────────────────────────
 //
 // Accessed from BOTH main thread and audio worklet thread.
@@ -54,8 +62,13 @@ static std::atomic<int> g_modulePending{0};
 
 // Atomic flags for cross-thread commands
 static std::atomic<int> g_cmdLoad{0};    // 1 = new module data ready
-static std::atomic<int> g_cmdSeekOrder{-1};
-static std::atomic<int> g_cmdSeekRow{-1};
+// Seek target, packed as (order<<32 | row) into ONE atomic. Two separate atomics
+// (each read via its own exchange(-1)) let the audio thread run between the main
+// thread's two stores and observe a valid order paired with row=-1 (sentinel) —
+// the order was consumed and the row half of that seek was lost. A single u64
+// makes the pair indivisible: either the whole seek is there, or it isn't.
+static constexpr uint64_t SEEK_NONE = ~uint64_t(0);
+static std::atomic<uint64_t> g_cmdSeek{SEEK_NONE};
 static std::atomic<int> g_cmdSetLoop{-1}; // -1=no change, 0=off, 1=on
 static std::atomic<float> g_cmdVolume{-1.0f}; // <0 = no change
 static std::atomic<int> g_cmdRenderParam{-1}; // -1 = no change
@@ -76,6 +89,13 @@ static int g_ringOverrunLogged = 0;
 // Position info polled by main thread (written by worklet)
 static PositionInfo g_positionInfo;
 static std::atomic<int> g_positionReady{0}; // 1 = new data available
+// Seqlock over g_positionInfo: the main thread reads the struct's fields
+// directly out of WASM linear memory (audio-worklet/positionInfoLayout.ts),
+// not through a function call that could snapshot it atomically, so a write
+// from this thread can otherwise land mid-read and hand back a torn mix of
+// two updates. Odd = a write is in progress; even = stable. Bumped twice
+// (once before, once after) around every g_positionInfo write below.
+static std::atomic<uint32_t> g_positionSeq{0};
 
 // Audio context and node handles
 static EMSCRIPTEN_WEBAUDIO_T g_audioCtx = 0;
@@ -114,6 +134,15 @@ static int g_externalContext = 0;
 // AudioWorklet thread stack (required by emscripten_start_wasm_audio_worklet_thread_async)
 static uint8_t* g_workletStack = nullptr;
 constexpr uint32_t WORKLET_STACK_SIZE = 128 * 1024;
+
+static uint64_t pack_seek(int order, int row) {
+    return (static_cast<uint64_t>(static_cast<uint32_t>(order)) << 32)
+         | static_cast<uint32_t>(row);
+}
+static void unpack_seek(uint64_t packed, int& order, int& row) {
+    order = static_cast<int>(static_cast<uint32_t>(packed >> 32));
+    row   = static_cast<int>(static_cast<uint32_t>(packed & 0xFFFFFFFFu));
+}
 
 static uint8_t* ensureWorkletStack() {
     if (!g_workletStack) {
@@ -221,9 +250,10 @@ EM_BOOL audio_process_cb(
 
     // Seek command
     {
-        int order = g_cmdSeekOrder.exchange(-1, std::memory_order_acq_rel);
-        int row   = g_cmdSeekRow.exchange(-1, std::memory_order_acq_rel);
-        if (order >= 0 && row >= 0) {
+        const uint64_t packed = g_cmdSeek.exchange(SEEK_NONE, std::memory_order_acq_rel);
+        if (packed != SEEK_NONE) {
+            int order, row;
+            unpack_seek(packed, order, row);
             g_module.seekOrderRow(order, row);
             // Re-zero frame clock so seek re-anchor (frameSecondsAtAnchor=0) matches
             g_audioFramesRendered = 0.0;
@@ -281,7 +311,12 @@ EM_BOOL audio_process_cb(
     }
 
     AudioSampleFrame& out = outputs[0];
-    const int frames = 128; // Standard AudioWorklet quantum
+    // emscripten/webaudio.h hardcodes AudioSampleFrame.data to numberOfChannels*128
+    // floats (no runtime frame-count field exists to assert against today) — see
+    // the MAX_QUANTUM comment above. frames tracks that fixed size so every buffer
+    // below is sized from one constant instead of a scattered "128" literal.
+    static_assert(MAX_QUANTUM == 128, "AudioSampleFrame.data is fixed at numberOfChannels*128 floats");
+    const int frames = MAX_QUANTUM;
 
     if (g_paused.load(std::memory_order_acquire) || !g_module.isLoaded()) {
         std::memset(out.data, 0, sizeof(float) * frames * out.numberOfChannels);
@@ -300,9 +335,11 @@ EM_BOOL audio_process_cb(
         const bool rowChanged = (currentRow != g_lastReportedRow);
         const bool timeThreshold = (timeSinceLastReport >= (1.0 / 60.0));
         if (rowChanged || timeThreshold) {
+            g_positionSeq.fetch_add(1, std::memory_order_acq_rel); // odd: write in progress
             g_module.fillPositionInfo(g_positionInfo);
             g_positionInfo.audioFramesRendered = g_audioFramesRendered;
             g_positionInfo.sampleRate = sr;
+            g_positionSeq.fetch_add(1, std::memory_order_release); // even: stable again
             g_lastReportedRow = currentRow;
             timeSinceLastReport = 0.0;
             g_positionReady.store(1, std::memory_order_release);
@@ -311,7 +348,7 @@ EM_BOOL audio_process_cb(
     }
 
     // Render interleaved stereo into a temp buffer
-    float interleaved[128 * 2]; // Stack allocation for 128 frames
+    float interleaved[MAX_QUANTUM * 2]; // Stack allocation, stereo
     int rendered = g_module.readInterleavedStereo(
         sr,
         frames,
@@ -322,10 +359,12 @@ EM_BOOL audio_process_cb(
         // Module ended
         std::memset(out.data, 0, sizeof(float) * frames * out.numberOfChannels);
         // Signal end to main thread
+        g_positionSeq.fetch_add(1, std::memory_order_acq_rel); // odd: write in progress
         PositionInfo& pi = g_positionInfo;
         pi.currentRow = -1; // Special sentinel for "ended"
         pi.audioFramesRendered = g_audioFramesRendered;
         pi.sampleRate = sr;
+        g_positionSeq.fetch_add(1, std::memory_order_release); // even: stable again
         g_positionReady.store(1, std::memory_order_release);
         return EM_TRUE;
     }
@@ -448,6 +487,10 @@ int init_audio(int sampleRate) {
     std::memset(&attrs, 0, sizeof(attrs));
     attrs.latencyHint   = "playback";
     attrs.sampleRate    = sampleRate > 0 ? sampleRate : LOCKED_SAMPLE_RATE;
+    // audio_process_cb's readInterleavedStereo() call must render for the rate
+    // this context actually opened at, not an assumed constant (see the
+    // g_renderSampleRate comment on init_audio_with_context below).
+    g_renderSampleRate = attrs.sampleRate;
 
     g_audioCtx = emscripten_create_audio_context(&attrs);
     if (!g_audioCtx) {
@@ -524,15 +567,26 @@ int get_ring_write_head() {
  * the caller is responsible for connecting it into their audio graph (e.g. via
  * the TypeScript bridgeToAudioGraph() helper or the ring-buffer bridge).
  *
- * @param ctxHandle  Emscripten audio context handle
+ * @param ctxHandle    Emscripten audio context handle
+ * @param sampleRateHz The context's real `AudioContext.sampleRate`. audio_process_cb's
+ *                     readInterleavedStereo() call renders for whatever rate this is —
+ *                     it used to hardcode 48000 (g_renderSampleRate's initializer, never
+ *                     reassigned), so when utils/audioContextFactory.ts's own 48000
+ *                     request was rejected and it fell back to the device rate (rare —
+ *                     some Firefox / older Safari), this engine kept rendering as if the
+ *                     context were still 48 kHz: about a 9% pitch/tempo error against
+ *                     whatever the device actually ran at. libopenmpt resamples to
+ *                     whatever rate you ask for, so there is no reason to hardcode one;
+ *                     pass 0 to keep the previous default (48000) for old callers.
  * @return 1 on success, 0 on failure
  */
 EMSCRIPTEN_KEEPALIVE
-int init_audio_with_context(int ctxHandle) {
+int init_audio_with_context(int ctxHandle, int sampleRateHz) {
     if (!ctxHandle) {
         std::fprintf(stderr, "[C++] init_audio_with_context: invalid context handle\n");
         return 0;
     }
+    g_renderSampleRate = sampleRateHz > 0 ? sampleRateHz : 48000;
     g_audioCtx        = ctxHandle;
     g_externalContext = 1; // skip auto-connect in worklet_thread_initialized
 
@@ -549,7 +603,8 @@ int init_audio_with_context(int ctxHandle) {
         nullptr
     );
 
-    std::printf("[C++] Audio initialised with external context (handle=%d)\n", ctxHandle);
+    std::printf("[C++] Audio initialised with external context (handle=%d, sampleRate=%d)\n",
+                ctxHandle, g_renderSampleRate);
     return 1;
 }
 
@@ -700,8 +755,7 @@ void suspend_audio() {
  */
 EMSCRIPTEN_KEEPALIVE
 void seek_order_row(int order, int row) {
-    g_cmdSeekOrder.store(order, std::memory_order_release);
-    g_cmdSeekRow.store(row, std::memory_order_release);
+    g_cmdSeek.store(pack_seek(order, row), std::memory_order_release);
 }
 
 /**
@@ -782,6 +836,17 @@ PositionInfo* poll_position() {
         return &g_positionInfo;
     }
     return nullptr;
+}
+
+/**
+ * Seqlock counter guarding *g_positionInfo* (see the g_positionSeq comment
+ * above). The caller reads this before and after decoding the struct's raw
+ * bytes out of WASM memory; odd, or a value that changed across the read,
+ * means a write raced the read and the decode must be retried.
+ */
+EMSCRIPTEN_KEEPALIVE
+uint32_t get_position_seq() {
+    return g_positionSeq.load(std::memory_order_acquire);
 }
 
 /**

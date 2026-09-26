@@ -2,7 +2,8 @@
 // Thin orchestrator: engine paths live under hooks/audioGraph/.
 
 import { logWorkletDiagnostics } from '../audio-worklet/diagnostics';
-import { createPlayerAudioContext } from '../utils/audioContextFactory';
+import { createPlayerAudioContext, setPlaybackActiveQuery } from '../utils/audioContextFactory';
+import { getAudioSuspendState, setAudioSuspended, subscribeAudioSuspend } from '../utils/audioSuspendState';
 import { postLoad, postPause, postPlay } from '../audio-worklet/protocol';
 import {
   canReuseWorkletNode,
@@ -27,6 +28,60 @@ export type {
   AudioGraphConfig,
   AudioGraphRefs,
 } from './audioGraph/types';
+
+// Contexts we've already wired suspend-recovery for — a page session has one
+// shared AudioContext (utils/audioContextFactory.ts), but startAudioPlayback
+// runs on every play(), so guard against re-registering listeners each time.
+const suspendRecoveryWired = new WeakSet<AudioContext>();
+
+/**
+ * Notice the shared AudioContext leaving `running` unexpectedly (#12 in
+ * CLAUDE.md — iOS/Safari `interrupted`, OS suspends) and recover on the next
+ * user gesture: resume() the context and re-anchor the playhead clock the
+ * same way a fresh play() does, instead of leaving the UI saying "Playing"
+ * over silence until the user happens to hit play again.
+ */
+export function wireAudioSuspendRecovery(
+  ctx: AudioContext,
+  refs: AudioGraphRefs,
+  callbacks: AudioGraphCallbacks,
+): void {
+  if (suspendRecoveryWired.has(ctx)) return;
+  suspendRecoveryWired.add(ctx);
+
+  setPlaybackActiveQuery(() => refs.isPlayingRef.current);
+
+  const resumeAndReanchor = (): void => {
+    if (!getAudioSuspendState().suspended) return;
+    void ctx.resume().then(() => {
+      if (ctx.state !== 'running') return; // still not back — next gesture retries
+      refs.audioClockStartRef.current = ctx.currentTime;
+      refs.workletTimeAtStartRef.current = refs.workletTimeRef.current || 0;
+      refs.driftAccumulatorRef.current = 0;
+      setAudioSuspended(false);
+      if (refs.isPlayingRef.current) callbacks.setStatus('Playing...');
+    }).catch(() => { /* still suspended (needs a "real" gesture); next one retries */ });
+  };
+
+  // Any of these already fire on the interactions a user would use to notice
+  // and react to stalled audio (tap the canvas, hit a key, click a control).
+  const gestureEvents: Array<keyof WindowEventMap> = ['pointerdown', 'keydown', 'touchstart'];
+  for (const evt of gestureEvents) {
+    window.addEventListener(evt, resumeAndReanchor, { capture: true, passive: true });
+  }
+
+  subscribeAudioSuspend((state) => {
+    if (state.suspended && refs.isPlayingRef.current) {
+      callbacks.setStatus('Audio paused by the system — tap anywhere to resume');
+    }
+  });
+
+  // Backstop for iOS Safari cases where `statechange` doesn't fire promptly:
+  // re-check as soon as the tab is foregrounded again.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') resumeAndReanchor();
+  });
+}
 
 export async function startAudioPlayback(
   refs: AudioGraphRefs,
@@ -111,6 +166,7 @@ export async function startAudioPlayback(
 
     const ctx = refs.audioContextRef.current;
     console.log('[PLAY] AudioContext state:', ctx.state);
+    wireAudioSuspendRecovery(ctx, refs, callbacks);
 
     // AUDIO-001 FIX COMPLETE: Log diagnostics
     if (import.meta.env.DEV) logWorkletDiagnostics(config.WORKLET_URL, ctx);

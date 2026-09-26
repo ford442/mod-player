@@ -83,6 +83,14 @@ const OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH = 3;
 // still ask for 4 (cubic) via setRenderParam / `?interp=4` on weak devices.
 const DEFAULT_INTERPOLATION_LENGTH = 8;
 
+// Cap on how many returned projectm-pcm buffers we keep around — bounds worst
+// case memory if the main thread ever returns more than we hand out.
+const PCM_BUFFER_POOL_MAX = 4;
+
+// Output fade duration around a module load's synchronous destroy+create swap
+// (see loadModule()) — turns a slow parse's stall into hush, not a click.
+const LOAD_FADE_MS = 10;
+
 function log(...args: unknown[]): void {
   if (DEBUG) console.log('[Worklet]', ...args);
 }
@@ -138,6 +146,10 @@ interface CtlSetTextMsg {
   key: string;
   value: string;
 }
+interface ReturnPcmBufferMsg {
+  type: typeof MAIN_TO_WORKLET.returnPcmBuffer;
+  buffer: Float32Array<ArrayBuffer>;
+}
 /** Legacy no-type load shim used by some callers. */
 interface LegacyLoadMsg {
   type?: undefined;
@@ -157,6 +169,7 @@ type MainToWorkletMsg =
   | SetChannelMuteMsg
   | SetRenderParamMsg
   | CtlSetTextMsg
+  | ReturnPcmBufferMsg
   | LegacyLoadMsg;
 
 type ParseMainToWorkletResult =
@@ -245,6 +258,13 @@ function parseMainToWorkletMessage(data: unknown): ParseMainToWorkletResult {
       return { ok: false, error: 'ctlSetText requires key/value strings' };
     }
     return { ok: true, message: data as unknown as CtlSetTextMsg };
+  }
+
+  if (type === MAIN_TO_WORKLET.returnPcmBuffer) {
+    if (!(data.buffer instanceof Float32Array)) {
+      return { ok: false, error: 'returnPcmBuffer requires a Float32Array buffer' };
+    }
+    return { ok: true, message: data as unknown as ReturnPcmBufferMsg };
   }
 
   // Legacy no-type load shim
@@ -428,6 +448,12 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
   declare isLibReady: boolean;
   declare isPlaying: boolean;
   declare hasEnded: boolean;
+  /** Set when process() caught a wasm trap; output stays silent until the next load(). */
+  declare faulted: boolean;
+  /** Current/target output gain for the load-swap fade (see loadModule()). */
+  declare _fadeGain: number;
+  declare _fadeTarget: number;
+  declare _fadeStep: number;
 
   declare positionReportInterval: number;
   declare lastPositionReportTime: number;
@@ -450,6 +476,8 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
   /** Reused interleaved PCM block — avoids new Float32Array on every emit. */
   declare pcmInterleaved: Float32Array;
   declare pcmAccumCount: number;
+  /** Transferable buffers returned by the main thread (see MT.returnPcmBuffer) — reused instead of allocating a fresh payload every emit. */
+  declare pcmBufferPool: Float32Array<ArrayBuffer>[];
 
   declare _libInitPromise: Promise<void>;
   declare _resolveLib: (value?: void | PromiseLike<void>) => void;
@@ -515,6 +543,10 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
     this.isLibReady = false;
     this.isPlaying = true;
     this.hasEnded = false;
+    this.faulted = false;
+    this._fadeGain = 1;
+    this._fadeTarget = 1;
+    this._fadeStep = 1 / Math.max(1, Math.round((sampleRate * LOAD_FADE_MS) / 1000));
 
     this.positionReportInterval = 1 / 60;
     this.lastPositionReportTime = 0;
@@ -529,6 +561,7 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
     this.pcmAccumR = new Float32Array(this.pcmChunkSize);
     this.pcmInterleaved = new Float32Array(this.pcmChunkSize * 2);
     this.pcmAccumCount = 0;
+    this.pcmBufferPool = [];
 
     log('Constructor called, sampleRate:', sampleRate);
 
@@ -626,6 +659,14 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
         }
         if (this.modulePtr && this.lib && typeof this.lib._openmpt_module_set_render_param === 'function') {
           this.lib._openmpt_module_set_render_param(this.modulePtr, msg.param, msg.value);
+        }
+      } else if (type === MT.returnPcmBuffer) {
+        // Only take back buffers sized for the current chunk — a stale return
+        // from before a chunk-size change (there is none today, but stay safe)
+        // would corrupt the next emit's .set() into a too-small view.
+        if (msg.buffer.length === this.pcmChunkSize * 2
+          && this.pcmBufferPool.length < PCM_BUFFER_POOL_MAX) {
+          this.pcmBufferPool.push(msg.buffer);
         }
       } else if (type === MT.ctlSetText) {
         const lib = this.lib;
@@ -810,6 +851,20 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
     meta[AR_BEAT] = beat;
   }
 
+  /** Per-sample ramp toward `_fadeTarget` (see loadModule()'s output fade). */
+  _applyLoadFade(outL: Float32Array, outR: Float32Array, count: number): void {
+    let gain = this._fadeGain;
+    const target = this._fadeTarget;
+    const step = this._fadeStep;
+    for (let i = 0; i < count; i++) {
+      if (gain < target) gain = Math.min(target, gain + step);
+      else if (gain > target) gain = Math.max(target, gain - step);
+      outL[i] = outL[i]! * gain;
+      outR[i] = outR[i]! * gain;
+    }
+    this._fadeGain = gain;
+  }
+
   // ── libopenmpt bootstrap via main-thread-fetched assets ────────────
   // AudioWorklet classic scripts cannot use import() or importScripts(), and
   // this scope has no fetch(). Main thread fetches libopenmpt-worklet.js and
@@ -848,16 +903,34 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
       return;
     }
 
+    // Module create/destroy below is synchronous WASM work that can run long
+    // enough on a large module to stall process() past its deadline (#4: measure
+    // with ?audioDiag=1). Fade to silence first so a slow parse produces hush
+    // instead of an abrupt discontinuity in whatever was still playing, then
+    // fade back in once the swap (success or failure) is done. The wait here
+    // gives process() a chance to actually run the fade-out quanta before the
+    // blocking work below starts.
+    this._fadeTarget = 0;
+    await new Promise<void>((resolve) => { globalThis.setTimeout(resolve, LOAD_FADE_MS); });
+
     try {
       const lib = this.lib;
       const bytes = moduleBytesFromPayload(moduleData);
       log('Loading module into libopenmpt:', bytes.byteLength, 'bytes');
 
-      // Tear down previous module
+      // Tear down previous module. Best-effort: after a process() trap (this.faulted)
+      // the old pointer may itself be the corrupt one that caused the trap, so a
+      // reload must not let a second throw from destroy() block recovery.
       if (this.modulePtr) {
-        lib._openmpt_module_destroy(this.modulePtr);
+        try {
+          lib._openmpt_module_destroy(this.modulePtr);
+        } catch (destroyErr) {
+          error('destroy of previous module ptr failed (ignored, reloading anyway):', destroyErr);
+        }
         this.modulePtr = 0;
       }
+      // A fresh load is the recovery path for a faulted node — give it a real chance.
+      this.faulted = false;
       if (this.leftBufPtr) { lib._free(this.leftBufPtr); this.leftBufPtr = 0; }
       if (this.rightBufPtr) { lib._free(this.rightBufPtr); this.rightBufPtr = 0; }
 
@@ -905,6 +978,10 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
     } catch (err) {
       error('loadModule error:', err);
       this.port.postMessage({ type: WT.error, message: String(err) });
+    } finally {
+      // Always fade back in — including on failure, so a bad file doesn't
+      // leave the node permanently silent while still marked "playing".
+      this._fadeTarget = 1;
     }
   }
 
@@ -934,6 +1011,43 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
       outR.fill(0);
       return true;
     }
+
+    // A prior quantum trapped inside wasm (corrupt pointer, OOB heap access, …).
+    // The instance is not trustworthy until the next load() rebuilds it — keep
+    // outputting silence rather than re-entering the code that just crashed.
+    if (this.faulted) {
+      outL.fill(0);
+      outR.fill(0);
+      return true;
+    }
+
+    try {
+      this._renderQuantum(outL, outR);
+    } catch (err) {
+      // A real wasm trap (e.g. WebAssembly.RuntimeError: memory access out of
+      // bounds) permanently corrupts this instance — nothing after it can be
+      // trusted. Silence output, tell the main thread so it can restart the
+      // node, and stay silent until that happens.
+      outL.fill(0);
+      outR.fill(0);
+      this.faulted = true;
+      error('process() trapped — silencing output and reporting fault:', err);
+      this.port.postMessage({
+        type: WT.error,
+        message: 'PROCESS_FAULT: ' + String(err instanceof Error ? err.message : err),
+        fatal: true,
+      });
+    }
+
+    return true;
+  }
+
+  /** The actual per-quantum render + reporting work. Isolated so process() can wrap it in one try/catch. */
+  _renderQuantum(outL: Float32Array, outR: Float32Array): void {
+    // process() already checked modulePtr/lib/isPlaying before calling this —
+    // re-checked here only to re-establish TS narrowing inside this method
+    // (narrowing from the caller's guard doesn't cross the method boundary).
+    if (!this.modulePtr || !this.lib) return;
 
     const numSamples = outL.length;
     const framesToRead = Math.min(numSamples, this.maxFrames);
@@ -1002,7 +1116,7 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
         this.hasEnded = true;
         this.port.postMessage({ type: WT.ended });
       }
-      return true;
+      return;
     }
     this.hasEnded = false;
 
@@ -1021,6 +1135,10 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
     for (let i = 0; i < samplesWritten; i++) {
       outL[i] = leftSrc[i]!;
       outR[i] = rightSrc[i]!;
+    }
+
+    if (this._fadeGain !== this._fadeTarget) {
+      this._applyLoadFade(outL, outR, samplesWritten);
     }
 
     // Copy first 128 samples into oscilloscope ring buffer
@@ -1060,8 +1178,12 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
             interleaved[i * 2] = this.pcmAccumL[i]!;
             interleaved[i * 2 + 1] = this.pcmAccumR[i]!;
           }
-          // Clone for postMessage so the reusable buffer stays attached.
-          const payload = interleaved.slice();
+          // Copy into a pooled buffer (returned by the main thread after it
+          // consumes the previous block — see MT.returnPcmBuffer) instead of
+          // allocating a fresh one every ~11.6 ms; the reusable accumulator
+          // (`interleaved`) itself is never transferred, so it stays attached.
+          const payload = this.pcmBufferPool.pop() ?? new Float32Array(this.pcmChunkSize * 2);
+          payload.set(interleaved);
           this.port.postMessage(
             {
               type: WT.projectmPcm, buffer: payload, channels: 2,
@@ -1176,8 +1298,6 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
     if (shouldReportPosition) {
       this._prevRowInt = rowInt;
     }
-
-    return true;
   }
 }
 

@@ -28,6 +28,7 @@
  */
 
 import { resolveStageModePreference } from './stageModeSelection';
+import { setAudioSuspended } from './audioSuspendState';
 
 export type AudioGraphProfile = 'playback' | 'interactive';
 
@@ -81,6 +82,42 @@ export function resolveAudioGraphProfile(
 
 let sharedContext: AudioContext | null = null;
 let loggedSampleRateFallback = false;
+
+/**
+ * Whether playback is currently expected (i.e. the UI thinks it's playing).
+ * Registered by the audio-graph layer (which owns `isPlayingRef`) so this
+ * framework-free module can tell a *user-initiated* pause (context correctly
+ * idle) from an *unexpected* one (context left `running` mid-playback).
+ */
+let playbackActiveQuery: (() => boolean) | null = null;
+
+/** Called once by the audio-graph layer to answer "should audio be playing right now?". */
+export function setPlaybackActiveQuery(query: (() => boolean) | null): void {
+  playbackActiveQuery = query;
+}
+
+/**
+ * Notice `ctx` leaving/rejoining `running` (iOS/Safari `interrupted`, OS
+ * suspends, a background tab reclaiming audio) instead of only ever checking
+ * `ctx.state` inside `play()`. Reported through utils/audioSuspendState.ts —
+ * see that module for why the UI-facing recovery lives elsewhere.
+ */
+function wireStateChangeReporting(ctx: AudioContext): void {
+  // A property assignment (not addEventListener) — this factory is the only
+  // owner of `ctx`, so there is no other `onstatechange` listener to preserve,
+  // and it keeps this testable against minimal AudioContext mocks.
+  ctx.onstatechange = () => {
+    const expectedPlaying = playbackActiveQuery ? playbackActiveQuery() : false;
+    if (ctx.state !== 'running') {
+      if (expectedPlaying) {
+        console.warn(`[AudioEngine] AudioContext unexpectedly left 'running' (now '${ctx.state}') while playing`);
+        setAudioSuspended(true, ctx.state);
+      }
+    } else {
+      setAudioSuspended(false);
+    }
+  };
+}
 
 function resolveAudioContextCtor(): typeof AudioContext | null {
   if (typeof AudioContext !== 'undefined') return AudioContext;
@@ -143,6 +180,7 @@ export function createPlayerAudioContext(
   }
 
   applySinkId(ctx, opts.sinkId);
+  wireStateChangeReporting(ctx);
 
   console.log('[AudioEngine] AudioContext created', {
     profile,
@@ -183,4 +221,5 @@ export function closeSharedPlayerAudioContext(): void {
 export function __resetSharedPlayerAudioContextForTests(): void {
   sharedContext = null;
   loggedSampleRateFallback = false;
+  playbackActiveQuery = null;
 }
