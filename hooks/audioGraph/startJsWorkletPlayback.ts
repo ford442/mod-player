@@ -14,11 +14,18 @@ import {
   parseWorkletToMainMessageOrWarn,
   postInitLib,
   postLoad,
+  postPause,
   postPlay,
+  postReturnPcmBuffer,
   postSetAudioDiag,
   postSetProjectmPcm,
   postSetRenderParam,
 } from '../../audio-worklet/protocol';
+import {
+  clearAudioFault,
+  noteAudioRestartAttempt,
+  setAudioFaulted,
+} from '../../utils/audioEngineFaultState';
 import {
   hasProjectMConsumer,
   isAudioDiagEnabled,
@@ -34,6 +41,59 @@ import type { AudioGraphCallbacks, AudioGraphConfig, AudioGraphRefs } from './ty
 const WORKLET_URL = getWorkletUrl();
 
 export type JsWorkletPlaybackResult = 'setup-complete' | 'failed';
+
+/**
+ * Tear down a crashed worklet node and either restart it (fresh node, same
+ * shared libopenmpt instance in the AudioWorkletGlobalScope — see
+ * ensureSharedLibOpenMPT) or, if the restart itself faults again, give up on
+ * the worklet path for this session and fall back to ScriptProcessorNode.
+ *
+ * Triggered by either `node.onprocessorerror` (an error the worklet's own
+ * process() try/catch did not catch — e.g. a bug outside _renderQuantum) or a
+ * `fatal` WT.error message (process() caught a wasm trap and silenced output).
+ */
+export async function handleWorkletFault(
+  refs: AudioGraphRefs,
+  callbacks: AudioGraphCallbacks,
+  config: AudioGraphConfig,
+  ctx: AudioContext,
+  node: AudioWorkletNode,
+  reason: 'processor-error' | 'process-trap',
+  message: string,
+): Promise<void> {
+  const attempt = noteAudioRestartAttempt();
+  setAudioFaulted(reason, message);
+  refs.isPlayingRef.current = false;
+  callbacks.setIsPlaying(false);
+
+  console.error(`[PLAY] Worklet faulted (${reason}, attempt ${attempt}): ${message}`);
+
+  // Best-effort teardown — the node is not trusted to respond to anything else.
+  try { node.onprocessorerror = null; } catch { /* ignore */ }
+  try { node.port.postMessage(postPause()); } catch { /* ignore */ }
+  try { node.port.onmessage = null; } catch { /* ignore */ }
+  try { node.disconnect(); } catch { /* ignore */ }
+  if (refs.audioWorkletNodeRef.current === node) {
+    refs.audioWorkletNodeRef.current = null;
+  }
+
+  if (attempt > 1) {
+    console.error('[PLAY] Worklet restart faulted again — falling back to ScriptProcessorNode');
+    callbacks.setStatus('Audio engine crashed — using fallback renderer');
+    setAudioFaulted('restart-failed', message);
+    await runScriptProcessorFallback(refs, callbacks, config, ctx, node);
+    return;
+  }
+
+  callbacks.setStatus('Audio engine error — restarting…');
+  // Do NOT clear the fault just because this returns 'setup-complete' — that
+  // only means the node/message-handler setup ran, not that it's actually
+  // rendering. restartAttempts must stay elevated until the 'loaded-accepted'
+  // case above confirms the new node is healthy, so a module that traps on
+  // every render still reaches the attempt>1 fallback instead of restarting
+  // forever.
+  await startJsWorkletPlayback(refs, callbacks, config, ctx, false);
+}
 
 /**
  * Load / reuse the JS AudioWorklet node, post initLib + load, wire master graph.
@@ -111,23 +171,12 @@ export async function startJsWorkletPlayback(
       console.log('[PLAY] Reusing existing AudioWorkletNode (hot module reload)');
     } else {
       console.log('[PLAY] Creating AudioWorkletNode...');
-      // Shared WASM memory requires cross-origin isolation (COOP/COEP headers).
-      // In production without those headers SharedArrayBuffer is unavailable and
-      // new WebAssembly.Memory({ shared: true }) throws a TypeError, killing play().
-      // The JS AudioWorklet engine manages its own memory, so shared memory is
-      // optional here (only needed for the native C++/Wasm engine).
-      let wasmMemory = refs.wasmMemoryRef.current;
+      // The JS engine's openmpt-processor.ts never reads processorOptions.memory —
+      // it manages its own wasm memory internally (see ensureSharedLibOpenMPT).
+      // A shared WebAssembly.Memory here was dead weight (16 MB allocated per
+      // node, unused); only the native C++/Wasm engine needs shared memory, and
+      // it manages its own via emscripten's WASM_WORKERS runtime, not this ref.
       const processorOptions: Record<string, unknown> = {};
-      if (!wasmMemory && window.crossOriginIsolated) {
-        console.log('[PLAY] Allocating shared WASM.Memory for worklet (16MB)');
-        wasmMemory = new WebAssembly.Memory({
-          initial: 256, // 256 pages = 16 MB
-          maximum: 256,
-          shared: true,
-        });
-        refs.wasmMemoryRef.current = wasmMemory;
-      }
-      if (wasmMemory) processorOptions.memory = wasmMemory;
       // Pass base URL so the worklet can resolve WASM/co-located assets correctly
       processorOptions.baseUrl = detectRuntimeBase();
 
@@ -181,6 +230,15 @@ export async function startJsWorkletPlayback(
 
       switch (result.kind) {
         case 'position':
+          // Only clear the fault once a *render* is actually confirmed — a
+          // WT.position message is posted from inside _renderQuantum() after
+          // a full quantum has rendered without trapping. 'loaded-accepted'
+          // (below) fires on the WT.loaded ack, before MT.play is even sent
+          // and well before the worklet's first process() call, so clearing
+          // there let a module that traps on its very first render reset
+          // restartAttempts to 0 on every restart and loop forever instead of
+          // ever reaching the ScriptProcessor fallback — see handleWorkletFault().
+          clearAudioFault();
           break;
 
         case 'loaded-stale':
@@ -218,7 +276,11 @@ export async function startJsWorkletPlayback(
 
         case 'error': {
           console.error("[PLAY] Worklet error:", result.message);
-          if (result.shouldAttemptSpFallback) {
+          if (result.fatal) {
+            // process() caught a wasm trap and silenced output — the instance
+            // is not recoverable in place; restart the node (see handleWorkletFault).
+            await handleWorkletFault(refs, callbacks, config, ctx, node, 'process-trap', result.message);
+          } else if (result.shouldAttemptSpFallback) {
             await runScriptProcessorFallback(refs, callbacks, config, ctx, node);
           } else if (!refs.spFallbackTriggered.current) {
             callbacks.setStatus("Worklet error: " + result.message);
@@ -240,6 +302,11 @@ export async function startJsWorkletPlayback(
             broadcastPcmBlock(buf, ch);
             publishPcmBlock(buf, ch, ctx.sampleRate);
           }
+          // Both consumers above read `buf` synchronously — safe to hand its
+          // buffer straight back to the worklet's allocation pool (#PCM-alloc).
+          try {
+            node.port.postMessage(postReturnPcmBuffer(buf), [buf.buffer]);
+          } catch { /* node torn down mid-flight — the buffer is simply GC'd */ }
           break;
         }
 
@@ -264,6 +331,16 @@ export async function startJsWorkletPlayback(
           return _exhaustive;
         }
       }
+    };
+
+    // Nothing sets this natively — an uncaught throw inside the processor
+    // (a bug outside the process()/try-catch in openmpt-processor.ts, or a
+    // browser-level worklet failure) otherwise kills the node silently while
+    // the UI keeps showing "Playing". Re-applied even for a reused node: it's
+    // a plain property assignment, idempotent, and cheap.
+    node.onprocessorerror = (ev) => {
+      const detail = ev instanceof ErrorEvent ? ev.message : String(ev);
+      void handleWorkletFault(refs, callbacks, config, ctx, node, 'processor-error', detail);
     };
 
     // Send glue + real WASM to the worklet first (must arrive before 'load'). The wasm buffer is

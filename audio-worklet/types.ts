@@ -163,6 +163,8 @@ export interface EmscriptenOpenMPTModule {
     _set_render_param: (param: number, value: number) => void;
     _ctl_set_text: (keyPtr: number, valuePtr: number) => void;
     _poll_position: () => number; // Returns pointer to PositionInfo or 0
+    /** Seqlock over *PositionInfo (see cpp/worklet_processor.cpp's g_positionSeq). Optional: older builds predate it. */
+    _get_position_seq?: () => number;
     _get_audio_context: () => number;
     _get_worklet_node: () => number;
     _cleanup_audio: () => void;
@@ -195,7 +197,13 @@ export interface EmscriptenOpenMPTModule {
      * the caller wires it into their own audio graph.
      * @param ctxHandle  Emscripten audio context handle (emscriptenRegisterAudioObject)
      */
-    _init_audio_with_context?: (ctxHandle: number) => number;
+    /**
+     * @param ctxHandle    Emscripten audio context handle.
+     * @param sampleRateHz `ctx.sampleRate` — must match the real AudioContext rate
+     *   (see cpp/worklet_processor.cpp's g_renderSampleRate); 0 keeps the native
+     *   default (48000) for callers that predate this parameter.
+     */
+    _init_audio_with_context?: (ctxHandle: number, sampleRateHz: number) => number;
 
     // ── Emscripten audio object registry (injected by webaudio build) ──
 

@@ -124,6 +124,7 @@ const optionalButExport = [
   'set_ring_buffer',
   'get_ring_write_head',
   'init_audio_with_context',
+  'get_position_seq',
   'get_num_channels',
   'get_num_orders',
   'get_num_patterns',
@@ -188,6 +189,36 @@ if (!/int commit_module\(\)/.test(cpp)) {
 for (const code of ['ERR_BAD_ARGS', 'ERR_OUT_OF_MEMORY', 'ERR_UNSUPPORTED_MODULE', 'ERR_AUDIO_LOAD']) {
   if (!cpp.includes(code)) {
     errors.push(`cpp/worklet_processor.cpp must report a typed ${code} via get_last_error()`);
+  }
+}
+
+// Sample-rate contract (#runtime-hardening): audio_process_cb's
+// readInterleavedStereo() call renders for g_renderSampleRate, which must
+// track the real AudioContext rate — not a hardcoded 48000 — or a device
+// whose context opened at something other than 48000 (utils/audioContextFactory.ts's
+// own fallback path) gets ~9% pitch/tempo drift.
+{
+  const sigMatch = cpp.match(/int init_audio_with_context\(([^)]*)\)/);
+  if (!sigMatch) {
+    errors.push('cpp/worklet_processor.cpp: init_audio_with_context() signature not found');
+  } else if (!/sampleRateHz/.test(sigMatch[1])) {
+    errors.push(
+      'init_audio_with_context() must take a sampleRateHz parameter and set g_renderSampleRate from it '
+      + '(a hardcoded rate mismatches a device whose AudioContext opened at a different rate)',
+    );
+  } else {
+    const bodyStart = cpp.indexOf('{', cpp.indexOf(sigMatch[0]));
+    const bodyEnd = cpp.indexOf('\n}', bodyStart);
+    const body = cpp.slice(bodyStart, bodyEnd);
+    if (!/g_renderSampleRate\s*=\s*sampleRateHz/.test(body)) {
+      errors.push('init_audio_with_context() must assign g_renderSampleRate from sampleRateHz');
+    }
+  }
+  if (!/_init_audio_with_context\?\s*:\s*\(ctxHandle:\s*number,\s*sampleRateHz:\s*number\)/.test(types)) {
+    errors.push('audio-worklet/types.ts: _init_audio_with_context must be typed (ctxHandle, sampleRateHz)');
+  }
+  if (!/initWithCtx\(handle, .*ctx\.sampleRate/.test(engine)) {
+    errors.push('OpenMPTWorkletEngine.ts must call initWithCtx(handle, …ctx.sampleRate…) — not an assumed constant');
   }
 }
 

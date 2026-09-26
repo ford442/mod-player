@@ -30,7 +30,7 @@ export type JsWorkletDispatchResult =
   | { kind: 'loaded-accepted' }
   | { kind: 'loaded-stale' }
   | { kind: 'ended' }
-  | { kind: 'error'; message: string; shouldAttemptSpFallback: boolean }
+  | { kind: 'error'; message: string; shouldAttemptSpFallback: boolean; fatal: boolean }
   | { kind: 'seek-ack' }
   | { kind: 'diagnostic'; subtype: 'needData' | 'starvation'; raw: unknown }
   | { kind: 'projectm-pcm'; buffer: Float32Array; channels: 1 | 2 }
@@ -115,6 +115,7 @@ export function dispatchWorkletToMainMessage(
         kind: 'error',
         message: message.message,
         shouldAttemptSpFallback,
+        fatal: message.fatal ?? false,
       };
     }
 

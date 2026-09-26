@@ -56,13 +56,6 @@ export {
 export const NATIVE_RING_BUF_FRAMES = 8192;
 
 /**
- * Total byte size required for one ring buffer allocation:
- *   8 B header  (writeHead Int32 + readHead Int32)
- * + NATIVE_RING_BUF_FRAMES × 2 channels × 4 B  (interleaved Float32 stereo)
- */
-export const NATIVE_PCM_CHUNK_FRAMES = 128;
-
-/**
  * Map a native error string onto the engine's `error` event code.
  * Native messages are `ERR_CODE: human detail`; older builds have no string at
  * all, which stays the generic LOAD_FAILED.
@@ -142,13 +135,32 @@ export class OpenMPTWorkletEngine extends MiniEventEmitter<EngineEventMap> {
     private state: EngineState = 'uninitialized';
     private pollTimer: ReturnType<typeof setInterval> | null = null;
     private lastRow = -1;
+    /** Edge-trigger for the "ended" sentinel — see startPolling(). */
+    private hasEmittedEnded = false;
     /** When true, copy PCM out of the C++ ring each poll (pcmBus / Project-M). */
     private pcmCapture = false;
+    /**
+     * This consumer's own read cursor into the ring (stereo frame index), so
+     * copyPcmChunk() can drain everything written since the *last* poll
+     * instead of only the newest quantum. -1 = not yet synced (set on the
+     * next tick without emitting, so re-enabling capture doesn't dump a huge
+     * stale backlog). Independent of the ring header's `readHead` field,
+     * which is reserved for a different (main-thread bridge) consumer.
+     */
+    private pcmReadFrame = -1;
     private basePath: string;
     /** SharedArrayBuffer provided at construction (signals ring-buffer bridge intent). */
     private sharedOutputBuffer: SharedArrayBuffer | null;
     /** WASM heap byte offset of the allocated ring buffer (0 = not allocated). */
     private ringBufPtr = 0;
+    /** Reused scratch buffer for copyPcmChunk (sized for the ring's full capacity,
+     *  the worst case) — returned as a subarray so a normal-sized read allocates
+     *  nothing, instead of a fresh Float32Array every ~16 ms tick. */
+    private pcmScratch: Float32Array | null = null;
+    /** Cached DataView for pollPositionOnce — recreated only if HEAPU8.buffer is
+     *  replaced (wasm heap growth), not every ~60 Hz poll tick. */
+    private positionView: DataView | null = null;
+    private positionViewBuffer: ArrayBufferLike | null = null;
     /** True after attachAudioContext. */
     private audioAttached = false;
     private attachedContext: AudioContext | null = null;
@@ -280,9 +292,14 @@ export class OpenMPTWorkletEngine extends MiniEventEmitter<EngineEventMap> {
         if (typeof initWithCtx !== 'function') {
             throw new Error('_init_audio_with_context missing from native WASM');
         }
-        const result = initWithCtx(handle);
+        // The native render call must target this context's REAL rate, not an
+        // assumed 48000 — utils/audioContextFactory.ts falls back to the device
+        // default when 48000 is rejected (rare), and rendering "48kHz audio" into
+        // a different-rate context is about a 9% pitch/tempo error either way.
+        const result = initWithCtx(handle, Math.round(ctx.sampleRate) || 0);
         if (!result) {
-            throw new Error('Failed to initialize native AudioWorklet');
+            const detail = this.takeNativeError();
+            throw new Error(detail ?? 'Failed to initialize native AudioWorklet');
         }
 
         const readyDeadline = Date.now() + 8000;
@@ -496,7 +513,12 @@ export class OpenMPTWorkletEngine extends MiniEventEmitter<EngineEventMap> {
     /** Enable/disable the 16 ms HEAPF32 PCM copy (off unless a consumer exists). */
     setPcmCapture(enabled: boolean): void {
         this.pcmCapture = enabled;
-        if (enabled) this.allocatePcmRing();
+        if (enabled) {
+            this.allocatePcmRing();
+            // Re-sync to "now" rather than replay however much (stale, possibly
+            // wrapped-around) backlog piled up while capture was off.
+            this.pcmReadFrame = -1;
+        }
     }
 
     /** Last successful load fingerprint, or null if nothing has been loaded. */
@@ -666,12 +688,19 @@ export class OpenMPTWorkletEngine extends MiniEventEmitter<EngineEventMap> {
         this.pollTimer = setInterval(() => {
             const data = this.pollPositionOnce();
             if (data) {
-                // Check for "ended" sentinel
+                // Check for "ended" sentinel. audio_process_cb re-stamps this
+                // sentinel + g_positionReady on every subsequent quantum once the
+                // module has finished (not just the first one), so without this
+                // edge-trigger 'ended' fires again on every ~16 ms poll forever.
                 if (data.currentRow === -1) {
-                    this.emit('ended', undefined as unknown as void);
-                    this.setState('paused');
+                    if (!this.hasEmittedEnded) {
+                        this.hasEmittedEnded = true;
+                        this.emit('ended', undefined as unknown as void);
+                        this.setState('paused');
+                    }
                     return;
                 }
+                this.hasEmittedEnded = false;
 
                 // Pattern matrices are extracted once at module load
                 // (parseModuleWithNative). Do not walk cells here — that was
@@ -701,7 +730,11 @@ export class OpenMPTWorkletEngine extends MiniEventEmitter<EngineEventMap> {
     }
 
     /**
-     * Copy the last NATIVE_PCM_CHUNK_FRAMES stereo frames from the C++ ring.
+     * Drain every stereo frame the C++ ring has written since the *previous*
+     * call — not just the newest quantum. The audio thread writes
+     * MAX_QUANTUM (128) frames roughly every ~2.7-2.9 ms; at the 16 ms poll
+     * interval that's ~5-6 quanta (~640-768 frames) per tick. Reading a fixed
+     * 128-frame window here dropped all but the last one (#pcm-tap-drops).
      */
     copyPcmChunk(sampleRateHint?: number): NativePcmChunk | null {
         if (!this.module || this.ringBufPtr <= 0) return null;
@@ -709,30 +742,60 @@ export class OpenMPTWorkletEngine extends MiniEventEmitter<EngineEventMap> {
             ? this.module._get_ring_write_head()
             : 0;
         const cap = NATIVE_RING_BUF_FRAMES;
-        const frames = NATIVE_PCM_CHUNK_FRAMES;
+
+        if (this.pcmReadFrame < 0) {
+            // First read after (re)enabling capture — sync to "now" instead of
+            // guessing how far back to backfill.
+            this.pcmReadFrame = writeHead;
+            return null;
+        }
+
+        let available = (writeHead - this.pcmReadFrame + cap) % cap;
+        if (available === 0) return null;
+        if (available > cap - 1) {
+            // The writer lapped this reader (main thread stalled longer than the
+            // ~170 ms the ring holds) — drop the frames it already overwrote and
+            // resync from the oldest frame still actually in the ring.
+            available = cap - 1;
+            this.pcmReadFrame = (writeHead - available + cap) % cap;
+        }
+
         const samplesOffsetBytes = this.ringBufPtr + 8;
         const f32Index = samplesOffsetBytes / 4;
         const heap = this.module.HEAPF32;
-        const out = new Float32Array(frames * 2);
-        for (let i = 0; i < frames; i++) {
-            const pos = (writeHead - frames + i + cap) % cap;
+        if (!this.pcmScratch) this.pcmScratch = new Float32Array(cap * 2);
+        const scratch = this.pcmScratch;
+        for (let i = 0; i < available; i++) {
+            const pos = (this.pcmReadFrame + i) % cap;
             const src = f32Index + pos * 2;
-            out[i * 2] = heap[src] ?? 0;
-            out[i * 2 + 1] = heap[src + 1] ?? 0;
+            scratch[i * 2] = heap[src] ?? 0;
+            scratch[i * 2 + 1] = heap[src + 1] ?? 0;
         }
+        this.pcmReadFrame = writeHead;
+
         const sampleRate = sampleRateHint
             || this.attachedContext?.sampleRate
             || 48000;
         return {
-            buffer: out,
+            // Consumers (broadcastPcmBlock, publishPcmBlock) read this
+            // synchronously — safe to hand back a view into the reused scratch
+            // buffer instead of allocating a fresh Float32Array every tick.
+            buffer: scratch.subarray(0, available * 2),
             channels: 2,
             sampleRate,
-            samplesPerChannel: frames,
+            samplesPerChannel: available,
         };
     }
 
     /**
      * Read position data from the C++ shared-memory struct.
+     *
+     * The struct's bytes are read directly out of live WASM memory (not through
+     * a function call that could hand back a consistent snapshot), and the
+     * audio thread can write a fresh update between any two of those reads.
+     * `_get_position_seq()` is a seqlock over that struct (see
+     * cpp/worklet_processor.cpp's g_positionSeq): odd, or a value that changed
+     * across the decode, means a write raced it and the read must be retried.
      */
     private pollPositionOnce(): WorkletPositionData | null {
         if (!this.module) return null;
@@ -740,9 +803,34 @@ export class OpenMPTWorkletEngine extends MiniEventEmitter<EngineEventMap> {
         const ptr = this.module._poll_position();
         if (!ptr) return null;
 
-        const view = new DataView(this.module.HEAPU8.buffer);
-        return decodePositionInfo(view, ptr, {
-            bufferByteLength: this.module.HEAPU8.byteLength,
-        });
+        const decodeOnce = (): WorkletPositionData | null => {
+            const heapBuf = this.module!.HEAPU8.buffer;
+            if (this.positionViewBuffer !== heapBuf) {
+                this.positionViewBuffer = heapBuf;
+                this.positionView = new DataView(heapBuf);
+            }
+            return decodePositionInfo(this.positionView!, ptr, {
+                bufferByteLength: this.module!.HEAPU8.byteLength,
+            });
+        };
+
+        const getSeq = this.module._get_position_seq;
+        if (typeof getSeq !== 'function') {
+            // Older native build predating the seqlock export — best effort, as before.
+            return decodeOnce();
+        }
+
+        const MAX_ATTEMPTS = 4;
+        for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+            const seqBefore = getSeq();
+            if (seqBefore % 2 !== 0) continue; // a write is in progress right now — retry
+            const decoded = decodeOnce();
+            if (getSeq() === seqBefore) return decoded;
+            // seq changed (or went odd) during the decode — a write raced it; retry.
+        }
+        // Never observed a stable window in MAX_ATTEMPTS tries (would mean the
+        // audio thread is writing on nearly every JS statement) — return the
+        // last decode rather than starve the UI of position updates entirely.
+        return decodeOnce();
     }
 }

@@ -197,6 +197,41 @@ describe('compiled JS worklet + real libopenmpt wasm (Node, fake AudioWorkletGlo
     expect(await renderFresh()).toBe(dflt);
   });
 
+  it('a forced wasm trap in process() (corrupt modulePtr) silences output and posts a fatal error; the next valid load recovers', async () => {
+    const ptrField = node.node as unknown as { modulePtr: number; faulted: boolean };
+    const validPtr = ptrField.modulePtr;
+    expect(validPtr).not.toBe(0);
+    const errorsBefore = scope.count(WT.error);
+
+    // Corrupt the wasm module pointer directly — process() passes this to
+    // libopenmpt's exported functions, and real wasm bounds-checks memory
+    // access: dereferencing a bogus pointer this far outside the module's
+    // heap traps with a JS-catchable WebAssembly.RuntimeError.
+    ptrField.modulePtr = 0x7fffffff;
+
+    const { peak } = render(scope, node.node, 5);
+    expect(peak).toBe(0); // silenced, not garbage samples from a half-run quantum
+
+    const errors = scope.posted.filter((m) => m.type === WT.error);
+    expect(errors.length).toBeGreaterThan(errorsBefore);
+    const fatal = errors[errors.length - 1]!;
+    expect(fatal.fatal).toBe(true);
+    expect(String(fatal.message)).toMatch(/PROCESS_FAULT/);
+    expect(ptrField.faulted).toBe(true);
+
+    // Still faulted — further quanta stay silent without re-entering the code
+    // that just trapped.
+    expect(render(scope, node.node, 5).peak).toBe(0);
+
+    // The next valid load recovers the node: loadModule() tears down the
+    // (also-corrupt) old pointer under its own try/catch and clears `faulted`.
+    const loadedBefore = scope.count(WT.loaded);
+    await node.send({ type: MT.load, moduleData: scope.toRealm(MOD) });
+    expect(scope.count(WT.loaded)).toBe(loadedBefore + 1);
+    expect(ptrField.faulted).toBe(false);
+    expect(render(scope, node.node, 300).peak).toBeGreaterThan(0.01);
+  });
+
   it('initLib without wasm bytes fails fast with a clear error (no wasm2js JS-only path)', async () => {
     const cold = new FakeScope();
     const n = cold.newNode();

@@ -121,7 +121,6 @@ export function useLibOpenMPT(initialVolume: number = 0.4, liteMode: boolean = f
       analyserRef: refs.analyserRef,
       audioWorkletNodeRef: refs.audioWorkletNodeRef,
       nativeEngineRef: refs.nativeEngineRef,
-      wasmMemoryRef: refs.wasmMemoryRef,
       workletOrderRef: refs.workletOrderRef,
       workletRowRef: refs.workletRowRef,
       workletTimeRef: refs.workletTimeRef,

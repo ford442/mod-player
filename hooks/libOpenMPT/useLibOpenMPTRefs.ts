@@ -18,7 +18,6 @@ export function useLibOpenMPTRefs(): LibOpenMPTRefs {
   const spRightBufPtr = useRef<number>(0);
   const spFallbackTriggered = useRef<boolean>(false);
   const audioWorkletNodeRef = useRef<AudioWorkletNode | null>(null);
-  const wasmMemoryRef = useRef<WebAssembly.Memory | null>(null);
   const stereoPannerRef = useRef<StereoPannerNode | null>(null);
   const gainNodeRef = useRef<GainNode | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
@@ -89,7 +88,6 @@ export function useLibOpenMPTRefs(): LibOpenMPTRefs {
     spRightBufPtr,
     spFallbackTriggered,
     audioWorkletNodeRef,
-    wasmMemoryRef,
     stereoPannerRef,
     gainNodeRef,
     analyserRef,

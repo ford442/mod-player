@@ -447,6 +447,7 @@ EXPORTED_FUNCTIONS=$(cat <<'EOF'
   '_set_render_param',
   '_ctl_set_text',
   '_poll_position',
+  '_get_position_seq',
   '_get_audio_context',
   '_get_worklet_node',
   '_cleanup_audio',
