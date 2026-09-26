@@ -29,10 +29,14 @@ export type {
   AudioGraphRefs,
 } from './audioGraph/types';
 
-// Contexts we've already wired suspend-recovery for — a page session has one
-// shared AudioContext (utils/audioContextFactory.ts), but startAudioPlayback
-// runs on every play(), so guard against re-registering listeners each time.
-const suspendRecoveryWired = new WeakSet<AudioContext>();
+// Contexts we've wired suspend-recovery for, keyed to their disposer — a page
+// session has one shared AudioContext (utils/audioContextFactory.ts), but
+// startAudioPlayback runs on every play(), so guard against re-registering
+// listeners each time. unwireAudioSuspendRecovery() below tears these down
+// when a context is closed (cleanupLibOpenMPT), so a later gesture or
+// statechange on the dead context can't reach a stale ctx/refs/callbacks
+// closure.
+const suspendRecoveryDisposers = new Map<AudioContext, () => void>();
 
 /**
  * Notice the shared AudioContext leaving `running` unexpectedly (#12 in
@@ -40,19 +44,26 @@ const suspendRecoveryWired = new WeakSet<AudioContext>();
  * user gesture: resume() the context and re-anchor the playhead clock the
  * same way a fresh play() does, instead of leaving the UI saying "Playing"
  * over silence until the user happens to hit play again.
+ *
+ * Returns a disposer (also stored, and used by unwireAudioSuspendRecovery).
  */
 export function wireAudioSuspendRecovery(
   ctx: AudioContext,
   refs: AudioGraphRefs,
   callbacks: AudioGraphCallbacks,
-): void {
-  if (suspendRecoveryWired.has(ctx)) return;
-  suspendRecoveryWired.add(ctx);
+): () => void {
+  const existing = suspendRecoveryDisposers.get(ctx);
+  if (existing) return existing;
 
   setPlaybackActiveQuery(() => refs.isPlayingRef.current);
 
   const resumeAndReanchor = (): void => {
-    if (!getAudioSuspendState().suspended) return;
+    if (!refs.isPlayingRef.current) return;
+    // Also check ctx.state directly, not just the suspended flag: if
+    // `statechange` never fired at all (exactly the case the visibilitychange
+    // backstop below exists for), the flag would never flip true and this
+    // would otherwise never attempt a resume.
+    if (!getAudioSuspendState().suspended && ctx.state === 'running') return;
     void ctx.resume().then(() => {
       if (ctx.state !== 'running') return; // still not back — next gesture retries
       refs.audioClockStartRef.current = ctx.currentTime;
@@ -66,11 +77,12 @@ export function wireAudioSuspendRecovery(
   // Any of these already fire on the interactions a user would use to notice
   // and react to stalled audio (tap the canvas, hit a key, click a control).
   const gestureEvents: Array<keyof WindowEventMap> = ['pointerdown', 'keydown', 'touchstart'];
+  const gestureOpts: AddEventListenerOptions = { capture: true, passive: true };
   for (const evt of gestureEvents) {
-    window.addEventListener(evt, resumeAndReanchor, { capture: true, passive: true });
+    window.addEventListener(evt, resumeAndReanchor, gestureOpts);
   }
 
-  subscribeAudioSuspend((state) => {
+  const unsubscribeSuspend = subscribeAudioSuspend((state) => {
     if (state.suspended && refs.isPlayingRef.current) {
       callbacks.setStatus('Audio paused by the system — tap anywhere to resume');
     }
@@ -78,9 +90,33 @@ export function wireAudioSuspendRecovery(
 
   // Backstop for iOS Safari cases where `statechange` doesn't fire promptly:
   // re-check as soon as the tab is foregrounded again.
-  document.addEventListener('visibilitychange', () => {
+  const onVisibilityChange = (): void => {
     if (document.visibilityState === 'visible') resumeAndReanchor();
-  });
+  };
+  document.addEventListener('visibilitychange', onVisibilityChange);
+
+  const dispose = (): void => {
+    for (const evt of gestureEvents) {
+      window.removeEventListener(evt, resumeAndReanchor, gestureOpts);
+    }
+    document.removeEventListener('visibilitychange', onVisibilityChange);
+    unsubscribeSuspend();
+    suspendRecoveryDisposers.delete(ctx);
+  };
+  suspendRecoveryDisposers.set(ctx, dispose);
+  return dispose;
+}
+
+/**
+ * Tear down wireAudioSuspendRecovery's global listeners and subscription for
+ * `ctx`. Call this before closing the shared AudioContext (see
+ * hooks/libOpenMPT/runInit.ts's cleanupLibOpenMPT) so a context that outlives
+ * its listeners — e.g. a remount without a full page reload — can't fire a
+ * stale gesture/visibility/suspend callback against a closed context.
+ */
+export function unwireAudioSuspendRecovery(ctx: AudioContext | null): void {
+  if (!ctx) return;
+  suspendRecoveryDisposers.get(ctx)?.();
 }
 
 export async function startAudioPlayback(

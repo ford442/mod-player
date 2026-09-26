@@ -212,6 +212,10 @@ export function closeSharedPlayerAudioContext(): void {
   const ctx = sharedContext;
   sharedContext = null;
   if (!ctx || ctx.state === 'closed') return;
+  // Detach before closing: a closing/closed context can still fire
+  // `statechange`, and wireStateChangeReporting has no way to tell "this is
+  // the context I was wired for" from "a new one replaced it" on its own.
+  ctx.onstatechange = null;
   void Promise.resolve(ctx.close()).catch((err: unknown) => {
     console.warn('[AudioEngine] AudioContext.close() failed', err);
   });

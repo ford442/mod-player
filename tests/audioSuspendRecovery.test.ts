@@ -16,9 +16,10 @@ import {
 } from '../utils/audioContextFactory';
 import {
   getAudioSuspendState,
+  setAudioSuspended,
   __resetAudioSuspendStateForTests,
 } from '../utils/audioSuspendState';
-import { wireAudioSuspendRecovery } from '../hooks/useAudioGraph';
+import { unwireAudioSuspendRecovery, wireAudioSuspendRecovery } from '../hooks/useAudioGraph';
 import type { AudioGraphCallbacks, AudioGraphRefs } from '../hooks/audioGraph/types';
 
 class MockAudioContext {
@@ -204,6 +205,32 @@ describe('AudioContext suspend recovery on the next user gesture (useAudioGraph)
     expect(callbacks.setStatus).toHaveBeenCalledWith('Playing...');
   });
 
+  it('recovers via visibilitychange even if statechange never fired (missed event)', async () => {
+    const ctx = createPlayerAudioContext() as unknown as MockAudioContext;
+    ctx.currentTime = 7;
+    const resume = vi.fn(async () => { ctx.state = 'running'; });
+    (ctx as unknown as { resume: () => Promise<void> }).resume = resume;
+
+    const refs = makeRefs();
+    const callbacks = makeCallbacks();
+    wireAudioSuspendRecovery(ctx as unknown as AudioContext, refs, callbacks);
+    setPlaybackActiveQuery(() => refs.isPlayingRef.current);
+
+    // The context left `running` but onstatechange is never invoked — the
+    // suspended-flag path alone would never call resume() here.
+    ctx.state = 'suspended';
+    expect(getAudioSuspendState().suspended).toBe(false);
+
+    (globalThis.document as unknown as FakeDocument).visibilityState = 'visible';
+    globalThis.document.dispatchEvent(new Event('visibilitychange'));
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(resume).toHaveBeenCalled();
+    expect(refs.audioClockStartRef.current).toBe(7);
+    expect(callbacks.setStatus).toHaveBeenCalledWith('Playing...');
+  });
+
   it('does not re-wire listeners twice for the same context (WeakSet guard)', () => {
     const ctx = createPlayerAudioContext() as unknown as AudioContext;
     const refs = makeRefs();
@@ -222,5 +249,37 @@ describe('AudioContext suspend recovery on the next user gesture (useAudioGraph)
       (args: unknown[]) => typeof args[0] === 'string' && args[0].includes('tap anywhere'),
     );
     expect(tapCalls).toHaveLength(1);
+  });
+
+  it('unwireAudioSuspendRecovery stops its own gesture/subscription listeners from reacting after disposal', () => {
+    // Isolates wireAudioSuspendRecovery's own cleanup from
+    // wireStateChangeReporting's separate `ctx.onstatechange` property (that
+    // one is detached by closeSharedPlayerAudioContext() itself, covered by
+    // the audioContextFactory suite above) by driving the shared store
+    // directly instead of through onstatechange.
+    const ctx = createPlayerAudioContext() as unknown as MockAudioContext;
+    const resume = vi.fn(async () => { ctx.state = 'running'; });
+    (ctx as unknown as { resume: () => Promise<void> }).resume = resume;
+
+    const refs = makeRefs();
+    const callbacks = makeCallbacks();
+    wireAudioSuspendRecovery(ctx as unknown as AudioContext, refs, callbacks);
+
+    unwireAudioSuspendRecovery(ctx as unknown as AudioContext);
+
+    setAudioSuspended(true, 'suspended');
+    // The disposed subscription must not have posted its "tap anywhere" status.
+    const tapCalls = callbacks.setStatus.mock.calls.filter(
+      (args: unknown[]) => typeof args[0] === 'string' && args[0].includes('tap anywhere'),
+    );
+    expect(tapCalls).toHaveLength(0);
+
+    globalThis.window.dispatchEvent(new Event('pointerdown'));
+    expect(resume).not.toHaveBeenCalled();
+
+    // Re-wiring the same context after disposal must work again (a fresh
+    // registration), not silently no-op forever.
+    const secondDispose = wireAudioSuspendRecovery(ctx as unknown as AudioContext, refs, callbacks);
+    expect(typeof secondDispose).toBe('function');
   });
 });

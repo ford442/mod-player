@@ -86,10 +86,13 @@ export async function handleWorkletFault(
   }
 
   callbacks.setStatus('Audio engine error — restarting…');
-  const result = await startJsWorkletPlayback(refs, callbacks, config, ctx, false);
-  if (result === 'setup-complete') {
-    clearAudioFault();
-  }
+  // Do NOT clear the fault just because this returns 'setup-complete' — that
+  // only means the node/message-handler setup ran, not that it's actually
+  // rendering. restartAttempts must stay elevated until the 'loaded-accepted'
+  // case above confirms the new node is healthy, so a module that traps on
+  // every render still reaches the attempt>1 fallback instead of restarting
+  // forever.
+  await startJsWorkletPlayback(refs, callbacks, config, ctx, false);
 }
 
 /**
@@ -238,6 +241,13 @@ export async function startJsWorkletPlayback(
           refs.isPlayingRef.current = true;
           callbacks.setIsPlaying(true);
           callbacks.setStatus("Playing...");
+          // Only clear here — a restarted node reaching 'setup-complete' just
+          // means startJsWorkletPlayback got through its own setup, not that
+          // the node is actually rendering. Clearing on that return value let
+          // a module that traps on every render restart forever (attempt
+          // resets to 0 before the next fault, so it never reaches the
+          // ScriptProcessor fallback threshold) — see handleWorkletFault().
+          clearAudioFault();
           if (refs.gainNodeRef.current) {
             refs.gainNodeRef.current.gain.value = config.volume;
           }
