@@ -24,6 +24,7 @@
  */
 
 import { withBase } from '../../lib/paths';
+import { createCheckedShaderModule, createComputePipelineChecked } from '../../../utils/gpuShaderCompile';
 import {
   OSC_SAMPLE_COUNT,
   type AudioBandSnapshot,
@@ -302,15 +303,7 @@ export class ComputeAnalysis {
         throw new Error(`fetch ${url} → ${response.status}`);
       }
       const code = await response.text();
-      const module = device.createShaderModule({ code, label: 'compute_analysis' });
-
-      const compilation = await module.getCompilationInfo?.();
-      const errors = compilation?.messages.filter((m) => m.type === 'error') ?? [];
-      if (errors.length > 0) {
-        throw new Error(
-          `compute_analysis.wgsl: ${errors.map((m) => `${m.lineNum}:${m.linePos} ${m.message}`).join('; ')}`,
-        );
-      }
+      const module = await createCheckedShaderModule(device, code, 'compute_analysis.wgsl');
 
       const storage = (): GPUBufferBindingLayout => ({ type: 'storage' });
       const bindGroupLayout = device.createBindGroupLayout({
@@ -326,16 +319,18 @@ export class ComputeAnalysis {
       });
       const layout = device.createPipelineLayout({ bindGroupLayouts: [bindGroupLayout] });
 
-      const waveform = device.createComputePipeline({
-        label: 'compute_analysis:waveform',
-        layout,
-        compute: { module, entryPoint: 'waveform_main' },
-      });
-      const spectrum = device.createComputePipeline({
-        label: 'compute_analysis:spectrum',
-        layout,
-        compute: { module, entryPoint: 'spectrum_main' },
-      });
+      const [waveform, spectrum] = await Promise.all([
+        createComputePipelineChecked(
+          device,
+          { layout, compute: { module, entryPoint: 'waveform_main' } },
+          'compute_analysis:waveform',
+        ),
+        createComputePipelineChecked(
+          device,
+          { layout, compute: { module, entryPoint: 'spectrum_main' } },
+          'compute_analysis:spectrum',
+        ),
+      ]);
 
       const STORAGE = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC;
       const params = device.createBuffer({

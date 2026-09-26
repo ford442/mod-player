@@ -72,3 +72,23 @@ describe('WebGPU canvas configuration (Problem C — probe/runtime share one con
     expect(probeBody).not.toContain("alphaMode: 'opaque'");
   });
 });
+
+describe('peekAdapterInfoForCapabilityHint (#439 — no stray low-power adapter)', () => {
+  it('never issues its own requestAdapter when no device request exists', async () => {
+    const { vi } = await import('vitest');
+    const requestAdapter = vi.fn(async () => ({ info: { vendor: 'intel' } }));
+    vi.stubGlobal('navigator', { gpu: { requestAdapter } });
+    try {
+      const { peekAdapterInfoForCapabilityHint } = await import('../utils/webgpuDevice');
+      await expect(peekAdapterInfoForCapabilityHint(10)).resolves.toBeUndefined();
+      expect(requestAdapter).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('webgpuDevice.ts has exactly one requestAdapter call site (the owned device request)', () => {
+    const src = readFileSync(join(ROOT, 'utils/webgpuDevice.ts'), 'utf8');
+    expect(src.match(/await navigator\.gpu\.requestAdapter\s*\(/g)).toHaveLength(1);
+  });
+});

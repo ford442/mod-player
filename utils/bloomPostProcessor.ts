@@ -2,6 +2,8 @@
 // Lightweight Bloom post-processor for WebGPU.
 // Supports both single-layer legacy mode and multi-layer semantic-category bloom.
 
+import { createCheckedShaderModule, createRenderPipelineChecked } from './gpuShaderCompile';
+
 export interface BloomOptions {
   shaderThreshold?: string;
   shaderBlur?: string;
@@ -27,10 +29,26 @@ export const DEFAULT_LAYERS: BloomLayer[] = [
   { label: 'expression', threshold: 0.75, blurRadius: 1.0, tint: [1.0, 0.5, 0.1], weight: 1.0 },
 ];
 
+/**
+ * Format of the texture the scene is rendered into when bloom is active.
+ * `rgba16float` is always renderable (no feature needed), so the threshold pass
+ * sees unclipped HDR values; the composite pass tonemaps back to the swapchain.
+ * Pattern / bezel pipelines drawn inside `render()`'s scene pass must target it.
+ */
+export const BLOOM_SCENE_FORMAT: GPUTextureFormat = 'rgba16float';
+
+/** Blur uniform: [dirX, dirY, width, height] — 16 bytes. */
+const BLUR_UNIFORM_BYTES = 16;
+
 interface LayerResources {
   thresholdTexture: GPUTexture;
   blurTextures: [GPUTexture, GPUTexture];
   thresholdBuffer: GPUBuffer;
+  /** Horizontal and vertical blur uniforms are separate buffers: `writeBuffer`
+   *  lands before the submitted command buffer runs, so one shared buffer would
+   *  make every blur pass in a frame read the last value written. */
+  hBlurBuffer: GPUBuffer;
+  vBlurBuffer: GPUBuffer;
   thresholdBindGroup: GPUBindGroup;
   hBlurBindGroup: GPUBindGroup;
   vBlurBindGroup: GPUBindGroup;
@@ -44,12 +62,13 @@ export class BloomPostProcessor {
   // Shared resources
   private sceneTexture!: GPUTexture;
   private linearSampler!: GPUSampler;
-  private blurBuffer!: GPUBuffer;
 
   // Legacy single-layer resources
   private thresholdTexture!: GPUTexture;
   private blurTextures: GPUTexture[] = [];
   private thresholdBuffer!: GPUBuffer;
+  private hBlurBuffer!: GPUBuffer;
+  private vBlurBuffer!: GPUBuffer;
   private compositeBuffer!: GPUBuffer;
 
   // Layered resources
@@ -57,6 +76,7 @@ export class BloomPostProcessor {
   private layerResources: LayerResources[] = [];
   // Debug: when >= 0, only this layer index contributes (others get weight 0)
   private debugLayerIndex: number = -1;
+  private sceneIntensity = 1.0;
   private layeredCompositeBindGroup!: GPUBindGroup;
 
   // Pipelines (shared between legacy and layered)
@@ -72,6 +92,11 @@ export class BloomPostProcessor {
 
   // CRT uniform buffer (16 bytes: intensity, scanlineDark, vignetteStrength, _pad)
   private crtUniformBuffer!: GPUBuffer;
+  private crtState: [number, number, number] = [0.0, 0.15, 0.4];
+
+  /** Preallocated upload scratch — render() and the per-frame setters allocate nothing. */
+  private readonly scratch4 = new Float32Array(4);
+  private readonly scratch8 = new Float32Array(8);
 
   // Shader code
   private thresholdShaderCode?: string | undefined;
@@ -92,6 +117,11 @@ export class BloomPostProcessor {
 
     this.finalFormat = options.finalFormat ?? ('bgra8unorm' as GPUTextureFormat);
     this.layers = options.layers ?? null;
+  }
+
+  /** Color format pipelines drawn inside the scene pass must target. */
+  get sceneFormat(): GPUTextureFormat {
+    return BLOOM_SCENE_FORMAT;
   }
 
   // Base URL for fetching shaders (set this for subpath deployments)
@@ -122,18 +152,10 @@ export class BloomPostProcessor {
     this.blurShaderCode = b;
     this.compositeShaderCode = c;
 
-    // Create textures
-    const width = this.canvas.width;
-    const height = this.canvas.height;
-    const blurSize = { width: Math.floor(width / 2), height: Math.floor(height / 2) };
-
-    // Use the swapchain format so the rendering pipelines (which target finalFormat)
-    // can write to this texture without a format-mismatch validation error.
-    this.sceneTexture = this.device.createTexture({
-      size: { width, height },
-      format: this.finalFormat,
-      usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
-    });
+    // Compile first: a broken bloom shader rejects here, before any texture
+    // or buffer is allocated.
+    await this.createPipelines();
+    if (this.disposed) return;
 
     this.linearSampler = this.device.createSampler({
       magFilter: 'linear',
@@ -142,70 +164,43 @@ export class BloomPostProcessor {
       addressModeV: 'clamp-to-edge',
     });
 
-    this.blurBuffer = this.device.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    const uniformUsage = GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST;
+    this.compositeBuffer = this.device.createBuffer({ size: 16, usage: uniformUsage });
 
     if (useLayered) {
-      this.compositeBuffer = this.device.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
-
       for (let i = 0; i < this.layers!.length; i++) {
-        const thresholdTex = this.device.createTexture({
-          size: blurSize,
-          format: 'rgba16float',
-          usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
-        });
-        const blurTex0 = this.device.createTexture({
-          size: blurSize,
-          format: 'rgba16float',
-          usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
-        });
-        const blurTex1 = this.device.createTexture({
-          size: blurSize,
-          format: 'rgba16float',
-          usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
-        });
-        const thresholdBuf = this.device.createBuffer({ size: 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
-
         this.layerResources.push({
-          thresholdTexture: thresholdTex,
-          blurTextures: [blurTex0, blurTex1] as [GPUTexture, GPUTexture],
-          thresholdBuffer: thresholdBuf,
+          thresholdTexture: null as unknown as GPUTexture,
+          blurTextures: [null, null] as unknown as [GPUTexture, GPUTexture],
+          thresholdBuffer: this.device.createBuffer({ size: 32, usage: uniformUsage }),
+          hBlurBuffer: this.device.createBuffer({ size: BLUR_UNIFORM_BYTES, usage: uniformUsage }),
+          vBlurBuffer: this.device.createBuffer({ size: BLUR_UNIFORM_BYTES, usage: uniformUsage }),
           thresholdBindGroup: null as unknown as GPUBindGroup,
           hBlurBindGroup: null as unknown as GPUBindGroup,
           vBlurBindGroup: null as unknown as GPUBindGroup,
         });
       }
+      this.writeLayerThresholds();
+      this.writeLayeredComposite();
     } else {
-      this.thresholdTexture = this.device.createTexture({
-        size: blurSize,
-        format: 'rgba16float',
-        usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
-      });
-
-      for (let i = 0; i < 2; i++) {
-        this.blurTextures.push(this.device.createTexture({
-          size: blurSize,
-          format: 'rgba16float',
-          usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
-        }));
-      }
-
-      this.thresholdBuffer = this.device.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
-      this.compositeBuffer = this.device.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+      this.thresholdBuffer = this.device.createBuffer({ size: 16, usage: uniformUsage });
+      this.hBlurBuffer = this.device.createBuffer({ size: BLUR_UNIFORM_BYTES, usage: uniformUsage });
+      this.vBlurBuffer = this.device.createBuffer({ size: BLUR_UNIFORM_BYTES, usage: uniformUsage });
 
       // Default values
-      this.device.queue.writeBuffer(this.thresholdBuffer, 0, new Float32Array([0.8, 0.2, 0.0, 0.0]));
-      this.device.queue.writeBuffer(this.compositeBuffer, 0, new Float32Array([1.2, 1.0, 0.0, 0.0]));
+      this.write4(this.thresholdBuffer, 0.8, 0.2, 0.0, 0.0);
+      this.write4(this.compositeBuffer, 1.2, 1.0, 0.0, 0.0);
     }
 
     // CRT uniform buffer — shared between legacy and layered modes
     // 16 bytes: [intensity, scanlineDark, vignetteStrength, _pad]
-    this.crtUniformBuffer = this.device.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    this.crtUniformBuffer = this.device.createBuffer({ size: 16, usage: uniformUsage });
     // Default: intensity=0.0 means CRT is off (bit-identical output to pre-CRT).
     // scanlineDark and vignetteStrength are pre-set to their recommended defaults
     // so enabling CRT via updateCRT(1.0) just works without extra configuration.
-    this.device.queue.writeBuffer(this.crtUniformBuffer, 0, new Float32Array([0.0, 0.15, 0.4, 0.0]));
+    this.write4(this.crtUniformBuffer, this.crtState[0], this.crtState[1], this.crtState[2], 0.0);
 
-    await this.createPipelines();
+    this.allocateTextures(this.canvas.width, this.canvas.height);
     this.createBindGroups();
   }
 
@@ -216,6 +211,50 @@ export class BloomPostProcessor {
       return await r.text();
     } catch (e) {
       throw new Error(`Could not load shader at ${path}. Provide shader code directly via options.shader* or import with ?raw in Vite.`);
+    }
+  }
+
+  private write4(buffer: GPUBuffer, a: number, b: number, c: number, d: number): void {
+    const s = this.scratch4;
+    s[0] = a; s[1] = b; s[2] = c; s[3] = d;
+    this.device.queue.writeBuffer(buffer, 0, s);
+  }
+
+  /** Per-layer threshold uniforms (32 bytes: threshold, knee, tint rgb, pad×3). Layer config is fixed, so this runs once. */
+  private writeLayerThresholds(): void {
+    if (!this.layers) return;
+    const s = this.scratch8;
+    for (let i = 0; i < this.layerResources.length; i++) {
+      const config = this.layers[i]!;
+      s[0] = config.threshold;
+      s[1] = 0.2; // knee
+      s[2] = config.tint[0];
+      s[3] = config.tint[1];
+      s[4] = config.tint[2];
+      s[5] = 0.0; s[6] = 0.0; s[7] = 0.0;
+      this.device.queue.writeBuffer(this.layerResources[i]!.thresholdBuffer, 0, s);
+    }
+  }
+
+  private writeLayeredComposite(): void {
+    if (!this.layers || !this.compositeBuffer) return;
+    const dbg = this.debugLayerIndex;
+    const w = (i: number) => ((dbg < 0 || dbg === i) ? this.layers![i]!.weight : 0);
+    this.write4(this.compositeBuffer, this.sceneIntensity, w(0), w(1), w(2));
+  }
+
+  /** Blur direction/resolution uniforms. Only depend on size and radius, so written on init/resize only. */
+  private writeBlurUniforms(width: number, height: number): void {
+    if (this.layers) {
+      for (let i = 0; i < this.layerResources.length; i++) {
+        const radius = this.layers[i]!.blurRadius;
+        const layer = this.layerResources[i]!;
+        this.write4(layer.hBlurBuffer, radius, 0, width, height);
+        this.write4(layer.vBlurBuffer, 0, radius, width, height);
+      }
+    } else {
+      this.write4(this.hBlurBuffer, 1, 0, width, height);
+      this.write4(this.vBlurBuffer, 0, 1, width, height);
     }
   }
 
@@ -246,26 +285,26 @@ export class BloomPostProcessor {
       throw new Error('Shaders not loaded');
     }
 
-    this.thresholdPipeline = this.device.createRenderPipeline({
+    const device = this.device;
+    const [vsModule, thresholdModule, blurModule, compositeModule] = await Promise.all([
+      createCheckedShaderModule(device, fullscreenVS, 'bloom_fullscreen_vs'),
+      createCheckedShaderModule(device, this.thresholdShaderCode, 'bloom_threshold'),
+      createCheckedShaderModule(device, this.blurShaderCode, 'bloom_blur'),
+      createCheckedShaderModule(device, this.compositeShaderCode, 'bloom_composite'),
+    ]);
+
+    const fullscreen = (fragment: GPUShaderModule, format: GPUTextureFormat): GPURenderPipelineDescriptor => ({
       layout: 'auto',
-      vertex: { module: this.device.createShaderModule({ code: fullscreenVS }), entryPoint: 'vs' },
-      fragment: { module: this.device.createShaderModule({ code: this.thresholdShaderCode }), entryPoint: 'fs', targets: [{ format: 'rgba16float' }] },
+      vertex: { module: vsModule, entryPoint: 'vs' },
+      fragment: { module: fragment, entryPoint: 'fs', targets: [{ format }] },
       primitive: { topology: 'triangle-list' },
     });
 
-    this.blurPipeline = this.device.createRenderPipeline({
-      layout: 'auto',
-      vertex: { module: this.device.createShaderModule({ code: fullscreenVS }), entryPoint: 'vs' },
-      fragment: { module: this.device.createShaderModule({ code: this.blurShaderCode }), entryPoint: 'fs', targets: [{ format: 'rgba16float' }] },
-      primitive: { topology: 'triangle-list' },
-    });
-
-    this.compositePipeline = this.device.createRenderPipeline({
-      layout: 'auto',
-      vertex: { module: this.device.createShaderModule({ code: fullscreenVS }), entryPoint: 'vs' },
-      fragment: { module: this.device.createShaderModule({ code: this.compositeShaderCode }), entryPoint: 'fs', targets: [{ format: this.finalFormat }] },
-      primitive: { topology: 'triangle-list' },
-    });
+    [this.thresholdPipeline, this.blurPipeline, this.compositePipeline] = await Promise.all([
+      createRenderPipelineChecked(device, fullscreen(thresholdModule, 'rgba16float'), 'bloom_threshold'),
+      createRenderPipelineChecked(device, fullscreen(blurModule, 'rgba16float'), 'bloom_blur'),
+      createRenderPipelineChecked(device, fullscreen(compositeModule, this.finalFormat), 'bloom_composite'),
+    ]);
   }
 
   private createBindGroups() {
@@ -290,7 +329,7 @@ export class BloomPostProcessor {
           entries: [
             { binding: 0, resource: layer.thresholdTexture.createView() },
             { binding: 1, resource: this.linearSampler },
-            { binding: 2, resource: { buffer: this.blurBuffer } },
+            { binding: 2, resource: { buffer: layer.hBlurBuffer } },
           ],
         });
 
@@ -299,7 +338,7 @@ export class BloomPostProcessor {
           entries: [
             { binding: 0, resource: layer.blurTextures[0].createView() },
             { binding: 1, resource: this.linearSampler },
-            { binding: 2, resource: { buffer: this.blurBuffer } },
+            { binding: 2, resource: { buffer: layer.vBlurBuffer } },
           ],
         });
       }
@@ -333,7 +372,7 @@ export class BloomPostProcessor {
         entries: [
           { binding: 0, resource: this.thresholdTexture.createView() },
           { binding: 1, resource: this.linearSampler },
-          { binding: 2, resource: { buffer: this.blurBuffer } },
+          { binding: 2, resource: { buffer: this.hBlurBuffer } },
         ],
       });
 
@@ -343,7 +382,7 @@ export class BloomPostProcessor {
         entries: [
           { binding: 0, resource: (this.blurTextures[0] ?? this.sceneTexture).createView() },
           { binding: 1, resource: this.linearSampler },
-          { binding: 2, resource: { buffer: this.blurBuffer } },
+          { binding: 2, resource: { buffer: this.vBlurBuffer } },
         ],
       });
 
@@ -362,8 +401,13 @@ export class BloomPostProcessor {
     }
   }
 
+  /** True once init() has finished and render() will draw. */
+  get isReady(): boolean {
+    return !this.disposed && !!this.sceneTexture;
+  }
+
   public render(commandEncoder: GPUCommandEncoder, renderScene: (pass: GPURenderPassEncoder) => void) {
-    if (this.disposed) return;
+    if (!this.isReady) return;
     if (this.layers) {
       this.renderLayered(commandEncoder, renderScene);
     } else {
@@ -371,8 +415,27 @@ export class BloomPostProcessor {
     }
   }
 
-  private renderLegacy(commandEncoder: GPUCommandEncoder, renderScene: (pass: GPURenderPassEncoder) => void) {
-    // PASS 1: Scene -> HDR scene texture
+  private fullscreenPass(
+    commandEncoder: GPUCommandEncoder,
+    target: GPUTexture,
+    pipeline: GPURenderPipeline,
+    bindGroup: GPUBindGroup,
+  ): void {
+    const pass = commandEncoder.beginRenderPass({
+      colorAttachments: [{
+        view: target.createView(),
+        clearValue: { r: 0, g: 0, b: 0, a: 1 },
+        loadOp: 'clear',
+        storeOp: 'store',
+      }],
+    });
+    pass.setPipeline(pipeline);
+    pass.setBindGroup(0, bindGroup);
+    pass.draw(6);
+    pass.end();
+  }
+
+  private scenePass(commandEncoder: GPUCommandEncoder, renderScene: (pass: GPURenderPassEncoder) => void): void {
     const scenePass = commandEncoder.beginRenderPass({
       colorAttachments: [{
         view: this.sceneTexture.createView(),
@@ -383,205 +446,55 @@ export class BloomPostProcessor {
     });
     renderScene(scenePass);
     scenePass.end();
+  }
+
+  private renderLegacy(commandEncoder: GPUCommandEncoder, renderScene: (pass: GPURenderPassEncoder) => void) {
+    // PASS 1: Scene -> HDR scene texture
+    this.scenePass(commandEncoder, renderScene);
+
+    const blurTex0 = this.blurTextures[0];
+    const blurTex1 = this.blurTextures[1];
+    if (!blurTex0 || !blurTex1) return;
 
     // PASS 2: Brightness threshold (to smaller texture)
-    const thresholdPass = commandEncoder.beginRenderPass({
-      colorAttachments: [{
-        view: this.thresholdTexture.createView(),
-        clearValue: { r: 0, g: 0, b: 0, a: 1 },
-        loadOp: 'clear',
-        storeOp: 'store',
-      }],
-    });
-    thresholdPass.setPipeline(this.thresholdPipeline);
-    thresholdPass.setBindGroup(0, this.thresholdBindGroup);
-    thresholdPass.draw(6);
-    thresholdPass.end();
-
+    this.fullscreenPass(commandEncoder, this.thresholdTexture, this.thresholdPipeline, this.thresholdBindGroup);
     // PASS 3: Horizontal blur -> blurTextures[0]
-    const blurTex0 = this.blurTextures[0];
-    if (!blurTex0) return;
-    const blurSize = { width: blurTex0.width, height: blurTex0.height };
-    this.device.queue.writeBuffer(this.blurBuffer, 0, new Float32Array([1, 0, blurSize.width, blurSize.height]));
-
-    const hBlurPass = commandEncoder.beginRenderPass({
-      colorAttachments: [{
-        view: (this.blurTextures[0] ?? this.sceneTexture).createView(),
-        clearValue: { r: 0, g: 0, b: 0, a: 1 },
-        loadOp: 'clear',
-        storeOp: 'store',
-      }],
-    });
-    hBlurPass.setPipeline(this.blurPipeline);
-    hBlurPass.setBindGroup(0, this.hBlurBindGroup);
-    hBlurPass.draw(6);
-    hBlurPass.end();
-
+    this.fullscreenPass(commandEncoder, blurTex0, this.blurPipeline, this.hBlurBindGroup);
     // PASS 4: Vertical blur -> blurTextures[1]
-    this.device.queue.writeBuffer(this.blurBuffer, 0, new Float32Array([0, 1, blurSize.width, blurSize.height]));
-
-    const vBlurPass = commandEncoder.beginRenderPass({
-      colorAttachments: [{
-        view: (this.blurTextures[1] ?? this.sceneTexture).createView(),
-        clearValue: { r: 0, g: 0, b: 0, a: 1 },
-        loadOp: 'clear',
-        storeOp: 'store',
-      }],
-    });
-    vBlurPass.setPipeline(this.blurPipeline);
-    vBlurPass.setBindGroup(0, this.vBlurBindGroup);
-    vBlurPass.draw(6);
-    vBlurPass.end();
-
+    this.fullscreenPass(commandEncoder, blurTex1, this.blurPipeline, this.vBlurBindGroup);
     // PASS 5: Composite -> swapchain
-    const compositePass = commandEncoder.beginRenderPass({
-      colorAttachments: [{
-        view: this.context.getCurrentTexture().createView(),
-        clearValue: { r: 0, g: 0, b: 0, a: 1 },
-        loadOp: 'clear',
-        storeOp: 'store',
-      }],
-    });
-    compositePass.setPipeline(this.compositePipeline);
-    compositePass.setBindGroup(0, this.compositeBindGroup);
-    compositePass.draw(6);
-    compositePass.end();
+    this.fullscreenPass(commandEncoder, this.context.getCurrentTexture(), this.compositePipeline, this.compositeBindGroup);
   }
 
   private renderLayered(commandEncoder: GPUCommandEncoder, renderScene: (pass: GPURenderPassEncoder) => void) {
     // PASS 1: Scene -> HDR scene texture
-    const scenePass = commandEncoder.beginRenderPass({
-      colorAttachments: [{
-        view: this.sceneTexture.createView(),
-        clearValue: { r: 0, g: 0, b: 0, a: 1 },
-        loadOp: 'clear',
-        storeOp: 'store',
-      }],
-    });
-    renderScene(scenePass);
-    scenePass.end();
+    this.scenePass(commandEncoder, renderScene);
 
     // Per-layer threshold + blur passes
-    const blurSize = {
-      width: this.layerResources[0]!.blurTextures[0].width,
-      height: this.layerResources[0]!.blurTextures[0].height,
-    };
-
-    let layerIndex = 0;
     for (const layer of this.layerResources) {
-      const config = this.layers![layerIndex]!;
-
-      // Write threshold uniform (32 bytes: threshold, knee, tintR, tintG, tintB, pad x3)
-      this.device.queue.writeBuffer(
-        layer.thresholdBuffer, 0,
-        new Float32Array([
-          config.threshold,
-          0.2, // knee
-          config.tint[0],
-          config.tint[1],
-          config.tint[2],
-          0.0,
-          0.0,
-          0.0,
-        ])
-      );
-
       // Threshold pass: sceneTexture -> layer.thresholdTexture
-      const thresholdPass = commandEncoder.beginRenderPass({
-        colorAttachments: [{
-          view: layer.thresholdTexture.createView(),
-          clearValue: { r: 0, g: 0, b: 0, a: 1 },
-          loadOp: 'clear',
-          storeOp: 'store',
-        }],
-      });
-      thresholdPass.setPipeline(this.thresholdPipeline);
-      thresholdPass.setBindGroup(0, layer.thresholdBindGroup);
-      thresholdPass.draw(6);
-      thresholdPass.end();
-
+      this.fullscreenPass(commandEncoder, layer.thresholdTexture, this.thresholdPipeline, layer.thresholdBindGroup);
       // H-blur: layer.thresholdTexture -> layer.blurTextures[0]
-      this.device.queue.writeBuffer(
-        this.blurBuffer, 0,
-        new Float32Array([config.blurRadius, 0, blurSize.width, blurSize.height])
-      );
-
-      const hBlurPass = commandEncoder.beginRenderPass({
-        colorAttachments: [{
-          view: layer.blurTextures[0].createView(),
-          clearValue: { r: 0, g: 0, b: 0, a: 1 },
-          loadOp: 'clear',
-          storeOp: 'store',
-        }],
-      });
-      hBlurPass.setPipeline(this.blurPipeline);
-      hBlurPass.setBindGroup(0, layer.hBlurBindGroup);
-      hBlurPass.draw(6);
-      hBlurPass.end();
-
+      this.fullscreenPass(commandEncoder, layer.blurTextures[0], this.blurPipeline, layer.hBlurBindGroup);
       // V-blur: layer.blurTextures[0] -> layer.blurTextures[1]
-      this.device.queue.writeBuffer(
-        this.blurBuffer, 0,
-        new Float32Array([0, config.blurRadius, blurSize.width, blurSize.height])
-      );
-
-      const vBlurPass = commandEncoder.beginRenderPass({
-        colorAttachments: [{
-          view: layer.blurTextures[1].createView(),
-          clearValue: { r: 0, g: 0, b: 0, a: 1 },
-          loadOp: 'clear',
-          storeOp: 'store',
-        }],
-      });
-      vBlurPass.setPipeline(this.blurPipeline);
-      vBlurPass.setBindGroup(0, layer.vBlurBindGroup);
-      vBlurPass.draw(6);
-      vBlurPass.end();
-
-      layerIndex++;
+      this.fullscreenPass(commandEncoder, layer.blurTextures[1], this.blurPipeline, layer.vBlurBindGroup);
     }
 
     // Composite pass: scene + all blurred layers -> swapchain
-    const dbg = this.debugLayerIndex;
-    const w0 = (dbg < 0 || dbg === 0) ? this.layers![0]!.weight : 0;
-    const w1 = (dbg < 0 || dbg === 1) ? this.layers![1]!.weight : 0;
-    const w2 = (dbg < 0 || dbg === 2) ? this.layers![2]!.weight : 0;
-    this.device.queue.writeBuffer(
-      this.compositeBuffer, 0,
-      new Float32Array([1.0, w0, w1, w2])
-    );
-
-    const compositePass = commandEncoder.beginRenderPass({
-      colorAttachments: [{
-        view: this.context.getCurrentTexture().createView(),
-        clearValue: { r: 0, g: 0, b: 0, a: 1 },
-        loadOp: 'clear',
-        storeOp: 'store',
-      }],
-    });
-    compositePass.setPipeline(this.compositePipeline);
-    compositePass.setBindGroup(0, this.layeredCompositeBindGroup);
-    compositePass.draw(6);
-    compositePass.end();
+    this.fullscreenPass(commandEncoder, this.context.getCurrentTexture(), this.compositePipeline, this.layeredCompositeBindGroup);
   }
 
   public updateUniforms(bloomIntensity: number, threshold: number = 0.8, knee: number = 0.2, sceneIntensity: number = 1.0) {
+    if (this.disposed || !this.compositeBuffer) return;
     if (!this.layers) {
       // compositeBuffer: [bloomIntensity, sceneIntensity]
-      this.device.queue.writeBuffer(this.compositeBuffer, 0, new Float32Array([bloomIntensity, sceneIntensity, 0.0, 0.0]));
+      this.write4(this.compositeBuffer, bloomIntensity, sceneIntensity, 0.0, 0.0);
       // thresholdBuffer: [threshold, knee]
-      this.device.queue.writeBuffer(this.thresholdBuffer, 0, new Float32Array([threshold, knee, 0.0, 0.0]));
+      this.write4(this.thresholdBuffer, threshold, knee, 0.0, 0.0);
     } else {
       // Layered mode: update sceneIntensity and keep per-layer weights
-      this.device.queue.writeBuffer(
-        this.compositeBuffer, 0,
-        new Float32Array([
-          sceneIntensity,
-          this.layers![0]!.weight,
-          this.layers![1]!.weight,
-          this.layers![2]!.weight,
-        ])
-      );
+      this.sceneIntensity = sceneIntensity;
+      this.writeLayeredComposite();
     }
   }
 
@@ -602,6 +515,7 @@ export class BloomPostProcessor {
    */
   public setDebugLayer(layerIndex: number): void {
     this.debugLayerIndex = layerIndex;
+    if (!this.disposed) this.writeLayeredComposite();
   }
 
   /** Returns the label of the currently isolated layer, or null if all layers are active. */
@@ -614,74 +528,69 @@ export class BloomPostProcessor {
   // Call once per frame before bloomPostProcessor.render().
   // intensity=0.0 → no effect (bit-identical to pre-CRT output).
   public updateCRT(intensity: number, scanlineDark: number = 0.15, vignetteStrength: number = 0.4) {
-    if (this.disposed) return;
-    this.device.queue.writeBuffer(
-      this.crtUniformBuffer, 0,
-      new Float32Array([intensity, scanlineDark, vignetteStrength, 0.0])
-    );
+    if (this.disposed || !this.crtUniformBuffer) return;
+    const crt = this.crtState;
+    if (crt[0] === intensity && crt[1] === scanlineDark && crt[2] === vignetteStrength) return;
+    crt[0] = intensity; crt[1] = scanlineDark; crt[2] = vignetteStrength;
+    this.write4(this.crtUniformBuffer, intensity, scanlineDark, vignetteStrength, 0.0);
   }
 
-  public resize(width: number, height: number) {
-    if (this.disposed || !this.sceneTexture) return;
+  private createRenderTexture(width: number, height: number, format: GPUTextureFormat): GPUTexture {
+    return this.device.createTexture({
+      size: { width, height },
+      format,
+      usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
+    });
+  }
 
-    const blurSize = { width: Math.floor(width / 2), height: Math.floor(height / 2) };
-
-    // Destroy old textures
-    this.sceneTexture.destroy();
+  private destroyTextures(): void {
+    this.sceneTexture?.destroy();
     this.thresholdTexture?.destroy();
     this.blurTextures.forEach(t => t.destroy());
     this.blurTextures = [];
     for (const layer of this.layerResources) {
-      layer.thresholdTexture.destroy();
+      layer.thresholdTexture?.destroy();
       layer.blurTextures[0]?.destroy();
       layer.blurTextures[1]?.destroy();
     }
+  }
 
-    // Recreate scene texture with the swapchain format (matching the rendering pipelines)
-    this.sceneTexture = this.device.createTexture({
-      size: { width, height },
-      format: this.finalFormat,
-      usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
-    });
+  /** (Re)create size-dependent textures and the blur uniforms that encode the size. */
+  private allocateTextures(width: number, height: number): void {
+    const w = Math.max(1, width);
+    const h = Math.max(1, height);
+    const bw = Math.max(1, Math.floor(w / 2));
+    const bh = Math.max(1, Math.floor(h / 2));
+
+    // HDR scene target — the pattern/bezel pipelines drawn in the scene pass
+    // are built for BLOOM_SCENE_FORMAT (see WebGPURenderer).
+    this.sceneTexture = this.createRenderTexture(w, h, BLOOM_SCENE_FORMAT);
 
     if (this.layers) {
-      // Recreate layered textures
-      for (let i = 0; i < this.layerResources.length; i++) {
-        const layer = this.layerResources[i]!;
-        const thresholdTex = this.device.createTexture({
-          size: blurSize,
-          format: 'rgba16float',
-          usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
-        });
-        const blurTex0 = this.device.createTexture({
-          size: blurSize,
-          format: 'rgba16float',
-          usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
-        });
-        const blurTex1 = this.device.createTexture({
-          size: blurSize,
-          format: 'rgba16float',
-          usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
-        });
-        layer.thresholdTexture = thresholdTex;
-        layer.blurTextures = [blurTex0, blurTex1] as [GPUTexture, GPUTexture];
+      for (const layer of this.layerResources) {
+        layer.thresholdTexture = this.createRenderTexture(bw, bh, 'rgba16float');
+        layer.blurTextures = [
+          this.createRenderTexture(bw, bh, 'rgba16float'),
+          this.createRenderTexture(bw, bh, 'rgba16float'),
+        ];
       }
     } else {
-      // Recreate legacy textures
-      this.thresholdTexture = this.device.createTexture({
-        size: blurSize,
-        format: 'rgba16float',
-        usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
-      });
-      for (let i = 0; i < 2; i++) {
-        this.blurTextures.push(this.device.createTexture({
-          size: blurSize,
-          format: 'rgba16float',
-          usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
-        }));
-      }
+      this.thresholdTexture = this.createRenderTexture(bw, bh, 'rgba16float');
+      this.blurTextures = [
+        this.createRenderTexture(bw, bh, 'rgba16float'),
+        this.createRenderTexture(bw, bh, 'rgba16float'),
+      ];
     }
 
+    this.writeBlurUniforms(bw, bh);
+  }
+
+  public resize(width: number, height: number) {
+    if (this.disposed || !this.sceneTexture) return;
+    if (this.sceneTexture.width === Math.max(1, width) && this.sceneTexture.height === Math.max(1, height)) return;
+
+    this.destroyTextures();
+    this.allocateTextures(width, height);
     // Recreate bind groups with new texture views
     this.createBindGroups();
   }
@@ -689,20 +598,18 @@ export class BloomPostProcessor {
   public destroy() {
     if (this.disposed) return;
     this.disposed = true;
-    this.sceneTexture?.destroy();
-    this.thresholdTexture?.destroy();
-    this.blurTextures.forEach(t => t.destroy());
-    this.blurTextures = [];
+    this.destroyTextures();
 
     this.thresholdBuffer?.destroy();
-    this.blurBuffer?.destroy();
+    this.hBlurBuffer?.destroy();
+    this.vBlurBuffer?.destroy();
     this.compositeBuffer?.destroy();
     this.crtUniformBuffer?.destroy();
 
     for (const layer of this.layerResources) {
-      layer.thresholdTexture?.destroy();
-      layer.blurTextures.forEach(t => t.destroy());
       layer.thresholdBuffer?.destroy();
+      layer.hBlurBuffer?.destroy();
+      layer.vBlurBuffer?.destroy();
     }
     this.layerResources = [];
   }

@@ -71,6 +71,8 @@ export function uploadOscilloscopeTexture(
 
 export interface FrameDrawState {
   pipeline: GPURenderPipeline | null;
+  /** `pipeline` built for BLOOM_SCENE_FORMAT; bloom is used only when present. */
+  hdrPipeline: GPURenderPipeline | null;
   bindGroup: GPUBindGroup | null;
   uniformBuffer: GPUBuffer | null;
   cellsBuffer: GPUBuffer | null;
@@ -79,6 +81,7 @@ export interface FrameDrawState {
   channelDataView: DataView | null;
   layoutType: LayoutType;
   bezelPipeline: GPURenderPipeline | null;
+  bezelHdrPipeline: GPURenderPipeline | null;
   bezelBindGroup: GPUBindGroup | null;
   bezelUniformBuffer: GPUBuffer | null;
   instrumentPaletteTexture: GPUTexture | null;
@@ -367,12 +370,19 @@ export function renderWebGPUFrame(ctx: FrameDrawContext): void {
   let totalInstances = visibleRows * numChannels;
   totalInstances += getUiExtraInstances(shaderFile);
 
-  const pipeline = state.pipeline;
   const bindGroup = state.bindGroup;
+  const needsBackground = !isSinglePassCompositeShader(shaderFile);
+  const drawsBezel = !!(state.bezelPipeline && state.bezelBindGroup && needsBackground && state.bezelUniformBuffer);
+  // Bloom renders the scene into its HDR texture, which only the HDR pipeline
+  // variants can target; without them, draw straight to the swapchain.
+  const useBloom = !!bloomProcessor?.isReady
+    && !!state.hdrPipeline
+    && (!drawsBezel || !!state.bezelHdrPipeline);
+  const pipeline = useBloom ? state.hdrPipeline! : state.pipeline;
+  const bezelPipeline = useBloom ? state.bezelHdrPipeline : state.bezelPipeline;
 
   const renderScene = (pass: GPURenderPassEncoder) => {
-    const needsBackground = !isSinglePassCompositeShader(shaderFile);
-    if (state.bezelPipeline && state.bezelBindGroup && needsBackground && state.bezelUniformBuffer) {
+    if (drawsBezel && bezelPipeline && state.bezelBindGroup && state.bezelUniformBuffer) {
       const actualCanvasW = canvas.width;
       const actualCanvasH = canvas.height;
       const minDim = Math.min(actualCanvasW, actualCanvasH);
@@ -429,7 +439,7 @@ export function renderWebGPUFrame(ctx: FrameDrawContext): void {
       }
 
       device.queue.writeBuffer(state.bezelUniformBuffer, 0, scratch.bezelBufferData, 0, 96);
-      pass.setPipeline(state.bezelPipeline);
+      pass.setPipeline(bezelPipeline);
       pass.setBindGroup(0, state.bezelBindGroup);
       pass.draw(6, 1, 0, 0);
     }
@@ -452,7 +462,7 @@ export function renderWebGPUFrame(ctx: FrameDrawContext): void {
   };
 
   if (!lifecycle.isCurrent(frameGen)) return;
-  if (bloomProcessor) {
+  if (useBloom && bloomProcessor) {
     // Bloom owns its own multi-pass encoding; timing it would mean threading
     // timestampWrites through every one of its passes.
     bloomProcessor.render(encoder, renderScene);
@@ -502,8 +512,5 @@ export function renderWebGPUFrame(ctx: FrameDrawContext): void {
       playheadRow: (p.playbackStateRef?.current?.playheadRow ?? p.playheadRow).toFixed(2),
       audioAnalysis: gpuAnalysisActive ? (gpuBands ? 'gpu' : 'gpu (warming)') : 'cpu',
     },
-    errors: prev.errors.filter(
-      (e) => e.startsWith('DEVICE-LOST') || e.startsWith('DEVICE-INIT'),
-    ),
   }));
 }

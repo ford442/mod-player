@@ -5,7 +5,9 @@ import {
   SHADER_REGISTRY,
   getShaderMeta,
   resolveShaderMeta,
+  DEFAULT_SHADER_ENTRY_POINTS,
   type ShaderMeta,
+  type ShaderEntryPoints,
   type HitTestProfile,
 } from './shaderRegistry';
 
@@ -107,6 +109,9 @@ export const usesAudioReactiveBezel = (shaderFile: string): boolean =>
  */
 export const usesGpuSpectrum = (shaderFile: string): boolean =>
   resolveShaderMeta(shaderFile).usesGpuSpectrum ?? false;
+
+export const getShaderEntryPoints = (shaderFile: string): Readonly<ShaderEntryPoints> =>
+  resolveShaderMeta(shaderFile).entryPoints ?? DEFAULT_SHADER_ENTRY_POINTS;
 
 export const usesBareCanvasChrome = (shaderFile: string): boolean =>
   resolveShaderMeta(shaderFile).bareCanvasChrome;

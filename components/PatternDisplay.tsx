@@ -23,8 +23,11 @@ import { useVideoPatternSource } from '../src/renderers/hooks/useVideoPatternSou
 import { usePatternBloom } from '../src/renderers/hooks/usePatternBloom';
 import { useShaderCanvasHitTest } from '../src/renderers/hooks/useShaderCanvasHitTest';
 import { usePatternRenderLoop } from '../src/renderers/hooks/usePatternRenderLoop';
+import { useThrottledDebugInfo } from '../src/renderers/hooks/useThrottledDebugInfo';
 
 const DEFAULT_CHANNELS = 4;
+
+const INITIAL_DEBUG_INFO: DebugInfo = { layoutMode: 'NONE', errors: [], uniforms: {} };
 
 interface PatternDisplayProps {
   matrix: PatternMatrix | null;
@@ -172,11 +175,9 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   const [localStepsLength, setLocalStepsLength] = useState<32 | 64>(32);
   const stepsLength = stepsLengthProp ?? localStepsLength;
 
-  const [debugInfo, setDebugInfo] = useState<DebugInfo>({
-    layoutMode: 'NONE',
-    errors: [],
-    uniforms: {},
-  });
+  // Frame loops report debug info every frame; this keeps it in a ref and only
+  // re-renders (≤4 Hz) while the debug panel is open.
+  const [debugInfo, setDebugInfo] = useThrottledDebugInfo(INITIAL_DEBUG_INFO, debugPanelOpen);
 
   const numChannels = matrix?.numChannels ?? DEFAULT_CHANNELS;
   const padTopChannel = usesPadTopChannel(shaderFile);

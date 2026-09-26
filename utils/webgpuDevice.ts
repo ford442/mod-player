@@ -249,30 +249,45 @@ export function peekInFlightWebGPUDeviceRequest(): Promise<WebGPUDeviceResult> |
   return latestDeviceRequest;
 }
 
+const deviceRequestWaiters: Array<(request: Promise<WebGPUDeviceResult>) => void> = [];
+
+/** How long a capability-hint peek waits for the real device request to start. */
+export const ADAPTER_HINT_WAIT_MS = 5000;
+
 /**
  * One-off adapter-info peek for early device-capability heuristics
  * (`utils/deviceCapabilities.ts`'s integrated-GPU → lite-mode refinement).
- * Prefers the adapter from an in-flight/settled `requestWebGPUDevice()` call
- * over issuing a second `requestAdapter()`; falls back to a fresh low-power
- * request only when no real device request has started yet. Never throws.
+ *
+ * Only ever reports the adapter owned by `requestWebGPUDevice()`: it never
+ * issues its own `requestAdapter()`, which on a dual-GPU laptop could bind a
+ * different (e.g. low-power iGPU) adapter than the live device and misreport
+ * it. When no device request has started yet it waits up to `waitMs` for one,
+ * then gives up with `undefined`. Never throws.
  */
 export async function peekAdapterInfoForCapabilityHint(
-  powerPreference: GPUPowerPreference = 'low-power',
+  waitMs: number = ADAPTER_HINT_WAIT_MS,
 ): Promise<GPUAdapterInfo | undefined> {
-  const inFlight = latestDeviceRequest;
-  if (inFlight) {
-    try {
-      const result = await inFlight;
-      return result.adapter.info as GPUAdapterInfo | undefined;
-    } catch {
-      /* real device request failed — fall through to a fresh probe below */
-    }
+  let request = latestDeviceRequest;
+  if (!request) {
+    // Boxed: resolving with the request promise itself would await it here.
+    const boxed = await new Promise<{ request: Promise<WebGPUDeviceResult> } | null>((resolve) => {
+      const waiter = (r: Promise<WebGPUDeviceResult>) => {
+        clearTimeout(timer);
+        resolve({ request: r });
+      };
+      const timer = setTimeout(() => {
+        const i = deviceRequestWaiters.indexOf(waiter);
+        if (i >= 0) deviceRequestWaiters.splice(i, 1);
+        resolve(null);
+      }, waitMs);
+      deviceRequestWaiters.push(waiter);
+    });
+    request = boxed?.request ?? null;
   }
-
-  if (!isWebGPUApiAvailable()) return undefined;
+  if (!request) return undefined;
   try {
-    const adapter = await navigator.gpu.requestAdapter({ powerPreference });
-    return adapter?.info as GPUAdapterInfo | undefined;
+    const result = await request;
+    return result.adapter.info as GPUAdapterInfo | undefined;
   } catch {
     return undefined;
   }
@@ -291,6 +306,7 @@ export async function requestWebGPUDevice(
 ): Promise<WebGPUDeviceResult> {
   const requestPromise = requestWebGPUDeviceUncached(options);
   latestDeviceRequest = requestPromise;
+  for (const notify of deviceRequestWaiters.splice(0)) notify(requestPromise);
   requestPromise.catch(() => {
     if (latestDeviceRequest === requestPromise) {
       latestDeviceRequest = null;

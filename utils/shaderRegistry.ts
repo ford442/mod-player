@@ -33,6 +33,7 @@
  * audioReactive       – binding 8 AudioReactive uniform + bezel_audio background (v0.58+)
  * usesGpuSpectrum     – prefer the WebGPU compute analysis pass (compute_analysis.wgsl)
  *                       over the AnalyserNode / CPU oscilloscope walk when PCM is flowing
+ * entryPoints         – WGSL vertex/fragment entry point names (default vs / fs)
  * highPrecisionPacking– PackedA/PackedB + DURA/TRIG packing
  * playheadRowAsFloat  – uniform slot [2] is f32 (not u32)
  * strictPlayheadSustain – playhead-scrolled sustain (v0.45b / v0.30b)
@@ -61,6 +62,14 @@ export interface CanvasSizeSpec {
   width: number;
   height: number;
 }
+
+export interface ShaderEntryPoints {
+  vertex: string;
+  fragment: string;
+}
+
+/** Entry points used when ShaderMeta.entryPoints is unset. */
+export const DEFAULT_SHADER_ENTRY_POINTS: Readonly<ShaderEntryPoints> = { vertex: 'vs', fragment: 'fs' };
 
 export interface ShaderMeta {
   extendedLayout: boolean;
@@ -100,6 +109,12 @@ export interface ShaderMeta {
    * unavailable, PCM is not flowing, or lite mode is on.
    */
   usesGpuSpectrum?: boolean;
+  /**
+   * WGSL entry point names for the pattern pipeline. Optional — every shipped
+   * shader uses `vs` / `fs`; set this only for a shader that names them
+   * differently (there is no trial-and-error fallback at pipeline creation).
+   */
+  entryPoints?: ShaderEntryPoints;
   highPrecisionPacking: boolean;
   playheadRowAsFloat: boolean;
   strictPlayheadSustain: boolean;

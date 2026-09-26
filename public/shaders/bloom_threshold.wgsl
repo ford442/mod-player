@@ -12,7 +12,9 @@ struct Uniforms {
 
 @fragment
 fn fs(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
-    let color = textureSample(sceneTexture, sceneSampler, uv).rgb;
+    // The scene is rgba16float (HDR, unclamped): drop negative / runaway values
+    // that an 8-bit target used to clamp away.
+    let color = clamp(textureSample(sceneTexture, sceneSampler, uv).rgb, vec3<f32>(0.0), vec3<f32>(64.0));
 
     // Soft threshold (Quilez-style soft knee)
     let threshold = uniforms.threshold;

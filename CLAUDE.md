@@ -254,6 +254,21 @@ EngineState           // Worklet engine lifecycle state
     to `g_module` via atomics only; poking the metadata parse changes nothing
     you can hear. `scripts/verify-native-exports.mjs` enforces all of this.
 
+14. **WebGPU pipelines are async and built before they replace anything (#439):**
+    every render/compute pipeline goes through `createRenderPipelineChecked` /
+    `createComputePipelineChecked` and every shader module through
+    `createCheckedShaderModule` (`utils/gpuShaderCompile.ts`). The synchronous
+    `create*Pipeline` never throws on validation errors, so it is banned in
+    `src/renderers/webgpu/` and the bloom/compute utils (tests enforce this).
+    `WebGPURenderer.initShader` builds the new pipelines first and only then
+    releases the old shader, so a broken WGSL file keeps the previous one on
+    screen and reports `SHADER-INIT: …` in `DebugInfo.errors`. Bloom renders the
+    scene into `BLOOM_SCENE_FORMAT` (`rgba16float`), so every pipeline drawn in
+    the bloom scene pass needs an HDR variant (`hdrPipeline` /
+    `bezelHdrPipeline`); blur uniforms are one buffer per direction × layer.
+    Debug info goes through `useThrottledDebugInfo`, not `useState`: it only
+    re-renders PatternDisplay while the debug panel is open.
+
 ## Critical Data Flows
 
 ### Module Load → Playback

@@ -12,6 +12,7 @@ import {
   usesAudioReactiveBezel,
   usesGpuSpectrum,
   usesVideoPatternTexture,
+  getShaderEntryPoints,
   type LayoutType,
 } from '../../../utils/shaderVersion';
 import { getShaderMeta, getLiteRecommendedShader } from '../../../utils/shaderRegistry';
@@ -21,7 +22,7 @@ import {
   disposeNoteDurationCompute,
   type NoteDurationComputeState,
 } from '../../../utils/computeNoteDuration';
-import type { BloomPostProcessor } from '../../../utils/bloomPostProcessor';
+import { BLOOM_SCENE_FORMAT, type BloomPostProcessor } from '../../../utils/bloomPostProcessor';
 import type React from 'react';
 import { GpuResourcePool } from '../../../utils/gpuResourcePool';
 import { LruCache } from '../../../utils/lruCache';
@@ -39,7 +40,13 @@ import {
 import { markWebGPUSessionFailed } from '../../../utils/webgpuProbe';
 import { AUDIO_REACTIVE_UNIFORM_BYTES, OSC_SAMPLE_COUNT } from '../../../utils/audioReactive';
 import { fetchShaderSource } from './shaderSource';
-import { assertShaderModuleCompiled } from '../../../utils/gpuShaderCompile';
+import {
+  appendGpuError,
+  attachUncapturedErrorHandler,
+  createCheckedShaderModule,
+  createRenderPipelineChecked,
+  GPU_ERROR_PREFIX,
+} from '../../../utils/gpuShaderCompile';
 import {
   createMainBindGroupLayout,
   refreshMainBindGroup,
@@ -84,6 +91,25 @@ export interface WebGPURendererDeps {
   bloomProcessorRef?: React.MutableRefObject<BloomPostProcessor | null> | undefined;
 }
 
+/**
+ * Seconds of uninterrupted rendering after a device (re)init before the
+ * device-lost recovery budget is refilled. A GPU that is lost again right after
+ * every re-init therefore still exhausts the budget instead of looping forever.
+ */
+export const DEVICE_STABLE_RESET_MS = 10_000;
+
+interface BuiltShaderPipelines {
+  layoutType: LayoutType;
+  pipeline: GPURenderPipeline;
+  /** BLOOM_SCENE_FORMAT variant for the bloom scene pass; null in lite mode. */
+  hdrPipeline: GPURenderPipeline | null;
+  bezel: {
+    pipeline: GPURenderPipeline;
+    hdrPipeline: GPURenderPipeline | null;
+    bindLayout: GPUBindGroupLayout;
+  } | null;
+}
+
 /** Max distinct patterns to keep GPU buffers resident for (see WebGPURenderer.cellsCache). */
 const CELLS_CACHE_LIMIT = 12;
 
@@ -96,6 +122,7 @@ export class WebGPURenderer {
   private renderGeneration = 0;
 
   private pipeline: GPURenderPipeline | null = null;
+  private hdrPipeline: GPURenderPipeline | null = null;
   private bindGroup: GPUBindGroup | null = null;
   private uniformBuffer: GPUBuffer | null = null;
   private cellsBuffer: GPUBuffer | null = null;
@@ -107,6 +134,7 @@ export class WebGPURenderer {
   private videoTexture: GPUTexture | null = null;
   private renderFrameCount = 0;
   private bezelPipeline: GPURenderPipeline | null = null;
+  private bezelHdrPipeline: GPURenderPipeline | null = null;
   private computeState: NoteDurationComputeState | null = null;
   private bezelBindGroup: GPUBindGroup | null = null;
   private bezelUniformBuffer: GPUBuffer | null = null;
@@ -121,6 +149,9 @@ export class WebGPURenderer {
   private liteMode = false;
   private markLostIntentional: (() => void) | null = null;
   private recoveryAttempts = 0;
+  /** performance.now() of the device init whose stability we are waiting on; null once the budget was refilled. */
+  private deviceStableSince: number | null = null;
+  private detachErrorHandler: (() => void) | null = null;
   private readonly maxDeviceLostRecoveries = 3;
   private oscTextureGeneration = 0;
   private boundOscTextureGeneration = -1;
@@ -167,6 +198,11 @@ export class WebGPURenderer {
 
   get renderGenerationRef(): number {
     return this.renderGeneration;
+  }
+
+  /** Shader whose pipelines are currently live (may lag a failed switch). */
+  get activeShaderFile(): string {
+    return this.shaderFile;
   }
 
   get lifecycleRef(): GpuLifecycle {
@@ -275,8 +311,10 @@ export class WebGPURenderer {
     this.renderGeneration = this.lifecycle.bump();
     this.bindGroup = null;
     this.pipeline = null;
+    this.hdrPipeline = null;
     this.bezelBindGroup = null;
     this.bezelPipeline = null;
+    this.bezelHdrPipeline = null;
     this.bezelTextureResources = null;
     this.textureResources = null;
     this.instrumentPaletteVersion = null;
@@ -372,8 +410,14 @@ export class WebGPURenderer {
         this.device = null;
         this.context = null;
         this.pipeline = null;
+        this.hdrPipeline = null;
+        this.bezelPipeline = null;
+        this.bezelHdrPipeline = null;
         this.bindGroup = null;
         this.nullOscTexture();
+        this.detachErrorHandler?.();
+        this.detachErrorHandler = null;
+        this.deviceStableSince = null;
 
         if (this.recoveryAttempts >= this.maxDeviceLostRecoveries) {
           markWebGPUSessionFailed(
@@ -410,7 +454,18 @@ export class WebGPURenderer {
     this.pool = new GpuResourcePool(device);
     this.device = device;
     this.context = context;
-    this.recoveryAttempts = 0;
+    // recoveryAttempts is NOT reset here: renderFrame refills the budget only
+    // after DEVICE_STABLE_RESET_MS of frames on this device.
+    this.deviceStableSince = performance.now();
+
+    this.detachErrorHandler?.();
+    this.detachErrorHandler = attachUncapturedErrorHandler(device, (message) => {
+      if (this.device !== device) return;
+      this.callbacks.onDebugInfo?.((prev) => ({
+        ...prev,
+        errors: appendGpuError(prev.errors, message),
+      }));
+    });
 
     // Lite mode stays on the AnalyserNode path and never asks for timestamps.
     this.disposeAnalysis();
@@ -443,7 +498,7 @@ export class WebGPURenderer {
     this.callbacks.onDeviceAcquired?.(true);
     this.callbacks.onDebugInfo?.((prev) => ({
       ...prev,
-      errors: prev.errors.filter((e) => !e.startsWith('DEVICE-LOST')),
+      errors: prev.errors.filter((e) => !e.startsWith('DEVICE-LOST') && !e.startsWith(GPU_ERROR_PREFIX)),
     }));
   }
 
@@ -460,6 +515,9 @@ export class WebGPURenderer {
   disposeDevice(): void {
     this.markLostIntentional?.();
     this.markLostIntentional = null;
+    this.detachErrorHandler?.();
+    this.detachErrorHandler = null;
+    this.deviceStableSince = null;
     this.lifecycle.bump();
     this.releaseShaderResources();
     this.disposeAnalysis();
@@ -477,6 +535,106 @@ export class WebGPURenderer {
     }
   }
 
+  /**
+   * Compile the shader modules and build every pipeline a shader needs, without
+   * touching the live state. Rejects with a readable error on WGSL or pipeline
+   * validation failure, so the caller can keep drawing with the previous
+   * pipeline. Returns null when cancelled.
+   */
+  private async buildShaderPipelines(
+    device: GPUDevice,
+    shaderFile: string,
+    isCancelled: () => boolean,
+  ): Promise<BuiltShaderPipelines | null> {
+    const shaderSource = await fetchShaderSource(shaderFile);
+    if (isCancelled()) return null;
+    const module = await createCheckedShaderModule(device, shaderSource, shaderFile);
+    if (isCancelled()) return null;
+
+    const layoutType = getLayoutType(shaderFile);
+    const bindGroupLayout = createMainBindGroupLayout(device, shaderFile, layoutType);
+    const layout = device.createPipelineLayout({ bindGroupLayouts: [bindGroupLayout] });
+    const entryPoints = getShaderEntryPoints(shaderFile);
+    const enableAlphaBlend = shouldEnableAlphaBlending(shaderFile);
+    const mainDescriptor = (format: GPUTextureFormat): GPURenderPipelineDescriptor => ({
+      layout,
+      vertex: { module, entryPoint: entryPoints.vertex },
+      fragment: {
+        module,
+        entryPoint: entryPoints.fragment,
+        targets: [{
+          format,
+          ...(enableAlphaBlend ? {
+            blend: {
+              color: { srcFactor: 'src-alpha', dstFactor: 'one-minus-src-alpha', operation: 'add' },
+              alpha: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha', operation: 'add' },
+            },
+          } : {}),
+        }],
+      },
+      primitive: { topology: 'triangle-list' },
+    });
+    // Bloom renders the scene into an HDR texture, so non-lite sessions also
+    // get a BLOOM_SCENE_FORMAT variant of each scene pipeline.
+    const wantsHdr = !this.liteMode;
+    const [pipeline, hdrPipeline] = await Promise.all([
+      createRenderPipelineChecked(device, mainDescriptor(this.canvasFormat), shaderFile),
+      wantsHdr
+        ? createRenderPipelineChecked(device, mainDescriptor(BLOOM_SCENE_FORMAT), `${shaderFile} (hdr)`)
+        : Promise.resolve(null),
+    ]);
+    if (isCancelled()) return null;
+
+    let bezel: BuiltShaderPipelines['bezel'] = null;
+    if (shouldUseBackgroundPass(shaderFile)) {
+      try {
+        const backgroundShaderFile = getBackgroundShaderFile(shaderFile);
+        const backgroundSource = await fetchShaderSource(backgroundShaderFile);
+        if (isCancelled()) return null;
+        const bezelModule = await createCheckedShaderModule(device, backgroundSource, backgroundShaderFile);
+        if (isCancelled()) return null;
+        const bezelBindEntries: GPUBindGroupLayoutEntry[] = [
+          { binding: 0, visibility: GPUShaderStage.FRAGMENT, buffer: { type: 'uniform' } },
+          { binding: 1, visibility: GPUShaderStage.FRAGMENT, sampler: { type: 'filtering' } },
+          { binding: 2, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float' } },
+        ];
+        if (usesAudioReactiveBezel(shaderFile)) {
+          bezelBindEntries.push({ binding: 3, visibility: GPUShaderStage.FRAGMENT, buffer: { type: 'uniform' } });
+        }
+        const bindLayout = device.createBindGroupLayout({ entries: bezelBindEntries });
+        const bezelLayout = device.createPipelineLayout({ bindGroupLayouts: [bindLayout] });
+        const bezelDescriptor = (format: GPUTextureFormat): GPURenderPipelineDescriptor => ({
+          layout: bezelLayout,
+          vertex: { module: bezelModule, entryPoint: 'vs' },
+          fragment: { module: bezelModule, entryPoint: 'fs', targets: [{ format }] },
+          primitive: { topology: 'triangle-list' },
+        });
+        const [bezelPipeline, bezelHdrPipeline] = await Promise.all([
+          createRenderPipelineChecked(device, bezelDescriptor(this.canvasFormat), backgroundShaderFile),
+          wantsHdr
+            ? createRenderPipelineChecked(device, bezelDescriptor(BLOOM_SCENE_FORMAT), `${backgroundShaderFile} (hdr)`)
+            : Promise.resolve(null),
+        ]);
+        bezel = { pipeline: bezelPipeline, hdrPipeline: bezelHdrPipeline, bindLayout };
+      } catch (e) {
+        // The chassis is decorative: draw the pattern without it.
+        console.warn('Failed to initialize bezel shader', e);
+        this.reportShaderError(e);
+      }
+    }
+    if (isCancelled()) return null;
+
+    return { layoutType, pipeline, hdrPipeline, bezel };
+  }
+
+  private reportShaderError(error: unknown): void {
+    const reason = error instanceof Error ? error.message : String(error);
+    this.callbacks.onDebugInfo?.((prev) => ({
+      ...prev,
+      errors: [...prev.errors.filter((e) => !e.startsWith('SHADER-INIT')), `SHADER-INIT: ${reason}`],
+    }));
+  }
+
   async initShader(
     shaderFile: string,
     params: WebGPURenderParams,
@@ -486,64 +644,29 @@ export class WebGPURenderer {
     const pool = this.pool;
     if (!device || !pool || pool.isDisposed) return;
 
-    this.shaderFile = shaderFile;
-    this.textureResources = null;
-    this.bezelTextureResources = null;
-    this.releaseShaderResources();
-
     let activeShaderFile = shaderFile;
     if (!getShaderMeta(activeShaderFile)) {
       const fallbackShader = getLiteRecommendedShader();
       console.warn(`[WebGPU] Shader "${activeShaderFile}" is not registered; falling back to "${fallbackShader}".`);
       activeShaderFile = fallbackShader;
     }
+
+    // Build first, commit second: if the new shader fails to compile or
+    // validate, this throws with the previous pipeline, bind groups and
+    // buffers still live, so the display keeps drawing instead of going black.
+    const cancelledOrStale = () => isCancelled() || pool.isDisposed || this.device !== device;
+    const built = await this.buildShaderPipelines(device, activeShaderFile, cancelledOrStale);
+    if (!built || cancelledOrStale()) return;
+
+    this.textureResources = null;
+    this.bezelTextureResources = null;
+    this.releaseShaderResources();
     this.shaderFile = activeShaderFile;
 
-    const shaderSource = await fetchShaderSource(activeShaderFile);
-    if (isCancelled() || pool.isDisposed) return;
-    const module = device.createShaderModule({ code: shaderSource, label: activeShaderFile });
-    try {
-      await assertShaderModuleCompiled(module, activeShaderFile);
-    } catch (e) {
-      this.pipeline = null;
-      throw e;
-    }
-    if (isCancelled() || pool.isDisposed) return;
-
-    const layoutType = getLayoutType(activeShaderFile);
+    const layoutType = built.layoutType;
     this.layoutType = layoutType;
-    const bindGroupLayout = createMainBindGroupLayout(device, activeShaderFile, layoutType);
-
-    const enableAlphaBlend = shouldEnableAlphaBlending(activeShaderFile);
-    const targets: GPUColorTargetState[] = [{
-      format: this.canvasFormat,
-      ...(enableAlphaBlend ? {
-        blend: {
-          color: { srcFactor: 'src-alpha', dstFactor: 'one-minus-src-alpha', operation: 'add' },
-          alpha: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha', operation: 'add' },
-        },
-      } : {}),
-    }];
-    try {
-      this.pipeline = device.createRenderPipeline({
-        layout: device.createPipelineLayout({ bindGroupLayouts: [bindGroupLayout] }),
-        vertex: { module, entryPoint: 'vs' },
-        fragment: { module, entryPoint: 'fs', targets },
-        primitive: { topology: 'triangle-list' },
-      });
-    } catch {
-      try {
-        this.pipeline = device.createRenderPipeline({
-          layout: device.createPipelineLayout({ bindGroupLayouts: [bindGroupLayout] }),
-          vertex: { module, entryPoint: 'vertex_main' },
-          fragment: { module, entryPoint: 'fragment_main', targets },
-          primitive: { topology: 'triangle-list' },
-        });
-      } catch (e) {
-        this.pipeline = null;
-        throw e;
-      }
-    }
+    this.pipeline = built.pipeline;
+    this.hdrPipeline = built.hdrPipeline;
 
     const uniformSize = layoutType === 'extended' ? 144 : (layoutType === 'texture' ? 64 : 32);
     this.uniformBuffer = pool.track(
@@ -590,33 +713,9 @@ export class WebGPURenderer {
       );
     }
 
-    if (shouldUseBackgroundPass(activeShaderFile)) {
+    if (built.bezel) {
       try {
-        const backgroundShaderFile = getBackgroundShaderFile(activeShaderFile);
-        const backgroundSource = await fetchShaderSource(backgroundShaderFile);
-        if (isCancelled() || pool.isDisposed) return;
-        const bezelModule = device.createShaderModule({
-          code: backgroundSource,
-          label: backgroundShaderFile,
-        });
-        await assertShaderModuleCompiled(bezelModule, backgroundShaderFile);
-        if (isCancelled() || pool.isDisposed) return;
         const audioBezel = usesAudioReactiveBezel(activeShaderFile);
-        const bezelBindEntries: GPUBindGroupLayoutEntry[] = [
-          { binding: 0, visibility: GPUShaderStage.FRAGMENT, buffer: { type: 'uniform' } },
-          { binding: 1, visibility: GPUShaderStage.FRAGMENT, sampler: { type: 'filtering' } },
-          { binding: 2, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float' } },
-        ];
-        if (audioBezel) {
-          bezelBindEntries.push({ binding: 3, visibility: GPUShaderStage.FRAGMENT, buffer: { type: 'uniform' } });
-        }
-        const bezelBindLayout = device.createBindGroupLayout({ entries: bezelBindEntries });
-        this.bezelPipeline = device.createRenderPipeline({
-          layout: device.createPipelineLayout({ bindGroupLayouts: [bezelBindLayout] }),
-          vertex: { module: bezelModule, entryPoint: 'vs' },
-          fragment: { module: bezelModule, entryPoint: 'fs', targets: [{ format: this.canvasFormat }] },
-          primitive: { topology: 'triangle-list' },
-        });
         this.bezelUniformBuffer = pool.track(
           device.createBuffer({ size: alignTo(96, 256), usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST }),
           'shader',
@@ -631,7 +730,9 @@ export class WebGPURenderer {
         if (audioBezel && this.audioReactiveUniformBuffer) {
           bezelGroupEntries.push({ binding: 3, resource: { buffer: this.audioReactiveUniformBuffer } });
         }
-        this.bezelBindGroup = device.createBindGroup({ layout: bezelBindLayout, entries: bezelGroupEntries });
+        this.bezelBindGroup = device.createBindGroup({ layout: built.bezel.bindLayout, entries: bezelGroupEntries });
+        this.bezelPipeline = built.bezel.pipeline;
+        this.bezelHdrPipeline = built.bezel.hdrPipeline;
       } catch (e) {
         console.warn('Failed to initialize bezel shader', e);
       }
@@ -833,8 +934,14 @@ export class WebGPURenderer {
     const context = this.context;
     if (!device || !pool || pool.isDisposed || !context || !canvas) return;
 
+    if (this.deviceStableSince !== null && performance.now() - this.deviceStableSince >= DEVICE_STABLE_RESET_MS) {
+      this.recoveryAttempts = 0;
+      this.deviceStableSince = null;
+    }
+
     const frameState: FrameDrawState = {
       pipeline: this.pipeline,
+      hdrPipeline: this.hdrPipeline,
       bindGroup: this.bindGroup,
       uniformBuffer: this.uniformBuffer,
       cellsBuffer: this.cellsBuffer,
@@ -843,6 +950,7 @@ export class WebGPURenderer {
       channelDataView: this.channelDataView,
       layoutType: this.layoutType,
       bezelPipeline: this.bezelPipeline,
+      bezelHdrPipeline: this.bezelHdrPipeline,
       bezelBindGroup: this.bezelBindGroup,
       bezelUniformBuffer: this.bezelUniformBuffer,
       instrumentPaletteTexture: this.instrumentPaletteTexture,

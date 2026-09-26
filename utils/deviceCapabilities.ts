@@ -94,14 +94,14 @@ export const DEVICE_CAPABILITIES: DeviceCapabilities = detectCapabilities();
 // Fire-and-forget async GPU adapter inspection for low-power hints.
 // Only refines the decision if no manual override is active.
 // Adapter info comes from utils/webgpuDevice.ts (the sole requestAdapter /
-// requestDevice call site) via peekAdapterInfoForCapabilityHint, which reuses
-// the real device request when one is already in flight instead of binding a
-// second adapter here.
+// requestDevice call site) via peekAdapterInfoForCapabilityHint, which only
+// reports the adapter of the real device request (waiting briefly for it to
+// start) and never binds a second adapter here.
 if (!DEVICE_CAPABILITIES.reason.includes('override')) {
   probeWebGPUAdapter()
     .then((adapterOk) => {
       if (!adapterOk) return undefined;
-      return peekAdapterInfoForCapabilityHint('low-power');
+      return peekAdapterInfoForCapabilityHint();
     })
     .then((info) => {
       if (!info) return;
