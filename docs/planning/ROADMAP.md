@@ -2,9 +2,11 @@
 
 Living pointer to active work. **Do not** append agent run diaries here — use GitHub issues and PRs for status.
 
-**Last reconciled:** 2026-09-26. #437 landed via #445 (3D is now a sibling overlay; `webgpuDevice.ts` is the only adapter/device/`configure()` owner), #449 landed as a direct `push fix` (`2d6a4ed`, real-WASM libopenmpt for the JS engine), #442's `preflight` + lockfile guard landed via #446. **#442's ruleset half is now confirmed absent, not just "needs checking":** `GET /repos/ford442/mod-player/rulesets` returns `[]` on the live repo. `2d6a4ed` went straight to `main` because nothing was ever enforcing the "no direct push" rule — it was documentation, not policy. An agent session cannot create the ruleset itself (repo-administration writes are blocked by the GitHub proxy, confirmed by a rejected `POST /rulesets`); it needs the repo owner to do it by hand once (exact steps in `CONTRIBUTING.md`). `CLAUDE.md`/`AGENTS.md`/`CONTRIBUTING.md` no longer assert the ruleset exists. CI on `main` is **green** (runs 622 / 623 / 625; `native-wasm-scheduled` run 11 green 2026-09-21). No open PRs.
+**Last reconciled:** 2026-10-02. Since 2026-09-26: #449 (WebGPU render-loop correctness — split bloom blur uniforms, async checked pipelines, throttled debug info) landed via #457; #438 (v0.60 spectrum chassis reading the `ComputeAnalysis` bins, `ShaderMeta.spectrumBuffer`) landed via #458 and is closed; the audio runtime failure paths (worklet fault → one restart → ScriptProcessor fallback, `AudioContext` suspend recovery, native seek/position atomics) landed via #456. CI on `main` is **green** (run 637 on `9d29bfa`). No open PRs. The ruleset half of #442 is still not done (manual owner step, see `CONTRIBUTING.md`).
 
-**Foundation state:** stable. The only remaining foundation item is the #436 WebGL2 decision. #437 is still **open** on GitHub even though its code has landed, so close it. #442 stays open — narrowed to just the manual ruleset step (details below).
+**Correction:** earlier reconciles called the real-WASM libopenmpt change "#449". That was **#439** (`2d6a4ed`). #449 is the WebGPU render-loop issue above, which is what `CLAUDE.md` pitfall 14 cites.
+
+**Foundation state:** stable. #436 (WebGL2 decision) is still the only open foundation item and has gone three reconciles without an owner decision; #417 still waits on it. #437 is **still open** on GitHub although its code landed in #445. Close it.
 
 ## ✅ CI history — three breaks (runs 597–603), all fixed
 
@@ -50,11 +52,11 @@ Landed by `8175cc9` (`fix(stage): URL ?stage= preference, toggle/exit commands, 
 
 | Priority | Issue | Summary |
 |----------|-------|---------|
-| P1 | [#436](https://github.com/ford442/mod-player/issues/436) | Resolve the WebGL2 contradiction: revive `?renderer=webgl2` as a real viz session **or** delete the deferred path and retarget smoke/capture/docs. Last open foundation item; #417 still waits on it. |
-| P1 (feature) | [#438](https://github.com/ford442/mod-player/issues/438) | GPU FFT spectrum → chassis shaders (v0.60 family reading `computeAnalysis`). **Unblocked** — #437 landed, so the WebGPU init surface is stable. Newest shader today is v0.59. |
-| P1 (feature) | [#416](https://github.com/ford442/mod-player/issues/416) | Live mute/solo. **JS path unblocked by #449**: the real-WASM glue exports the whole `libopenmpt_ext.h` API plus `dynCall`/`getValue`, and `utils/libopenmptExt.ts` already drives the ext interface on the main thread. Worklet stub is `TODO(#416)` in `audio-worklet/js/openmpt-processor.ts` (`MT.setChannelMute`). |
-| **close** | [#437](https://github.com/ford442/mod-player/issues/437) | Landed in #445 (`c686bc0`). `App.tsx` renders `App3DModeShell` as a sibling of `MainLayout`, not an early return. Adapter/device requests go through `utils/webgpuDevice.ts`, and `configureCanvasContext` defaults the probe and runtime to `premultiplied`. Pinned by `tests/threeDModeLayout.test.ts` and `tests/webgpuDeviceOwnership.test.ts`. |
-| **narrow, keep open** | [#442](https://github.com/ford442/mod-player/issues/442) | `npm run preflight` + `scripts/verify-lockfile.mjs` + CI wiring landed in #446 — that part is done. The ruleset half is confirmed **not** done: `GET /repos/ford442/mod-player/rulesets` → `[]` on 2026-09-26, which is why `2d6a4ed` went straight to `main` on 2026-09-19. A `POST /rulesets` from an agent session is rejected by the GitHub proxy ("Write access to this GitHub API path is not permitted"), so this is a manual, one-time task for the repo owner in GitHub Settings → Rules → Rulesets (exact config in `CONTRIBUTING.md`). Docs no longer claim the ruleset exists. Close #442 only after the ruleset is actually created and a direct push to `main` has been tried and refused. |
+| P1 (feature, **current focus**) | [#448](https://github.com/ford442/mod-player/issues/448) / [#416](https://github.com/ford442/mod-player/issues/416) | Live mute/solo on the JS engine. The worklet stub is the `TODO(#416)` branch on `MT.setChannelMute` in `audio-worklet/js/openmpt-processor.ts`. The main-thread send path already exists (`hooks/libOpenMPT/runInit.ts` → `engine.setChannelMute`). #456's fault handling gives an audio-thread mistake a recovery path instead of a dead node. The pattern for the ext interactive interface is in `utils/libopenmptExt.ts`, which uses it for offline render. |
+| P1 (hygiene) | [#451](https://github.com/ford442/mod-player/issues/451) | Toolchain + repo hygiene. The issue asks for several PRs. Take the **bundle slice first**: three.js is modulepreloaded on every page because `threeVendorManualChunk` (`vite-plugins/crossOriginIsolationHeaders.ts`) drags react/react-dom/scheduler into `three-r3f`; Tailwind content globs miss `app/**`/`src/**` and scan `audio-worklet/**`/`hooks/**`; `vite.config.ts` has no `build.target`. Still true on `9d29bfa`. `dist/` and `__pycache__/` are still tracked. |
+| P1 (decision) | [#436](https://github.com/ford442/mod-player/issues/436) | Resolve the WebGL2 contradiction: revive `?renderer=webgl2` as a real viz session **or** delete the deferred path. Blocks #417. This needs an owner call, not more agent work. |
+| **close** | [#437](https://github.com/ford442/mod-player/issues/437) | Landed in #445 (`c686bc0`); pinned by `tests/threeDModeLayout.test.ts` and `tests/webgpuDeviceOwnership.test.ts`. |
+| **narrow, keep open** | [#442](https://github.com/ford442/mod-player/issues/442) | Preflight + lockfile guard landed in #446. The ruleset still does not exist, and agent sessions cannot create it (the GitHub proxy rejects `POST /rulesets`). The repo owner has to do it by hand once; see `CONTRIBUTING.md`. |
 
 ## Next (after foundation)
 
@@ -62,7 +64,10 @@ Landed by `8175cc9` (`fix(stage): URL ?stage= preference, toggle/exit commands, 
 |----------|-------|---------|
 | P2 | [#403](https://github.com/ford442/mod-player/issues/403) | Tracker studio: inspector waveforms, S3M extract, **audible** pattern edits via a sample-audition worklet (libopenmpt cannot write cells). Build the worklet on `audio-worklet/js/` (typed, #435). |
 | P2 | [#417](https://github.com/ford442/mod-player/issues/417) | Performance instrument: MIDI/chassis on `playerCommands`, `stageMode`, WebCodecs music-video. Waits on the #436 decision. |
-| P2 (leftover) | #411 (closed) | `native-engine-bench-notes.md` native column still empty. Filling it needs an emsdk 3.1.51 host. #449 rewrote the JS baseline notes, so re-baseline both columns together. |
+| P2 | [#452](https://github.com/ford442/mod-player/issues/452) | Shader Lab: typed uniform schema (generated WGSL structs) + live WGSL editor with hot pipeline swap. Builds on #449's checked async pipelines. |
+| P2 | [#453](https://github.com/ford442/mod-player/issues/453) | Master FX rack after libopenmpt (EQ/comp/reverb/"Amiga" coloration) as a WASM DSP worklet with export parity. |
+| P3 | [#454](https://github.com/ford442/mod-player/issues/454) | Module library v2: metadata DB, full-text search, per-song presets, offline crate. |
+| P2 (leftover) | #411 (closed) | `native-engine-bench-notes.md` native column still empty. Filling it needs an emsdk 3.1.51 host. #439 rewrote the JS baseline notes, so re-baseline both columns together. |
 
 ## Landed (do not re-open)
 
@@ -93,8 +98,11 @@ Landed by `8175cc9` (`fix(stage): URL ?stage= preference, toggle/exit commands, 
 | One resident native `OpenMPTModule`; typed `ERR_*` load errors; locked `init_audio` | [#441](https://github.com/ford442/mod-player/pull/441), on `main` 2026-09-18 (`21252a9`). Transient `g_metaModule` is unloaded by `commit_module()` before the audio thread builds `g_module`; `scripts/verify-native-exports.mjs` enforces it. |
 | [#435](https://github.com/ford442/mod-player/issues/435) Typed JS worklet | [#444](https://github.com/ford442/mod-player/pull/444), on `main` 2026-09-18. `openmpt-worklet.js` is generated from `audio-worklet/js/openmpt-processor.ts`. |
 | [#437](https://github.com/ford442/mod-player/issues/437) 3D mode keeps `PatternDisplay` mounted; single WebGPU owner | [#445](https://github.com/ford442/mod-player/pull/445), on `main` 2026-09-18 (`c686bc0`). Issue still open, so close it. |
-| [#449](https://github.com/ford442/mod-player/issues/439) Real-WASM libopenmpt for the JS engine (wasm2js glue deleted) | `2d6a4ed` **direct push to `main`**, 2026-09-19 (CI run 623 green). libopenmpt 0.8.4, emsdk 3.1.51, `public/worklets/libopenmpt-worklet.{js,wasm}`, `npm run verify:js-libopenmpt`. Never reviewed as a PR. |
-| [#442](https://github.com/ford442/mod-player/issues/442) `npm run preflight` + lockfile guard | [#446](https://github.com/ford442/mod-player/pull/446), on `main` 2026-09-19 (`11f2ef8`). Ruleset half unverified (see Active). |
+| [#439](https://github.com/ford442/mod-player/issues/439) Real-WASM libopenmpt for the JS engine (wasm2js glue deleted) | `2d6a4ed` **direct push to `main`**, 2026-09-19 (CI run 623 green). libopenmpt 0.8.4, emsdk 3.1.51, `public/worklets/libopenmpt-worklet.{js,wasm}`, `npm run verify:js-libopenmpt`. Never reviewed as a PR. |
+| [#442](https://github.com/ford442/mod-player/issues/442) `npm run preflight` + lockfile guard | [#446](https://github.com/ford442/mod-player/pull/446), on `main` 2026-09-19 (`11f2ef8`). Ruleset half confirmed absent (see Active). |
+| Audio runtime failure paths (worklet fault restart → ScriptProcessor fallback, suspend recovery, native seek/position atomics, PCM-tap cursor) | [#456](https://github.com/ford442/mod-player/pull/456), on `main` 2026-09-26 (`398ba46`). Native parse off the audio thread was explicitly deferred. |
+| [#449](https://github.com/ford442/mod-player/issues/449) WebGPU render-loop correctness (bloom H/V uniforms, async checked pipelines, throttled debug info) | [#457](https://github.com/ford442/mod-player/pull/457), on `main` 2026-09-26 (`7055a3d`). |
+| [#438](https://github.com/ford442/mod-player/issues/438) v0.60 spectrum chassis reading GPU FFT bins | [#458](https://github.com/ford442/mod-player/pull/458), on `main` 2026-09-26 (`9d29bfa`). `ShaderMeta.spectrumBuffer`; placeholder bins until `ComputeAnalysis` resolves. |
 
 ## Planning scratch (local, gitignored)
 
