@@ -235,12 +235,18 @@ try {
 }
 
 // Optional native C++/Emscripten engine (gitignored until `npm run build:emcc`).
-// Absent is OK (JS worklet remains the default). Partial or invalid is always a
+// Absent is OK (JS worklet remains the default) unless the build opted into
+// native via VITE_NATIVE_PARITY_GATE=1 — then a missing trio means the gate
+// promises an engine the dist doesn't ship. Partial or invalid is always a
 // broken dist and must fail. See scripts/nativeEngineArtifacts.mjs.
 {
   const native = classifyNativeEngine(join(BUILD_DIR, 'worklets'));
   if (native.status === 'complete') {
     console.log(formatNativeEngineSummary(native));
+  } else if (native.status === 'absent' && process.env.VITE_NATIVE_PARITY_GATE === '1') {
+    errors.push(
+      'VITE_NATIVE_PARITY_GATE=1 but native engine artifacts (openmpt-native.*) are absent from dist/worklets/ — run `npm run build:emcc` first',
+    );
   } else if (native.status === 'absent') {
     console.warn('');
     console.warn('================================================================');

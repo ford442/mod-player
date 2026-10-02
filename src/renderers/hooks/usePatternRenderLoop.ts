@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { gpuAnalysisIsLive } from '../../../utils/audioAnalysisBus';
 import type { BloomPostProcessor } from '../../../utils/bloomPostProcessor';
 import type { WebGPURenderParams } from '../params';
 
@@ -61,7 +62,11 @@ export function usePatternRenderLoop(params: UsePatternRenderLoopParams) {
         renderParamsRef.current.themeBlend = themeBlendRef.current;
       }
       if (!isModuleLoaded && !isPlaying) setLocalTime(time / 1000.0);
-      if (analyserNode) {
+      // Skip the CPU FFT pull entirely while the WebGPU compute pass owns the
+      // analysis bus — it has already produced this frame's spectrum on the GPU
+      // and a second `getByteFrequencyData` would only duplicate it. Time-bounded
+      // rather than latched, so a device loss falls back within a frame or two.
+      if (analyserNode && !gpuAnalysisIsLive()) {
         if (freqDataRef.current.length !== analyserNode.frequencyBinCount) {
           freqDataRef.current = new Uint8Array(analyserNode.frequencyBinCount);
         }
