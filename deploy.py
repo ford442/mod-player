@@ -565,7 +565,7 @@ def main() -> None:
         "1",
         "true",
         "yes",
-    )
+    ) or os.getenv("VITE_NATIVE_PARITY_GATE", "").strip() == "1"
     enforce_native_engine(build_path, require_native=require_native)
 
     manifest = build_inventory(build_path)

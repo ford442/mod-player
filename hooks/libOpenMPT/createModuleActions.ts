@@ -329,6 +329,6 @@ export function createLoadModule(
     refs.userModuleLoadedRef.current = true;
     setStatus(`Loading "${fileName}"...`);
     await processModuleData(fileData, fileName);
-    if (refs.playRef.current) refs.playRef.current({ forceModuleLoad: true });
+    if (refs.playRef.current) await refs.playRef.current({ forceModuleLoad: true });
   };
 }
