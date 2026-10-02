@@ -77,7 +77,8 @@ const GPU_ACTIVE_WINDOW_MS = 250;
 const subscribers = new Set<AnalysisSubscriber>();
 let latest: AnalysisSnapshot | null = null;
 let lastNotifyAt = 0;
-let lastGpuPublishAt = 0;
+// -Infinity, not 0: a page younger than the window must not read as GPU-live.
+let lastGpuPublishAt = Number.NEGATIVE_INFINITY;
 
 /** performance.now() where available; Date.now() in a worker/test context. */
 const now = (): number =>
@@ -258,5 +259,5 @@ export function resetAnalysisBus(): void {
   subscribers.clear();
   latest = null;
   lastNotifyAt = 0;
-  lastGpuPublishAt = 0;
+  lastGpuPublishAt = Number.NEGATIVE_INFINITY;
 }

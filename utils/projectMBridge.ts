@@ -61,7 +61,8 @@ let _workletPcmChannel: BroadcastChannel | null = null;
 // blocks, so Project-M never receives duplicated (stereo worklet + mono RAF)
 // PCM. If the worklet path falls silent (e.g. the engine switches to the
 // ScriptProcessor fallback), the RAF path resumes within WORKLET_ACTIVE_WINDOW_MS.
-let _lastWorkletBroadcast = 0;
+// -Infinity until the first block, so a fresh page doesn't read as worklet-live.
+let _lastWorkletBroadcast = Number.NEGATIVE_INFINITY;
 const WORKLET_ACTIVE_WINDOW_MS = 250;
 
 /**
@@ -176,6 +177,12 @@ export function startProjectMBridge(analyser: AnalyserNode | null): () => void {
   let rafRunning = false;
 
   function send() {
+    // Worklet PCM resumed between supervisor ticks — stop now rather than
+    // double-publishing mono fallback alongside it for up to one interval.
+    if (projectMPcmIsLive()) {
+      stopRaf();
+      return;
+    }
     analyserNode.getFloatTimeDomainData(buf);
     // Use slice() so the transfer doesn't detach the reusable buffer
     const copy = buf.slice();
