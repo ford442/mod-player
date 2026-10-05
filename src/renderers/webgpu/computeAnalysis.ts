@@ -30,9 +30,10 @@ import {
   type AudioBandSnapshot,
 } from '../../../utils/audioReactive';
 import { subscribePcm, type PcmBlock } from '../../../utils/pcmBus';
+import { publishAnalysis } from '../../../utils/audioAnalysisBus';
 import type { GpuTimestampRecorder } from './timestampQuery';
 
-/** Stereo frames retained for analysis. 2048 @ 44.1 kHz ≈ 46 ms of audio. */
+/** Stereo frames retained for analysis. 2048 @ 48 kHz ≈ 43 ms of audio. */
 export const PCM_FRAME_CAPACITY = 2048;
 
 /** Must match MAX_FFT_SIZE in shaders/lib/fft.wgsl. */
@@ -267,6 +268,27 @@ export class ComputeAnalysis {
   private readbackEncoded = false;
   private unsubscribePcm: (() => void) | null = null;
   private lastPcmAt = 0;
+  /**
+   * The most recent block as it arrived, copied for the analysis bus. The ring
+   * is the GPU's view (unwrapped, fixed capacity); consumers of the bus want
+   * the block the audio clock actually produced. Copied because the worklet
+   * transfers the original buffer back to its pool right after publishing,
+   * which detaches it.
+   */
+  private lastPcmBlock: PcmBlock | null = null;
+  /**
+   * Frames pushed since the last reset, divided by the sample rate to give the
+   * bus an audio-clock timestamp. ComputeAnalysis holds no AudioContext, and
+   * the PCM it is handed is exactly what the audio clock rendered, so counting
+   * it is the audio clock — free of the RAF jitter a wall clock would add.
+   */
+  private pcmFramesSeen = 0;
+  /**
+   * PCM block + frame count captured when the readback copies were encoded,
+   * so the published snapshot pairs GPU results with the PCM they analysed
+   * rather than whatever block arrived while `mapAsync` was pending.
+   */
+  private readbackPcm: { block: PcmBlock; framesSeen: number } | null = null;
   private disposed = false;
 
   private constructor(
@@ -421,6 +443,9 @@ export class ComputeAnalysis {
       this.unsubscribePcm?.();
       this.unsubscribePcm = null;
       this.pcm.reset();
+      this.lastPcmBlock = null;
+      this.readbackPcm = null;
+      this.pcmFramesSeen = 0;
       this.snapshot = null;
     }
   }
@@ -468,6 +493,8 @@ export class ComputeAnalysis {
     if (!this.pcm.write(block.samples, block.channels, block.sampleRate)) return;
     this.pcmDirty = true;
     this.lastPcmAt = now();
+    this.lastPcmBlock = { ...block, samples: block.samples.slice() };
+    this.pcmFramesSeen += block.frameCount;
   }
 
   /**
@@ -566,6 +593,9 @@ export class ComputeAnalysis {
     encoder.copyBufferToBuffer(this.buffers.meta, 0, this.buffers.metaStaging, 0, META_FLOATS * 4);
     encoder.copyBufferToBuffer(this.buffers.bins, 0, this.buffers.binsStaging, 0, SPECTRUM_BUFFER_BYTES);
     this.readbackEncoded = true;
+    this.readbackPcm = this.lastPcmBlock
+      ? { block: this.lastPcmBlock, framesSeen: this.pcmFramesSeen }
+      : null;
   }
 
   /**
@@ -577,6 +607,8 @@ export class ComputeAnalysis {
     if (this.disposed || this.readbackPending || !this.readbackEncoded) return;
     this.readbackEncoded = false;
     this.readbackPending = true;
+    const readbackPcm = this.readbackPcm;
+    this.readbackPcm = null;
     Promise.all([
       this.buffers.metaStaging.mapAsync(GPUMapMode.READ),
       this.buffers.binsStaging.mapAsync(GPUMapMode.READ),
@@ -595,6 +627,7 @@ export class ComputeAnalysis {
         const next = foldBandsToSnapshot(meta, beat);
         next.bins.set(this.binsSnapshot);
         this.snapshot = next;
+        if (readbackPcm) this.publishToAnalysisBus(next, readbackPcm.block, readbackPcm.framesSeen);
       })
       .catch(() => {
         /* buffer destroyed or device lost — keep the previous snapshot */
@@ -606,6 +639,25 @@ export class ComputeAnalysis {
         }
         this.readbackPending = false;
       });
+  }
+
+  /**
+   * Hand the readback to the app-wide analysis bus so the channel scope, the
+   * 3D stage and the Project-M bridge read the FFT this pass already did
+   * instead of each opening its own AnalyserNode. No-op when nothing listens.
+   */
+  private publishToAnalysisBus(snapshot: SpectrumSnapshot, block: PcmBlock, framesSeen: number): void {
+    publishAnalysis({
+      audioTime: block.sampleRate > 0 ? framesSeen / block.sampleRate : 0,
+      sampleRate: block.sampleRate,
+      pcm: block.samples,
+      channels: block.channels,
+      bands: snapshot.bands,
+      rms: snapshot.rmsL,
+      peak: snapshot.peakL,
+      bins32: snapshot.bins,
+      source: 'gpu-compute',
+    });
   }
 
   /**

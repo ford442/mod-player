@@ -1,5 +1,9 @@
 import { useRef, useEffect, useCallback } from 'react';
 import {
+  subscribeAnalysis,
+  type AnalysisSnapshot,
+} from '../utils/audioAnalysisBus';
+import {
   DB_FLOOR,
   advanceChannelMeter,
   applyDbGradient,
@@ -56,6 +60,13 @@ export const ChannelMeters: React.FC<ChannelMetersProps> = ({
   const rafRef = useRef<number>(0);
   const lastFrameTimeRef = useRef<number>(0);
   const lastAriaUpdateRef = useRef<number>(0);
+  /**
+   * Latest analysis snapshot, or null while nothing is producing. The scope
+   * draws from `snapshot.pcm` so it shares the app's one audio tap instead of
+   * pulling a third time-domain read off the AnalyserNode every frame. The
+   * analyser below stays as the lite-mode / no-producer fallback.
+   */
+  const snapshotRef = useRef<AnalysisSnapshot | null>(null);
 
   const channelVURef = useRef(channelVU);
   const numChannelsRef = useRef(numChannels);
@@ -63,6 +74,10 @@ export const ChannelMeters: React.FC<ChannelMetersProps> = ({
   channelVURef.current = channelVU;
   numChannelsRef.current = numChannels;
   analyserNodeRef.current = analyserNode;
+
+  useEffect(() => subscribeAnalysis((snapshot) => {
+    snapshotRef.current = snapshot;
+  }), []);
 
   useEffect(() => {
     channelStatesRef.current = ensureChannelStates(
@@ -168,17 +183,45 @@ export const ChannelMeters: React.FC<ChannelMetersProps> = ({
     }
   }, []);
 
+  /**
+   * Trace points for the scope, as signed samples in -1..1.
+   *
+   * Prefers the analysis bus. Its PCM is interleaved stereo straight off the
+   * audio clock, so the left channel is taken by stride rather than averaged —
+   * a mono fold would cancel wide stereo material into a flat line. Falls back
+   * to the AnalyserNode only when no producer is publishing (lite mode).
+   */
+  const readScopeSamples = useCallback((): Float32Array | null => {
+    const snapshot = snapshotRef.current;
+    if (snapshot && snapshot.pcm.length > 0) {
+      const { pcm, channels } = snapshot;
+      if (channels === 1) return pcm;
+      const left = new Float32Array(Math.floor(pcm.length / 2));
+      for (let i = 0; i < left.length; i++) left[i] = pcm[i * 2] ?? 0;
+      return left;
+    }
+
+    const an = analyserNodeRef.current;
+    if (!an) return null;
+    const bytes = new Uint8Array(an.frequencyBinCount);
+    an.getByteTimeDomainData(bytes);
+    const samples = new Float32Array(bytes.length);
+    for (let i = 0; i < bytes.length; i++) {
+      samples[i] = ((bytes[i] ?? 128) - 128) / 128;
+    }
+    return samples;
+  }, []);
+
   const drawOscilloscope = useCallback(() => {
     const canvas = scopeCanvasRef.current;
     const ctx = canvas?.getContext('2d');
-    const an = analyserNodeRef.current;
-    if (!canvas || !ctx || !an) return;
+    if (!canvas || !ctx) return;
+    const buf = readScopeSamples();
+    if (!buf) return;
 
     const w = canvas.width;
     const h = canvas.height;
-    const bufLen = an.frequencyBinCount;
-    const buf = new Uint8Array(bufLen);
-    an.getByteTimeDomainData(buf);
+    const bufLen = buf.length;
 
     ctx.fillStyle = SCOPE_BG;
     ctx.fillRect(0, 0, w, h);
@@ -196,14 +239,15 @@ export const ChannelMeters: React.FC<ChannelMetersProps> = ({
     const sliceWidth = w / bufLen;
     let x = 0;
     for (let i = 0; i < bufLen; i++) {
-      const sample = buf[i] ?? 128;
-      const y = (sample / 255) * h;
+      // -1..1 → bottom..top of the canvas, silence on the centre line.
+      const sample = Math.max(-1, Math.min(1, buf[i] ?? 0));
+      const y = (0.5 - sample * 0.5) * h;
       if (i === 0) ctx.moveTo(x, y);
       else ctx.lineTo(x, y);
       x += sliceWidth;
     }
     ctx.stroke();
-  }, []);
+  }, [readScopeSamples]);
 
   const tick = useCallback((timestamp: number) => {
     const prev = lastFrameTimeRef.current;
@@ -230,6 +274,9 @@ export const ChannelMeters: React.FC<ChannelMetersProps> = ({
   useEffect(() => {
     if (!isPlaying) {
       lastFrameTimeRef.current = 0;
+      // Drop the held snapshot so a later play doesn't flash the previous
+      // tune's waveform before the first new one arrives.
+      snapshotRef.current = null;
       channelStatesRef.current.forEach(resetChannelMeterState);
 
       const clearCanvas = (
