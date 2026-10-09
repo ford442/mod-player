@@ -622,6 +622,11 @@ done
 
 echo "🔗 Linking native worklet (em++; exceptions left enabled for libopenmpt.a)..."
 
+# -sFILESYSTEM=0: nothing here touches Emscripten's FS (the module arrives as a malloc'd buffer via
+# load_module, and printf/fprintf go through the stdio write hook, which stays). Measured on
+# emsdk 3.1.51 (release): the .wasm is byte-identical and the JS glue shrinks 162,258 -> 115,997 B
+# (27.4 -> 15.6 kB gzip). The JS libopenmpt build already links this way.
+
 em++ \
     "${COMPILE_FLAGS[@]}" \
     "${LINK_FLAGS[@]+"${LINK_FLAGS[@]}"}" \
@@ -634,6 +639,7 @@ em++ \
     -sAUDIO_WORKLET=1 \
     -sWASM_WORKERS=1 \
     -sSINGLE_FILE=0 \
+    -sFILESYSTEM=0 \
     -sENVIRONMENT=web,worker \
     "${EMSCRIPTEN_FLAGS[@]}" \
     -sEXPORTED_RUNTIME_METHODS="['ccall','cwrap','UTF8ToString','getValue','setValue','emscriptenGetAudioObject','emscriptenRegisterAudioObject']" \
