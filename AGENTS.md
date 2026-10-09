@@ -229,7 +229,7 @@ python3 deploy.py
   1. `lint-and-build` – `npm ci` → `verify:wasm` → `npm run lint` (hard fail) → `npm run typecheck` → `npm run typecheck:tests` → **`npm test`** → `npm run test:shader-registry` → `npm run build` → artifact + `verify:build` checks.
   2. `visual-smoke` – Build, preview server, Playwright smoke (`smoke:visual:ci`) on WebGL2 + HTML renderers.
   3. `wasm-smoke-test` – Installs Emscripten **3.1.51**, verifies safe native build scripts, `verify:native-exports`, `bash -n`, and that tracked `openmpt-worklet.js` still looks like the JS processor.
-  4. `native-full-build` – Path-filtered full `npm run build:emcc` when `cpp/**`, `scripts/build-wasm.sh`, or `audio-worklet/**` change; caches `vendor/libopenmpt-0.8.4+release`.
+  4. `native-full-build` – Path-filtered full `npm run build:emcc` when `cpp/**`, `scripts/build-wasm.sh`, or `audio-worklet/**` change; caches `vendor/libopenmpt-0.8.4+release-native-release`, keyed on the flag stamp from `scripts/build-wasm.sh --print-flag-stamp` (no prefix fallback).
   5. `native-wasm-scheduled.yml` – Weekly (and manual) full `npm run build:emcc` with the same libopenmpt cache; uploads `openmpt-native.*` artifacts and asserts the JS worklet is unchanged.
 
 ## Security & CORS Considerations

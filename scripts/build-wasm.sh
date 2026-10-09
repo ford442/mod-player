@@ -13,7 +13,8 @@
 #      Newer emsdk often works; CI and docs treat 3.1.51 as the verified pin.
 #
 #   2. libopenmpt source (auto-downloaded if missing):
-#        vendor/libopenmpt-0.8.4+release  (from lib.openmpt.org tarball)
+#        vendor/libopenmpt-0.8.4+release-native-<release|debug>  (one build tree per mode, copied
+#        from an existing source tree or extracted from the lib.openmpt.org tarball)
 #        Or override: export LIBOPENMPT_DIR=/path/to/libopenmpt
 #
 #   3. Emscripten builds need STATIC_LIB=1 (handled automatically) to produce
@@ -24,6 +25,9 @@
 #   ./scripts/build-wasm.sh --debug      # -O0 -g -sASSERTIONS=2
 #   ./scripts/build-wasm.sh --safe-heap  # + SAFE_HEAP (slow; debug memory)
 #   ./scripts/build-wasm.sh --grow       # ALLOW_MEMORY_GROWTH=1 MAXIMUM_MEMORY=512mb (huge ITs)
+#   ./scripts/build-wasm.sh --print-flag-stamp [--debug]
+#                                        # print the libopenmpt flag stamp and exit (needs no emcc;
+#                                        # CI uses it as the libopenmpt.a cache key)
 #
 # Heap contract (release, ALLOW_MEMORY_GROWTH=0):
 #   INITIAL_MEMORY=128mb is a HARD CAP covering ONE resident C++ OpenMPTModule,
@@ -45,7 +49,13 @@
 # link runs through em++. Collapsing them back into one emcc call is what made
 # native-full-build red (DISABLE_EXCEPTION_THROWING=1 vs __cxa_throw). See the
 # comment above the compile/link block before touching COMPILE_FLAGS.
-# After changing release flags, delete vendor/.../bin/libopenmpt.a to force rebuild.
+#
+# libopenmpt.a is rebuilt automatically when the flags that produce it change: each mode
+# builds in its own tree (vendor/libopenmpt-<ver>+release-native-<release|debug>) and records
+# a stamp of {mode, emsdk pin, libopenmpt version, CXXFLAGS/CFLAGS, make flags, emcc version}
+# in bin/.native-flags. A missing or different stamp means `make clean` + rebuild, so there is
+# nothing to delete by hand after editing LIBOPENMPT_*_FLAGS. Bump LIBOPENMPT_BUILD_REV to force
+# a rebuild for a reason the flags don't capture.
 #   npm run build:emcc                   # preferred package.json entry
 #   npm run build:worklet                # deprecated alias → this script
 #
@@ -58,6 +68,41 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# ── Flags from argv ──────────────────────────────────────────────────
+# Parsed before emsdk is sourced so --print-flag-stamp never needs a toolchain.
+DEBUG_MODE=0
+SAFE_HEAP=0
+GROW_HEAP=0
+PRINT_FLAG_STAMP=0
+for arg in "$@"; do
+    case "$arg" in
+        --debug) DEBUG_MODE=1 ;;
+        --safe-heap) SAFE_HEAP=1 ;;
+        --grow) GROW_HEAP=1 ;;
+        --print-flag-stamp) PRINT_FLAG_STAMP=1 ;;
+        -h|--help)
+            sed -n '2,40p' "$0" | sed 's/^# \?//'
+            exit 0
+            ;;
+        *)
+            echo "Unknown option: $arg (use --debug, --safe-heap, --grow, and/or --print-flag-stamp)" >&2
+            exit 1
+            ;;
+    esac
+done
+
+if [[ "$PRINT_FLAG_STAMP" -eq 1 ]]; then
+    # stdout must carry nothing but the stamp (CI captures it as a cache key). Everything
+    # else this script prints on the way — mode banners, sourcing emsdk_env.sh — goes to
+    # stderr; the stamp is written to the saved original stdout, fd 3.
+    exec 3>&1 1>&2
+fi
+
+BUILD_MODE=release
+if [[ "$DEBUG_MODE" -eq 1 ]]; then
+    BUILD_MODE=debug
+fi
 
 # ── Pinned emsdk version (must match CI) ─────────────────────────────
 # libopenmpt 0.8.4 requires Emscripten >= 3.1.51 (see src/mpt/base/detect_os.hpp).
@@ -86,10 +131,15 @@ VENDOR_ROOT="$PROJECT_ROOT/vendor"
 LIBOPENMPT_VERSION="0.8.4"
 LIBOPENMPT_TARBALL="libopenmpt-${LIBOPENMPT_VERSION}+release.makefile.tar.gz"
 LIBOPENMPT_VENDOR_NAME="libopenmpt-${LIBOPENMPT_VERSION}+release"
-LIBOPENMPT_VENDOR_DIR="$VENDOR_ROOT/$LIBOPENMPT_VENDOR_NAME"
+# Pristine sources: the name the tarball extracts to, and where older versions of this script
+# built in place. Only ever a donor now — nothing is built in it.
+LIBOPENMPT_SOURCE_DIR="$VENDOR_ROOT/$LIBOPENMPT_VENDOR_NAME"
+# The build tree for THIS mode. Debug and release get separate trees so they never share (or
+# silently reuse) one bin/libopenmpt.a; this is also the directory CI caches.
+LIBOPENMPT_VENDOR_DIR="$VENDOR_ROOT/${LIBOPENMPT_VENDOR_NAME}-native-${BUILD_MODE}"
 LEGACY_VENDOR_DIR="$VENDOR_ROOT/libopenmpt"
 
-# libopenmpt paths (override with LIBOPENMPT_DIR env var)
+# libopenmpt paths (override with LIBOPENMPT_DIR env var; an override is used as-is, unstamped)
 LIBOPENMPT_DIR="${LIBOPENMPT_DIR:-$LIBOPENMPT_VENDOR_DIR}"
 LIBOPENMPT_MAKE_FLAGS=(
     CONFIG=emscripten
@@ -99,26 +149,6 @@ LIBOPENMPT_MAKE_FLAGS=(
     EXAMPLES=0
     OPENMPT123=0
 )
-
-# ── Flags from argv ──────────────────────────────────────────────────
-DEBUG_MODE=0
-SAFE_HEAP=0
-GROW_HEAP=0
-for arg in "$@"; do
-    case "$arg" in
-        --debug) DEBUG_MODE=1 ;;
-        --safe-heap) SAFE_HEAP=1 ;;
-        --grow) GROW_HEAP=1 ;;
-        -h|--help)
-            sed -n '2,40p' "$0" | sed 's/^# \?//'
-            exit 0
-            ;;
-        *)
-            echo "Unknown option: $arg (use --debug, --safe-heap, and/or --grow)" >&2
-            exit 1
-            ;;
-    esac
-done
 
 # ── Compile / link flags ─────────────────────────────────────────────
 # Phase 2: SIMD, thin LTO, WASM feature flags, section GC, emmalloc.
@@ -159,7 +189,6 @@ else
         -flto=thin
         -msimd128
         -mbulk-memory -matomics -mnontrapping-fptoint -msign-ext
-        -mtune=wasm32
         -ffunction-sections -fdata-sections
     )
     CXX_ONLY_FLAGS=(-fno-exceptions -fno-rtti)
@@ -194,6 +223,44 @@ fi
 # libopenmpt CXXFLAGS is about compiling it at all, not about live error recovery.
 LIBOPENMPT_RELEASE_CXXFLAGS='-O3 -DNDEBUG -msimd128 -flto=thin -mbulk-memory -matomics'
 LIBOPENMPT_RELEASE_CFLAGS='-O3 -DNDEBUG -msimd128 -flto=thin -mbulk-memory -matomics'
+# Debug: the wrapper links with --shared-memory (WASM_WORKERS), and wasm-ld rejects any object
+# built without -matomics/-mbulk-memory — libopenmpt.a included. Without explicit flags the
+# libopenmpt makefile falls back to its own optimisation defaults and none of that, so these are
+# not optional. -O1, not -O0, so the debug engine can still keep up with real time; no LTO/SIMD to
+# match the wrapper's debug flags.
+LIBOPENMPT_DEBUG_CXXFLAGS='-O1 -mbulk-memory -matomics'
+LIBOPENMPT_DEBUG_CFLAGS='-O1 -mbulk-memory -matomics'
+# Bump to force every cached libopenmpt.a to rebuild for a reason the flags above don't capture.
+LIBOPENMPT_BUILD_REV=1
+
+if [[ "$DEBUG_MODE" -eq 1 ]]; then
+    LIBOPENMPT_CXXFLAGS="$LIBOPENMPT_DEBUG_CXXFLAGS"
+    LIBOPENMPT_CFLAGS="$LIBOPENMPT_DEBUG_CFLAGS"
+else
+    LIBOPENMPT_CXXFLAGS="$LIBOPENMPT_RELEASE_CXXFLAGS"
+    LIBOPENMPT_CFLAGS="$LIBOPENMPT_RELEASE_CFLAGS"
+fi
+
+# ── libopenmpt.a flag stamp ──────────────────────────────────────────
+# Everything that decides what libopenmpt.a contains. Derived from the PIN, not from
+# `emcc --version`, so CI can compute it (as the actions/cache key) before emsdk is installed;
+# the on-disk stamp below additionally folds in the emcc that actually ran.
+libopenmpt_flag_stamp() {
+    printf '%s\n' \
+        "rev=$LIBOPENMPT_BUILD_REV" \
+        "mode=$BUILD_MODE" \
+        "emsdk=$EMSDK_PIN" \
+        "libopenmpt=$LIBOPENMPT_VERSION" \
+        "cxxflags=$LIBOPENMPT_CXXFLAGS" \
+        "cflags=$LIBOPENMPT_CFLAGS" \
+        "make=${LIBOPENMPT_MAKE_FLAGS[*]}" \
+        | sha256sum | cut -c1-16
+}
+
+if [[ "$PRINT_FLAG_STAMP" -eq 1 ]]; then
+    libopenmpt_flag_stamp >&3
+    exit 0
+fi
 
 EXTRA_SANITIZER_FLAGS=()
 if [[ "$SAFE_HEAP" -eq 1 ]]; then
@@ -271,26 +338,40 @@ libopenmpt_has_required_api() {
     grep -q 'openmpt_module_get_time_at_position' "$header" 2>/dev/null
 }
 
+# Download the release tarball and move its sources to $1 (the tarball extracts to
+# $LIBOPENMPT_VENDOR_NAME, which is not where the per-mode trees live).
 download_libopenmpt_tarball() {
-    local dest_parent="$1"
-    local dest="$dest_parent/$LIBOPENMPT_VENDOR_NAME"
-    local archive="$dest_parent/$LIBOPENMPT_TARBALL"
+    local dest="$1"
+    local archive="$VENDOR_ROOT/$LIBOPENMPT_TARBALL"
+    local extract_dir
 
-    mkdir -p "$dest_parent"
+    mkdir -p "$VENDOR_ROOT"
     echo "📥 Downloading libopenmpt ${LIBOPENMPT_VERSION}…"
     if ! wget -q "https://lib.openmpt.org/files/libopenmpt/src/${LIBOPENMPT_TARBALL}" -O "$archive"; then
         echo "❌ Failed to download ${LIBOPENMPT_TARBALL}" >&2
         exit 1
     fi
-    if ! tar xzf "$archive" -C "$dest_parent"; then
+    extract_dir="$(mktemp -d "$VENDOR_ROOT/.extract.XXXXXX")"
+    if ! tar xzf "$archive" -C "$extract_dir"; then
         echo "❌ Failed to extract ${LIBOPENMPT_TARBALL}" >&2
+        rm -rf "$extract_dir"
         exit 1
     fi
     rm -f "$archive"
-    if [[ ! -d "$dest" ]]; then
-        echo "❌ Expected directory '$dest' after extract." >&2
+    if [[ ! -d "$extract_dir/$LIBOPENMPT_VENDOR_NAME" ]]; then
+        echo "❌ Expected directory '$LIBOPENMPT_VENDOR_NAME' after extract." >&2
+        rm -rf "$extract_dir"
         exit 1
     fi
+    mv "$extract_dir/$LIBOPENMPT_VENDOR_NAME" "$dest"
+    rmdir "$extract_dir"
+}
+
+# Copy a libopenmpt source tree to $2 without build output, so the copy always compiles from scratch.
+copy_libopenmpt_sources() {
+    local from="$1" to="$2"
+    mkdir -p "$to"
+    tar -C "$from" --exclude='./bin' --exclude='*.o' --exclude='*.d' --exclude='*.a' -cf - . | tar -C "$to" -xf -
 }
 
 resolve_libopenmpt_paths() {
@@ -316,18 +397,55 @@ resolve_libopenmpt_paths() {
 }
 
 build_libopenmpt_in_place() {
-    echo "🔨 Building libopenmpt for Emscripten (STATIC_LIB=1; this takes a few minutes)…"
-    local make_extra=()
-    if [[ "$DEBUG_MODE" -eq 0 ]]; then
-        make_extra+=(CXXFLAGS="$LIBOPENMPT_RELEASE_CXXFLAGS" CFLAGS="$LIBOPENMPT_RELEASE_CFLAGS")
-        echo "   libopenmpt CXXFLAGS: $LIBOPENMPT_RELEASE_CXXFLAGS"
-    fi
+    echo "🔨 Building libopenmpt for Emscripten (${BUILD_MODE}, STATIC_LIB=1; this takes a few minutes)…"
+    echo "   libopenmpt CXXFLAGS: $LIBOPENMPT_CXXFLAGS"
     pushd "$LIBOPENMPT_DIR" >/dev/null
     # Drop stale .o/.d from prior emsdk versions (e.g. bits/stdint.h paths that moved).
     echo "   make clean (CONFIG=emscripten)…"
     make "${LIBOPENMPT_MAKE_FLAGS[@]}" clean
-    make "${LIBOPENMPT_MAKE_FLAGS[@]}" "${make_extra[@]}" -j"$(nproc 2>/dev/null || echo 2)" bin/libopenmpt.a
+    # Flags go on the make command line so they REPLACE (not extend) the config's CXXFLAGS.
+    make "${LIBOPENMPT_MAKE_FLAGS[@]}" \
+        CXXFLAGS="$LIBOPENMPT_CXXFLAGS" CFLAGS="$LIBOPENMPT_CFLAGS" \
+        -j"$(nproc 2>/dev/null || echo 2)" bin/libopenmpt.a
     popd >/dev/null
+}
+
+# The stamp recorded beside a built libopenmpt.a. Config stamp + the emcc that actually ran
+# (EMCC_VERSION_LINE is set before ensure_libopenmpt is called).
+libopenmpt_disk_stamp() {
+    printf '%s\n%s\n' "$(libopenmpt_flag_stamp)" "$EMCC_VERSION_LINE" | sha256sum | cut -c1-16
+}
+
+libopenmpt_stamp_file() {
+    echo "$LIBOPENMPT_DIR/bin/.native-flags"
+}
+
+# True when the tree's libopenmpt.a was built with exactly the current flags.
+libopenmpt_stamp_matches() {
+    local stamp_file
+    stamp_file="$(libopenmpt_stamp_file)"
+    [[ -f "$stamp_file" && "$(cat "$stamp_file")" == "$(libopenmpt_disk_stamp)" ]]
+}
+
+# Make sure the per-mode tree holds libopenmpt sources: reuse it, else copy from an existing
+# source tree (without its objects), else download.
+prepare_managed_tree() {
+    local donor
+    if is_valid_openmpt_source "$LIBOPENMPT_VENDOR_DIR" && libopenmpt_has_required_api "$LIBOPENMPT_VENDOR_DIR"; then
+        return 0
+    fi
+    if [[ -d "$LIBOPENMPT_VENDOR_DIR" ]]; then
+        echo "⚠️  Removing incomplete or outdated build tree at $LIBOPENMPT_VENDOR_DIR"
+        rm -rf "$LIBOPENMPT_VENDOR_DIR"
+    fi
+    for donor in "$LIBOPENMPT_SOURCE_DIR" "$LEGACY_VENDOR_DIR"; do
+        if is_valid_openmpt_source "$donor" && libopenmpt_has_required_api "$donor"; then
+            echo "📂 Copying libopenmpt sources from $donor (objects excluded)…"
+            copy_libopenmpt_sources "$donor" "$LIBOPENMPT_VENDOR_DIR"
+            return 0
+        fi
+    done
+    download_libopenmpt_tarball "$LIBOPENMPT_VENDOR_DIR"
 }
 
 report_libopenmpt_failure() {
@@ -346,52 +464,46 @@ report_libopenmpt_failure() {
 }
 
 ensure_libopenmpt() {
-    # Cache-friendly: when vendor/.a already exists (CI actions/cache hit or prior
-    # local make), skip download + multi-minute libopenmpt compile.
-    if resolve_libopenmpt_paths && libopenmpt_has_required_api "$LIBOPENMPT_DIR"; then
-        echo "✅ libopenmpt ready at $LIBOPENMPT_DIR (prebuilt .a — skipping make)"
-        echo "   include=$LIBOPENMPT_INCLUDE  lib=$LIBOPENMPT_LIB"
-        if [[ "$DEBUG_MODE" -eq 0 ]]; then
-            echo "   ℹ️  Release build uses SIMD/LTO — rm bin/libopenmpt.a if you changed optimization flags"
+    # A LIBOPENMPT_DIR override is the caller's own tree: use its prebuilt .a as-is (we can't know
+    # what flags built it), or build in place if it only has sources. No stamp, no cleanup of our own.
+    if [[ "$LIBOPENMPT_DIR" != "$LIBOPENMPT_VENDOR_DIR" ]]; then
+        if resolve_libopenmpt_paths && libopenmpt_has_required_api "$LIBOPENMPT_DIR"; then
+            echo "✅ libopenmpt ready at $LIBOPENMPT_DIR (LIBOPENMPT_DIR override — prebuilt .a used as-is, flags not checked)"
+            echo "   include=$LIBOPENMPT_INCLUDE  lib=$LIBOPENMPT_LIB"
+            return 0
         fi
+        if is_valid_openmpt_source "$LIBOPENMPT_DIR" && libopenmpt_has_required_api "$LIBOPENMPT_DIR"; then
+            echo "📦 Using LIBOPENMPT_DIR=$LIBOPENMPT_DIR"
+            if ! find_libopenmpt_lib_dir "$LIBOPENMPT_DIR" >/dev/null; then
+                build_libopenmpt_in_place
+            fi
+            if ! resolve_libopenmpt_paths; then
+                report_libopenmpt_failure
+            fi
+            echo "✅ libopenmpt built at $LIBOPENMPT_DIR"
+            return 0
+        fi
+        echo "⚠️  LIBOPENMPT_DIR=$LIBOPENMPT_DIR is not a usable libopenmpt tree — using the managed $BUILD_MODE tree instead" >&2
+        LIBOPENMPT_DIR="$LIBOPENMPT_VENDOR_DIR"
+    fi
+
+    # Managed per-mode tree. Reuse its libopenmpt.a only if it was built with exactly the current
+    # flags (CI actions/cache hit or an earlier local run); anything else rebuilds, so editing
+    # LIBOPENMPT_*_FLAGS can never leave a stale archive in use.
+    if resolve_libopenmpt_paths && libopenmpt_has_required_api "$LIBOPENMPT_DIR" && libopenmpt_stamp_matches; then
+        echo "✅ libopenmpt ready at $LIBOPENMPT_DIR (${BUILD_MODE}, flag stamp $(libopenmpt_flag_stamp) — skipping make)"
+        echo "   include=$LIBOPENMPT_INCLUDE  lib=$LIBOPENMPT_LIB"
         return 0
     fi
-    if resolve_libopenmpt_paths; then
-        echo "⚠️  Prebuilt libopenmpt.a found but headers lack native-worklet API — rebuilding from source"
+    if [[ -f "$LIBOPENMPT_DIR/bin/libopenmpt.a" ]]; then
+        echo "♻️  libopenmpt.a in $LIBOPENMPT_DIR is stale or unstamped (flags changed or built by an older script) — rebuilding"
     fi
 
-    if [[ -n "${LIBOPENMPT_DIR:-}" ]] && [[ "$LIBOPENMPT_DIR" != "$LIBOPENMPT_VENDOR_DIR" ]] && is_valid_openmpt_source "$LIBOPENMPT_DIR"; then
-        echo "📦 Using LIBOPENMPT_DIR=$LIBOPENMPT_DIR"
-    elif is_valid_openmpt_source "$LIBOPENMPT_VENDOR_DIR" && libopenmpt_has_required_api "$LIBOPENMPT_VENDOR_DIR"; then
-        LIBOPENMPT_DIR="$LIBOPENMPT_VENDOR_DIR"
-        echo "📦 Using vendored libopenmpt at $LIBOPENMPT_DIR"
-    elif is_valid_openmpt_source "$LEGACY_VENDOR_DIR" && libopenmpt_has_required_api "$LEGACY_VENDOR_DIR"; then
-        LIBOPENMPT_DIR="$LEGACY_VENDOR_DIR"
-        echo "📦 Using legacy vendor checkout at $LIBOPENMPT_DIR"
-    else
-        if [[ -d "$LEGACY_VENDOR_DIR" ]]; then
-            if ! is_valid_openmpt_source "$LEGACY_VENDOR_DIR"; then
-                echo "⚠️  Removing incomplete legacy vendor tree at $LEGACY_VENDOR_DIR"
-                rm -rf "$LEGACY_VENDOR_DIR"
-            elif ! libopenmpt_has_required_api "$LEGACY_VENDOR_DIR"; then
-                echo "⚠️  Removing outdated legacy vendor at $LEGACY_VENDOR_DIR (missing native-worklet C API)"
-                rm -rf "$LEGACY_VENDOR_DIR"
-            fi
-        fi
-        if [[ -d "$LIBOPENMPT_VENDOR_DIR" ]] && ! is_valid_openmpt_source "$LIBOPENMPT_VENDOR_DIR"; then
-            echo "⚠️  Removing incomplete vendor tree at $LIBOPENMPT_VENDOR_DIR"
-            rm -rf "$LIBOPENMPT_VENDOR_DIR"
-        elif [[ -d "$LIBOPENMPT_VENDOR_DIR" ]] && ! libopenmpt_has_required_api "$LIBOPENMPT_VENDOR_DIR"; then
-            echo "⚠️  Removing outdated vendor tree at $LIBOPENMPT_VENDOR_DIR (missing native-worklet C API)"
-            rm -rf "$LIBOPENMPT_VENDOR_DIR"
-        fi
-        download_libopenmpt_tarball "$VENDOR_ROOT"
-        LIBOPENMPT_DIR="$LIBOPENMPT_VENDOR_DIR"
-    fi
-
-    if ! find_libopenmpt_lib_dir "$LIBOPENMPT_DIR" >/dev/null; then
-        build_libopenmpt_in_place
-    fi
+    prepare_managed_tree
+    rm -f "$LIBOPENMPT_DIR/bin/libopenmpt.a" "$(libopenmpt_stamp_file)"
+    build_libopenmpt_in_place
+    mkdir -p "$LIBOPENMPT_DIR/bin"
+    libopenmpt_disk_stamp > "$(libopenmpt_stamp_file)"
 
     if ! resolve_libopenmpt_paths; then
         report_libopenmpt_failure
