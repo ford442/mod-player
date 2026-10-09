@@ -62,6 +62,9 @@ git.sh
 /dist/worklets/openmpt-native.js
 /dist/worklets/openmpt-native.wasm
 /dist/worklets/openmpt-native.aw.js
+# emcc's WASM_WORKERS runtime also emits a .ww.js next to the glue (nothing loads it; it was committed by accident)
+/public/worklets/openmpt-native.ww.js
+/dist/worklets/openmpt-native.ww.js
 # openmpt-worklet.js (generated from TS) and libopenmpt-worklet.{js,wasm} (real-WASM JS engine,
 # scripts/build-js-libopenmpt.sh) are tracked
 # (the C++ WASM build outputs .wasm and .aw.js — those remain ignored)
@@ -73,3 +76,8 @@ git.sh
 # Local env files
 .env
 .env.local
+
+# Browser-automation scratch output (Playwright runner / MCP browser) — never source
+test-results/
+playwright-report/
+.playwright-mcp/
