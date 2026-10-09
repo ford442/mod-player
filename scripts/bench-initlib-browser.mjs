@@ -58,7 +58,9 @@ async function once(browser, engine) {
         };
       });
     }
-    await goto(page, engine, `${BASE_URL}/?renderer=webgl2&engine=js`, TIMEOUT);
+    // webgpu = what this bench has really run (default launcher passes --enable-unsafe-webgpu; the old
+    // `renderer=webgl2` was a silent no-op → WebGPU). WebGL2 is opt-in only (#462) and not needed here.
+    await goto(page, engine, `${BASE_URL}/?renderer=webgpu&engine=js`, TIMEOUT);
     await waitForFunction(page, () => window.__TEST_HOOKS__?.isModuleLoaded?.() === true, { timeout: TIMEOUT });
     await evaluate(page, () => {
       const play = [...document.querySelectorAll('button')].find((b) => /play/i.test(b.textContent ?? ''));

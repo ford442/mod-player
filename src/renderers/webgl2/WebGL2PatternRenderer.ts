@@ -1,4 +1,4 @@
-import type { ChannelShadowState } from '../../../types';
+import type { ChannelShadowState, PatternMatrix } from '../../../types';
 import type { WebGPURenderParams } from '../params';
 import { resolveLiveChannels } from '../params';
 import type { WebGL2DebugConfig } from '../types';
@@ -88,6 +88,8 @@ export class WebGL2PatternRenderer {
   private debug: WebGL2DebugConfig = createDebugConfig();
   private scrollOffset = 0;
   private lastTimeSec = 0;
+  /** Last matrix uploaded to the cell texture — repack only when it (or its shape) changes. */
+  private uploadedCells: { matrix: PatternMatrix; padTop: boolean; cols: number; rows: number } | null = null;
   init(canvas: HTMLCanvasElement, shaderFile: string): boolean {
     this.destroy();
     const gl = canvas.getContext('webgl2', {
@@ -324,11 +326,16 @@ export class WebGL2PatternRenderer {
     const cols = padTopChannel ? rawCols + 1 : rawCols;
     const rows = matrix.numRows || DEFAULT_ROWS;
 
-    // Upload cell texture
-    const { packedData } = packPatternMatrixHighPrecision(matrix, padTopChannel);
+    // Upload cell texture. Packing runs the CPU DURA pass and allocates per cell, so — like the
+    // WebGPU path (`updateMatrix`) — only repack when the matrix identity or its shape changes.
+    const up = this.uploadedCells;
     gl.bindTexture(gl.TEXTURE_2D, res.cellTexture);
-    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG32UI, cols, rows, 0, gl.RG_INTEGER, gl.UNSIGNED_INT, packedData);
+    if (!up || up.matrix !== matrix || up.padTop !== padTopChannel || up.cols !== cols || up.rows !== rows) {
+      const { packedData } = packPatternMatrixHighPrecision(matrix, padTopChannel);
+      gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG32UI, cols, rows, 0, gl.RG_INTEGER, gl.UNSIGNED_INT, packedData);
+      this.uploadedCells = { matrix, padTop: padTopChannel, cols, rows };
+    }
 
     // Upload channel state
     const requiredSize = cols * 2 * 4;
@@ -486,5 +493,6 @@ export class WebGL2PatternRenderer {
     this.chassis = null;
     this.pattern = null;
     this.bloom = null;
+    this.uploadedCells = null;
   }
 }

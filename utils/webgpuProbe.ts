@@ -39,8 +39,23 @@ declare global {
   }
 }
 
+/** Device status a hard-fail maps to (mirrors `WebGPUDeviceStatus` failure values). */
+export type WebGPUHardFailStatus = 'unsupported' | 'no-adapter' | 'device-failed';
+
 let sessionHardFailReason: string | null = null;
 let lastReport: WebGPUProbeReport | null = null;
+/**
+ * The *first* hard-fail of this session. `markWebGPUSessionFailed` runs again
+ * whenever PatternDisplay remounts (a blocked session rethrows as `device-failed`),
+ * which would otherwise overwrite the true cause (`no-adapter`, …).
+ */
+let firstHardFail: { stage: WebGPUProbeStage; status: WebGPUHardFailStatus } | null = null;
+
+function hardFailStatusForStage(stage: WebGPUProbeStage): WebGPUHardFailStatus {
+  if (stage === 'api') return 'unsupported';
+  if (stage === 'adapter') return 'no-adapter';
+  return 'device-failed';
+}
 
 /** Detect Chrome / Edge / other for probe logs (navigator.userAgentData when present). */
 export function detectBrowserBrand(
@@ -76,10 +91,21 @@ export function getLastWebGPUProbeReport(): WebGPUProbeReport | null {
   return lastReport;
 }
 
+/** Original hard-fail status this session (`no-adapter`, …), or null if WebGPU has not hard-failed. */
+export function getWebGPUHardFailStatus(): WebGPUHardFailStatus | null {
+  return firstHardFail?.status ?? null;
+}
+
+/** Stage of the original hard-fail. `'lost'` means the main canvas is already WebGPU-locked. */
+export function getWebGPUHardFailStage(): WebGPUProbeStage | null {
+  return firstHardFail?.stage ?? null;
+}
+
 /** Test helper. */
 export function resetWebGPUProbeStateForTests(): void {
   sessionHardFailReason = null;
   lastReport = null;
+  firstHardFail = null;
   if (typeof window !== 'undefined') {
     try {
       delete window.__WEBGPU_PROBE__;
@@ -132,6 +158,7 @@ export function markWebGPUSessionFailed(
   adapterInfo?: WebGPUProbeAdapterInfo,
 ): WebGPUProbeReport {
   sessionHardFailReason = error;
+  firstHardFail ??= { stage, status: hardFailStatusForStage(stage) };
   const report = publishWebGPUProbeReport({
     ok: false,
     stage,
@@ -150,6 +177,7 @@ export function publishWebGPUProbeReady(
   adapterInfo?: WebGPUProbeAdapterInfo,
 ): WebGPUProbeReport {
   sessionHardFailReason = null;
+  firstHardFail = null;
   return publishWebGPUProbeReport({
     ok: true,
     stage: 'ready',

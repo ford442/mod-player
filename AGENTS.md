@@ -103,8 +103,8 @@ Production silent-playback and MOD/XM switch failures were fixed in PRs **#329**
   - **Video:** v0.23 (Clouds), v0.24 (Tunnel)
 - **Pipeline:** Shaders are fetched as raw text strings (often via `fetch()` or bundled strings) and passed into the WebGPU render pipeline in components like `PatternDisplay.tsx` and `Studio3D.tsx`.
 - **Bloom:** Post-processing bloom passes live in `utils/bloomPostProcessor.ts`; presets are defined in `types/bloomPresets.ts`.
-- **Compatibility:** GPU viz requires **WebGPU** this phase (hard-fail on probe/device failure — no auto WebGL2/HTML **shader** session). `?renderer=webgl2` is a no-op (deferred). Explicit `?renderer=html` still selects the DOM pattern grid (`PatternHTMLFallback` / `PatternSequencer`) as tracker UI. Debug: `window.__WEBGPU_PROBE__`, `window.DEBUG_RENDERER`.
-- **Agent/CI:** `window.currentPatternRenderer` exposes `readPixels()`, `setDebugMode()`, `getCanvas()` on WebGL2/HTML backends.
+- **Compatibility:** GPU viz requires **WebGPU** this phase (hard-fail on probe/device failure — no auto WebGL2/HTML **shader** session). **WebGL2 is opt-in only (#462)**: `?webgl2=1` (alias `?renderer=webgl2`) or the "Use WebGL2 visualizer" button on the failure card — never automatic, never persisted; a stored/`DEBUG_RENDERER` `'webgl2'` is ignored. Explicit `?renderer=html` still selects the DOM pattern grid (`PatternHTMLFallback` / `PatternSequencer`) as tracker UI. Debug: `window.__WEBGPU_PROBE__`, `window.DEBUG_RENDERER`.
+- **Agent/CI:** `window.currentPatternRenderer` exposes `readPixels()`, `setDebugMode()`, `getCanvas()` on WebGL2/HTML backends (`readPixels()` is real on WebGL2 only; the WebGPU handle returns `null`). `.backend` is the backend that actually rendered — assert it instead of trusting the URL.
 - **Critical Coupling:** Shaders are not pure assets. `PatternDisplay.tsx` parses the shader **filename** (e.g., `patternv0.37.wgsl`) to determine layout type, buffer packing strategy, canvas size, and whether shader-embedded UI controls exist. Changing a shader's uniform struct requires a matching update to `createUniformPayload()` in TypeScript.
 
 ## Data Packing for GPU
@@ -219,7 +219,7 @@ python3 deploy.py
 - **Test TypeScript:** `npm run typecheck:tests` type-checks `tests/**/*.ts` via `tsconfig.test.json` (CI gate).
 - **Shader registry invariant:** `npm run test:shader-registry` (Node `.cjs` script) verifies registry ↔ `SHADER_GROUPS` agreement — not fully duplicated in Vitest.
 - **Debug invariant scripts:** `utils/__debug__/*.test.cjs` (e.g. packing invariants, circular paging) are run manually or via dedicated `npm run test:*` scripts; not part of the default `npm test` glob.
-- **Shader renderer screenshot check:** `scripts/screenshot-shader-check.mjs` captures the pattern visualizer for each renderer (`webgl2`, `html`, optionally `webgpu`) and a configurable list of shaders. Run it against a local preview with:
+- **Shader renderer screenshot check:** `scripts/screenshot-shader-check.mjs` is a legacy alias that forwards to `scripts/visual-smoke.mjs` (profile `quick`; renderers per `RENDERERS`, `html`/`webgpu` only — WebGL2 is opt-in via `?webgl2=1`, see `docs/VISUAL_SMOKE.md`). Run it against a local preview with:
   ```bash
   npm run preview -- --port 4173 &
   npm run screenshot:shaders
@@ -227,7 +227,7 @@ python3 deploy.py
   Outputs are written to `/mnt/ramdisk/mod-player-screenshots` by default, including `report.json` and `SCREENSHOT_REPORT.md`.
 - **GitHub Actions** (`.github/workflows/ci.yml`) runs PR jobs plus a scheduled native build:
   1. `lint-and-build` – `npm ci` → `verify:wasm` → `npm run lint` (hard fail) → `npm run typecheck` → `npm run typecheck:tests` → **`npm test`** → `npm run test:shader-registry` → `npm run build` → artifact + `verify:build` checks.
-  2. `visual-smoke` – Build, preview server, Playwright smoke (`smoke:visual:ci`) on WebGL2 + HTML renderers.
+  2. `visual-smoke` – Build, preview server, Playwright smoke (`smoke:visual:ci`) on the HTML renderer.
   3. `wasm-smoke-test` – Installs Emscripten **3.1.51**, verifies safe native build scripts, `verify:native-exports`, `bash -n`, and that tracked `openmpt-worklet.js` still looks like the JS processor.
   4. `native-full-build` – Path-filtered full `npm run build:emcc` when `cpp/**`, `scripts/build-wasm.sh`, or `audio-worklet/**` change; caches `vendor/libopenmpt-0.8.4+release`.
   5. `native-wasm-scheduled.yml` – Weekly (and manual) full `npm run build:emcc` with the same libopenmpt cache; uploads `openmpt-native.*` artifacts and asserts the JS worklet is unchanged.
@@ -258,5 +258,5 @@ python3 deploy.py
 This is a **frontend-only** app; there is no backend to run for local dev. `libopenmpt` is self-hosted as `public/worklets/libopenmpt-worklet.{js,wasm}` and sample modules (`4-mat_madness.mod`, `test.xm`, `libopenmpt-test.mod`) ship in `public/`, so the player works fully offline with no CDN or storage API. `VITE_STORAGE_API_URL` (proxied `/api`, `/songs`) is optional and only needed for the remote song browser.
 - **Run/build/test/lint:** use the standard scripts in `package.json` (`npm run dev` → Vite on `http://localhost:5173`, `npm run build`, `npm test` (Vitest, 61+ tests), `npm run typecheck`, `npm run lint`). See README/AGENTS build sections above.
 - **Base path:** default dev and `npm run build` use site root (`VITE_APP_BASE_PATH=/` in `.env.development` / `.env.production`). The live deploy at `test.1ink.us/xm-player/` uses `npm run build:xm-player` which bakes `/xm-player/` into asset URLs. If you see 404s for `/xm-player/assets/*` or `libopenmpt-worklet.js` while testing at root, you built with the xm-player profile — use `npm run dev` or a root-base `npm run build` instead.
-- **Browser testing without WebGPU:** the cloud VM's Chrome has no WebGPU by default. Append `?renderer=webgl2` (or `?renderer=html`) to the dev URL to use the fallback renderers; the app otherwise tries WebGPU first and may show a blank visualizer. Audio playback requires a user gesture (click Play).
-- **Hello-world check:** open `http://localhost:5173/?renderer=webgl2`, wait for the default module `4-mat_madness.mod` to auto-load, click Play, and confirm the position/order/row counters advance and the visualizer animates. Force JS engine with `?engine=js` when native artifacts are present locally.
+- **Browser testing without WebGPU:** the cloud VM's Chrome has no WebGPU by default. Append `?renderer=html` (DOM grid) or opt in to the GLSL session with `?webgl2=1` (badge `WebGL2 fallback — WebGPU not in use`); the app otherwise tries WebGPU first and shows the failure card (which has a **Use WebGL2 visualizer** button) — there is no automatic fallback. Audio playback requires a user gesture (click Play).
+- **Hello-world check:** open `http://localhost:5173/?webgl2=1`, wait for the default module `4-mat_madness.mod` to auto-load, click Play, and confirm the position/order/row counters advance and the visualizer animates. Force JS engine with `?engine=js` when native artifacts are present locally.

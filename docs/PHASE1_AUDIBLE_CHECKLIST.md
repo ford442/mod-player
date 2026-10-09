@@ -7,7 +7,7 @@ Run after any audio-path or playhead-prediction change. Use headphones or speake
 ```bash
 npm run dev
 # Diagnostic URL (force JS worklet + pin shader):
-open 'http://localhost:5173/?engine=js&renderer=webgl2&shader=patternv0.30b.wgsl'
+open 'http://localhost:5173/?engine=js&webgl2=1&shader=patternv0.30b.wgsl'
 ```
 
 Optional playhead diagnostics:

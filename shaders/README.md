@@ -258,7 +258,7 @@ PackedB = [Reserved(16) | EffectCmd(8) | EffectVal(8)]
 ## Performance & Compatibility
 
 - **WebGPU Requirement:** Chrome 113+, Edge 113+, Arc, or other WebGPU-enabled browsers
-- **Fallbacks:** WebGPU → WebGL2 (`?renderer=webgl2`, GLSL reference) → HTML (`?renderer=html`)
+- **Fallbacks:** none are automatic. `?renderer=html` selects the DOM grid; the WebGL2 GLSL session is opt-in only (`?webgl2=1`, or the failure-card button after a WebGPU hard-fail)
 - **Canvas Sizes:** Most shaders use 1024×1024; legacy (v0.25–v0.26) use 2048×2016
 - **Bloom Pipeline:** Uses separate threshold, blur, and composite passes
 
