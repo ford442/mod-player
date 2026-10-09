@@ -11,7 +11,7 @@
 ## Technology Stack (Summary)
 - React 18 + TypeScript + Vite
 - libopenmpt (WASM) via AudioWorklet (JS + optional native C++)
-- WebGPU + WGSL (pattern visualizer, bloom, chassis); WebGL2 GLSL reference renderer (`?renderer=webgl2`); HTML fallback
+- WebGPU + WGSL (pattern visualizer, bloom, chassis); WebGL2 GLSL renderer (opt-in only: `?webgl2=1` or the WebGPU failure-card button — never automatic); HTML grid (`?renderer=html`)
 - Three.js / React Three Fiber (optional 3D mode)
 - Tailwind + custom CSS variables
 
@@ -23,7 +23,7 @@
 
 ## Pattern Renderer Backends
 - **webgpu** (default): production WGSL shaders via `hooks/useWebGPURender.ts`
-- **webgl2**: GLSL 3.00 ES in `src/renderers/webgl2/` — use for shader porting, Playwright pixel tests (`window.currentPatternRenderer.readPixels()`), debug modes (Alt+D in dev)
+- **webgl2** (opt-in only — `?webgl2=1`, alias `?renderer=webgl2`, or the failure-card button; never automatic or persisted): GLSL 3.00 ES in `src/renderers/webgl2/` — use for shader porting, Playwright pixel tests (`window.currentPatternRenderer.readPixels()`), debug modes (Alt+D in dev)
 - **html**: DOM grid via `PatternSequencer` — `?renderer=html`
 
 Shared data packing: `utils/gpuPacking.ts`. WebGL2 lens-cap GLSL mirrors `hooks/webGLShaders.ts`.

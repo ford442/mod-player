@@ -143,6 +143,12 @@ npm run capture:trigger-tail # v0.30b / sustain tail capture
 
 ## Renderer policy for smoke scripts: WebGL2 is opt-in only (#462)
 
+**Decision (#436 → Option B):** revive a real WebGL2 session, **opt-in only**. `?webgl2=1` (alias `?renderer=webgl2`) and the failure-card button start it.
+A stored `localStorage.xasm1_pattern_renderer = 'webgl2'` or `window.DEBUG_RENDERER = 'webgl2'` still do **not** start WebGL2 (they are ignored with a warning — the opt-in is per page load,
+never persisted), so scripts must pass the URL param. `?renderer=webgl2` therefore drives GLSL pixels (it is no longer a silent no-op), and the six scripts that requested it were retargeted below.
+Limits: the failure-card button covers adapter/API/device/presentation-probe failures, where the main canvas is still untouched. After a **lost** WebGPU device the canvas is already a WebGPU context,
+so the card can only hint `?webgl2=1` (reload) — the button does not cover device loss.
+
 There is **no automatic WebGPU → WebGL2 fallback**. The GLSL WebGL2 session renders only when asked:
 
 | How | Where |
@@ -160,7 +166,8 @@ Pick the backend a script really needs — `?renderer=webgl2` used to be a silen
 |--------|---------|
 | `smoke:audio`, `smoke:audio:ci` (`AUDIO_CHROME_ARGS` has no WebGPU flags) | `html` |
 | `smoke:visual:ci` | `html` |
-| `smoke:playhead`, `bench:engine`, `scripts/bench-initlib-browser.mjs` (default launcher passes `--enable-unsafe-webgpu`) | `webgpu` |
+| `smoke:playhead` (renderer-independent; the CI job is GPU-less) | `html` |
+| `bench:engine`, `scripts/bench-initlib-browser.mjs` (local only; default launcher passes `--enable-unsafe-webgpu`; keeps baselines comparable — they silently ran WebGPU before) | `webgpu` |
 | `capture:trigger-tail`, `audit:shader-modes` (need a real `readPixels()`; GPU/Colab host) | `webgl2` via `?webgl2=1`, and they assert the active backend is the requested one |
 
 Acceptance for the opt-in itself (needs `npm run dev` or a preview; not wired into `package.json`):
