@@ -8,7 +8,7 @@ Recent changes
 - v0.35: added "Donut & Night Mode" shader `shaders/patternv0.35_bloom.wgsl` (channel invert toggle, white center island, studio dim + UV ring); also includes previous bloom helpers in `utils/bloomPostProcessor.ts`.
 
 - Play tracker modules in the browser using libopenmpt (WASM).
-- Pattern view with three renderer backends: **WebGPU** (WGSL shaders), **WebGL2** (GLSL reference renderer), and **HTML** fallback.
+- Pattern view with three renderer backends: **WebGPU** (WGSL shaders), **WebGL2** (simplified GLSL renderer — explicit opt-in only, never automatic), and **HTML** (DOM grid).
 - Simple media panel & overlay for images, GIFs, and videos synchronized with playback.
 - Built with Vite, React, and TypeScript. Tailwind CSS is used for styling.
 
@@ -17,7 +17,7 @@ Quick start
 Prerequisites
 
 - Node.js (16+ recommended) and npm or a compatible package manager.
-- A modern browser. WebGPU is the default renderer (Chrome 113+, Edge 113+, Arc). WebGL2 and HTML fallbacks work in any modern browser.
+- A modern browser. WebGPU is the default renderer (Chrome 113+, Edge 113+, Arc). The opt-in WebGL2 session (`?webgl2=1`) and the HTML grid work in any modern browser; there is no automatic fallback.
 
 Install dependencies
 
@@ -101,7 +101,7 @@ See also: `docs/WASM_BUILD_SOLUTIONS.md`, `public/worklets/README.md`, `AGENTS.m
 ```bash
 npm run build && npm run preview -- --port 4173 &
 npm run smoke:visual          # full matrix (webgl2/html/webgpu + lite modes)
-npm run smoke:visual:ci       # CI subset: webgl2 + html, v0.30b/46/50/57
+npm run smoke:visual:ci       # CI subset: html, v0.30b/46/50/57
 ```
 
 See `docs/VISUAL_SMOKE.md` for the manual WebGPU + mobile checklist.
@@ -112,9 +112,9 @@ Usage
 - Use the playback controls to play/stop and toggle looping.
 - Switch pattern renderers via URL param, debug panel, or devtools:
   - `?renderer=webgpu` (default when available)
-  - `?renderer=webgl2` — deferred this phase (no-op → WebGPU; GLSL path not auto-started)
+  - `?webgl2=1` — opt-in WebGL2 (GLSL) visualizer for this page load, with a persistent "WebGL2 fallback — WebGPU not in use" badge (`?renderer=webgl2` is an alias). It is also offered as a **Use WebGL2 visualizer** button when WebGPU hard-fails; it never starts automatically and is never persisted
   - `?renderer=html` — lightweight DOM grid (`PatternSequencer`)
-  - `window.DEBUG_RENDERER = 'webgl2'` or `localStorage.setItem('xasm1_pattern_renderer', 'webgl2')`
+  - `window.DEBUG_RENDERER = 'html'` or `localStorage.setItem('xasm1_pattern_renderer', 'html')` (a stored/`DEBUG_RENDERER` `'webgl2'` is ignored)
 - Add media files via the media panel to display them in the overlay while a module plays.
 
 Project structure (important files)
@@ -132,8 +132,8 @@ Notes and configuration
 
 - libopenmpt: Self-hosted real WebAssembly build of libopenmpt **0.8.4** — `public/worklets/libopenmpt-worklet.{js,wasm}` — shared by the AudioWorklet, the main thread (`index.html`, BASE_URL-aware, SRI-pinned) and the parser worker. Rebuild with `npm run build:js-libopenmpt` (emsdk 3.1.51). See `public/worklets/README.md`.
 - Tailwind: A CDN helper script is present in `index.html` to bring in utility styles quickly in development. For production builds you may want to use the PostCSS/Tailwind config in the repo.
-- **Pattern renderers:** GPU viz requires **WebGPU** (hard-fail on probe/device failure — no auto WebGL2/HTML **shader** session). Explicit `?renderer=html` selects the DOM pattern grid. WebGL2 GLSL reference remains in-tree but is deferred for viz sessions. Probe breadcrumb: `window.__WEBGPU_PROBE__`.
-- **WebGPU → WebGL2 porting (deferred viz):** Shared packing lives in `utils/gpuPacking.ts`; WebGL2 GLSL mirrors `hooks/webGLShaders.ts`. Chassis/night mode/bloom approximations are in `src/renderers/webgl2/shaders/`.
+- **Pattern renderers:** GPU viz requires **WebGPU** (hard-fail on probe/device failure — no auto WebGL2/HTML **shader** session). Explicit `?renderer=html` selects the DOM pattern grid; `?webgl2=1` / the failure-card button opt in to the WebGL2 GLSL session. Probe breadcrumb: `window.__WEBGPU_PROBE__`.
+- **WebGPU → WebGL2 (opt-in viz):** Shared packing lives in `utils/gpuPacking.ts`; WebGL2 GLSL mirrors `hooks/webGLShaders.ts`. Chassis/night mode/bloom approximations are in `src/renderers/webgl2/shaders/`.
 
 Contributing
 

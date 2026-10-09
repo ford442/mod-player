@@ -46,9 +46,12 @@ const nativeArtifactsPresent = () =>
   existsSync(NATIVE_GLUE)
   && existsSync(join(process.cwd(), 'public', 'worklets', 'openmpt-native.wasm'));
 
+// Renderer = what these runs actually exercise: the default launcher passes --enable-unsafe-webgpu, and
+// `renderer=webgl2` has been a silent no-op → WebGPU since WebGL2 became opt-in only (#462). Playhead
+// math is renderer-independent (__PLAYHEAD_DEBUG__), so no GLSL session is needed here.
 const SCENARIOS_BASE = [
-  { id: 'square', shader: 'patternv0.44.wgsl', renderer: 'webgl2', paging: false, lagCheck: true },
-  { id: 'circular', shader: 'patternv0.46.wgsl', renderer: 'webgl2', paging: true, lagCheck: false },
+  { id: 'square', shader: 'patternv0.44.wgsl', renderer: 'webgpu', paging: false, lagCheck: true },
+  { id: 'circular', shader: 'patternv0.46.wgsl', renderer: 'webgpu', paging: true, lagCheck: false },
 ];
 
 function buildScenarios() {

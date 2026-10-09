@@ -95,17 +95,17 @@ npm run verify:js-libopenmpt # Static + boot/render/corrupt-input checks of that
 python3 deploy.py    # Build + SFTP upload to production server
 ```
 
-**Browser requirement:** WebGPU requires Chrome 113+, Edge 113+, or Arc. For headless testing pass `--enable-unsafe-webgpu`. Use `?renderer=webgl2` when WebGPU is unavailable or for GLSL-based debugging.
+**Browser requirement:** WebGPU requires Chrome 113+, Edge 113+, or Arc. For headless testing pass `--enable-unsafe-webgpu`. When WebGPU is unavailable, use `?renderer=html` (DOM grid) or opt in to the GLSL WebGL2 session with `?webgl2=1` — it is never selected automatically.
 
 ### Pattern Renderer Backends
 
 | Backend | Entry | Use case |
 |---------|-------|----------|
 | `webgpu` | default | Production visuals (WGSL + bloom) — **required** for GPU viz this phase |
-| `webgl2` | deferred | GLSL reference path exists but is **not** auto-selected; `?renderer=webgl2` no-ops to WebGPU |
+| `webgl2` | `?webgl2=1` (alias `?renderer=webgl2`), or the **Use WebGL2 visualizer** button on the WebGPU failure card | **Opt-in only, never automatic, never persisted** (per page load). Simplified GLSL pattern + playhead with a persistent `WebGL2 fallback — WebGPU not in use` badge and one `console.warn`; `readPixels()` works. A stored / `DEBUG_RENDERER` `'webgl2'` is ignored |
 | `html` | `?renderer=html` | DOM pattern grid (tracker UI), not a GLSL shader session |
 
-Toggle via debug panel (🔍), `localStorage.xasm1_pattern_renderer`, or `window.DEBUG_RENDERER`. WebGL2 debug: **Alt+D** cycles wireframe/UV/playhead modes (dev only).
+Toggle `webgpu`/`html` via debug panel (🔍), `localStorage.xasm1_pattern_renderer`, or `window.DEBUG_RENDERER`; the debug panel lists the resolved backend + reason (`backend`, `backendReason`). Opt-in state lives in `src/renderers/webgl2/optIn.ts`. WebGL2 debug: **Alt+D** cycles wireframe/UV/playhead modes (dev only). Smoke-script renderer policy: `docs/VISUAL_SMOKE.md`.
 
 **Deployment env var:** `VITE_APP_BASE_PATH=/xm-player/ npm run build` for subdirectory hosting.
 

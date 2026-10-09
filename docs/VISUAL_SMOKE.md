@@ -12,7 +12,7 @@ npm run build && npm run preview -- --port 4173
 npm run smoke:visual
 ```
 
-CI profile (WebGL2 + HTML only, smaller shader set):
+CI profile (HTML only, smaller shader set — WebGPU and the opt-in WebGL2 session are not run in CI):
 
 ```bash
 SMOKE_PROFILE=ci npm run smoke:visual
@@ -27,7 +27,7 @@ Artifacts land in `./artifacts/visual-smoke/` by default (`report.json`, `VISUAL
 | `BASE_URL` | `http://localhost:4173` | Preview or dev server |
 | `OUTPUT_DIR` | `./artifacts/visual-smoke` | Screenshots + reports |
 | `SMOKE_PROFILE` | `full` | `ci` \| `quick` \| `full` |
-| `RENDERERS` | profile-based | `webgl2,html` (ci) or +`webgpu` (full) |
+| `RENDERERS` | profile-based | `html` (ci) or `html,webgpu` (full) — `webgl2` only via the explicit opt-in below |
 | `SHADER_FILES` | profile-based | See matrix below |
 | `LITE_MODES` | `0` (ci) or `0,1` (full) | `?lite=1` forces lite path |
 | `MODULE_URLS` | `/4-mat_madness.mod` (+ `/test.xm` in full) | MOD + XM for DURA parity |
@@ -44,7 +44,7 @@ Artifacts land in `./artifacts/visual-smoke/` by default (`report.json`, `VISUAL
 | `patternv0.50.wgsl` | Three-emitter LED baseline |
 | `patternv0.55–57.wgsl` | Oscilloscope / palette / velocity LEDs |
 
-CI profile runs: **v0.30b, v0.46, v0.50, v0.52–57, v0.23, v0.24** on **webgl2 + html**.
+CI profile runs: **v0.30b, v0.46, v0.50, v0.52–57, v0.23, v0.24** on **html**.
 
 ---
 
@@ -141,11 +141,45 @@ npm run capture:trigger-tail # v0.30b / sustain tail capture
 
 ---
 
+## Renderer policy for smoke scripts: WebGL2 is opt-in only (#462)
+
+There is **no automatic WebGPU → WebGL2 fallback**. The GLSL WebGL2 session renders only when asked:
+
+| How | Where |
+|-----|-------|
+| `?webgl2=1` (canonical; `?renderer=webgl2` is an alias) | forces WebGL2 for that page load — WebGPU is never attempted |
+| "Use WebGL2 visualizer" button | on the WebGPU failure card, after a confirmed hard-fail; swaps backend in place |
+
+Nothing about WebGL2 is persisted (`localStorage.xasm1_pattern_renderer = 'webgl2'` / `window.DEBUG_RENDERER = 'webgl2'` are ignored). While it renders, a badge
+`WebGL2 fallback — WebGPU not in use` (`[data-webgl2-fallback-badge]`) is shown and one `console.warn('[Renderer] WebGL2 fallback active — WebGPU not in use (reason: <status>)')` is logged.
+`window.currentPatternRenderer.backend` / `__TEST_HOOKS__.getActiveRenderer()` report the backend that actually rendered.
+
+Pick the backend a script really needs — `?renderer=webgl2` used to be a silent no-op that ran WebGPU:
+
+| Script | Backend |
+|--------|---------|
+| `smoke:audio`, `smoke:audio:ci` (`AUDIO_CHROME_ARGS` has no WebGPU flags) | `html` |
+| `smoke:visual:ci` | `html` |
+| `smoke:playhead`, `bench:engine`, `scripts/bench-initlib-browser.mjs` (default launcher passes `--enable-unsafe-webgpu`) | `webgpu` |
+| `capture:trigger-tail`, `audit:shader-modes` (need a real `readPixels()`; GPU/Colab host) | `webgl2` via `?webgl2=1`, and they assert the active backend is the requested one |
+
+Acceptance for the opt-in itself (needs `npm run dev` or a preview; not wired into `package.json`):
+
+```bash
+BASE_URL=http://localhost:5173 node scripts/webgl2-optin-acceptance.mjs
+```
+
+Scenario 1 `?webgl2=1` in Chromium *without* WebGPU · scenario 2 no param → failure card + button, click → badge, one warn, same `<canvas>` and `AudioContext`, no new `requestAdapter()`, survives a shader switch ·
+scenario 3 no param *with* `--enable-unsafe-webgpu` → no badge, no warn (`EXPECTED_SKIP` for "WebGPU ready" on hosts whose WebGPU cannot present).
+The WebGL2 look is the shared GLSL lens-cap approximation (not a per-shader port); use it for structure/playhead checks, not WGSL parity.
+
+---
+
 ## Manual WebGPU desktop checklist
 
 Run against **`npm run dev`** (DURA parity only logs in dev builds).
 
-1. Open `http://localhost:5173/?renderer=webgpu` (WebGPU is required for GPU viz; WebGL2 auto-fallback is deferred — see `window.__WEBGPU_PROBE__` on failure)
+1. Open `http://localhost:5173/?renderer=webgpu` (WebGPU is required for GPU viz; WebGL2 is **opt-in only** — `?webgl2=1` or the failure-card button, never automatic — see `window.__WEBGPU_PROBE__` on failure)
 2. Load `/4-mat_madness.mod` and `/test.xm` (or any `.it` if available)
 3. DevTools console:
    - [ ] `[DURA-PARITY] ✓` for both MOD and IT (high-precision shaders)
@@ -165,7 +199,7 @@ Emulate mobile in DevTools **or** use a real phone:
 
 1. `?lite=1` — forces lite: v0.21, 512×512, no bloom, no WebGL overlay
 2. `?lite=0` on mobile UA — full desktop path
-3. [ ] No WebGPU console errors (fallback to WebGL2/HTML acceptable)
+3. [ ] No WebGPU console errors (no automatic fallback — WebGL2 only via the opt-in, with its "WebGL2 fallback — WebGPU not in use" badge; HTML via `?renderer=html`)
 4. [ ] Lite toggle in header matches `?lite=` behavior
 
 ---
@@ -176,7 +210,7 @@ The `visual-smoke` job in `.github/workflows/ci.yml`:
 
 1. `npm run build`
 2. Starts `vite preview` on port 4173
-3. `SMOKE_PROFILE=ci npm run smoke:visual` — **required** (WebGL2 + HTML, coverage assertions included)
+3. `SMOKE_PROFILE=ci npm run smoke:visual` — **required** (HTML, coverage assertions included)
 4. WebGPU coverage step (`continue-on-error: true`) — experimental, see below
 5. Uploads `artifacts/visual-smoke/` on failure (5-day retention)
 6. Always uploads `artifacts/visual-smoke-webgpu/` (5-day retention)
