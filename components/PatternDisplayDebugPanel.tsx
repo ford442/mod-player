@@ -65,8 +65,8 @@ export function PatternDisplayDebugPanel({
             >
               <option value="webgpu">webgpu</option>
               <option value="html">html (DOM grid)</option>
-              <option value="webgl2" disabled title="WebGL2 shader path deferred">
-                webgl2 (deferred)
+              <option value="webgl2" disabled title="WebGL2 is opt-in: ?webgl2=1 or the WebGPU failure-card button">
+                webgl2 (opt-in only)
               </option>
             </select>
           </div>
