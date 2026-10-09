@@ -3,9 +3,13 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
+  "engines": {
+    "node": ">=22.12.0"
+  },
   "scripts": {
     "sync:shaders": "node scripts/sync-shaders.mjs",
     "build:js-worklet": "node scripts/build-js-worklet.mjs",
+    "verify:js-worklet-fresh": "node scripts/build-js-worklet.mjs --check",
     "predev": "npm run sync:shaders && npm run build:js-worklet",
     "dev": "vite",
     "prebuild": "npm run sync:shaders && npm run build:js-worklet",
@@ -23,6 +27,7 @@
     "bench:js-libopenmpt": "node scripts/bench-js-libopenmpt.mjs",
     "verify:wasm": "node scripts/verify-wasm-assets.mjs",
     "verify:build": "node scripts/verify-build.mjs",
+    "verify:build:root": "EXPECTED_BASE=/ PROJECT_NAME= node scripts/verify-build.mjs",
     "verify:bundle-budget": "node scripts/verify-bundle-budget.mjs",
     "verify:lockfile": "node scripts/verify-lockfile.mjs",
     "build:xm-player:verify": "npm run build:xm-player && npm run verify:build && npm run verify:bundle-budget",
@@ -31,8 +36,10 @@
     "deploy:upload-only": "python3 deploy.py --no-build",
     "deploy:go:upload-only": "python3 deploy.py --site go --no-build",
     "preview": "vite preview",
-    "lint": "eslint . --max-warnings 43",
-    "typecheck": "tsc --noEmit",
+    "lint": "eslint . --max-warnings 40",
+    "typecheck": "tsc --noEmit && npm run typecheck:node && npm run typecheck:scripts",
+    "typecheck:node": "tsc --noEmit -p tsconfig.node.json",
+    "typecheck:scripts": "tsc --noEmit -p tsconfig.scripts.json",
     "typecheck:worklet": "tsc --noEmit -p tsconfig.worklet.json",
     "typecheck:tests": "tsc --noEmit -p tsconfig.test.json",
     "test": "vitest run",
@@ -41,7 +48,7 @@
     "test:trigger-tail": "vitest run tests/triggerTailPacking.test.ts",
     "test:octave-brightness": "vitest run tests/octaveBrightness.test.ts",
     "test:shader-includes": "vitest run tests/shaderIncludes.test.ts && node scripts/verify-shader-parity.mjs",
-    "test:shader-registry": "node utils/__debug__/shaderRegistry.test.cjs",
+    "test:shader-registry": "vitest run tests/shaderRegistry.test.ts",
     "test:circular-paging": "vitest run tests/circularPaging.test.ts",
     "test:playhead": "vitest run tests/playheadPrediction.test.ts",
     "capture:trigger-tail": "node scripts/capture-trigger-tail.mjs",
@@ -56,7 +63,7 @@
     "smoke:audio": "node scripts/audio-smoke.mjs",
     "smoke:audio:ci": "AUDIO_SMOKE_HEADLESS=1 node scripts/audio-smoke.mjs",
     "check:cycles": "madge --circular --extensions ts,tsx src/renderers hooks/useWebGPURender.ts",
-    "preflight": "npm run verify:lockfile && npm ci --dry-run --ignore-scripts && npm run lint && npm run typecheck && npm run typecheck:tests && npm test && npm run test:shader-registry && npm run build"
+    "preflight": "npm run verify:lockfile && npm ci --dry-run --ignore-scripts --no-audit --no-fund --offline && npm run verify:wasm && npm run verify:js-libopenmpt && npm run verify:js-worklet-fresh && npm run lint && npm run typecheck && npm run typecheck:worklet && npm run typecheck:tests && npm test && npm run test:shader-includes && npm run build && npm run verify:build:root && npm run verify:bundle-budget"
   },
   "dependencies": {
     "@react-three/drei": "^9.122.0",
@@ -65,7 +72,7 @@
     "@tanstack/react-virtual": "^3.14.5",
     "clsx": "^2.1.1",
     "react": "^18.3.1",
-    "react-dom": "^18.2.0",
+    "react-dom": "^18.3.1",
     "tailwind-merge": "^3.5.0",
     "three": "^0.160.0",
     "zod": "^4.4.3",
@@ -74,7 +81,7 @@
   "devDependencies": {
     "@eslint/js": "^9.19.0",
     "@tailwindcss/typography": "^0.5.10",
-    "@types/node": "^20.19.0",
+    "@types/node": "^22.20.5",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.0",

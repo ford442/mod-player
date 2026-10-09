@@ -118,6 +118,7 @@ if [[ "$DEBUG_MODE" -eq 1 ]]; then
     LINK_MODE_FLAGS=(-sASSERTIONS=2 -sSAFE_HEAP=0)
 else
     COMPILE_FLAGS+=(-O3 -DNDEBUG -flto=thin -ffunction-sections -fdata-sections)
+    # shellcheck disable=SC2054  # -Wl,... is ONE linker pass-through argument, not a comma-separated list
     LINK_MODE_FLAGS=(-sASSERTIONS=0 -Wl,--gc-sections)
 fi
 if [[ "$SIMD" -eq 1 ]]; then

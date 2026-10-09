@@ -57,7 +57,7 @@ npm run preview
 
 Assets load from site root (`/`). For the live subpath deploy at `test.1ink.us/xm-player/`, use `npm run build:xm-player` (sets `VITE_APP_BASE_PATH=/xm-player/`).
 
-Lint (ESLint, hard CI gate; max 43 warnings budget)
+Lint (ESLint, hard CI gate; max 40 warnings budget)
 
 ```bash
 npm run lint
@@ -131,7 +131,7 @@ Project structure (important files)
 Notes and configuration
 
 - libopenmpt: Self-hosted real WebAssembly build of libopenmpt **0.8.4** — `public/worklets/libopenmpt-worklet.{js,wasm}` — shared by the AudioWorklet, the main thread (`index.html`, BASE_URL-aware, SRI-pinned) and the parser worker. Rebuild with `npm run build:js-libopenmpt` (emsdk 3.1.51). See `public/worklets/README.md`.
-- Tailwind: A CDN helper script is present in `index.html` to bring in utility styles quickly in development. For production builds you may want to use the PostCSS/Tailwind config in the repo.
+- Tailwind: Styles are compiled by PostCSS/Tailwind (`tailwind.config.js`, `postcss.config.js`) in dev and production alike; there is no Tailwind CDN script. The `content` globs are deliberately explicit — see `CLAUDE.md` pitfall 5.
 - **Pattern renderers:** GPU viz requires **WebGPU** (hard-fail on probe/device failure — no auto WebGL2/HTML **shader** session). Explicit `?renderer=html` selects the DOM pattern grid. WebGL2 GLSL reference remains in-tree but is deferred for viz sessions. Probe breadcrumb: `window.__WEBGPU_PROBE__`.
 - **WebGPU → WebGL2 porting (deferred viz):** Shared packing lives in `utils/gpuPacking.ts`; WebGL2 GLSL mirrors `hooks/webGLShaders.ts`. Chassis/night mode/bloom approximations are in `src/renderers/webgl2/shaders/`.
 

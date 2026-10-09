@@ -5,14 +5,14 @@
 | First-party (ship here) | Experimental (do not land without review) |
 |-------------------------|---------------------------------------------|
 | `components/`, `hooks/`, `utils/`, `src/` | `archive/` |
-| `shaders/` + `public/shaders/` (synced) | `shaders-enhanced/` (prototypes) |
+| `shaders/` + `public/shaders/` (synced) | Shader prototypes that are not registered in `utils/shaderRegistry.ts` |
 | `appConfig.ts`, `utils/shaderRegistry.ts` | Agent scratch output at repo root |
 | `scripts/`, `cpp/`, `public/worklets/` | Duplicate mini-apps or vendor trees |
 
 ## Rules for agents and humans
 
 1. **No orphan components** — Do not add files under `components/` unless something in the app imports them (`App.tsx`, `MainLayout.tsx`, etc.).
-2. **Shader changes** — Edit `utils/shaderRegistry.ts` + `appConfig.ts` + WGSL; run `npm run test:shader-registry`.
+2. **Shader changes** — Edit `utils/shaderRegistry.ts` + `appConfig.ts` + WGSL; run `npm run test:shader-registry` (Vitest, also part of `npm test`).
 3. **Agent output** — Put throwaway experiments in `archive/` or a feature branch, not next to production files.
 4. **libopenmpt source** — Only `vendor/libopenmpt-*` (gitignored, downloaded by `scripts/build-wasm.sh`). Do not commit a second copy at repo root.
 5. **Deploy** — Use `deploy.py` only; `deploy_old.py` was removed.
@@ -24,9 +24,14 @@ npm run preflight
 ```
 
 One command, chained with `&&`, stopping at the first failure. In order:
-`verify:lockfile` → `npm ci --dry-run --ignore-scripts` → `lint` → `typecheck` →
-`typecheck:tests` → `test` → `test:shader-registry` → `build`. It mirrors the
-`lint-and-build` CI job, so a green preflight is a real signal about **that job**.
+`verify:lockfile` → `npm ci --dry-run --ignore-scripts --offline` → `verify:wasm` →
+`verify:js-libopenmpt` → `verify:js-worklet-fresh` → `lint` → `typecheck` →
+`typecheck:worklet` → `typecheck:tests` → `test` → `test:shader-includes` → `build` →
+`verify:build:root` → `verify:bundle-budget`.
+
+The `lint-and-build` CI job is `npm ci` followed by `npm run preflight` — it *is* this
+chain, so the two cannot drift apart. Add new CI gates to the `preflight` script in
+`package.json`, not to the workflow. It needs no network after `npm ci`.
 
 **What preflight does _not_ cover:** `visual-smoke`, `audio-smoke`,
 `playhead-smoke`, `wasm-smoke-test` and `native-full-build`. Those need a
@@ -39,7 +44,7 @@ Playwright browser or emsdk 3.1.51 and still only run in CI (or locally via
 - `npm run verify:lockfile` (`scripts/verify-lockfile.mjs`) checks only what npm's
   own validation skips: `lockfileVersion` is exactly 3, and every non-`link`
   `packages[]` entry has both `resolved` and `integrity`.
-- `npm ci --dry-run --ignore-scripts` is the dependency-graph check. It is npm's
+- `npm ci --dry-run --ignore-scripts --offline` is the dependency-graph check. It is npm's
   own validator — it catches a deleted `packages[]` subtree in ~2s, offline, and
   names the exact missing specifier (`Missing: @esbuild/…@0.21.5 from lock file`).
   Do not wrap or reimplement it.

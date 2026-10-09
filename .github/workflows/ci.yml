@@ -6,6 +6,11 @@ on:
   pull_request:
     branches: [main, master]
 
+# A new push to a PR supersedes the previous run; pushes to main are never cancelled.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   lint-and-build:
     runs-on: ubuntu-latest
@@ -20,63 +25,15 @@ jobs:
           node-version: '22'
           cache: 'npm'
       
-      - name: Lockfile metadata guard (integrity/resolved/lockfileVersion)
-        run: npm run verify:lockfile
-
-      - name: Lockfile graph guard (package.json <-> lock in sync)
-        # npm's own validator; names the exact missing specifier in ~2s, offline.
-        # Runs before `npm ci` so a corrupt lockfile fails fast and by name.
-        run: npm ci --dry-run --ignore-scripts
-
       - name: Install dependencies
         run: npm ci
 
-      - name: Verify WASM assets (reject HTML-as-.wasm stubs)
-        run: npm run verify:wasm
-
-      - name: Verify real-WASM JS engine (libopenmpt-worklet.{js,wasm})
-        # Static checks + boots the glue the way the AudioWorklet does: renders audio, corrupt
-        # input returns NULL (not an abort), heap growth refreshes the views, global WebAssembly untouched.
-        run: npm run verify:js-libopenmpt
-
-      - name: Verify generated JS worklet is up to date (#435)
-        run: npm run build:js-worklet && git diff --exit-code
-
-      - name: Lint
-        run: npm run lint
-
-      - name: Type check
-        run: npm run typecheck
-
-      - name: Type check JS worklet source
-        run: npm run typecheck:worklet
-
-      - name: Type check tests
-        run: npm run typecheck:tests
-
-      - name: Unit tests (Vitest)
-        run: npm test
-      
-      - name: Shader registry tests
-        run: npm run test:shader-registry
-
-      - name: Shader include + parity tests
-        run: npm run test:shader-includes
-      
-      - name: Build
-        run: npm run build
-      
-      - name: Check build artifacts
-        run: |
-          if [ ! -f dist/index.html ]; then echo "❌ dist/index.html missing"; false; fi
-          if [ ! -d dist/assets ]; then echo "❌ dist/assets missing"; false; fi
-          echo "✅ Build artifacts verified"
-      
-      - name: Post-build verify (CSS + WASM magic)
-        run: EXPECTED_BASE='/' PROJECT_NAME='' npm run verify:build
-
-      - name: Bundle budget (entry chunk + three-r3f split)
-        run: npm run verify:bundle-budget
+      # The whole gate lives in package.json so CI and `npm run preflight` cannot drift apart:
+      # lockfile guards, wasm/js-engine verification, generated-worklet freshness (#435), lint,
+      # type checks (app, worklet, tests), unit tests, shader include/parity, build, and the
+      # post-build CSS/WASM and bundle-budget checks. Needs no network after `npm ci`.
+      - name: Preflight
+        run: npm run preflight
 
   visual-smoke:
     runs-on: ubuntu-latest
@@ -95,8 +52,8 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Install Playwright Chromium
-        run: npx playwright install chromium --with-deps
+      - name: Set up Playwright Chromium
+        uses: ./.github/actions/setup-playwright
 
       - name: Build
         run: VITE_APP_BASE_PATH=/ npm run build
@@ -121,6 +78,47 @@ jobs:
           name: visual-smoke-failure
           path: artifacts/visual-smoke/
           retention-days: 5
+
+      - name: Stop preview server
+        if: always()
+        run: |
+          if [ -f /tmp/preview.pid ]; then kill $(cat /tmp/preview.pid) 2>/dev/null || true; fi
+
+  # Best-effort WebGPU coverage, split out of visual-smoke so it runs in parallel: it was ~60 s of that
+  # job's ~4 min and nothing depends on its result (the step is continue-on-error, so this job always
+  # ends green; the screenshots are uploaded for inspection).
+  visual-smoke-webgpu:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Set up Playwright Chromium
+        uses: ./.github/actions/setup-playwright
+
+      - name: Build
+        run: VITE_APP_BASE_PATH=/ npm run build
+
+      - name: Start preview server
+        run: |
+          npm run preview -- --port 4173 --host 127.0.0.1 &
+          echo $! > /tmp/preview-webgpu.pid
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:4173/ >/dev/null; then echo "preview ready"; exit 0; fi
+            sleep 2
+          done
+          echo "preview failed to start"; exit 1
 
       - name: Visual smoke (WebGPU coverage — experimental, continue-on-error)
         # WebGPU coverage assertions run here as a best-effort check.
@@ -154,7 +152,7 @@ jobs:
       - name: Stop preview server
         if: always()
         run: |
-          if [ -f /tmp/preview.pid ]; then kill $(cat /tmp/preview.pid) 2>/dev/null || true; fi
+          if [ -f /tmp/preview-webgpu.pid ]; then kill $(cat /tmp/preview-webgpu.pid) 2>/dev/null || true; fi
 
   audio-smoke:
     runs-on: ubuntu-latest
@@ -173,8 +171,8 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Install Playwright Chromium
-        run: npx playwright install chromium --with-deps
+      - name: Set up Playwright Chromium
+        uses: ./.github/actions/setup-playwright
 
       - name: Build
         run: VITE_APP_BASE_PATH=/ npm run build
@@ -222,8 +220,8 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Install Playwright Chromium
-        run: npx playwright install chromium --with-deps
+      - name: Set up Playwright Chromium
+        uses: ./.github/actions/setup-playwright
 
       - name: Build
         run: VITE_APP_BASE_PATH=/ npm run build
@@ -273,18 +271,14 @@ jobs:
       - name: Check native build script (canonical path)
         run: |
           if [ ! -f scripts/build-wasm.sh ]; then echo "❌ scripts/build-wasm.sh missing"; false; fi
-          if [ ! -f build-wasm.sh ]; then echo "❌ build-wasm.sh (deprecated alias) missing"; false; fi
           # Must not clobber tracked JS worklet
           if grep -E -- '-o[[:space:]]+public/worklets/openmpt-worklet' scripts/build-wasm.sh; then
             echo "❌ scripts/build-wasm.sh must not write openmpt-worklet.*"; false
           fi
-          if grep -E -- '-o[[:space:]]+public/worklets/openmpt-worklet' build-wasm.sh; then
-            echo "❌ root build-wasm.sh must not write openmpt-worklet.*"; false
-          fi
-          if grep -E 'rm[[:space:]]+-rf[[:space:]]+public/worklets' build-wasm.sh scripts/build-wasm.sh; then
+          if grep -E 'rm[[:space:]]+-rf[[:space:]]+public/worklets' scripts/build-wasm.sh; then
             echo "❌ build scripts must not rm -rf public/worklets"; false
           fi
-          echo "✅ Native build scripts present and safe"
+          echo "✅ Native build script present and safe"
       
       - name: Setup Node.js (for dependencies)
         uses: actions/setup-node@v7
@@ -300,13 +294,16 @@ jobs:
       
       # Full emcc link runs in native-full-build (path-filtered) + scheduled workflow.
       - name: Shellcheck / syntax-check build scripts
+        # Findings fail the job. (This step used to be `shellcheck ... || true` behind a
+        # "tool is installed" check, so it could never fail and silently skipped if shellcheck was absent.)
+        # Gated at warning+: info/style notes (e.g. SC2015 on the deliberate `A && B || true` idiom)
+        # differ between shellcheck versions, so gating on them would flap whenever the runner image updates.
         run: |
-          for f in scripts/build-wasm.sh build-wasm.sh; do
-            if command -v shellcheck &> /dev/null; then
-              shellcheck "$f" || true
-            fi
+          command -v shellcheck >/dev/null || { echo "❌ shellcheck is not installed on this runner"; exit 1; }
+          for f in scripts/build-wasm.sh scripts/build-js-libopenmpt.sh; do
+            shellcheck --severity=warning "$f"
             bash -n "$f"
-            echo "✅ $f syntax OK"
+            echo "✅ $f clean"
           done
       
       - name: Guard tracked JS worklet still present
@@ -385,7 +382,6 @@ jobs:
   native-full-build:
     runs-on: ubuntu-latest
     timeout-minutes: 45
-    needs: []
     if: |
       github.event_name == 'push' ||
       github.event_name == 'pull_request'

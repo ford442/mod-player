@@ -8,8 +8,6 @@ export default defineConfig({
     include: ['**/*.test.ts'],
     exclude: [
       ...configDefaults.exclude,
-      'utils/__debug__/**',
-      'components/__debug__/**',
       'scripts/**',
       '**/_codeql_detected_source_root/**',
     ],

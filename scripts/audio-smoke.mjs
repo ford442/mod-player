@@ -34,7 +34,6 @@ import {
 } from './lib/audio-smoke-config.mjs';
 import {
   countersAdvanced,
-  checkAudioDiag,
   readPlaybackCountersInBrowser,
 } from './lib/audio-smoke-counters.mjs';
 
