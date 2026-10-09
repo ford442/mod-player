@@ -16,11 +16,12 @@
 ## Key Configuration Files
 - **`package.json`** — Defines scripts (`dev`, `build`, `typecheck`, `lint`, `preview`, `build:worklet`, `build:emcc`), dependencies, and `"type": "module"`.
 - **`tsconfig.json`** — High strictness. Excludes `archive/`, `jules_patch` (not production).
-- **`tsconfig.node.json`** — Composite project reference for `vite.config.ts`.
+- **`tsconfig.node.json`** — Strict check (extends `tsconfig.json`, `noEmit`) of `vite.config.ts`, `vitest.config.ts` and `vite-plugins/`. Run by `npm run typecheck` (`typecheck:node`).
+- **`tsconfig.scripts.json`** — `checkJs` over an explicit list of the pure-Node `scripts/*.mjs` plus `cpp/pre.js`/`post.js` (`typecheck:scripts`, part of `npm run typecheck`). Opt a script in by adding it to `include`, **not** with `// @ts-check` (that would also activate in `tsconfig.test.json`, which loads some of the same files with strict options). The Playwright/browser scripts are not checked yet.
 - **`vite.config.ts`** — Base path from `VITE_APP_BASE_PATH`; React plugin; COOP/COEP headers (`same-origin` / `credentialless`); `watch.followSymlinks: false` (guards against CodeQL self-referential symlink); `optimizeDeps.exclude: ['openmpt-native']`; `assetsInclude: ['**/*.wasm']`.
 - **`tailwind.config.js`** — Explicit `content` paths only (no broad globs) to prevent build OOM. Custom theme extensions for `panel`, `edge`, `accent`, `glow`, `borderColor`, and `boxShadow`.
 - **`postcss.config.js`** — TailwindCSS + Autoprefixer.
-- **`eslint.config.js`** — Ignores `dist`, `public`, `vendor`, `archive`, `node_modules`, `jules_patch`, `subdir`, `scripts`, `cpp`. CI: `npm run lint` (max 40 warnings; ratchet down as debt is paid).
+- **`eslint.config.js`** — Ignores `dist`, `public`, `vendor`, `archive`, `node_modules`, `jules_patch`, `subdir`, `.claude`, `cpp`. Lints `scripts/**/*.mjs` (Node + browser globals), forbids DOM globals in the worklet sources (`no-restricted-globals` on `audio-worklet/js/**` and the two modules it bundles), and enables the type-aware `@typescript-eslint/no-floating-promises` on `src/ hooks/ audio-worklet/ utils/`. CI: `npm run lint` (max 40 warnings; ratchet down as debt is paid).
 - **`package-lock.json`** — Committed for reproducible installs. CI uses `npm ci`. Never hand-edit it; regenerate with `npm install`. Guarded by `npm run verify:lockfile` (metadata) plus `npm ci --dry-run --ignore-scripts --offline` (graph), both part of `npm run preflight`.
 
 ## Before Committing

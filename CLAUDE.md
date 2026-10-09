@@ -83,7 +83,7 @@ mod-player/
 npm run dev          # Start Vite dev server at http://localhost:5173
 npm run build        # tsc + Vite production build → dist/ (uses 4 GB heap)
 npm run preview      # Preview production build locally
-npm run typecheck    # TypeScript type-check only (no emit)
+npm run typecheck    # TypeScript type-check only (no emit): app + vite/vitest configs + scripts/ (tsconfig.node.json, tsconfig.scripts.json)
 npm run preflight    # Run before every commit: CI's `lint-and-build` job *is* this chain (stops at first failure, no network needed after `npm ci`)
 npm run verify:lockfile # package-lock.json metadata guard (lockfileVersion 3, resolved + integrity)
 npm run lint         # ESLint (max 40 warnings budget; hard CI gate)

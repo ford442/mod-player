@@ -3,6 +3,9 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
+  "engines": {
+    "node": ">=22.12.0"
+  },
   "scripts": {
     "sync:shaders": "node scripts/sync-shaders.mjs",
     "build:js-worklet": "node scripts/build-js-worklet.mjs",
@@ -34,7 +37,9 @@
     "deploy:go:upload-only": "python3 deploy.py --site go --no-build",
     "preview": "vite preview",
     "lint": "eslint . --max-warnings 40",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && npm run typecheck:node && npm run typecheck:scripts",
+    "typecheck:node": "tsc --noEmit -p tsconfig.node.json",
+    "typecheck:scripts": "tsc --noEmit -p tsconfig.scripts.json",
     "typecheck:worklet": "tsc --noEmit -p tsconfig.worklet.json",
     "typecheck:tests": "tsc --noEmit -p tsconfig.test.json",
     "test": "vitest run",
@@ -67,7 +72,7 @@
     "@tanstack/react-virtual": "^3.14.5",
     "clsx": "^2.1.1",
     "react": "^18.3.1",
-    "react-dom": "^18.2.0",
+    "react-dom": "^18.3.1",
     "tailwind-merge": "^3.5.0",
     "three": "^0.160.0",
     "zod": "^4.4.3",
@@ -76,7 +81,7 @@
   "devDependencies": {
     "@eslint/js": "^9.19.0",
     "@tailwindcss/typography": "^0.5.10",
-    "@types/node": "^20.19.0",
+    "@types/node": "^22.20.5",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.0",

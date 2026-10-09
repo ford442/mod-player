@@ -20,7 +20,7 @@
  *   FAIL_ON_WARN     1 to treat buffer warnings as hard fail
  *   SKIP_COVERAGE    1 to disable structural coverage assertions
  */
-import { mkdirSync, writeFileSync, existsSync, rmSync, statSync, readFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync, existsSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   launchBrowser,
