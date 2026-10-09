@@ -1,0 +1,31 @@
+name: Set up Playwright Chromium
+description: >-
+  Install Playwright's Chromium with its OS dependencies, caching the browser download between runs.
+  Requires `npm ci` to have run (the cache key is the installed playwright version).
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve Playwright version
+      id: version
+      shell: bash
+      run: echo "playwright=$(node -p "require('playwright/package.json').version")" >> "$GITHUB_OUTPUT"
+
+    - name: Cache Playwright browsers
+      id: browsers
+      uses: actions/cache@v6
+      with:
+        path: ~/.cache/ms-playwright
+        key: playwright-${{ runner.os }}-${{ steps.version.outputs.playwright }}
+
+    # Cache miss: download the browser and install the apt packages it needs.
+    - name: Install Chromium and system dependencies
+      if: steps.browsers.outputs.cache-hit != 'true'
+      shell: bash
+      run: npx playwright install chromium --with-deps
+
+    # Cache hit: the browser is restored, but the runner is fresh, so its apt packages are not.
+    - name: Install system dependencies only
+      if: steps.browsers.outputs.cache-hit == 'true'
+      shell: bash
+      run: npx playwright install-deps chromium

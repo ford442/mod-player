@@ -6,6 +6,11 @@ on:
   pull_request:
     branches: [main, master]
 
+# A new push to a PR supersedes the previous run; pushes to main are never cancelled.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   lint-and-build:
     runs-on: ubuntu-latest
@@ -47,8 +52,8 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Install Playwright Chromium
-        run: npx playwright install chromium --with-deps
+      - name: Set up Playwright Chromium
+        uses: ./.github/actions/setup-playwright
 
       - name: Build
         run: VITE_APP_BASE_PATH=/ npm run build
@@ -73,6 +78,47 @@ jobs:
           name: visual-smoke-failure
           path: artifacts/visual-smoke/
           retention-days: 5
+
+      - name: Stop preview server
+        if: always()
+        run: |
+          if [ -f /tmp/preview.pid ]; then kill $(cat /tmp/preview.pid) 2>/dev/null || true; fi
+
+  # Best-effort WebGPU coverage, split out of visual-smoke so it runs in parallel: it was ~60 s of that
+  # job's ~4 min and nothing depends on its result (the step is continue-on-error, so this job always
+  # ends green; the screenshots are uploaded for inspection).
+  visual-smoke-webgpu:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Set up Playwright Chromium
+        uses: ./.github/actions/setup-playwright
+
+      - name: Build
+        run: VITE_APP_BASE_PATH=/ npm run build
+
+      - name: Start preview server
+        run: |
+          npm run preview -- --port 4173 --host 127.0.0.1 &
+          echo $! > /tmp/preview-webgpu.pid
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:4173/ >/dev/null; then echo "preview ready"; exit 0; fi
+            sleep 2
+          done
+          echo "preview failed to start"; exit 1
 
       - name: Visual smoke (WebGPU coverage — experimental, continue-on-error)
         # WebGPU coverage assertions run here as a best-effort check.
@@ -106,7 +152,7 @@ jobs:
       - name: Stop preview server
         if: always()
         run: |
-          if [ -f /tmp/preview.pid ]; then kill $(cat /tmp/preview.pid) 2>/dev/null || true; fi
+          if [ -f /tmp/preview-webgpu.pid ]; then kill $(cat /tmp/preview-webgpu.pid) 2>/dev/null || true; fi
 
   audio-smoke:
     runs-on: ubuntu-latest
@@ -125,8 +171,8 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Install Playwright Chromium
-        run: npx playwright install chromium --with-deps
+      - name: Set up Playwright Chromium
+        uses: ./.github/actions/setup-playwright
 
       - name: Build
         run: VITE_APP_BASE_PATH=/ npm run build
@@ -174,8 +220,8 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Install Playwright Chromium
-        run: npx playwright install chromium --with-deps
+      - name: Set up Playwright Chromium
+        uses: ./.github/actions/setup-playwright
 
       - name: Build
         run: VITE_APP_BASE_PATH=/ npm run build
@@ -225,18 +271,14 @@ jobs:
       - name: Check native build script (canonical path)
         run: |
           if [ ! -f scripts/build-wasm.sh ]; then echo "❌ scripts/build-wasm.sh missing"; false; fi
-          if [ ! -f build-wasm.sh ]; then echo "❌ build-wasm.sh (deprecated alias) missing"; false; fi
           # Must not clobber tracked JS worklet
           if grep -E -- '-o[[:space:]]+public/worklets/openmpt-worklet' scripts/build-wasm.sh; then
             echo "❌ scripts/build-wasm.sh must not write openmpt-worklet.*"; false
           fi
-          if grep -E -- '-o[[:space:]]+public/worklets/openmpt-worklet' build-wasm.sh; then
-            echo "❌ root build-wasm.sh must not write openmpt-worklet.*"; false
-          fi
-          if grep -E 'rm[[:space:]]+-rf[[:space:]]+public/worklets' build-wasm.sh scripts/build-wasm.sh; then
+          if grep -E 'rm[[:space:]]+-rf[[:space:]]+public/worklets' scripts/build-wasm.sh; then
             echo "❌ build scripts must not rm -rf public/worklets"; false
           fi
-          echo "✅ Native build scripts present and safe"
+          echo "✅ Native build script present and safe"
       
       - name: Setup Node.js (for dependencies)
         uses: actions/setup-node@v7
@@ -252,13 +294,14 @@ jobs:
       
       # Full emcc link runs in native-full-build (path-filtered) + scheduled workflow.
       - name: Shellcheck / syntax-check build scripts
+        # Findings fail the job. (This step used to be `shellcheck ... || true` behind a
+        # "tool is installed" check, so it could never fail and silently skipped if shellcheck was absent.)
         run: |
-          for f in scripts/build-wasm.sh build-wasm.sh; do
-            if command -v shellcheck &> /dev/null; then
-              shellcheck "$f" || true
-            fi
+          command -v shellcheck >/dev/null || { echo "❌ shellcheck is not installed on this runner"; exit 1; }
+          for f in scripts/build-wasm.sh scripts/build-js-libopenmpt.sh; do
+            shellcheck "$f"
             bash -n "$f"
-            echo "✅ $f syntax OK"
+            echo "✅ $f clean"
           done
       
       - name: Guard tracked JS worklet still present
@@ -337,7 +380,6 @@ jobs:
   native-full-build:
     runs-on: ubuntu-latest
     timeout-minutes: 45
-    needs: []
     if: |
       github.event_name == 'push' ||
       github.event_name == 'pull_request'

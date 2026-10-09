@@ -172,14 +172,19 @@ Emulate mobile in DevTools **or** use a real phone:
 
 ## CI behaviour
 
-The `visual-smoke` job in `.github/workflows/ci.yml`:
+Two jobs in `.github/workflows/ci.yml` run in parallel, each with its own `npm run build` and `vite preview` on port 4173:
 
-1. `npm run build`
-2. Starts `vite preview` on port 4173
-3. `SMOKE_PROFILE=ci npm run smoke:visual` — **required** (WebGL2 + HTML, coverage assertions included)
-4. WebGPU coverage step (`continue-on-error: true`) — experimental, see below
-5. Uploads `artifacts/visual-smoke/` on failure (5-day retention)
-6. Always uploads `artifacts/visual-smoke-webgpu/` (5-day retention)
+**`visual-smoke`** (required)
+1. `npm run build`, then `vite preview`
+2. `SMOKE_PROFILE=ci npm run smoke:visual` — WebGL2 + HTML, coverage assertions included
+3. Uploads `artifacts/visual-smoke/` on failure (5-day retention)
+
+**`visual-smoke-webgpu`** (experimental, best-effort)
+1. Same build + preview
+2. The WebGPU coverage step (`continue-on-error: true`), see below
+3. Always uploads `artifacts/visual-smoke-webgpu/` (5-day retention)
+
+The WebGPU run lives in its own job because it took ~60 s of what was a ~4 min `visual-smoke` job and nothing depends on its result; as a separate job it no longer lengthens the required check.
 
 ### WebGPU promotion path
 
@@ -187,7 +192,8 @@ The WebGPU coverage step currently runs with `continue-on-error: true` because h
 
 **To promote to required:**
 1. Confirm the WebGPU step passes cleanly across ≥ 5 consecutive CI runs on main.
-2. Remove `continue-on-error: true` from the `webgpu-coverage` step in `.github/workflows/ci.yml`.
+2. Remove `continue-on-error: true` from the `webgpu-coverage` step of the `visual-smoke-webgpu` job in `.github/workflows/ci.yml`.
 3. Change the upload step from `if: always()` to `if: failure()`.
+4. Either make the job's result part of the required checks, or fold the step back into `visual-smoke`.
 
 WebGPU is **not** required in CI — headless WebGPU is recorded as `EXPECTED_SKIP`. Use the manual checklist above for WGSL verification.
