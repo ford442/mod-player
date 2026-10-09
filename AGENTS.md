@@ -219,7 +219,7 @@ python3 deploy.py
 - **Test TypeScript:** `npm run typecheck:tests` type-checks `tests/**/*.ts` via `tsconfig.test.json` (CI gate).
 - **Shader registry invariant:** `npm run test:shader-registry` (Node `.cjs` script) verifies registry ↔ `SHADER_GROUPS` agreement — not fully duplicated in Vitest.
 - **Debug invariant scripts:** `utils/__debug__/*.test.cjs` (e.g. packing invariants, circular paging) are run manually or via dedicated `npm run test:*` scripts; not part of the default `npm test` glob.
-- **Shader renderer screenshot check:** `scripts/screenshot-shader-check.mjs` captures the pattern visualizer for each renderer (`webgl2`, `html`, optionally `webgpu`) and a configurable list of shaders. Run it against a local preview with:
+- **Shader renderer screenshot check:** `scripts/screenshot-shader-check.mjs` is a legacy alias that forwards to `scripts/visual-smoke.mjs` (profile `quick`; renderers per `RENDERERS`, `html`/`webgpu` only — WebGL2 is opt-in via `?webgl2=1`, see `docs/VISUAL_SMOKE.md`). Run it against a local preview with:
   ```bash
   npm run preview -- --port 4173 &
   npm run screenshot:shaders

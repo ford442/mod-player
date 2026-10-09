@@ -100,7 +100,7 @@ See also: `docs/WASM_BUILD_SOLUTIONS.md`, `public/worklets/README.md`, `AGENTS.m
 
 ```bash
 npm run build && npm run preview -- --port 4173 &
-npm run smoke:visual          # full matrix (webgl2/html/webgpu + lite modes)
+npm run smoke:visual          # full matrix (html/webgpu + lite modes; WebGL2 is opt-in only, not in the matrix)
 npm run smoke:visual:ci       # CI subset: html, v0.30b/46/50/57
 ```
 

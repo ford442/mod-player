@@ -134,6 +134,8 @@ export const FULL_SHADER_FILES = [
 //   v0.57 Velocity LEDs
 //
 // NOTE: CI uses HTML pattern grid. WebGL2 is opt-in only (?webgl2=1, #462) and is not in this matrix.
+// Deliberate skip: no WebGL2 cell runs in CI. The manual cell is scripts/webgl2-optin-acceptance.mjs
+// (see docs/VISUAL_SMOKE.md, "Renderer policy for smoke scripts").
 // WGSL night-theme / oscilloscope / instrument-palette paths are verified under
 // SMOKE_PROFILE=full with WebGPU (--enable-unsafe-webgpu). HTML smoke still
 // catches severe mount/play regressions without starting a GLSL session.
