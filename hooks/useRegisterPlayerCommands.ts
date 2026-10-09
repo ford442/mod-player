@@ -30,6 +30,12 @@ export interface PlayerCommandHandlers {
   onShaderSelectByIndex?: (index: number) => void;
 }
 
+/** transport.stop: the surface's onStop, or onPause when it has none. */
+export function stopOrPause(handlers: Pick<PlayerCommandHandlers, 'onStop' | 'onPause'>): void {
+  if (handlers.onStop) handlers.onStop();
+  else handlers.onPause();
+}
+
 /** Register all player command handlers on the shared command bus. */
 export function registerPlayerCommands(handlers: PlayerCommandHandlers): () => void {
   const unsubs: Array<() => void> = [];
@@ -44,10 +50,7 @@ export function registerPlayerCommands(handlers: PlayerCommandHandlers): () => v
   bind('transport.playPause', () => { handlers.onPlayPause(); });
   bind('transport.play', () => { handlers.onPlay(); });
   bind('transport.pause', () => { handlers.onPause(); });
-  bind('transport.stop', () => {
-    if (handlers.onStop) handlers.onStop();
-    else handlers.onPause();
-  });
+  bind('transport.stop', () => { stopOrPause(handlers); });
   bind('seek.forwardRow', () => { handlers.onSeekForward(); });
   bind('seek.backwardRow', () => { handlers.onSeekBackward(); });
   bind('seek.nextOrder', () => { handlers.onSeekNextOrder(); });
@@ -105,7 +108,10 @@ export function useRegisterPlayerCommands(handlers: PlayerCommandHandlers): void
       onPlayPause: () => handlersRef.current.onPlayPause(),
       onPlay: () => handlersRef.current.onPlay(),
       onPause: () => handlersRef.current.onPause(),
-      onStop: () => handlersRef.current.onStop?.(),
+      // registerPlayerCommands falls back to onPause only when onStop is absent, but this wrapper is
+      // always present — so the fallback has to be applied here too, or transport.stop is silently
+      // dropped for any surface that registers no onStop.
+      onStop: () => stopOrPause(handlersRef.current),
       onSeekForward: () => handlersRef.current.onSeekForward(),
       onSeekBackward: () => handlersRef.current.onSeekBackward(),
       onSeekNextOrder: () => handlersRef.current.onSeekNextOrder(),

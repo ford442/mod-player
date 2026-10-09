@@ -140,8 +140,8 @@ export const playerCommands = new PlayerCommandBus();
 /** Human-readable labels for shortcuts help + MIDI docs */
 export const COMMAND_LABELS: Record<PlayerCommandId, string> = {
   'transport.playPause': 'Play / pause',
-  'transport.play': 'Play',
-  'transport.pause': 'Pause / stop',
+  'transport.play': 'Play / resume',
+  'transport.pause': 'Pause',
   'transport.stop': 'Stop',
   'seek.forwardRow': 'Seek +1 row',
   'seek.backwardRow': 'Seek −1 row',

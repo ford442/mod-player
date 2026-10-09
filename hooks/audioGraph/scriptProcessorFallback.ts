@@ -55,6 +55,9 @@ export async function runScriptProcessorFallback(
       const mPtr = refs.currentModulePtr.current;
       const mLib = refs.libopenmptRef.current;
       if (!mLib || !mPtr) { outL.fill(0); outR.fill(0); return; }
+      // Paused: render silence without advancing the module, so resume continues from the same
+      // row. Pause latency here is one SPN buffer (4096 frames), unlike the worklet's one quantum.
+      if (refs.isPausedRef.current) { outL.fill(0); outR.fill(0); return; }
 
       let written = mLib._openmpt_module_read_float_stereo(
         mPtr, ctx.sampleRate, SP_BUFFER, leftPtr, rightPtr
@@ -95,10 +98,16 @@ export async function runScriptProcessorFallback(
     spNode.connect(refs.analyserRef.current!);
     wireMasterOutput(ctx, refs, config.volume, config.panValue);
     refs.scriptProcessorRef.current = spNode;
+    refs.playbackEngineRef.current = 'scriptprocessor';
 
-    refs.isPlayingRef.current = true;
-    callbacks.setIsPlaying(true);
-    callbacks.setStatus("Playing (ScriptProcessor fallback)...");
+    if (refs.isPausedRef.current) {
+      // Started (e.g. after a worklet fault) while paused: the callback above already renders silence.
+      callbacks.setStatus("Paused.");
+    } else {
+      refs.isPlayingRef.current = true;
+      callbacks.setIsPlaying(true);
+      callbacks.setStatus("Playing (ScriptProcessor fallback)...");
+    }
     if (refs.animationFrameHandle.current) cancelAnimationFrame(refs.animationFrameHandle.current);
     refs.animationFrameHandle.current = requestAnimationFrame(refs.updateUIRef.current!);
   } else {

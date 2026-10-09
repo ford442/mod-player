@@ -315,7 +315,9 @@ declare global {
       seekToRow: (row: number) => void;
       stopPlayback: () => void;
       startPlayback: () => void;
+      pausePlayback: () => void;
       getIsPlaying: () => boolean;
+      getTransportState: () => 'stopped' | 'playing' | 'paused';
       getAudioContextState: () => string;
       getAudioContextSampleRate: () => number;
       setPlayheadFraction: (value: number) => void;

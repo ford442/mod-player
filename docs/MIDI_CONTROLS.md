@@ -27,11 +27,17 @@ MIDI works even when keyboard shortcuts are blocked (e.g. focus in a text field)
 
 | MIDI | Command |
 |------|---------|
-| Note **94** (0x5E) | Play |
-| Note **93** (0x5D) | Pause / stop |
+| Note **94** (0x5E) | Play (resumes from the paused position if paused) |
+| Note **93** (0x5D) | Stop (resets to the start; before the pause feature this note paused) |
 | Note **91** (0x5B) | Previous order |
 | Note **92** (0x5C) | Next order |
-| Note **60** (Middle C) | Play / pause toggle |
+| Note **60** (Middle C) | Play / pause toggle (pauses in place; the next press resumes) |
+
+There is no default note for a bare **Pause** (`transport.pause`) yet; add one to the stored JSON (see
+[Custom mappings](#custom-mappings)) if you want it separate from the Middle C toggle. A mapping set that
+was already saved to `localStorage` (or restored with **Reset mappings** before this change) keeps its
+stored commands, so its `93 → transport.pause` now genuinely pauses where it used to stop. Click **Reset
+mappings** to pick up the new default (`93 → transport.stop`).
 
 ### Order jumps (pad notes, like keyboard `1`–`9`)
 
