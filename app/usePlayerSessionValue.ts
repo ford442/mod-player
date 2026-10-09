@@ -9,6 +9,7 @@ export interface UsePlayerSessionValueParams {
   isReady: boolean;
   isModuleLoaded: boolean;
   isPlaying: boolean;
+  isPaused: boolean;
   isLooping: boolean;
   playbackSeconds: number;
   playbackRowFraction: number;
@@ -44,6 +45,7 @@ export interface UsePlayerSessionValueParams {
   oscBufferRef: React.MutableRefObject<Float32Array | null>;
   audioReactiveRef: React.MutableRefObject<Float32Array | null>;
   playGuarded: () => void;
+  pause: () => void;
   stopMusic: (destroy?: boolean) => void;
   seekToStep: (step: number) => void;
   setIsLooping: (v: boolean | ((prev: boolean) => boolean)) => void;
@@ -59,6 +61,7 @@ export function usePlayerSessionValue(params: UsePlayerSessionValueParams): Play
     isReady,
     isModuleLoaded,
     isPlaying,
+    isPaused,
     isLooping,
     playbackSeconds,
     playbackRowFraction,
@@ -94,6 +97,7 @@ export function usePlayerSessionValue(params: UsePlayerSessionValueParams): Play
     oscBufferRef,
     audioReactiveRef,
     playGuarded,
+    pause,
     stopMusic,
     seekToStep,
     setIsLooping,
@@ -108,6 +112,7 @@ export function usePlayerSessionValue(params: UsePlayerSessionValueParams): Play
     isReady,
     isModuleLoaded,
     isPlaying,
+    isPaused,
     isLooping,
     playbackSeconds,
     playbackRowFraction,
@@ -143,6 +148,7 @@ export function usePlayerSessionValue(params: UsePlayerSessionValueParams): Play
     oscBufferRef,
     audioReactiveRef,
     play: playGuarded,
+    pause,
     stopMusic,
     seekToStep,
     setIsLooping,
@@ -152,13 +158,13 @@ export function usePlayerSessionValue(params: UsePlayerSessionValueParams): Play
     toggleAudioEngine,
     toggleChannelMute,
   }), [
-    isReady, isModuleLoaded, isPlaying, isLooping, playbackSeconds, playbackRowFraction,
+    isReady, isModuleLoaded, isPlaying, isPaused, isLooping, playbackSeconds, playbackRowFraction,
     totalPatternRows, sequencerMatrix, channelStates, beatPhase, grooveAmount, kickTrigger,
     activeChannels, volume, pan, status, activeEngine, isWorkletSupported, syncDebug, workletLoadError,
     analyserNode, channelVU, moduleMetadata, moduleFileName, moduleDurationSeconds,
     instrumentTable, channelMuteMask, displayShaderFile, instrumentPalette, dimFactor, isNightShader,
     isStepsShader, nightConfig, playbackStateRef, channelStatesRef, oscBufferRef,
-    audioReactiveRef, playGuarded, stopMusic, seekToStep, setIsLooping, setVolume, setPan,
+    audioReactiveRef, playGuarded, pause, stopMusic, seekToStep, setIsLooping, setVolume, setPan,
     handleFileSelected, toggleAudioEngine, toggleChannelMute,
   ]);
 }

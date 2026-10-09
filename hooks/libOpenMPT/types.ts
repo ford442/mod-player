@@ -11,10 +11,13 @@ import type { InstrumentTable } from '../../types/instruments';
 import type { OpenMPTWorkletEngine } from '../../audio-worklet/OpenMPTWorkletEngine';
 import type { WorkletPositionSample } from '../../utils/playheadPrediction';
 import type { NativeClockAnchor } from '../../utils/nativeClockAnchor';
+import type { PauseClock } from '../../utils/transportClock';
 import type {
   PlayheadLagTracker,
   PositionReportTracker,
 } from '../../utils/playheadLagMonitor';
+
+export type PlaybackEngine = 'worklet' | 'native-worklet' | 'scriptprocessor';
 
 /** All mutable refs owned by useLibOpenMPT — passed to extracted action factories. */
 export interface LibOpenMPTRefs {
@@ -54,6 +57,10 @@ export interface LibOpenMPTRefs {
   patternBackfillAbortRef: React.MutableRefObject<AbortController | null>;
   channelStatesRef: React.MutableRefObject<ChannelShadowState[]>;
   isPlayingRef: React.MutableRefObject<boolean>;
+  /** Paused: the engine is silent but keeps its position. Never true while isPlayingRef is. */
+  isPausedRef: React.MutableRefObject<boolean>;
+  /** Audio-clock instants of the last pause / resume — see utils/transportClock.ts. */
+  pauseClockRef: React.MutableRefObject<PauseClock>;
   playRef: React.MutableRefObject<((options?: { forceModuleLoad?: boolean }) => Promise<void>) | null>;
   workletLoadedRef: React.MutableRefObject<boolean>;
   workletModuleTokenRef: React.MutableRefObject<number>;
@@ -73,6 +80,12 @@ export interface LibOpenMPTRefs {
   nativeEngineRef: React.MutableRefObject<OpenMPTWorkletEngine | null>;
   nativeSharedBufferRef: React.MutableRefObject<SharedArrayBuffer | null>;
   activeEngineRef: React.MutableRefObject<'worklet' | 'native-worklet'>;
+  /**
+   * The engine that actually started the current playback, written by the engine start paths. Unlike
+   * activeEngineRef (selection state, which still says native after a failed native start fell back to
+   * the JS worklet) this is what pause/resume must drive.
+   */
+  playbackEngineRef: React.MutableRefObject<PlaybackEngine | null>;
   /** Maps native frame clock → main heard-time for playhead prediction. */
   nativeClockAnchorRef: React.MutableRefObject<NativeClockAnchor | null>;
   /** Bridge latency estimate (ring vs MediaStream) for clock anchor. */
@@ -85,6 +98,7 @@ export interface LibOpenMPTRefs {
 export interface LibOpenMPTSetters {
   setStatus: React.Dispatch<React.SetStateAction<string>>;
   setIsPlaying: React.Dispatch<React.SetStateAction<boolean>>;
+  setIsPaused: React.Dispatch<React.SetStateAction<boolean>>;
   setIsModuleLoaded: React.Dispatch<React.SetStateAction<boolean>>;
   setModuleInfo: React.Dispatch<React.SetStateAction<ModuleInfo>>;
   setSequencerMatrix: React.Dispatch<React.SetStateAction<PatternMatrix | null>>;

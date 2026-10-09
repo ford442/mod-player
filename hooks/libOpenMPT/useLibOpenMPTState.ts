@@ -7,6 +7,8 @@ export function useLibOpenMPTState(initialVolume: number) {
   const [status, setStatus] = useState<string>('Initializing...');
   const [isReady, setIsReady] = useState<boolean>(false);
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
+  /** Paused: silent, position kept, resumable. `isPlaying` is false while this is true. */
+  const [isPaused, setIsPaused] = useState<boolean>(false);
   const [isModuleLoaded, setIsModuleLoaded] = useState<boolean>(false);
   const [moduleInfo, setModuleInfo] = useState<ModuleInfo>({
     title: 'None',
@@ -68,6 +70,8 @@ export function useLibOpenMPTState(initialVolume: number) {
     setIsReady,
     isPlaying,
     setIsPlaying,
+    isPaused,
+    setIsPaused,
     isModuleLoaded,
     setIsModuleLoaded,
     moduleInfo,

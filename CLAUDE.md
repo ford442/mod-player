@@ -269,6 +269,23 @@ EngineState           // Worklet engine lifecycle state
     Debug info goes through `useThrottledDebugInfo`, not `useState`: it only
     re-renders PatternDisplay while the debug panel is open.
 
+15. **Transport is stopped / playing / paused — and pause is not stop (#461):**
+    `isPlaying` and `isPaused` are mutually exclusive (`deriveTransportState`).
+    *Pause* (`createPauseMusic`) silences the engine but keeps its cursor, the
+    clock refs and the last position sample; *stop* resets all of those. Never
+    implement pause with `stopMusic`, `AudioContext.suspend()` (pitfall 10) or a
+    new worklet message — it is `postPause()` / native `pause()` / the
+    ScriptProcessor callback reading `isPausedRef`. The playhead is
+    *extrapolated* from the last position sample on the audio clock, and that
+    clock does not pause, so `utils/transportClock.ts` caps heard time while
+    paused and rebases the stale sample on resume; skip that and resume jumps
+    the playhead forward by the pause length. `play()` while paused **resumes**
+    (`playShouldResume`); only `forceModuleLoad` really reloads, and a module
+    loaded while paused is *cued* (loads silent, stays paused). Choose the
+    engine to pause/resume from `playbackEngineRef` (written by the start
+    paths), **not** `activeEngine`: after a failed native start the app falls
+    back to the JS worklet but `activeEngine` can still say native.
+
 ## Critical Data Flows
 
 ### Module Load → Playback

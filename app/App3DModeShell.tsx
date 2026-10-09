@@ -15,12 +15,14 @@ export interface App3DModeShellProps {
   isModuleLoaded: boolean;
   syncDebug: SyncDebugInfo;
   isPlaying: boolean;
+  isPaused: boolean;
   playbackSeconds: number;
   channelStates: ChannelShadowState[];
   volume: number;
   pan: number;
   isLooping: boolean;
   play: () => void;
+  pause: () => void;
   stopMusic: (v: boolean) => void;
   setIsLooping: (v: boolean | ((prev: boolean) => boolean)) => void;
   setVolume: (v: number | ((prev: number) => number)) => void;

@@ -39,7 +39,8 @@ export const MIDI_ENABLED_STORAGE_KEY = 'xasm1_midi_enabled';
 export const DEFAULT_MIDI_MAPPINGS: MidiMapping[] = [
   // Transport (MIDI Machine Control style, any channel)
   { id: 'mmc-play', kind: 'noteOn', note: 94, command: 'transport.play', noteOnOnly: true },
-  { id: 'mmc-stop', kind: 'noteOn', note: 93, command: 'transport.pause', noteOnOnly: true },
+  // MMC Stop is a stop (position resets), not a pause — transport.pause is now a real pause.
+  { id: 'mmc-stop', kind: 'noteOn', note: 93, command: 'transport.stop', noteOnOnly: true },
   { id: 'mmc-rewind', kind: 'noteOn', note: 91, command: 'seek.prevOrder', noteOnOnly: true },
   { id: 'mmc-forward', kind: 'noteOn', note: 92, command: 'seek.nextOrder', noteOnOnly: true },
   // Simple keyboard / pad fallback

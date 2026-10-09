@@ -28,6 +28,14 @@ export interface AudioGraphRefs {
   spLeftBufPtr:        React.MutableRefObject<number>;
   spRightBufPtr:       React.MutableRefObject<number>;
   isPlayingRef:        React.MutableRefObject<boolean>;
+  /**
+   * Transport is paused (see hooks/libOpenMPT/createTransportActions.ts). Engine start paths read it so
+   * a node (re)started while paused — worklet fault recovery, loading a module — comes up paused,
+   * and the ScriptProcessor callback reads it to render silence.
+   */
+  isPausedRef:         React.MutableRefObject<boolean>;
+  /** Written by each engine start path: which engine is really rendering (pause/resume drive this one). */
+  playbackEngineRef:   React.MutableRefObject<'worklet' | 'native-worklet' | 'scriptprocessor' | null>;
   animationFrameHandle: React.MutableRefObject<number>;
   currentModulePtr:    React.MutableRefObject<number>;
   channelStatesRef:    React.MutableRefObject<ChannelShadowState[]>;

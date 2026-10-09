@@ -46,6 +46,7 @@ export function TransportBar() {
   const {
     isReady,
     isPlaying,
+    isPaused,
     isModuleLoaded,
     isLooping,
     playbackSeconds,
@@ -56,6 +57,7 @@ export function TransportBar() {
     moduleDurationSeconds,
     isNightShader,
     play,
+    pause,
     stopMusic,
     seekToStep,
     setIsLooping,
@@ -71,9 +73,11 @@ export function TransportBar() {
       <Controls
         isReady={isReady}
         isPlaying={isPlaying}
+        isPaused={isPaused}
         isModuleLoaded={isModuleLoaded}
         onFileSelected={handleFileSelected}
         onPlay={play}
+        onPause={pause}
         onStop={() => stopMusic(false)}
         isLooping={isLooping}
         onLoopToggle={() => setIsLooping(!isLooping)}

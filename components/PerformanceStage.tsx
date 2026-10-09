@@ -63,6 +63,7 @@ export function PerformanceStage({ studioDisplayHost = null }: PerformanceStageP
     isReady,
     isModuleLoaded,
     isPlaying,
+    isPaused,
     isLooping,
     playbackSeconds,
     playbackRowFraction,
@@ -88,6 +89,7 @@ export function PerformanceStage({ studioDisplayHost = null }: PerformanceStageP
     oscBufferRef,
     audioReactiveRef,
     play,
+    pause,
     stopMusic,
     seekToStep,
     setIsLooping,
@@ -231,9 +233,11 @@ export function PerformanceStage({ studioDisplayHost = null }: PerformanceStageP
           <Controls
             isReady={isReady}
             isPlaying={isPlaying}
+            isPaused={isPaused}
             isModuleLoaded={isModuleLoaded}
             onFileSelected={handleFileSelected}
             onPlay={play}
+            onPause={pause}
             onStop={() => stopMusic(false)}
             isLooping={isLooping}
             onLoopToggle={() => setIsLooping(!isLooping)}

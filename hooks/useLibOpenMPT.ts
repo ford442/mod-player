@@ -1,4 +1,4 @@
-import { useCallback, useEffect } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import type { PatternMatrix } from '../types';
 import { startAudioPlayback, type AudioGraphCallbacks, type AudioGraphConfig, type AudioGraphRefs } from './useAudioGraph';
 import { useWorkletLoader } from './useWorkletLoader';
@@ -8,6 +8,7 @@ import {
   writeStoredAudioEngineOverride,
 } from '../utils/audioEngineSelection';
 import { hasShareModuleIntent } from '../utils/shareState';
+import { deriveTransportState, playShouldResume } from '../utils/transportClock';
 import { applyMasterLevels } from '../utils/audioMasterGraph';
 import { DEFAULT_MODULE_URL, WORKLET_URL } from './libOpenMPT/constants';
 import { useLibOpenMPTRefs } from './libOpenMPT/useLibOpenMPTRefs';
@@ -19,7 +20,9 @@ import {
   createProcessModuleData,
 } from './libOpenMPT/createModuleActions';
 import {
+  createPauseMusic,
   createRequestOscBuffer,
+  createResumeMusic,
   createSeekToStep,
   createStopMusic,
 } from './libOpenMPT/createTransportActions';
@@ -30,14 +33,14 @@ export function useLibOpenMPT(initialVolume: number = 0.4, liteMode: boolean = f
   const refs = useLibOpenMPTRefs();
 
   const {
-    status, isReady, isPlaying, isModuleLoaded, moduleInfo, patternData,
+    status, isReady, isPlaying, isPaused, isModuleLoaded, moduleInfo, patternData,
     sequencerMatrix, sequencerCurrentRow, sequencerGlobalRow, totalPatternRows,
     playbackSeconds, playbackRowFraction, channelStates, beatPhase, grooveAmount,
     kickTrigger, activeChannels, isLooping, panValue, volume, activeEngine,
     isWorkletSupported, isNativeWorkletAvailable, restartPlayback, syncDebug,
     workletLoadError, instrumentNames, sampleNames, moduleFormat, instrumentTable, moduleComments,
     moduleDurationSeconds, moduleFileName,
-    setStatus, setIsPlaying, setIsModuleLoaded, setModuleInfo, setSequencerMatrix,
+    setStatus, setIsPlaying, setIsPaused, setIsModuleLoaded, setModuleInfo, setSequencerMatrix,
     setInstrumentNames, setSampleNames, setModuleFormat, setInstrumentTable, setModuleComments, setModuleDurationSeconds,
     setModuleFileName, setSequencerCurrentRow, setSequencerGlobalRow, setPlaybackSeconds,
     setPlaybackRowFraction, setTotalPatternRows, setChannelStates, setBeatPhase,
@@ -53,6 +56,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4, liteMode: boolean = f
   const setters = {
     setStatus,
     setIsPlaying,
+    setIsPaused,
     setIsModuleLoaded,
     setModuleInfo,
     setSequencerMatrix,
@@ -83,6 +87,11 @@ export function useLibOpenMPT(initialVolume: number = 0.4, liteMode: boolean = f
   const transportDeps = { refs, setters, activeEngine };
 
   const stopMusic = useCallback(createStopMusic(transportDeps), []);
+  // Stable for the component's lifetime, like stopMusic (they only touch refs and React's stable
+  // setters). A lazily-initialised state value rather than useCallback(createX(deps), []), which the
+  // exhaustive-deps rule flags ("dependencies are unknown") and would add to the warning budget.
+  const [pauseMusic] = useState(() => createPauseMusic(transportDeps));
+  const [resumeMusic] = useState(() => createResumeMusic(transportDeps));
   const seekToStepWrapper = useCallback(createSeekToStep(transportDeps), [activeEngine]);
   const requestOscBuffer = useCallback(createRequestOscBuffer(refs), []);
 
@@ -111,6 +120,12 @@ export function useLibOpenMPT(initialVolume: number = 0.4, liteMode: boolean = f
   refs.updateUIRef.current = updateUI;
 
   const play = useCallback(async (options?: { forceModuleLoad?: boolean }) => {
+    // "Play" while paused means resume, not a fresh start (see playShouldResume). A module load
+    // (forceModuleLoad) is the exception: it comes up cued/paused via the engine start paths.
+    if (playShouldResume(refs.isPausedRef.current, options)) {
+      resumeMusic();
+      return;
+    }
     const audioRefs: AudioGraphRefs = {
       libopenmptRef: refs.libopenmptRef,
       fileDataRef: refs.fileDataRef,
@@ -137,6 +152,8 @@ export function useLibOpenMPT(initialVolume: number = 0.4, liteMode: boolean = f
       spLeftBufPtr: refs.spLeftBufPtr,
       spRightBufPtr: refs.spRightBufPtr,
       isPlayingRef: refs.isPlayingRef,
+      isPausedRef: refs.isPausedRef,
+      playbackEngineRef: refs.playbackEngineRef,
       animationFrameHandle: refs.animationFrameHandle,
       currentModulePtr: refs.currentModulePtr,
       channelStatesRef: refs.channelStatesRef,
@@ -176,9 +193,15 @@ export function useLibOpenMPT(initialVolume: number = 0.4, liteMode: boolean = f
     requestOscBuffer();
   }, [
     activeEngine, isWorkletSupported, isNativeWorkletAvailable, panValue, volume, isLooping,
-    stopMusic, seekToStepWrapper, updateUI, requestOscBuffer,
+    stopMusic, resumeMusic, seekToStepWrapper, updateUI, requestOscBuffer,
     setStatus, setIsPlaying, setActiveEngine, setModuleInfo, setSequencerMatrix,
   ]);
+
+  /** Space / MIDI note 60 / the play button: pause while playing, otherwise play-or-resume. */
+  const togglePlayPause = useCallback(() => {
+    if (refs.isPlayingRef.current) pauseMusic();
+    else void play();
+  }, [pauseMusic, play, refs.isPlayingRef]);
 
   refs.playRef.current = play;
 
@@ -203,10 +226,14 @@ export function useLibOpenMPT(initialVolume: number = 0.4, liteMode: boolean = f
     if (isPlaying) {
       setRestartPlayback(true);
       stopMusic(false);
+    } else if (isPaused) {
+      // A pause belongs to the engine that holds the cursor; the other engine cannot continue it.
+      // Stop (position resets) rather than leave a paused UI over an engine that no longer exists.
+      stopMusic(false);
     }
     setActiveEngine(newEngine);
     setWorkletLoadError(null);
-  }, [activeEngine, isPlaying, isNativeWorkletAvailable, isWorkletSupported, stopMusic, setActiveEngine, setWorkletLoadError, setRestartPlayback]);
+  }, [activeEngine, isPlaying, isPaused, isNativeWorkletAvailable, isWorkletSupported, stopMusic, setActiveEngine, setWorkletLoadError, setRestartPlayback]);
 
   useEffect(() => {
     refs.audioWorkletNodeRef.current?.port.postMessage(postSetAudioLite(liteMode));
@@ -302,8 +329,9 @@ export function useLibOpenMPT(initialVolume: number = 0.4, liteMode: boolean = f
   }, [isReady, processModuleData, setStatus]);
 
   return {
-    status, isReady, isPlaying, isModuleLoaded, moduleInfo, patternData,
-    loadFile: loadModule, play, stopMusic, sequencerMatrix, sequencerCurrentRow, sequencerGlobalRow,
+    status, isReady, isPlaying, isPaused, isModuleLoaded, moduleInfo, patternData,
+    transportState: deriveTransportState(isPlaying, isPaused),
+    loadFile: loadModule, play, stopMusic, pause: pauseMusic, resume: resumeMusic, togglePlayPause, sequencerMatrix, sequencerCurrentRow, sequencerGlobalRow,
     totalPatternRows, playbackSeconds, playbackRowFraction, setPlaybackRowFraction, channelStates, beatPhase, grooveAmount, kickTrigger, activeChannels,
     instrumentNames,
     sampleNames,

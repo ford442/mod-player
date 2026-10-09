@@ -33,6 +33,7 @@ import {
 } from '../../utils/audioDiagOptions';
 import { seedPatternDiag } from '../../utils/patternBoundaryDiag';
 import { dispatchWorkletToMainMessage } from '../../audio-worklet/jsWorkletDispatch';
+import { silenceChannelStates } from '../../utils/transportClock';
 import { moduleBytesFromFileData, wireMasterOutput } from './masterGraph';
 import { runScriptProcessorFallback } from './scriptProcessorFallback';
 import type { AudioGraphCallbacks, AudioGraphConfig, AudioGraphRefs } from './types';
@@ -93,6 +94,50 @@ export async function handleWorkletFault(
   // every render still reaches the attempt>1 fallback instead of restarting
   // forever.
   await startJsWorkletPlayback(refs, callbacks, config, ctx, false);
+}
+
+/**
+ * The worklet acknowledged an accepted `loaded` (token matched): start playing — unless the transport is
+ * paused, in which case the node comes up paused. That is the case after worklet fault recovery (#456)
+ * and when a module is loaded while paused (it is cued, not played).
+ */
+export async function acceptWorkletLoaded(
+  refs: AudioGraphRefs,
+  callbacks: AudioGraphCallbacks,
+  config: Pick<AudioGraphConfig, 'volume' | 'panValue'>,
+  ctx: AudioContext,
+  node: AudioWorkletNode,
+): Promise<void> {
+  if (refs.gainNodeRef.current) {
+    refs.gainNodeRef.current.gain.value = config.volume;
+  }
+  if (refs.stereoPannerRef.current) {
+    refs.stereoPannerRef.current.pan.value = config.panValue;
+  }
+
+  if (refs.isPausedRef.current) {
+    console.log('[PLAY] Worklet loaded module while paused – staying paused');
+    // A paused start already sent pause before load; repeating it keeps the node's state explicit.
+    node.port.postMessage(postPause());
+    // The module (re)loaded from order 0 row 0, so that is where we are paused: bring the playhead
+    // and the engine cursor back in step.
+    callbacks.seekToStepWrapper(0);
+    callbacks.setStatus('Paused.');
+    if (refs.animationFrameHandle.current) cancelAnimationFrame(refs.animationFrameHandle.current);
+    refs.animationFrameHandle.current = requestAnimationFrame(refs.updateUIRef.current!);
+    return;
+  }
+
+  console.log('[PLAY] Worklet loaded module – starting animation');
+  refs.isPlayingRef.current = true;
+  callbacks.setIsPlaying(true);
+  callbacks.setStatus('Playing...');
+  if (ctx.state === 'suspended') {
+    try { await ctx.resume(); } catch { /* ignore */ }
+  }
+  if (refs.animationFrameHandle.current) cancelAnimationFrame(refs.animationFrameHandle.current);
+  refs.animationFrameHandle.current = requestAnimationFrame(refs.updateUIRef.current!);
+  node.port.postMessage(postPlay());
 }
 
 /**
@@ -239,31 +284,17 @@ export async function startJsWorkletPlayback(
           // restartAttempts to 0 on every restart and loop forever instead of
           // ever reaching the ScriptProcessor fallback — see handleWorkletFault().
           clearAudioFault();
+          // A report already in flight when the pause landed carries VU data: keep the meters dark.
+          if (refs.isPausedRef.current) silenceChannelStates(refs.channelStatesRef.current);
           break;
 
         case 'loaded-stale':
           console.log('[PLAY] Ignoring stale worklet loaded ack (token mismatch)');
           return;
 
-        case 'loaded-accepted': {
-          console.log("[PLAY] Worklet loaded module – starting animation");
-          refs.isPlayingRef.current = true;
-          callbacks.setIsPlaying(true);
-          callbacks.setStatus("Playing...");
-          if (refs.gainNodeRef.current) {
-            refs.gainNodeRef.current.gain.value = config.volume;
-          }
-          if (refs.stereoPannerRef.current) {
-            refs.stereoPannerRef.current.pan.value = config.panValue;
-          }
-          if (ctx.state === 'suspended') {
-            try { await ctx.resume(); } catch { /* ignore */ }
-          }
-          if (refs.animationFrameHandle.current) cancelAnimationFrame(refs.animationFrameHandle.current);
-          refs.animationFrameHandle.current = requestAnimationFrame(refs.updateUIRef.current!);
-          node.port.postMessage(postPlay());
+        case 'loaded-accepted':
+          await acceptWorkletLoaded(refs, callbacks, config, ctx, node);
           break;
-        }
 
         case 'ended':
           console.log('[PLAY] Worklet reported module ended');
@@ -383,6 +414,10 @@ export async function startJsWorkletPlayback(
     if (moduleBuf) {
       console.log('[PLAY] Sending module data to worklet:', moduleBuf.byteLength, 'bytes');
       refs.lastWorkletModuleTokenSentRef.current = refs.workletModuleTokenRef.current;
+      // A fresh processor renders as soon as its module loads (isPlaying defaults to true and load
+      // never touches it), so when we are paused the pause must reach it BEFORE the load — acting on
+      // the `loaded` ack instead would leak a few quanta of audio.
+      if (refs.isPausedRef.current) node.port.postMessage(postPause());
       node.port.postMessage(postLoad(moduleBuf));
     } else {
       console.error("[PLAY] No buffer to send to worklet!");
@@ -398,6 +433,7 @@ export async function startJsWorkletPlayback(
     wireMasterOutput(ctx, refs, config.volume, config.panValue);
 
     refs.audioWorkletNodeRef.current = node;
+    refs.playbackEngineRef.current = 'worklet';
     // Show a loading state while the WASM finishes initialising.
     // isPlaying will be set to true via the 'loaded' message handler above.
     callbacks.setStatus("Loading audio engine...");
