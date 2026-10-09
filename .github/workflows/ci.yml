@@ -432,14 +432,24 @@ jobs:
         if: steps.filter.outputs.native == 'true'
         run: npm ci
 
+      # The stamp covers mode, emsdk pin, libopenmpt version and every flag that shapes libopenmpt.a
+      # (scripts/build-wasm.sh). Printing it needs no toolchain.
+      - name: Compute libopenmpt flag stamp (release)
+        id: libopenmpt_stamp
+        if: steps.filter.outputs.native == 'true'
+        run: |
+          stamp="$(bash scripts/build-wasm.sh --print-flag-stamp)"
+          if [[ ! "$stamp" =~ ^[0-9a-f]{16}$ ]]; then echo "❌ unexpected flag stamp: '$stamp'" >&2; exit 1; fi
+          echo "stamp=$stamp" >> "$GITHUB_OUTPUT"
+
       - name: Cache libopenmpt static library
         if: steps.filter.outputs.native == 'true'
         uses: actions/cache@v6
         with:
-          path: vendor/libopenmpt-0.8.4+release
-          key: libopenmpt-a-${{ runner.os }}-emsdk-3.1.51-v0.8.4-static1-${{ hashFiles('scripts/build-wasm.sh') }}
-          restore-keys: |
-            libopenmpt-a-${{ runner.os }}-emsdk-3.1.51-v0.8.4-static1-
+          path: vendor/libopenmpt-0.8.4+release-native-release
+          # Exact key only — NO restore-keys. A prefix fallback restored a libopenmpt.a built with
+          # other flags, and the build script then trusted whatever archive it found.
+          key: libopenmpt-native-${{ runner.os }}-release-${{ steps.libopenmpt_stamp.outputs.stamp }}
 
       - name: Snapshot tracked JS worklet
         if: steps.filter.outputs.native == 'true'

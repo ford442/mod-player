@@ -46,7 +46,7 @@ npm run build:emcc
 ls -lh public/worklets/openmpt-native.*
 ```
 
-libopenmpt **0.8.4** is downloaded into `vendor/` automatically if missing. When `vendor/libopenmpt-0.8.4+release/bin/libopenmpt.a` already exists (local prior build or CI `actions/cache`), `build-wasm.sh` skips the multi-minute `make` and only re-links thin C++.
+libopenmpt **0.8.4** is downloaded into `vendor/` automatically if missing. Each mode builds in its own tree (`vendor/libopenmpt-0.8.4+release-native-release`, `…-native-debug`). When that tree's `bin/libopenmpt.a` already exists **and its `bin/.native-flags` stamp matches the current flags** (local prior build or CI `actions/cache`), `build-wasm.sh` skips the multi-minute `make` and only re-links thin C++. Editing `LIBOPENMPT_*_FLAGS` changes the stamp, so the archive rebuilds by itself — nothing to delete by hand. `scripts/build-wasm.sh --print-flag-stamp [--debug]` prints the stamp (no emcc needed); CI uses it as the cache key.
 
 ### Runtime engine override
 
@@ -55,7 +55,7 @@ After building artifacts, the app still defaults to the JS worklet (`auto`). To 
 - URL: `?engine=js`
 - Storage: `localStorage.xasm1_audio_engine = 'js'` (or omit / `auto` for prefer-when-present)
 
-See `public/worklets/README.md` for full precedence. CI: scheduled + path-filtered jobs cache `vendor/libopenmpt-0.8.4+release` with key including `hashFiles('scripts/build-wasm.sh')`.
+See `public/worklets/README.md` for full precedence. CI: scheduled + path-filtered jobs cache the per-mode tree under the exact key `libopenmpt-native-<os>-<mode>-<stamp>` (no `restore-keys`: a prefix fallback used to restore an archive built with other flags).
 
 ## Verify exports stay in sync
 
