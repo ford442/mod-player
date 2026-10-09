@@ -83,9 +83,9 @@ Copy only `public/worklets/openmpt-native.*` out of the image — never replace 
 
 | Workflow | When | What |
 |----------|------|------|
-| `ci.yml` → `wasm-smoke-test` | Every PR/push | Script safety, `verify:native-exports`, emsdk **3.1.51** pin |
+| `ci.yml` → `wasm-smoke-test` | Every PR/push | Script safety, shellcheck (warning+), `verify:native-exports`, emsdk **3.1.51** pin |
 | `native-wasm-scheduled.yml` | Weekly + manual | Full `npm run build:emcc`, artifact upload, JS worklet integrity check |
 
 ## Historical footgun (fixed)
 
-Older root `build-wasm.sh` used `-o public/worklets/openmpt-worklet.js` and even `rm -rf public/worklets`, destroying the production JS processor. That path is retired; see `public/worklets/README.md` and `AGENTS.md`.
+The old root `build-wasm.sh` (since deleted) used `-o public/worklets/openmpt-worklet.js` and even `rm -rf public/worklets`, destroying the production JS processor. That path is retired; see `public/worklets/README.md` and `AGENTS.md`.

@@ -19,7 +19,7 @@ Split player chrome state into three layers:
 ## Rules
 
 1. **Never put high-frequency audio in Zustand** — VU, per-quantum channel shadow state, and fractional playhead stay on refs inside `useLibOpenMPT`; only display-rate snapshots enter React context.
-2. **Stores own persistence** — use `utils/localStorageIO.ts` (same JSON format as `useLocalStorage`) so existing user prefs survive the refactor.
+2. **Stores own persistence** — use `utils/localStorageIO.ts` (same JSON format as the former `useLocalStorage` hook) so existing user prefs survive the refactor.
 3. **New panels mount via store or features context** — do not add props to `MainLayout`; extend `PlayerFeaturesValue` or add a focused store slice.
 4. **App.tsx stays the composition root** — wires hooks, builds context values, registers keyboard/MIDI/share side effects.
 

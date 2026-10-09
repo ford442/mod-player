@@ -99,7 +99,7 @@ async function openPage(browser, engine) {
 
 async function seedSession(page, { shader, renderer }) {
   await page.evaluate(({ shader: s, renderer: r }) => {
-    // useLocalStorage stores JSON-stringified values — raw strings break shader selection.
+    // The app stores JSON-stringified values (utils/localStorageIO.ts) — raw strings break shader selection.
     localStorage.setItem('xasm1_last_shader', JSON.stringify(s));
     localStorage.setItem('xasm1_pattern_renderer', r);
     localStorage.setItem('xasm1_lite_mode', '0');

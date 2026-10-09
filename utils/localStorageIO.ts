@@ -1,4 +1,4 @@
-/** Read/write localStorage using the same JSON format as hooks/useLocalStorage.ts */
+/** Read/write localStorage as JSON (the format the former hooks/useLocalStorage.ts used, so stored values still parse) */
 
 export function readLocalStorage<T>(key: string, fallback: T): T {
   try {

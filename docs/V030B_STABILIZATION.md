@@ -12,7 +12,7 @@
 |------|-----|
 | `AGENTS.md` | Audio architecture, renderer backends, CI gates |
 | `docs/WORKLET_AUDIO_BUG.md` | #329/#330/#354 regression post-mortem + prevention checklist |
-| `grok.md` | Project overview + shader-uniform coupling warning |
+| `CLAUDE.md` | Project overview + shader-uniform coupling warning |
 | `utils/playheadPrediction.ts` | Worklet → GPU fractional playhead extrapolation |
 | `utils/gpuPacking.ts` | PackedA/PackedB + DURA/TRIG-001 CPU packing |
 | `shaders/lib/dura.wgsl` | WGSL duration unpack (`unpackDurationInfo`) |

@@ -23,7 +23,6 @@ What is **production** vs **supporting** vs **ignored/experimental**.
 | `scripts/` | Build, smoke tests, shader sync |
 | `.github/workflows/` | CI |
 | `archive/` | Demoted experiments — **not imported** |
-| `shaders-enhanced/` | WGSL prototypes; promote via registry when ready |
 
 ## Gitignored / download at build time
 
@@ -45,7 +44,7 @@ What is **production** vs **supporting** vs **ignored/experimental**.
 | Tracked | Untracked (gitignored) |
 |---------|------------------------|
 | `docs/planning/ROADMAP.md` — short living roadmap | `.swarm-state.md`, `weekly_plan.md` — run diaries |
-| `docs/planning/*.md` — feature specs (e.g. FT2 comparison) | Root agent dump files |
+| `docs/planning/*.md` — plans and feature specs (e.g. FT2 comparison); agent prompt templates live in `docs/agents/` | Root agent dump files |
 | GitHub issues / PRs for status | Private weekly dispatch artifacts |
 
 Do **not** append multi-session ops diaries to tracked files. Point agents at issues + `ROADMAP.md`.
@@ -64,6 +63,13 @@ These were deleted or archived to reduce agent confusion:
 - Root `git.sh` — unsafe “add/commit/push fix” helper; use normal git workflow
 - Root `plan.md` → `docs/planning/ft2-feature-comparison.md`
 - Tracked `_codeql_detected_source_root` symlink — gitignored (Vite still uses `watch.followSymlinks: false`)
+
+## Removed (#451 cleanup)
+
+- `dist/`, `test-results/`, `.playwright-mcp/` and `public/worklets/openmpt-native.ww.js` — build/scratch output that had been committed; now gitignored
+- `shaders-enhanced/`, `src/shaders/polar_chassis.wgsl`, `src/utils/shaderHelpers.ts`, `utils/colorSchemes.ts`, `hooks/useLocalStorage.ts`, and four unused components (`CheatsheetModal`, `StoragePlaylist`, `InfoDisplay`, `PatternViewer`) — nothing imported them
+- `scripts/apply-tier-a-includes.mjs`, `migrate-tier-a.mjs`, `tier_a_strip.py` (+ `.shader-baselines/`) — the tier-A shader-include migration is finished; `scripts/verify-packing.mts`, `scripts/make_bezel_transparent.py`
+- `grok.md` (a third assistant guide), `metadata.json`, root `build-wasm.sh` (deprecated alias of `scripts/build-wasm.sh`)
 
 ## Sparse checkout hint
 

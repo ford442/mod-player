@@ -5,7 +5,7 @@
 | First-party (ship here) | Experimental (do not land without review) |
 |-------------------------|---------------------------------------------|
 | `components/`, `hooks/`, `utils/`, `src/` | `archive/` |
-| `shaders/` + `public/shaders/` (synced) | `shaders-enhanced/` (prototypes) |
+| `shaders/` + `public/shaders/` (synced) | Shader prototypes that are not registered in `utils/shaderRegistry.ts` |
 | `appConfig.ts`, `utils/shaderRegistry.ts` | Agent scratch output at repo root |
 | `scripts/`, `cpp/`, `public/worklets/` | Duplicate mini-apps or vendor trees |
 

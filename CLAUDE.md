@@ -46,7 +46,7 @@ mod-player/
 │
 ├── audio-worklet/
 │   ├── js/openmpt-processor.ts  # JS AudioWorklet processor SOURCE (esbuild → public/worklets/openmpt-worklet.js)
-│   ├── libSingleton.ts, libRuntimeReady.ts, workletProtocolConstants.ts   # Bundled into the worklet
+│   ├── libRuntimeReady.ts, workletProtocolConstants.ts   # Bundled into the worklet
 │   ├── protocol.ts, jsWorkletDispatch.ts     # Main-thread side of the worklet message protocol
 │   └── OpenMPTWorkletEngine.ts  # Native C++ engine wrapper
 │
