@@ -296,10 +296,12 @@ jobs:
       - name: Shellcheck / syntax-check build scripts
         # Findings fail the job. (This step used to be `shellcheck ... || true` behind a
         # "tool is installed" check, so it could never fail and silently skipped if shellcheck was absent.)
+        # Gated at warning+: info/style notes (e.g. SC2015 on the deliberate `A && B || true` idiom)
+        # differ between shellcheck versions, so gating on them would flap whenever the runner image updates.
         run: |
           command -v shellcheck >/dev/null || { echo "❌ shellcheck is not installed on this runner"; exit 1; }
           for f in scripts/build-wasm.sh scripts/build-js-libopenmpt.sh; do
-            shellcheck "$f"
+            shellcheck --severity=warning "$f"
             bash -n "$f"
             echo "✅ $f clean"
           done
