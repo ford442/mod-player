@@ -35,6 +35,12 @@ const ENTRIES = [
     outfile: 'public/worklets/openmpt-worklet.js',
     versionFile: 'audio-worklet/js/worklet-version.generated.json',
   },
+  {
+    // FX rack character stage (#453); loaded by audio/fx/character/.
+    entry: 'audio-worklet/js/fx-character-processor.ts',
+    outfile: 'public/worklets/fx-character-worklet.js',
+    versionFile: 'audio-worklet/js/fx-character-version.generated.json',
+  },
 ];
 
 /** @param {string} entry */
