@@ -269,6 +269,18 @@ EngineState           // Worklet engine lifecycle state
     Debug info goes through `useThrottledDebugInfo`, not `useState`: it only
     re-renders PatternDisplay while the debug panel is open.
 
+15. **Master chain has a single input (#453):** every engine (JS worklet,
+    native, ScriptProcessor) connects to `masterInputRef`, **never** to
+    `analyserRef`: `engine → masterInput → masterDirect → analyser → panner →
+    gain → destination`. The FX rack attaches in parallel to `masterDirect`
+    (`masterInput → rack → analyser`) through `audio/fx/fxHost.ts`, and owns
+    `masterDirect.gain`. `ensureMasterOutputChain` is **connect-only** (a
+    duplicate `connect()` is a no-op per spec), so re-asserting it on every
+    play / hot reload keeps the performance-capture tap and the rack's edges.
+    Don't put a bare `disconnect()` on a master node back.
+    `tests/audioMasterGraph.test.ts` holds the topology and sample-exact null
+    tests (real Web Audio via node-web-audio-api, `tests/helpers/webAudioNode.ts`).
+
 ## Critical Data Flows
 
 ### Module Load → Playback
@@ -335,6 +347,7 @@ All shared canvas layout values live here:
 - **Do not** add broad glob patterns to `tailwind.config.js`
 - **Do not** remove the Vite CORS headers (breaks SharedArrayBuffer / WASM workers)
 - **Do not** add a second `new AudioContext` call site — `utils/audioContextFactory.ts` is the only one (see pitfall 11)
+- **Do not** connect an engine node to `analyserRef` or put a bare `disconnect()` on a master node — engines go to `masterInputRef` (see pitfall 15)
 - **Do not** assume WebGPU is available — always check for fallback paths
 - **Do not** commit Emscripten `a.out` / `a.out.*` — native outputs are only `public/worklets/openmpt-native.*` (gitignored build artifacts from `npm run build:emcc`)
 - **Do not** commit agent scratch files (`.swarm-state.md`, `weekly_plan.md`) — use `docs/planning/ROADMAP.md` and GitHub issues

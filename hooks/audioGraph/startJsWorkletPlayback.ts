@@ -388,10 +388,10 @@ export async function startJsWorkletPlayback(
       console.error("[PLAY] No buffer to send to worklet!");
     }
 
-    console.log('[PLAY] Connecting audio graph: worklet -> analyser -> panner -> gain -> destination');
+    console.log('[PLAY] Connecting audio graph: worklet -> master input -> analyser -> panner -> gain -> destination');
     if (!reuseWorkletNode) {
       try { node.disconnect(); } catch { /* ignore stale edges */ }
-      node.connect(refs.analyserRef.current!);
+      node.connect(refs.masterInputRef.current!);
     } else {
       console.log('[PLAY] Hot reload — keeping existing worklet wiring; re-asserting master output chain');
     }
