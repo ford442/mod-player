@@ -66,7 +66,7 @@ Landed by `8175cc9` (`fix(stage): URL ?stage= preference, toggle/exit commands, 
 | P2 | [#403](https://github.com/ford442/mod-player/issues/403) | Tracker studio: inspector waveforms, S3M extract, **audible** pattern edits via a sample-audition worklet (libopenmpt cannot write cells). Build the worklet on `audio-worklet/js/` (typed, #435). |
 | P2 | [#417](https://github.com/ford442/mod-player/issues/417) | Performance instrument: MIDI/chassis on `playerCommands`, `stageMode`, WebCodecs music-video. Unblocked once #462 lands (the #436 decision is made). |
 | P2 | [#452](https://github.com/ford442/mod-player/issues/452) | Shader Lab: typed uniform schema (generated WGSL structs) + live WGSL editor with hot pipeline swap. Builds on #449's checked async pipelines. |
-| P2 | [#453](https://github.com/ford442/mod-player/issues/453) | Master FX rack after libopenmpt (EQ/comp/reverb/"Amiga" coloration) as a WASM DSP worklet with export parity. |
+| P2 | [#453](https://github.com/ford442/mod-player/issues/453) | Master FX rack after libopenmpt (EQ/comp/reverb/"Amiga" coloration) as a WASM DSP worklet with export parity. **Implemented, in review** — stacked branches `chore/453-prep` → … → `docs/453-closeout`; design + limits in `docs/FX_RACK.md`, Faust decision in `docs/ADR-fx-character-dsp.md`. Public builds gated on `VITE_FX_RACK=1`. |
 | P3 | [#454](https://github.com/ford442/mod-player/issues/454) | Module library v2: metadata DB, full-text search, per-song presets, offline crate. |
 | P2 (leftover) | #411 (closed) | `native-engine-bench-notes.md` native column still empty. Filling it needs an emsdk 3.1.51 host. #439 rewrote the JS baseline notes, so re-baseline both columns together. |
 
