@@ -140,11 +140,12 @@ for (const href of preloadHrefs) {
 /** rel path (relative to BUILD_DIR) → { code: Buffer, via: string | null } for the eager graph. */
 const eagerChunks = new Map();
 {
+  /** @type {Array<{ rel: string, via: string | null }>} */
   const queue = [];
   if (entryRel) queue.push({ rel: entryRel, via: null });
   for (const href of preloadHrefs) queue.push({ rel: resolveAssetHref(href), via: 'index.html modulepreload' });
-  while (queue.length > 0) {
-    const { rel, via } = queue.shift();
+  for (let item = queue.shift(); item; item = queue.shift()) {
+    const { rel, via } = item;
     if (eagerChunks.has(rel)) continue;
     const abs = join(BUILD_DIR, rel);
     if (!existsSync(abs)) {
