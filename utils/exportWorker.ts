@@ -1,5 +1,6 @@
 import type {
   ExportWorkerComplete,
+  ExportWorkerPcm,
   ExportWorkerProgress,
   ExportWorkerRequest,
   ExportWorkerResult,
@@ -45,6 +46,22 @@ export function exportWavInWorker(
   worker: Worker,
   options: ExportWavOptions,
 ): Promise<ExportWorkerComplete> {
+  return runExportWorker<ExportWorkerComplete>(worker, options, 'wav');
+}
+
+/** Dry float render for the FX rack export path (#453): encode happens on the main thread. */
+export function exportPcmInWorker(
+  worker: Worker,
+  options: ExportWavOptions,
+): Promise<ExportWorkerPcm> {
+  return runExportWorker<ExportWorkerPcm>(worker, options, 'pcm');
+}
+
+function runExportWorker<T extends ExportWorkerComplete | ExportWorkerPcm>(
+  worker: Worker,
+  options: ExportWavOptions,
+  output: 'wav' | 'pcm',
+): Promise<T> {
   const message: ExportWorkerRequest = {
     type: 'render-wav',
     fileData: options.fileData,
@@ -52,12 +69,13 @@ export function exportWavInWorker(
     ...(options.muteMask ? { muteMask: options.muteMask } : {}),
     ...(options.startSeconds !== undefined ? { startSeconds: options.startSeconds } : {}),
     ...(options.endSeconds !== undefined ? { endSeconds: options.endSeconds } : {}),
+    ...(output === 'pcm' ? { output } : {}),
   };
 
   const transfer: Transferable[] = [options.fileData.buffer];
   const timeoutMs = options.timeoutMs ?? EXPORT_WORKER_TIMEOUT_MS;
 
-  return new Promise<ExportWorkerComplete>((resolve, reject) => {
+  return new Promise<T>((resolve, reject) => {
     let settled = false;
     const timer = window.setTimeout(() => {
       if (settled) return;
@@ -85,11 +103,11 @@ export function exportWavInWorker(
         }
         return;
       }
-      if (data.type === 'complete') {
+      if (data.type === 'complete' || data.type === 'complete-pcm') {
         if (!settled) {
           settled = true;
           cleanup();
-          resolve(data);
+          resolve(data as T);
         }
       }
     };
@@ -133,4 +151,4 @@ export function exportWavInWorker(
   });
 }
 
-export type { ExportWorkerComplete, ExportWorkerProgress };
+export type { ExportWorkerComplete, ExportWorkerPcm, ExportWorkerProgress };
