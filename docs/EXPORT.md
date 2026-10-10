@@ -7,6 +7,7 @@ Creators can export audio and record performance clips from the player UI (**Exp
 | Feature | Implementation | Notes |
 |---------|----------------|-------|
 | **Offline WAV** | `workers/openmpt-export.worker.ts` + `utils/offlineRender.ts` | Renders in a dedicated worker; UI stays responsive |
+| **Through the FX rack** (#453) | worker (dry PCM, `output: 'pcm'`) → `audio/fx/offline/renderFxOffline.ts` (main-thread OfflineAudioContext, same `buildFxGraph()` as live) → encode | Whenever an FX module is on; adds the rack's latency + tail; see `docs/FX_RACK.md` |
 | **Channel mute mask** | libopenmpt ext `interactive.set_channel_mute_status` | Toggle channels in Export panel; mutes apply only when ≥1 channel is muted |
 | **Performance capture** | `MediaRecorder` + `canvas.captureStream()` + parallel audio tap | Saves WebM/MP4 depending on browser |
 
@@ -17,6 +18,10 @@ Exported WAV length is compared to `openmpt_module_get_duration_seconds()` metad
 ```
 |renderedSeconds − metadataSeconds| ≤ 1/30 s   (one 30 fps frame)
 ```
+
+With the FX rack on, the check still applies to the dry render; the FX tail
+(room IR, compressor look-ahead, resampler delay) is appended on top and
+reported in the export message.
 
 The offline renderer uses 44.1 kHz stereo, Sinc+LP interpolation (`OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH` = 3, value 8), and `set_repeat_count(0)` for a single pass (no loop).
 
