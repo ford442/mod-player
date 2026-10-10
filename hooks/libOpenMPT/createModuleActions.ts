@@ -14,6 +14,7 @@ import {
   resolveParsedModule,
 } from './parseModule';
 import type { LibOpenMPTRefs, LibOpenMPTSetters } from './types';
+import { publishSongBytes } from '../../utils/songIdentity';
 
 export interface ModuleActionsDeps {
   refs: LibOpenMPTRefs;
@@ -126,6 +127,9 @@ export function createProcessModuleData(deps: ModuleActionsDeps) {
 
     const fileDataCopy = fileData.slice();
     fileDataRef.current = fileDataCopy;
+    // Per-song FX presets (#453) key on a hash of the whole file. Every load
+    // path (drop, playlist, default module) comes through here.
+    void publishSongBytes(fileDataCopy);
 
     const nativeEngineEarly = refs.nativeEngineRef.current;
     const useNativeParse =

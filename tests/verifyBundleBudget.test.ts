@@ -15,19 +15,26 @@ const ENTRY = 'index-AAAA.js';
 const VENDOR = 'react-vendor-BBBB.js';
 const THREE = 'three-r3f-CCCC.js';
 const LAZY = 'App3DView-DDDD.js';
+const FX = 'fxRackController-EEEE.js';
 
 interface Fixture {
   /** Extra `<link rel="modulepreload">` hrefs in index.html. */
   preloads?: string[];
   /** Overrides for chunk file contents, keyed by file name; `null` omits the chunk. */
   chunks?: Partial<Record<string, string | null>>;
+  /** Ship dist/ir/*.opus (default true). */
+  irs?: boolean;
 }
 
-/** A minimal dist/ the budget script accepts: entry → react-vendor, 3D view lazily → three-r3f. */
-function makeDist({ preloads = [], chunks = {} }: Fixture = {}): string {
+/**
+ * A minimal dist/ the budget script accepts: entry → react-vendor, 3D view lazily → three-r3f,
+ * FX rack lazily (#453), room IRs shipped.
+ */
+function makeDist({ preloads = [], chunks = {}, irs = true }: Fixture = {}): string {
   const dir = mkdtempSync(join(tmp, 'dist-'));
   const defaults: Record<string, string> = {
-    [ENTRY]: `import{r as e}from"./${VENDOR}";const L=()=>import("./${LAZY}");export{L as lazy3d};`,
+    [ENTRY]: `import{r as e}from"./${VENDOR}";const L=()=>import("./${LAZY}");const F=()=>import("./${FX}");export{L as lazy3d,F as fx};`,
+    [FX]: `import{r as e}from"./${VENDOR}";export const g=c=>c.createConvolver();`,
     [VENDOR]: 'export const r=1;',
     [THREE]: `import{r as e}from"./${VENDOR}";export const T=2;`,
     [LAZY]: `import{r as e}from"./${VENDOR}";import{T}from"./${THREE}";export default T;`,
@@ -51,6 +58,10 @@ function makeDist({ preloads = [], chunks = {} }: Fixture = {}): string {
   }
   mkdirSync(join(dir, 'worklets'), { recursive: true });
   writeFileSync(join(dir, 'worklets', 'openmpt-worklet.js'), '// stub');
+  if (irs) {
+    mkdirSync(join(dir, 'ir'), { recursive: true });
+    writeFileSync(join(dir, 'ir', 'small.opus'), 'OggS');
+  }
   return dir;
 }
 
@@ -102,6 +113,28 @@ describe('verify-bundle-budget: three.js must stay off the initial load', () => 
     const r = run(makeDist({ chunks: { [ENTRY]: `import{r as e}from"./${VENDOR}";import d from"./${LAZY}";export{d};` } }));
     expect(r.status).toBe(1);
     expect(r.out).toContain('3D view is not lazy');
+  });
+
+  it('fails when the FX rack chunk is missing, or loaded eagerly (#453)', () => {
+    const missing = run(makeDist({ chunks: { [FX]: null } }));
+    expect(missing.status).toBe(1);
+    expect(missing.out).toContain('no fxRackController-*.js lazy chunk found');
+
+    const eager = run(
+      makeDist({ chunks: { [ENTRY]: `import{r as e}from"./${VENDOR}";import{g}from"./${FX}";export{g};` } }),
+    );
+    expect(eager.status).toBe(1);
+    expect(eager.out).toContain('FX rack is not lazy');
+  });
+
+  it('fails when the FX rack graph leaks into the initial load, or the IRs are missing (#453)', () => {
+    const leaked = run(makeDist({ chunks: { [VENDOR]: 'export const r=c=>c.createDynamicsCompressor();' } }));
+    expect(leaked.status).toBe(1);
+    expect(leaked.out).toContain('contains FX rack graph code');
+
+    const noIrs = run(makeDist({ irs: false }));
+    expect(noIrs.status).toBe(1);
+    expect(noIrs.out).toContain('dist/ir/*.opus missing');
   });
 
   it('fails when the shared react-vendor chunk is missing', () => {
