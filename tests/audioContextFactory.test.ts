@@ -239,6 +239,15 @@ describe('audioContextFactory is the only construction site', () => {
     expect(offenders).toEqual([]);
   });
 
+  it('OfflineAudioContext is only built for FX export and FX test harnesses (#453)', () => {
+    const allowed = ['/audio/fx/offline/', '/audio/fx/testing/'];
+    const offenders = walkSources(ROOT)
+      .map((f) => f.slice(ROOT.length))
+      .filter((rel) => !allowed.some((dir) => rel.startsWith(dir)))
+      .filter((rel) => /new\s+OfflineAudioContext\b/.test(readCode(join(ROOT, rel))));
+    expect(offenders).toEqual([]);
+  });
+
   it('the dual-context native path is gone from the tree', () => {
     const hits = walkSources(ROOT)
       .filter((f) => /nativeCtx|isNativeLegacyAudioContext|native-bridge-processor/
