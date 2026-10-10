@@ -26,6 +26,8 @@ export interface LibOpenMPTRefs {
   spRightBufPtr: React.MutableRefObject<number>;
   spFallbackTriggered: React.MutableRefObject<boolean>;
   audioWorkletNodeRef: React.MutableRefObject<AudioWorkletNode | null>;
+  masterInputRef: React.MutableRefObject<GainNode | null>;
+  masterDirectRef: React.MutableRefObject<GainNode | null>;
   stereoPannerRef: React.MutableRefObject<StereoPannerNode | null>;
   gainNodeRef: React.MutableRefObject<GainNode | null>;
   analyserRef: React.MutableRefObject<AnalyserNode | null>;
