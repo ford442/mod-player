@@ -8,11 +8,15 @@ import {
   releaseMasterNodes,
   type MasterGraphRefs,
 } from '../utils/audioMasterGraph';
+import { FxRack } from '../audio/fx/FxRack';
+import { defaultFxRackState } from '../audio/fx/spec/schema';
 import { readAudioGraphSources } from './helpers/audioGraphSource';
+import { CHARACTER_WORKLET, FX_CROSSFADE_S } from './helpers/fxRender';
 import {
   bufferFrom,
   channelsOf,
   createOfflineContext,
+  installWebAudioGlobals,
   maxAbsDiff,
   nwa,
   startRenderingWithTimeout,
@@ -279,6 +283,46 @@ describe('master graph null test (#453 acceptance 1)', () => {
     const legacy = await renderLegacy(input);
     const attached = await renderProduction(input, true);
     expect(maxAbsDiff(attached, legacy)).toBe(0);
+  });
+
+  it('a real FxRack attached with every slot bypassed, then collapsed, matches the pre-rack graph', async () => {
+    installWebAudioGlobals();
+    const input = program();
+    const legacy = await renderLegacy(input);
+
+    const ctx = createOfflineContext({ length: LEN, sampleRate: SR });
+    const refs = graphRefs();
+    ensureCommonMasterNodes(ctx as unknown as AudioContext, refs, VOLUME, PAN);
+    // Modules created but bypassed: their slots are unity wires.
+    const rack = await FxRack.create(ctx, defaultFxRackState(), {
+      mode: 'live',
+      characterWorkletUrl: CHARACTER_WORKLET,
+    });
+    await rack.prepare(['character', 'eq', 'comp']);
+    const attachAt = (128 * 10) / SR;
+    const collapseAt = (128 * 100) / SR;
+    rack.attach(
+      {
+        masterInput: refs.masterInputRef.current!,
+        masterDirect: refs.masterDirectRef.current!,
+        analyser: refs.analyserRef.current!,
+      },
+      attachAt,
+    );
+    rack.collapse(collapseAt);
+    wireMasterOutput(ctx as unknown as AudioContext, refs, VOLUME, PAN); // a play / hot reload mid-way
+    const src = new nwa.AudioBufferSourceNode(ctx, { buffer: bufferFrom(ctx, input) });
+    src.connect(refs.masterInputRef.current!);
+    src.start(0);
+    const out = channelsOf(await startRenderingWithTimeout(ctx));
+
+    const f = (t: number) => Math.round(t * SR);
+    const settled = (t: number) => f(t + FX_CROSSFADE_S) + 1;
+    expect(maxAbsDiff(out, legacy, 0, f(attachAt))).toBe(0); //               direct path
+    expect(maxAbsDiff(out, legacy, settled(attachAt), f(collapseAt))).toBe(0); // through the bypassed rack
+    expect(maxAbsDiff(out, legacy, settled(collapseAt))).toBe(0); //             collapsed again
+    // During each 10 ms complementary fade the two identical paths sum to x within float rounding.
+    expect(maxAbsDiff(out, legacy)).toBeLessThan(1e-6);
   });
 
   it('ensureCommonMasterNodes publishes the host and recreates nodes for a new context', () => {
