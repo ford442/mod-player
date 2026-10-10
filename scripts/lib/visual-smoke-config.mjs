@@ -6,7 +6,7 @@
  *   SMOKE_PROFILE=ci|full|quick
  */
 
-/** @typedef {{ id: string, renderer: string, lite: 0|1, moduleUrl?: string, label?: string }} SmokeScenario */
+/** @typedef {{ id: string, renderer: string, lite: 0|1, shaderFile?: string, moduleUrl?: string, seekRows?: number[], label?: string }} SmokeScenario */
 
 export const DEFAULT_SEEK_ROWS = [0, 8, 16];
 
@@ -181,9 +181,11 @@ export function renderersForProfile(profile) {
   return ['html', 'webgpu'];
 }
 
+/** @returns {Array<0 | 1>} */
 export function liteModesForProfile(profile) {
   if (process.env.LITE_MODES) {
-    return process.env.LITE_MODES.split(',').map((s) => Number(s.trim())).filter((n) => n === 0 || n === 1);
+    const modes = process.env.LITE_MODES.split(',').map((s) => Number(s.trim()));
+    return modes.filter(/** @returns {n is 0 | 1} */ (n) => n === 0 || n === 1);
   }
   if (profile === 'ci') return [0];
   return [0, 1];

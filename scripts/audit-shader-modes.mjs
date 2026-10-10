@@ -9,8 +9,7 @@
 
 import puppeteer from '/content/headless-chrome-nvidia-t4-gpu-support/examples/puppeteer/node_modules/puppeteer/lib/puppeteer/puppeteer.js';
 import { mkdirSync, writeFileSync, readFileSync, readdirSync } from 'fs';
-import { join, basename } from 'path';
-import { execSync } from 'child_process';
+import { join } from 'path';
 
 const BASE_URL = process.env.TEST_URL || 'http://localhost:5173';
 const OUTPUT_DIR = process.env.OUTPUT_DIR || '/mnt/ramdisk/shader-audit';

@@ -111,8 +111,10 @@ export function checkAudioDiag(diag) {
  * Keep in sync with tests/audioSmokeCounters.test.ts fixtures.
  */
 export function readPlaybackCountersInBrowser() {
-  const hooks = window.__TEST_HOOKS__;
-  const diag = window.__AUDIO_DIAG__;
+  // These globals are installed by the app (hooks/diagnostics), not typed in the DOM lib.
+  const appWindow = /** @type {Window & { __TEST_HOOKS__?: any, __AUDIO_DIAG__?: any }} */ (window);
+  const hooks = appWindow.__TEST_HOOKS__;
+  const diag = appWindow.__AUDIO_DIAG__;
   const seekRoot = document.querySelector('.flex.items-center.gap-3.text-xs.font-mono.select-none');
   const timeText = seekRoot?.querySelector('span')?.textContent ?? null;
 
