@@ -92,6 +92,7 @@ npm run build:worklet # Alias of build:emcc (never overwrites openmpt-worklet.js
 npm run build:js-worklet # Compile the typed worklets (openmpt-processor.ts → openmpt-worklet.js, fx-character-processor.ts → fx-character-worklet.js; esbuild)
 npm run build:js-libopenmpt # Real-WASM libopenmpt for the JS engine → public/worklets/libopenmpt-worklet.{js,wasm} (emsdk 3.1.51; committed)
 npm run verify:js-libopenmpt # Static + boot/render/corrupt-input checks of that pair (no emsdk needed)
+npm run smoke:fx:ci  # FX rack on headless Chrome (#453): bypass null, crossfade clicks, parity, character CPU (needs a preview on BASE_URL)
 python3 deploy.py    # Build + SFTP upload to production server
 ```
 
