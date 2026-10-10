@@ -125,6 +125,10 @@ export const getShaderEntryPoints = (shaderFile: string): Readonly<ShaderEntryPo
 export const usesSpectrumBuffer = (shaderFile: string): boolean =>
   resolveShaderMeta(shaderFile).spectrumBuffer ?? false;
 
+/** Background reads the FX rack's settings from bezel slots 24–27 (#453). */
+export const usesFxUniforms = (shaderFile: string): boolean =>
+  resolveShaderMeta(shaderFile).fxUniforms ?? false;
+
 export const usesBareCanvasChrome = (shaderFile: string): boolean =>
   resolveShaderMeta(shaderFile).bareCanvasChrome;
 

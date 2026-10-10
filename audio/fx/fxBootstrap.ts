@@ -9,6 +9,7 @@
  */
 import { FX_RACK_ENABLED } from '../../appConfig';
 import { useFxStore } from '../../store/fxStore';
+import { setFxVisualTargets } from './fxVisualState';
 import { anyModuleActive, type FxModuleId } from './types';
 
 type ControllerModule = typeof import('./fxRackController');
@@ -47,11 +48,14 @@ export function retryFxModule(id: FxModuleId): void {
 /** Start watching the store; returns the unsubscribe. Call once (App). */
 export function startFxBootstrap(): () => void {
   if (!FX_RACK_ENABLED) return () => {};
-  const check = (effective = useFxStore.getState().effective) => {
-    if (anyModuleActive(effective)) void loadFxRackController();
+  const sync = () => {
+    const s = useFxStore.getState();
+    // The chassis shader (v0.61) shows the rack's settings even before it loads.
+    setFxVisualTargets(s.effective, s.moduleStatus.room?.status !== 'unavailable');
+    if (anyModuleActive(s.effective)) void loadFxRackController();
   };
-  check();
+  sync();
   return useFxStore.subscribe((s, prev) => {
-    if (s.effective !== prev.effective) check(s.effective);
+    if (s.effective !== prev.effective || s.moduleStatus !== prev.moduleStatus) sync();
   });
 }
