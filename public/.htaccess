@@ -18,6 +18,8 @@
   # the main-thread glue use WebAssembly.instantiateStreaming (it falls back to ArrayBuffer
   # instantiation with a console warning otherwise).
   AddType application/wasm .wasm
+  # FX rack room IRs (#453), fetched by audio/fx/room/irLoader.ts.
+  AddType audio/ogg .opus
   AddType text/css .css
   RemoveCharset .css
   AddType text/html .html

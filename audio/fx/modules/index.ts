@@ -3,6 +3,7 @@ import type { FxModuleId, FxParamsById } from '../types';
 import { createCharacterModule } from './characterModule';
 import { createCompModule } from './compModule';
 import { createEqModule } from './eqModule';
+import { createRoomModule } from './roomModule';
 import type { FxModuleEnv, FxModuleFactory, FxModuleInstance } from './types';
 
 export const createFxModule: FxModuleFactory = async <K extends FxModuleId>(
@@ -19,8 +20,7 @@ export const createFxModule: FxModuleFactory = async <K extends FxModuleId>(
     case 'character':
       return (await createCharacterModule(ctx, params as FxParamsById['character'], env)) as unknown as FxModuleInstance<K>;
     case 'room':
-      // Convolution room arrives with its IR assets.
-      return null;
+      return (await createRoomModule(ctx, params as FxParamsById['room'], env)) as unknown as FxModuleInstance<K> | null;
     default:
       return null;
   }

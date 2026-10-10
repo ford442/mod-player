@@ -5,7 +5,9 @@
  */
 import { FX_CROSSFADE_S, FX_LOOKAHEAD_S } from '../../audio/fx/automation';
 import { FxRack, type FxRackEnv } from '../../audio/fx/FxRack';
+import type { IrLoader } from '../../audio/fx/room/irLoader';
 import type { FxScheduler } from '../../audio/fx/scheduler';
+import { synthIr } from '../../scripts/lib/ir-synth.mjs';
 import type { FxRackState } from '../../audio/fx/types';
 import {
   bufferFrom,
@@ -41,6 +43,27 @@ export interface RackRenderOptions {
   prepare?: FxRackState['order'];
   /** Extra frames after the input (tails). */
   tailFrames?: number;
+  /** Room IRs (default: the synthesized loader below). */
+  irLoader?: IrLoader;
+  onStatus?: FxRackEnv['onStatus'];
+}
+
+/**
+ * Room IRs synthesized at the context's rate with the generator's own synth
+ * (node-web-audio-api can't decode the committed Opus files). Records loads.
+ */
+export function synthIrLoader(): IrLoader & { loads: string[] } {
+  const loads: string[] = [];
+  return {
+    loads,
+    load(ctx, id) {
+      loads.push(id);
+      const channels = synthIr(id, ctx.sampleRate);
+      const buffer = ctx.createBuffer(channels.length, channels[0]!.length, ctx.sampleRate);
+      channels.forEach((data, c) => buffer.copyToChannel(data as Float32Array<ArrayBuffer>, c));
+      return Promise.resolve(buffer);
+    },
+  };
 }
 
 /**
@@ -73,6 +96,8 @@ export async function renderRack(
     mode: opts.mode ?? 'live',
     characterWorkletUrl: CHARACTER_WORKLET,
     scheduler,
+    irLoader: opts.irLoader ?? synthIrLoader(),
+    ...(opts.onStatus ? { onStatus: opts.onStatus } : {}),
     ...(opts.fadeSeconds !== undefined ? { fadeSeconds: opts.fadeSeconds } : {}),
   };
   const rack = await FxRack.create(ctx, opts.initial, env);

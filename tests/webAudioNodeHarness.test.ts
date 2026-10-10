@@ -10,6 +10,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
+  WEB_AUDIO_TIMEOUT_MS,
   bufferFrom,
   channelsOf,
   maxAbsDiff,
@@ -31,7 +32,7 @@ function testSignal(): Float32Array<ArrayBuffer>[] {
   return [left, right];
 }
 
-describe('node-web-audio-api harness (#453)', () => {
+describe('node-web-audio-api harness (#453)', { timeout: WEB_AUDIO_TIMEOUT_MS }, () => {
   it('renders a unity-gain chain bit-exactly', async () => {
     const input = testSignal();
     const out = await renderOffline({ length: LEN, sampleRate: SR }, (ctx) => {

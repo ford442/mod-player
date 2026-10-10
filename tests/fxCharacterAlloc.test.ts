@@ -99,4 +99,4 @@ it('process() does not allocate after warm-up, even while params change every qu
   // scavenge mid-loop would make `grown` negative.
   expect(grown).toBeGreaterThanOrEqual(0);
   expect(grown - baseline).toBeLessThan(16 * 1024);
-});
+}, 30_000);

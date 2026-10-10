@@ -14,7 +14,9 @@
     "scripts/jsEngineArtifacts.mjs",
     "scripts/jsEngineArtifacts.mjs.d.ts",
     "scripts/lib/synth-xm.mjs",
-    "scripts/lib/synth-xm.mjs.d.ts"
+    "scripts/lib/synth-xm.mjs.d.ts",
+    "scripts/lib/ir-synth.mjs",
+    "scripts/lib/ir-synth.mjs.d.ts"
   ],
   "exclude": ["node_modules", "dist", "archive", "jules_patch"]
 }
