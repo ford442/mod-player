@@ -9,7 +9,7 @@
  */
 import { FX_RACK_ENABLED } from '../../appConfig';
 import { useFxStore } from '../../store/fxStore';
-import { anyModuleActive } from './types';
+import { anyModuleActive, type FxModuleId } from './types';
 
 type ControllerModule = typeof import('./fxRackController');
 
@@ -23,6 +23,8 @@ export function loadFxRackController(): Promise<ControllerModule> | null {
     controller = import('./fxRackController').then(
       (mod) => {
         mod.startFxRackController();
+        // The code is here; the graph itself is built once a context exists (first play).
+        useFxStore.getState().setRackStatus('ready');
         return mod;
       },
       (err: unknown) => {
@@ -35,6 +37,11 @@ export function loadFxRackController(): Promise<ControllerModule> | null {
     controller.catch(() => {});
   }
   return controller;
+}
+
+/** Retry a module the rack reported unavailable (the panel's Retry button). */
+export function retryFxModule(id: FxModuleId): void {
+  void loadFxRackController()?.then((mod) => mod.retryFxModule(id));
 }
 
 /** Start watching the store; returns the unsubscribe. Call once (App). */

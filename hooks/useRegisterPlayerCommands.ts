@@ -1,7 +1,9 @@
 import { useEffect, useLayoutEffect, useRef } from 'react';
+import { FX_MODULE_IDS } from '../audio/fx/types';
 import {
   playerCommands,
   type CommandHandler,
+  type CommandPayloadMap,
   type PlayerCommandId,
 } from '../utils/playerCommands';
 
@@ -28,6 +30,9 @@ export interface PlayerCommandHandlers {
   onToggleStageMode: () => void;
   onExitStageMode: () => void;
   onShaderSelectByIndex?: (index: number) => void;
+  onFxToggle?: (payload: CommandPayloadMap['fx.toggle']) => void;
+  onFxSetParam?: (payload: CommandPayloadMap['fx.setParam']) => void;
+  onFxPreset?: (payload: CommandPayloadMap['fx.preset']) => void;
 }
 
 /** transport.stop: the surface's onStop, or onPause when it has none. */
@@ -35,6 +40,9 @@ export function stopOrPause(handlers: Pick<PlayerCommandHandlers, 'onStop' | 'on
   if (handlers.onStop) handlers.onStop();
   else handlers.onPause();
 }
+
+const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null;
+const isFxTarget = (v: unknown): boolean => v === 'rack' || (FX_MODULE_IDS as readonly unknown[]).includes(v);
 
 /** Register all player command handlers on the shared command bus. */
 export function registerPlayerCommands(handlers: PlayerCommandHandlers): () => void {
@@ -91,6 +99,35 @@ export function registerPlayerCommands(handlers: PlayerCommandHandlers): () => v
       }
     });
   }
+  // FX rack (#453). Payloads come from MIDI / gamepad too: validate the shape.
+  if (handlers.onFxToggle) {
+    bind('fx.toggle', (payload) => {
+      const raw: unknown = payload;
+      if (!isObject(raw) || !isFxTarget(raw.module)) return;
+      if (raw.enabled !== undefined && typeof raw.enabled !== 'boolean') return;
+      handlers.onFxToggle!(raw as unknown as CommandPayloadMap['fx.toggle']);
+    });
+  }
+  if (handlers.onFxSetParam) {
+    bind('fx.setParam', (payload) => {
+      const raw: unknown = payload;
+      if (!isObject(raw) || !isFxTarget(raw.module) || raw.module === 'rack') return;
+      if (typeof raw.param !== 'string' || typeof raw.value !== 'number' || !Number.isFinite(raw.value)) return;
+      handlers.onFxSetParam!(raw as unknown as CommandPayloadMap['fx.setParam']);
+    });
+  }
+  if (handlers.onFxPreset) {
+    bind('fx.preset', (payload) => {
+      const raw: unknown = payload;
+      if (!isObject(raw)) return;
+      const ok =
+        typeof raw.presetId === 'string' ||
+        raw.step === 1 ||
+        raw.step === -1 ||
+        (typeof raw.index === 'number' && Number.isInteger(raw.index));
+      if (ok) handlers.onFxPreset!(raw as unknown as CommandPayloadMap['fx.preset']);
+    });
+  }
 
   return () => {
     for (const unsub of unsubs) unsub();
@@ -130,6 +167,9 @@ export function useRegisterPlayerCommands(handlers: PlayerCommandHandlers): void
       onToggleStageMode: () => handlersRef.current.onToggleStageMode(),
       onExitStageMode: () => handlersRef.current.onExitStageMode(),
       onShaderSelectByIndex: (index) => handlersRef.current.onShaderSelectByIndex?.(index),
+      onFxToggle: (payload) => handlersRef.current.onFxToggle?.(payload),
+      onFxSetParam: (payload) => handlersRef.current.onFxSetParam?.(payload),
+      onFxPreset: (payload) => handlersRef.current.onFxPreset?.(payload),
     });
   }, []);
 }

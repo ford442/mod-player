@@ -19,7 +19,7 @@ import { FxRack } from './FxRack';
 import { sharedIrLoader } from './room/irLoader';
 import { createContextScheduler } from './scheduler';
 import { defaultFxRackState } from './spec/schema';
-import { anyModuleActive, FX_MODULE_IDS, type FxRackState } from './types';
+import { anyModuleActive, FX_MODULE_IDS, type FxModuleId, type FxRackState } from './types';
 
 /** How often a pending collapse re-checks that every tail has rung out. */
 const COLLAPSE_POLL_MS = 200;
@@ -54,6 +54,17 @@ class FxRackController {
       }),
     );
     void this.onHost(getFxHost());
+  }
+
+  /** Retry a module that was unavailable (e.g. its IR failed to load). */
+  retry(id: FxModuleId): void {
+    const rack = this.rack;
+    if (!rack) return;
+    useFxStore.getState().setModuleStatus(id, 'loading');
+    void rack.retry(id).then(() => {
+      if (rack.unavailable.has(id)) return; // onStatus already reported why
+      if (anyModuleActive(useFxStore.getState().effective)) this.requestSync();
+    });
   }
 
   stop(): void {
@@ -173,6 +184,10 @@ export function startFxRackController(): void {
   if (instance) return;
   instance = new FxRackController();
   instance.start();
+}
+
+export function retryFxModule(id: FxModuleId): void {
+  instance?.retry(id);
 }
 
 /** Tests / teardown. */
