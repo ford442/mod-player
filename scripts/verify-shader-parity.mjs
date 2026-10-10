@@ -15,7 +15,8 @@ const DEST = join(ROOT, 'public/shaders');
 const PICKER_IDS = [
   'patternv0.44.wgsl', 'patternv0.43.wgsl', 'patternv0.40.wgsl', 'patternv0.39.wgsl', 'patternv0.21.wgsl',
   'patternv0.50.wgsl', 'patternv0.50b.wgsl', 'patternv0.51.wgsl', 'patternv0.52.wgsl', 'patternv0.53.wgsl',
-  'patternv0.54.wgsl', 'patternv0.58.wgsl', 'patternv0.57.wgsl', 'patternv0.56.wgsl', 'patternv0.55.wgsl',
+  'patternv0.54.wgsl', 'patternv0.61.wgsl', 'patternv0.60.wgsl', 'patternv0.58.wgsl', 'patternv0.57.wgsl',
+  'patternv0.59.wgsl', 'patternv0.56.wgsl', 'patternv0.55.wgsl',
   'patternv0.49.wgsl', 'patternv0.48.wgsl', 'patternv0.47.wgsl', 'patternv0.46.wgsl', 'patternv0.45.wgsl',
   'patternv0.45b.wgsl', 'patternv0.42.wgsl', 'patternv0.38.wgsl', 'patternv0.35_bloom.wgsl', 'patternv0.30.wgsl',
   'patternv0.30b.wgsl', 'patternv0.23.wgsl', 'patternv0.24.wgsl',

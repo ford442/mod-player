@@ -131,6 +131,14 @@ export interface ShaderMeta {
    * shader sees silence rather than a validation error.
    */
   spectrumBuffer?: boolean;
+  /**
+   * Optional and additive (#453): the background pass reads the FX rack's
+   * settings — drive, tone, room, module bitmask — from bezel uniform slots
+   * 24–27 (audio/fx/fxVisualState.ts). They are rack *settings*, smoothed on
+   * the CPU, not audio analysis. frameDraw.ts zeroes the slots for every other
+   * shader.
+   */
+  fxUniforms?: boolean;
   highPrecisionPacking: boolean;
   playheadRowAsFloat: boolean;
   strictPlayheadSustain: boolean;
@@ -588,6 +596,21 @@ export const SHADER_REGISTRY: Readonly<Record<string, ShaderMeta>> = {
     usesGpuSpectrum: true,
     spectrumBuffer: true,
     background: 'bezel_spectrum.wgsl',
+  }),
+
+  // ── v0.61 — FX-rack chassis (#453): v0.60 + bezel_fx.wgsl ─────────────────
+  // LED pass = v0.60. The chassis adds the FX rack's settings (bezel slots
+  // 24–27) on top of the spectrum bars, which stay the dry GPU FFT.
+  'patternv0.61.wgsl': circularLed({
+    bloomProfile: 'three-emitter',
+    instrumentPalette: true,
+    instrumentHighlight: true,
+    supportsReducedMotion: false,
+    stepsDrivenVisibleRows: true,
+    usesGpuSpectrum: true,
+    spectrumBuffer: true,
+    fxUniforms: true,
+    background: 'bezel_fx.wgsl',
   }),
 };
 
