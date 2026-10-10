@@ -6,6 +6,9 @@ import { WebGL2PatternRenderer } from './WebGL2PatternRenderer';
 import { setCurrentPatternRenderer } from '../global';
 import type { CurrentPatternRenderer, WebGL2DebugMode } from '../types';
 import { cycleDebugMode } from './debugModes';
+import { createLogger } from '../../../utils/log';
+
+const log = createLogger('WebGL2 debug');
 
 export function useWebGL2PatternRender(
   canvasRef: React.RefObject<HTMLCanvasElement>,
@@ -79,7 +82,7 @@ export function useWebGL2PatternRender(
       if (!r) return;
       const next = cycleDebugMode(r.getDebugConfig().mode);
       r.setDebugConfig({ mode: next });
-      console.log(`[WebGL2 debug] mode: ${next}`);
+      log.log(`mode: ${next}`);
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);

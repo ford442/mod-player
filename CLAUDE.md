@@ -200,6 +200,7 @@ EngineState           // Worklet engine lifecycle state
 - **Styling:** Tailwind utility classes; avoid custom CSS unless Tailwind can't express it
 - **TypeScript:** Strict mode. All strict flags enabled including `noUnusedLocals`, `noUnusedParameters`, `exactOptionalPropertyTypes`, `noUncheckedIndexedAccess`
 - **React patterns:** Functional components with hooks only; no class components
+- **Logging:** use `createLogger('Scope')` from `utils/log.ts` instead of `console.log` (ESLint `no-console` enforces it; `console.warn`/`error` stay allowed). `log`/`debug` print in `vite dev` and, in a production build, only with `?debug=log` or `localStorage.xasm1_debug_log = '1'`; `warn`/`error` always print. The Playwright smokes read `[PLAY]` lines from a production build, so `scripts/lib/audio-smoke-config.mjs` adds `debug=log` to its URL. **Never import `utils/log` from the AudioWorklet bundle** (`audio-worklet/js/**`, `workletProtocolConstants.ts`, `libRuntimeReady.ts`): `import.meta.env` does not exist in the esbuild IIFE (`tests/logger.test.ts` enforces this)
 - **Mutable refs for audio state:** Channel states use refs, not React state, to prevent render-cycle flooding from high-frequency audio data
 - **No test framework currently:** Validation is done via `tsc --noEmit` and ESLint; manual browser testing for WebGPU/audio features
 

@@ -45,9 +45,12 @@ async function once(browser, engine) {
     if (engine === 'playwright') {
       await context.addInitScript(() => {
         window.__initMarks = {};
+        // The marks below are the app's own [PLAY] lines, which a production build only prints when asked
+        // (utils/log.ts); the logger emits ('[PLAY]', 'message', ...), so match on the joined strings.
+        try { localStorage.setItem('xasm1_debug_log', '1'); } catch { /* storage unavailable */ }
         const orig = console.log.bind(console);
         console.log = (...a) => {
-          const s = typeof a[0] === 'string' ? a[0] : '';
+          const s = a.filter((v) => typeof v === 'string').join(' ');
           const m = window.__initMarks;
           const now = performance.now();
           if (s.startsWith('[PLAY] Starting playback')) m.click ??= now;

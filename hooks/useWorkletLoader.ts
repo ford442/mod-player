@@ -11,6 +11,9 @@
 import { useCallback, useRef, useState } from 'react';
 import { detectRuntimeBase, withBase } from '../src/lib/paths';
 import workletVersionData from '../audio-worklet/js/worklet-version.generated.json';
+import { createLogger } from '../utils/log';
+
+const workletLog = createLogger('WorkletLoader');
 
 export { withBase };
 
@@ -121,12 +124,12 @@ export function useWorkletLoader(options: UseWorkletLoaderOptions = {}) {
 
   const log = useCallback((...args: unknown[]) => {
     if (debug) {
-      console.log('[WorkletLoader]', ...args);
+      workletLog.log(...args);
     }
   }, [debug]);
 
   const logError = useCallback((...args: unknown[]) => {
-    console.error('[WorkletLoader]', ...args);
+    workletLog.error(...args);
   }, []);
 
   /**

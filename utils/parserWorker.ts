@@ -1,7 +1,10 @@
 import type { WorkerParseMessage, WorkerParseResult, WorkerParseResponse, WorkerParseError } from '../types';
-import { parserLog } from './parserDebug';
+import { isParserDebugEnabled, parserLog } from './parserDebug';
 import { createParserPromise } from './parserPromise';
 import parserWorkerUrl from '../workers/openmpt-parser.worker.ts?worker&url';
+import { createLogger } from './log';
+
+const log = createLogger('Parser');
 
 export const PARSER_WORKER_TIMEOUT_MS = 15_000;
 export const PARSER_SLOW_HINT_MS = 5_000;
@@ -20,7 +23,7 @@ export async function verifyParserWorkerUrl(): Promise<boolean> {
   try {
     const response = await fetch(url, { method: 'HEAD', cache: 'no-store' });
     const ok = response.ok;
-    console.log(`[Parser] worker HEAD ${url} → ${response.status}`);
+    log.log(`worker HEAD ${url} → ${response.status}`);
     return ok;
   } catch (err) {
     console.warn('[Parser] worker HEAD check failed:', err);
@@ -55,13 +58,15 @@ export function parseInWorker(
   timeoutMs: number = PARSER_WORKER_TIMEOUT_MS,
 ): Promise<WorkerParseResponse | WorkerParseError> {
   const { fileName } = message;
+  // The worker can't read ?debug=parser / localStorage itself — tell it (see utils/parserDebug.ts).
+  const outgoing: WorkerParseMessage = isParserDebugEnabled() ? { ...message, debug: true } : message;
 
   const { promise } = createParserPromise<WorkerParseResult>(
     worker,
     timeoutMs,
     () => {
       parserLog('posting to worker', fileName, message.fileData.byteLength);
-      worker.postMessage(message, transfer);
+      worker.postMessage(outgoing, transfer);
     },
     {
       shouldResolve: (data) => data?.type !== 'progress',

@@ -1,4 +1,7 @@
 import { getWorkletUrl, getAbsoluteWorkletUrl, withBase } from '../useWorkletLoader';
+import { createLogger } from '../../utils/log';
+
+const log = createLogger('AudioWorklet');
 
 /** Default auto-load module (served from public/). */
 export const DEFAULT_MODULE_URL = withBase('4-mat_madness.mod');
@@ -7,7 +10,7 @@ export const DEFAULT_MODULE_URL = withBase('4-mat_madness.mod');
 export const WORKLET_URL = getWorkletUrl();
 
 // AUDIO-001 FIX COMPLETE: Enhanced logging for diagnostics
-console.log('[AudioWorklet] Configuration:', {
+log.log('Configuration:', {
   workletUrl: WORKLET_URL,
   absoluteWorkletUrl: getAbsoluteWorkletUrl(),
   viteBaseUrl: import.meta.env.BASE_URL,

@@ -16,6 +16,9 @@ import { workletPatternToMatrix } from '../../audio-worklet/NativePatternReader'
 import { INTERPOLATION_SINC_LP } from '../../utils/openmptRenderParams';
 import { moduleBytesFromFileData, wireMasterOutput } from './masterGraph';
 import type { AudioGraphCallbacks, AudioGraphConfig, AudioGraphRefs } from './types';
+import { createLogger } from '../../utils/log';
+
+const log = createLogger('PLAY');
 
 export type NativePlaybackResult = 'started' | 'fallback-to-js';
 
@@ -35,7 +38,7 @@ export async function startNativePlayback(
   config: AudioGraphConfig,
   ctx: AudioContext,
 ): Promise<NativePlaybackResult> {
-  console.log('[PLAY] Using native C++/Wasm AudioWorklet engine...');
+  log.log('Using native C++/Wasm AudioWorklet engine...');
   try {
     const engine = refs.nativeEngineRef.current!;
 
@@ -44,13 +47,13 @@ export async function startNativePlayback(
     const buf = moduleBytesFromFileData(refs.fileDataRef.current);
     if (buf) {
       if (shouldReloadNativeModule(engine.getLoadedFingerprint(), buf)) {
-        console.log('[PLAY] Sending module data to native engine:', buf.byteLength, 'bytes');
+        log.log('Sending module data to native engine:', buf.byteLength, 'bytes');
         await engine.load(buf);
         // Nothing reads patterns on this path, so drop the transient
         // main-thread parse immediately (one resident module during playback).
         engine.commitModule();
       } else {
-        console.log('[PLAY] Native module already loaded — skipping duplicate parse');
+        log.log('Native module already loaded — skipping duplicate parse');
       }
     }
 
@@ -76,7 +79,7 @@ export async function startNativePlayback(
     cppNode.connect(refs.analyserRef.current!);
     wireMasterOutput(ctx, refs, config.volume, config.panValue);
     refs.audioWorkletNodeRef.current = cppNode;
-    console.log('[PLAY] Native engine: C++ node on shared AudioContext');
+    log.log('Native engine: C++ node on shared AudioContext');
 
     // Shared context: no bridge, so no extra output delay to compensate for.
     refs.nativeBridgeLatencyRef.current = 0;
@@ -116,7 +119,7 @@ export async function startNativePlayback(
     });
 
     engine.on('ended', () => {
-      console.log('[PLAY] Native engine reported module ended');
+      log.log('Native engine reported module ended');
       if (config.isLooping) {
         callbacks.seekToStepWrapper(0);
       } else {
@@ -125,7 +128,7 @@ export async function startNativePlayback(
     });
 
     engine.play();
-    console.log('[PLAY] Native C++/Wasm AudioWorklet engine started');
+    log.log('Native C++/Wasm AudioWorklet engine started');
 
     refs.isPlayingRef.current = true;
     callbacks.setIsPlaying(true);
