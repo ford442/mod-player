@@ -1,7 +1,7 @@
 import { Controls } from './Controls';
 import { SeekBar } from './SeekBar';
 import { cn } from '../utils/cn';
-import { IS_PUBLIC_MODE, LIGHT_THEMES } from '../appConfig';
+import { FX_RACK_ENABLED, IS_PUBLIC_MODE, LIGHT_THEMES } from '../appConfig';
 import { usePlayerSession } from '../context/PlayerSessionContext';
 import { usePlayerFeatures } from '../context/PlayerFeaturesContext';
 import { usePlayerUiStore } from '../store/playerUiStore';
@@ -27,6 +27,8 @@ export function TransportBar() {
     setShowLibraryBrowser,
     showLocalLibrary,
     setShowLocalLibrary,
+    showFxRack,
+    setShowFxRack,
   } = usePlayerUiStore();
   const {
     bloomPreset,
@@ -125,6 +127,9 @@ export function TransportBar() {
           { key: 'meta', label: 'ℹ️ Metadata', state: showMetadata, toggle: setShowMetadata },
           ...(showDevSurface ? [
             { key: 'instruments', label: '🎹 Instruments', state: showInstruments, toggle: setShowInstruments },
+          ] : []),
+          ...(FX_RACK_ENABLED ? [
+            { key: 'fx', label: '🎛️ FX Rack', state: showFxRack, toggle: setShowFxRack },
           ] : []),
           { key: 'playlist', label: '📋 Playlist', state: showPlaylist, toggle: setShowPlaylist },
           ...(showDevSurface ? [

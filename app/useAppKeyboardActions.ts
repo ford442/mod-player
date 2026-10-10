@@ -1,7 +1,9 @@
 import { useCallback } from 'react';
 import { useRegisterPlayerCommands } from '../hooks/useRegisterPlayerCommands';
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
-import { AVAILABLE_SHADERS } from '../appConfig';
+import { AVAILABLE_SHADERS, FX_RACK_ENABLED } from '../appConfig';
+import { useFxStore } from '../store/fxStore';
+import type { CommandPayloadMap } from '../utils/playerCommands';
 import type { PatternMatrix } from '../types';
 import { usePlayerUiStore } from '../store/playerUiStore';
 
@@ -115,7 +117,22 @@ export function useAppKeyboardActions(params: UseAppKeyboardActionsParams) {
     if (pick) setShaderFile(pick.id);
   }, [setShaderFile]);
 
+  // FX rack (#453): commands edit the store; the rack (lazy) follows it.
+  const onFxToggle = useCallback((p: CommandPayloadMap['fx.toggle']) => {
+    useFxStore.getState().setModuleEnabled(p.module, p.enabled);
+  }, []);
+  const onFxSetParam = useCallback((p: CommandPayloadMap['fx.setParam']) => {
+    useFxStore.getState().setParam(p.module, p.param, p.value, p.normalized ? { normalized: true } : undefined);
+  }, []);
+  const onFxPreset = useCallback((p: CommandPayloadMap['fx.preset']) => {
+    const fx = useFxStore.getState();
+    if (p.presetId !== undefined) fx.applyPreset(p.presetId);
+    else if (p.step !== undefined) fx.stepPreset(p.step);
+    else if (p.index !== undefined) fx.selectPresetByIndex(p.index);
+  }, []);
+
   useRegisterPlayerCommands({
+    ...(FX_RACK_ENABLED ? { onFxToggle, onFxSetParam, onFxPreset } : {}),
     onPlayPause: onKbdPlayPause,
     onPlay: onKbdPlay,
     onPause: onKbdPause,

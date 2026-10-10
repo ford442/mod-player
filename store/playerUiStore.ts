@@ -17,6 +17,8 @@ export interface PlayerUiState {
   showPlaylist: boolean;
   showLibraryBrowser: boolean;
   showLocalLibrary: boolean;
+  /** FX rack panel (#453); persisted. */
+  showFxRack: boolean;
   /**
    * Pattern editor chrome (session-only; not persisted).
    * Default off so play-only UX is unchanged.
@@ -40,6 +42,7 @@ export interface PlayerUiState {
   setShowPlaylist: (show: boolean) => void;
   setShowLibraryBrowser: (show: boolean) => void;
   setShowLocalLibrary: (show: boolean) => void;
+  setShowFxRack: (show: boolean) => void;
   setEditMode: (editMode: boolean) => void;
   toggleEditMode: () => void;
   setStageMode: (stageMode: boolean) => void;
@@ -62,6 +65,7 @@ export const usePlayerUiStore = create<PlayerUiState>((set) => ({
   showPlaylist: true,
   showLibraryBrowser: false,
   showLocalLibrary: false,
+  showFxRack: readLocalStorage<boolean>('xasm1_show_fx_rack', true),
   editMode: false,
   stageMode: resolveStageModePreference(),
   selectedInstrumentIndex: null,
@@ -93,6 +97,10 @@ export const usePlayerUiStore = create<PlayerUiState>((set) => ({
   setShowPlaylist: (showPlaylist) => set({ showPlaylist }),
   setShowLibraryBrowser: (showLibraryBrowser) => set({ showLibraryBrowser }),
   setShowLocalLibrary: (showLocalLibrary) => set({ showLocalLibrary }),
+  setShowFxRack: (showFxRack) => {
+    writeLocalStorage('xasm1_show_fx_rack', showFxRack);
+    set({ showFxRack });
+  },
   setEditMode: (editMode) => set({ editMode }),
   toggleEditMode: () => set((state) => ({ editMode: !state.editMode })),
   setStageMode: (stageMode) => {

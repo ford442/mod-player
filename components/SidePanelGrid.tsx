@@ -4,17 +4,18 @@ import { Panel } from './Panel';
 import { MidiControlsPanel } from './MidiControlsPanel';
 import { ExportPanel } from './ExportPanel';
 import { InstrumentPanel } from './InstrumentPanel';
-import { IS_PUBLIC_MODE, LIGHT_THEMES } from '../appConfig';
+import { FX_RACK_ENABLED, IS_PUBLIC_MODE, LIGHT_THEMES } from '../appConfig';
+import { FxRackPanelLazy } from './fx/FxRackPanelLazy';
 import { usePlayerSession } from '../context/PlayerSessionContext';
 import { usePlayerFeatures } from '../context/PlayerFeaturesContext';
 import { usePlayerUiStore } from '../store/playerUiStore';
 import { useShaderPrefsStore } from '../store/shaderPrefsStore';
 
-/** Right-column grid: Module Info, Instruments, VU Meters, MIDI/Hardware, Export. */
+/** Side panels: FX rack (left, wide); Module Info, Instruments, VU Meters, MIDI/Hardware, Export (right). */
 export function SidePanelGrid() {
   const session = usePlayerSession();
   const features = usePlayerFeatures();
-  const { theme, showMetadata, showInstruments, showChannelMeters } = usePlayerUiStore();
+  const { theme, showMetadata, showInstruments, showChannelMeters, showFxRack } = usePlayerUiStore();
   const { storedShader: shaderFile } = useShaderPrefsStore();
 
   const isDarkMode = !LIGHT_THEMES.has(theme);
@@ -49,8 +50,14 @@ export function SidePanelGrid() {
 
   return (
     <div className="mt-4 grid grid-cols-1 lg:grid-cols-3 gap-4">
-      {/* Left Column: placeholder — PatternDisplay is rendered above */}
-      <div className="lg:col-span-2" />
+      {/* Left Column: FX rack (#453) — PatternDisplay is rendered above */}
+      <div className="lg:col-span-2">
+        {FX_RACK_ENABLED && showFxRack && (
+          <Panel variant="bezel" title="FX Rack" titleAccent>
+            <FxRackPanelLazy />
+          </Panel>
+        )}
+      </div>
 
       {/* Right Column: Metadata + VU Meters */}
       <div className="flex flex-col gap-4">
