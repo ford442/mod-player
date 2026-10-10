@@ -14,6 +14,9 @@ import {
   resolveParsedModule,
 } from './parseModule';
 import type { LibOpenMPTRefs, LibOpenMPTSetters } from './types';
+import { createLogger } from '../../utils/log';
+
+const log = createLogger('Module');
 
 export interface ModuleActionsDeps {
   refs: LibOpenMPTRefs;
@@ -40,7 +43,7 @@ export function createEnsureMainThreadModule(refs: LibOpenMPTRefs) {
 
     if (modPtr !== 0) {
       refs.currentModulePtr.current = modPtr;
-      console.log('[ensureMainThreadModule] Main-thread module created for fallback');
+      log.log('ensureMainThreadModule: Main-thread module created for fallback');
     } else {
       console.error('[ensureMainThreadModule] Failed to create main-thread module');
     }
@@ -107,7 +110,7 @@ export function createProcessModuleData(deps: ModuleActionsDeps) {
       return;
     }
 
-    console.log('[processModuleData] Processing module:', fileName, 'size:', fileData.byteLength);
+    log.log('processModuleData: Processing module:', fileName, 'size:', fileData.byteLength);
 
     workletModuleTokenRef.current += 1;
     playheadLagTrackerRef.current = createPlayheadLagTracker();
@@ -119,7 +122,7 @@ export function createProcessModuleData(deps: ModuleActionsDeps) {
     setPlaybackRowFraction(0);
 
     if (currentModulePtr.current !== 0) {
-      console.log('[processModuleData] Destroying previous main-thread module');
+      log.log('processModuleData: Destroying previous main-thread module');
       lib._openmpt_module_destroy(currentModulePtr.current);
       currentModulePtr.current = 0;
     }
@@ -242,7 +245,7 @@ export function createProcessModuleData(deps: ModuleActionsDeps) {
       )
         .then(() => {
           if (backfillAbort.signal.aborted) return;
-          console.log(
+          log.log(
             `[Parser] pattern backfill complete (${backfillFileName}):`,
             metadata.numOrders,
             'orders',

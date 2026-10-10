@@ -58,4 +58,22 @@ export default tseslint.config(
       'no-var': 'off',
     },
   },
+  {
+    // App code logs through utils/log.ts (scoped, diagnostics gated); console.warn/error stay available.
+    // Exempt: tests and build config, the AudioWorklet sources (their own DEBUG-gated log; they must not
+    // import the logger), and audio-worklet/diagnostics.ts, an explicit diagnostic printer.
+    files: ['**/*.{ts,tsx}'],
+    ignores: [
+      '**/*.d.ts',
+      'tests/**',
+      'vite.config.ts',
+      'vitest.config.ts',
+      'vite-plugins/**',
+      'audio-worklet/js/**',
+      'audio-worklet/diagnostics.ts',
+    ],
+    rules: {
+      'no-console': ['error', { allow: ['warn', 'error'] }],
+    },
+  },
 );

@@ -135,6 +135,11 @@ export interface WorkerParseRequest {
   type: 'parse';
   fileData: Uint8Array;
   fileName: string;
+  /**
+   * Set by parseInWorker when parser logging is on (`?debug=parser`). The worker cannot read the
+   * page URL or localStorage, so the main thread has to tell it.
+   */
+  debug?: boolean;
 }
 
 export interface WorkerParseMetadata {

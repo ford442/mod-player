@@ -6,7 +6,7 @@ import {
 import { waitForRuntimeInitialized } from '../audio-worklet/libRuntimeReady';
 import { parseModuleWithLib } from '../utils/parseModuleWithLib';
 import { extractInstrumentTable, mergeLibInstrumentNames } from '../utils/sampleExtract';
-import { parserLog } from '../utils/parserDebug';
+import { parserLog, setParserDebugFromMainThread } from '../utils/parserDebug';
 import type { InstrumentTable } from '../types/instruments';
 
 const LIB_FETCH_TIMEOUT_MS = 12_000;
@@ -15,6 +15,8 @@ interface ParseRequest {
   type: 'parse';
   fileData: Uint8Array;
   fileName: string;
+  /** Mirrors WorkerParseRequest.debug (types.ts). */
+  debug?: boolean;
 }
 
 interface ParseResponse {
@@ -108,12 +110,14 @@ function postError(message: string): void {
 }
 
 async function handleMessage(data: IncomingMessage): Promise<void> {
-  const { type, fileData, fileName } = data;
+  const { type, fileData, fileName, debug } = data;
 
   if (type !== 'parse') {
     postError(`Unknown worker message type: ${type}`);
     return;
   }
+
+  setParserDebugFromMainThread(debug === true);
 
   parserLog('worker parse start', fileName, fileData.byteLength);
   self.postMessage({ type: 'progress', stage: 'fetch' } satisfies { type: 'progress'; stage: 'fetch' });

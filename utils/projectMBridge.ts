@@ -34,6 +34,10 @@
  */
 
 /** Default FFT size used when the AnalyserNode hasn't been configured yet. */
+
+import { createLogger } from './log';
+
+const log = createLogger('ProjectM');
 const DEFAULT_FFT_SIZE = 2048;
 
 /** Shape of every PCM message sent to project-M.
@@ -164,8 +168,8 @@ export function startProjectMBridge(analyser: AnalyserNode | null): () => void {
     return () => {};
   }
 
-  console.log(
-    `[ProjectM] Detected ${isPopup ? 'popup' : 'iframe'} context. Starting legacy RAF PCM broadcast...`
+  log.log(
+    `Detected ${isPopup ? 'popup' : 'iframe'} context. Starting legacy RAF PCM broadcast...`
   );
 
   // Use a dedicated channel for the RAF path so it doesn't interfere with
@@ -216,7 +220,7 @@ export function startProjectMBridge(analyser: AnalyserNode | null): () => void {
   function startRaf() {
     if (rafRunning) return;
     rafRunning = true;
-    console.log('[ProjectM] Worklet PCM quiet — starting fallback RAF broadcast');
+    log.log('Worklet PCM quiet — starting fallback RAF broadcast');
     rafId = requestAnimationFrame(send);
   }
 
@@ -224,7 +228,7 @@ export function startProjectMBridge(analyser: AnalyserNode | null): () => void {
     if (!rafRunning) return;
     rafRunning = false;
     cancelAnimationFrame(rafId);
-    console.log('[ProjectM] Worklet PCM live — fallback RAF broadcast stopped');
+    log.log('Worklet PCM live — fallback RAF broadcast stopped');
   }
 
   // Supervisor: decides whether the fallback loop should exist at all. Runs far

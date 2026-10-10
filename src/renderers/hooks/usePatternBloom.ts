@@ -4,6 +4,9 @@ import { getShaderMeta } from '../../../utils/shaderRegistry';
 import { getBloomProfile } from '../../../utils/bloomProfiles';
 import { detectRuntimeBase } from '../../lib/paths';
 import { configureCanvasContext } from '../../../utils/webgpuDevice';
+import { createLogger } from '../../../utils/log';
+
+const log = createLogger('Bloom debug');
 
 export interface UsePatternBloomParams {
   bloomRef: React.MutableRefObject<BloomPostProcessor | null>;
@@ -99,7 +102,7 @@ export function usePatternBloom(params: UsePatternBloomParams) {
         const next = prev >= 2 ? -1 : prev + 1;
         bloom.setDebugLayer(next);
         const label = bloom.getDebugLayerLabel();
-        console.log(`[Bloom debug] layer: ${label ?? 'all'}`);
+        log.log(`layer: ${label ?? 'all'}`);
         return next;
       });
     };

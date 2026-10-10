@@ -16,6 +16,9 @@ import { verifyParserWorkerUrl } from '../../utils/parserWorker';
 import type { LibOpenMPTRefs, LibOpenMPTSetters } from './types';
 import { WORKLET_URL } from './constants';
 import { setPcmDemandListener } from '../../utils/pcmBus';
+import { createLogger } from '../../utils/log';
+
+const log = createLogger('INIT');
 
 export interface InitDeps {
   refs: LibOpenMPTRefs;
@@ -75,7 +78,7 @@ export async function runLibOpenMPTInit(deps: InitDeps): Promise<void> {
     setIsNativeWorkletAvailable,
   } = setters;
 
-  console.log('[INIT] Starting libopenmpt initialization...');
+  log.log('Starting libopenmpt initialization...');
 
   if (!window.libopenmptReady) {
     setStatus('Error: libopenmpt initialization script not found.');
@@ -88,9 +91,9 @@ export async function runLibOpenMPTInit(deps: InitDeps): Promise<void> {
       setTimeout(() => reject(new Error('Initialization timed out')), 15000);
     });
 
-    console.log('[INIT] Waiting for libopenmptReady...');
+    log.log('Waiting for libopenmptReady...');
     const lib = await Promise.race([window.libopenmptReady, timeoutPromise]);
-    console.log('[INIT] libopenmptReady resolved');
+    log.log('libopenmptReady resolved');
 
     polyfillLibStrings(lib);
     refs.libopenmptRef.current = lib;
@@ -104,7 +107,7 @@ export async function runLibOpenMPTInit(deps: InitDeps): Promise<void> {
       }
     });
 
-    console.log('[INIT] Testing AudioWorklet support...');
+    log.log('Testing AudioWorklet support...');
     try {
       const hasWorkletSupport = checkWorkletSupport();
       if (import.meta.env.DEV) logWorkletDiagnostics(WORKLET_URL);
@@ -115,7 +118,7 @@ export async function runLibOpenMPTInit(deps: InitDeps): Promise<void> {
         if (fileAccessible) {
           setIsWorkletSupported(true);
           setActiveEngine('worklet');
-          console.log('✅ [INIT] AudioWorklet API available and file accessible');
+          log.log('✅ AudioWorklet API available and file accessible');
         } else {
           console.warn('⚠️ [INIT] AudioWorklet API available but worklet file not accessible');
           setIsWorkletSupported(false);
@@ -136,13 +139,13 @@ export async function runLibOpenMPTInit(deps: InitDeps): Promise<void> {
     }
 
     const enginePref = resolveAudioEnginePreference();
-    console.log('[INIT] Audio engine preference:', enginePref);
+    log.log('Audio engine preference:', enginePref);
     setActiveEngine('worklet');
 
     if (enginePref.mode === 'force-js') {
-      console.log('[INIT] force-JS default — JS worklet is active engine');
+      log.log('force-JS default — JS worklet is active engine');
     } else if (enginePref.mode === 'auto') {
-      console.log('[INIT] auto mode — native promotes only when parity gate is open and glue is present');
+      log.log('auto mode — native promotes only when parity gate is open and glue is present');
     }
 
     const shouldProbeNative =
@@ -153,11 +156,11 @@ export async function runLibOpenMPTInit(deps: InitDeps): Promise<void> {
     if (shouldProbeNative) {
       try {
         const nativeGlueUrl = getNativeGlueUrl();
-        console.log('[INIT] Probing for native engine at:', nativeGlueUrl);
+        log.log('Probing for native engine at:', nativeGlueUrl);
         const glueIsSafe = await isNativeGlueAvailable(nativeGlueUrl);
 
         if (glueIsSafe) {
-          console.log('[INIT] Native C++/Wasm AudioWorklet glue detected');
+          log.log('Native C++/Wasm AudioWorklet glue detected');
 
           const engine = new OpenMPTWorkletEngine();
           await engine.init();
@@ -171,15 +174,15 @@ export async function runLibOpenMPTInit(deps: InitDeps): Promise<void> {
 
           if (shouldPromoteNativeEngine(enginePref, true)) {
             setActiveEngine('native-worklet');
-            console.log('[INIT] Native engine initialized and promoted (preference:', enginePref.mode, ')');
+            log.log('Native engine initialized and promoted (preference:', enginePref.mode, ')');
           } else {
             if (enginePref.mode === 'force-js') {
               writeStoredAudioEngineOverride('js');
             }
             if (enginePref.mode === 'auto') {
-              console.log('[INIT] Native glue present but parity gate closed — staying on JS worklet');
+              log.log('Native glue present but parity gate closed — staying on JS worklet');
             }
-            console.log('[INIT] Native engine initialized but not promoted — active engine is JS worklet');
+            log.log('Native engine initialized but not promoted — active engine is JS worklet');
           }
         } else if (enginePref.mode === 'prefer-native') {
           console.warn(
@@ -187,7 +190,7 @@ export async function runLibOpenMPTInit(deps: InitDeps): Promise<void> {
           );
           setActiveEngine('worklet');
         } else {
-          console.log('[INIT] Native engine glue not available — using JS AudioWorklet');
+          log.log('Native engine glue not available — using JS AudioWorklet');
           setActiveEngine('worklet');
         }
       } catch (nativeErr) {
@@ -210,7 +213,7 @@ export async function runLibOpenMPTInit(deps: InitDeps): Promise<void> {
 }
 
 export function cleanupLibOpenMPT(refs: LibOpenMPTRefs) {
-  console.log('Cleaning up libopenmpt resources.');
+  log.log('Cleaning up libopenmpt resources.');
   // Drop the PCM demand listener before the node goes away; the next
   // startJsWorkletPlayback installs a fresh one bound to the new node.
   setPcmDemandListener(null);

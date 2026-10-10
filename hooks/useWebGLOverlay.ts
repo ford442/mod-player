@@ -23,6 +23,9 @@ import {
 } from '../utils/geometryConstants';
 import { resolveOverlayLayout, horizontalPadRowRemapEnabled } from '../utils/overlayLayout';
 import { detectRuntimeBase } from '../src/lib/paths';
+import { createLogger } from '../utils/log';
+
+const glLog = createLogger('WebGL');
 
 const DEFAULT_ROWS = 64;
 const DEFAULT_CHANNELS = 4;
@@ -78,14 +81,14 @@ export function useWebGLOverlay(
   const initWebGL = useCallback(() => {
     const shaderFile = paramsRef.current.shaderFile;
     if (!paramsRef.current.isOverlayActive) {
-      console.log('🔧 Overlay inactive, skipping WebGL init');
+      glLog.log('🔧 Overlay inactive, skipping WebGL init');
       return;
     }
     const useNoteSustainTailMode = usesStrictPlayheadSustainMode(shaderFile);
     const isV021 = usesWebGLOverlayHorizontal(shaderFile);
     const useCircularPaging = usesCircularRowPaging(shaderFile);
     const useHeaderRowRemap = horizontalPadRowRemapEnabled(shaderFile, paramsRef.current.padTopChannel);
-    console.group('🔧 initWebGL');
+    glLog.group('🔧 initWebGL');
 
     // Clean up existing WebGL resources first
     if (glContextRef.current && glResourcesRef.current) {
@@ -100,7 +103,7 @@ export function useWebGLOverlay(
         if (oldRes.capTexture) oldGl.deleteTexture(oldRes.capTexture);
         oldGl.clearColor(0, 0, 0, 0);
         oldGl.clear(oldGl.COLOR_BUFFER_BIT | oldGl.DEPTH_BUFFER_BIT);
-        console.log('✅ Cleaned up previous WebGL resources and cleared canvas');
+        glLog.log('✅ Cleaned up previous WebGL resources and cleared canvas');
       } catch (e) {
         console.warn('⚠️ Error cleaning up WebGL:', e);
       }
@@ -109,7 +112,7 @@ export function useWebGLOverlay(
 
     if (!glCanvasRef.current) {
       console.warn('⚠️ No glCanvasRef');
-      console.groupEnd();
+      glLog.groupEnd();
       return;
     }
 
@@ -118,13 +121,13 @@ export function useWebGLOverlay(
       gl = glCanvasRef.current.getContext('webgl2', { alpha: true, premultipliedAlpha: false });
       if (!gl) {
         console.error('❌ Failed to get WebGL2 context');
-        console.groupEnd();
+        glLog.groupEnd();
         return;
       }
-      console.log('✅ Got WebGL2 context');
+      glLog.log('✅ Got WebGL2 context');
     } catch (e) {
       console.error('❌ WebGL2 context error:', e);
-      console.groupEnd();
+      glLog.groupEnd();
       return;
     }
 
@@ -142,8 +145,8 @@ export function useWebGLOverlay(
         clearGl.clearColor(0, 0, 0, 0);
         clearGl.clear(clearGl.COLOR_BUFFER_BIT | clearGl.DEPTH_BUFFER_BIT);
       }
-      console.log('🔧 Shader does not use WebGL2 overlay, canvas cleared');
-      console.groupEnd();
+      glLog.log('🔧 Shader does not use WebGL2 overlay, canvas cleared');
+      glLog.groupEnd();
       return;
     }
 
@@ -162,7 +165,7 @@ export function useWebGLOverlay(
           gl!.deleteShader(s);
           return null;
         }
-        console.log(`✅ ${name} shader compiled`);
+        glLog.log(`✅ ${name} shader compiled`);
         return s;
       } catch (e) {
         console.error(`❌ ${name} shader exception:`, e);
@@ -174,7 +177,7 @@ export function useWebGLOverlay(
     const fs = createShader(gl.FRAGMENT_SHADER, fsSource, 'Fragment');
     if (!vs || !fs) {
       console.error('❌ Shader compilation failed');
-      console.groupEnd();
+      glLog.groupEnd();
       return;
     }
 
@@ -186,13 +189,13 @@ export function useWebGLOverlay(
       gl.linkProgram(prog);
       if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
         console.error('❌ GL Link Error:', gl.getProgramInfoLog(prog));
-        console.groupEnd();
+        glLog.groupEnd();
         return;
       }
-      console.log('✅ Shader program linked');
+      glLog.log('✅ Shader program linked');
     } catch (e) {
       console.error('❌ Program linking exception:', e);
-      console.groupEnd();
+      glLog.groupEnd();
       return;
     }
 
@@ -238,13 +241,13 @@ export function useWebGLOverlay(
       if (currentGl) {
         currentGl.bindTexture(currentGl.TEXTURE_2D, capTex);
         currentGl.texImage2D(currentGl.TEXTURE_2D, 0, currentGl.RGBA, currentGl.RGBA, currentGl.UNSIGNED_BYTE, capImg);
-        console.log('✅ Cap texture loaded');
+        glLog.log('✅ Cap texture loaded');
       }
     };
     capImg.onerror = () => { console.warn('⚠️ Failed to load cap texture'); };
     const runtimeBase = detectRuntimeBase();
     capImg.src = `${runtimeBase}unlit-button.png`;
-    console.log('[WebGL] Cap texture URL:', `${runtimeBase}unlit-button.png`);
+    glLog.log('Cap texture URL:', `${runtimeBase}unlit-button.png`);
 
     try {
       const uniformLocs: Record<string, WebGLUniformLocation | null> = {
@@ -265,7 +268,7 @@ export function useWebGLOverlay(
         u_outerRadius: gl.getUniformLocation(prog, 'u_outerRadius'),
       };
 
-      console.log(`[WebGL] Shader: ${shaderFile}, Layout: ${getLayoutType(shaderFile)}`);
+      glLog.log(`Shader: ${shaderFile}, Layout: ${getLayoutType(shaderFile)}`);
 
       const missingCore: string[] = [];
       const missingVariant: string[] = [];
@@ -283,16 +286,16 @@ export function useWebGLOverlay(
         console.error(`[WebGL] ❌ Missing CORE uniforms in ${shaderFile}:`, missingCore);
       }
       if (missingVariant.length > 0) {
-        console.log(`[WebGL] Variant uniforms optimized out in ${shaderFile}:`, missingVariant);
+        glLog.log(`Variant uniforms optimized out in ${shaderFile}:`, missingVariant);
       }
 
       glResourcesRef.current = { program: prog, vao, cellTexture: cellTex, stateTexture: stateTex, capTexture: capTex, buffer: buf, uniforms: uniformLocs };
-      console.log('✅ WebGL resources initialized');
+      glLog.log('✅ WebGL resources initialized');
     } catch (e) {
       console.error('❌ Error setting up uniforms:', e);
     }
 
-    console.groupEnd();
+    glLog.groupEnd();
 
     return () => {
       try {

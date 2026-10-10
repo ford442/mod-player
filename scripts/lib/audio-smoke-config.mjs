@@ -51,6 +51,9 @@ export function buildAudioSmokeUrl(baseUrl, { audioDiag = true, engine = 'js', r
   const params = new URLSearchParams();
   params.set('renderer', renderer);
   params.set('engine', engine);
+  // The smoke runs against a production build, where diagnostics are off by default (utils/log.ts).
+  // classifyAudioConsole() counts the `[PLAY] Worklet reported module ended` line (#329 runaway guard).
+  params.set('debug', 'log');
   if (audioDiag) params.set('audioDiag', '1');
   return `${root}/?${params.toString()}`;
 }

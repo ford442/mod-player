@@ -56,6 +56,9 @@ import {
   publishWebGPUProbeReady,
   readAdapterInfo,
 } from './webgpuProbe';
+import { createLogger } from './log';
+
+const log = createLogger('WebGPU');
 
 /** Optional features that production code may enable when the adapter supports them. */
 export const OPTIONAL_PRODUCTION_FEATURES: readonly GPUFeatureName[] = [
@@ -420,12 +423,10 @@ async function requestWebGPUDeviceUncached(
 
   publishWebGPUProbeReady(adapterInfo);
 
-  if (import.meta.env.DEV) {
-    console.info(
-      `[WebGPU] device ready (power=${powerPreference}, features=[${enabledFeatures.join(', ') || 'none'}], ` +
-        `limits={maxStorageBufferBindingSize=${device.limits.maxStorageBufferBindingSize}})`,
-    );
-  }
+  log.log(
+    `device ready (power=${powerPreference}, features=[${enabledFeatures.join(', ') || 'none'}], ` +
+      `limits={maxStorageBufferBindingSize=${device.limits.maxStorageBufferBindingSize}})`,
+  );
 
   return {
     adapter,

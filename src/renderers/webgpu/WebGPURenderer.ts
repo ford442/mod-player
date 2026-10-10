@@ -81,6 +81,9 @@ import {
   livePcmSubscribers,
   recordPatternBoundaryEvent,
 } from '../../../utils/patternBoundaryDiag';
+import { createLogger } from '../../../utils/log';
+
+const log = createLogger('WebGPU');
 
 export interface WebGPURendererCallbacks {
   onDeviceStatus?: (status: WebGPUDeviceStatus) => void;
@@ -605,7 +608,7 @@ export class WebGPURenderer {
     this.device = null;
     this.context = null;
     if (import.meta.env.DEV) {
-      console.log('[WebGPU] device disposed on unmount');
+      log.log('device disposed on unmount');
     }
   }
 
