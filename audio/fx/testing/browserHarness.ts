@@ -21,6 +21,7 @@ import { FX_CROSSFADE_S } from '../automation';
 import { buildFxGraph } from '../buildFxGraph';
 import { ensureCharacterWorklet } from '../character/characterWorkletLoader';
 import { FxRack, type FxRackEnv } from '../FxRack';
+import { fxTailSeconds, renderFxOffline } from '../offline/renderFxOffline';
 import { IR_MANIFEST } from '../room/irCatalog';
 import { sharedIrLoader } from '../room/irLoader';
 import { FX_FACTORY_PRESETS } from '../spec/presets';
@@ -364,6 +365,29 @@ async function parityChecks(env: Omit<FxRackEnv, 'mode'>): Promise<HarnessCheck[
   return out;
 }
 
+// ── Export parity (acceptance 4) ─────────────────────────────────────────────
+
+async function exportChecks(env: Omit<FxRackEnv, 'mode'>): Promise<HarnessCheck[]> {
+  const out: HarnessCheck[] = [];
+  const sampleRate = 44_100; // the export rate
+  const input = program({ sampleRate, seconds: 0.6 });
+  for (const preset of FX_FACTORY_PRESETS.filter((p) => p.id !== 'flat')) {
+    const tailFrames = Math.ceil(fxTailSeconds(preset.state, sampleRate) * sampleRate);
+    const padded = input.map((ch) => {
+      const longer = new Float32Array(ch.length + tailFrames);
+      longer.set(ch);
+      return longer;
+    });
+    const live = await renderRack(env, padded, sampleRate, preset.state, { mode: 'live' });
+    const exported = await renderFxOffline({ left: input[0]!, right: input[1]!, sampleRate }, preset.state, {
+      ...(env.characterWorkletUrl ? { characterWorkletUrl: env.characterWorkletUrl } : {}),
+      ...(env.irLoader ? { irLoader: env.irLoader } : {}),
+    });
+    out.push(check(`export ${preset.id}: renderFxOffline vs live rack`, maxAbsDiff([exported.left, exported.right], live), 1e-4, 'below'));
+  }
+  return out;
+}
+
 // ── CPU (acceptance 3) ───────────────────────────────────────────────────────
 
 const median = (xs: number[]) => {
@@ -433,6 +457,7 @@ export async function runAll(options: HarnessOptions): Promise<HarnessReport> {
   checks.push(...(await crossfadeChecks(env)));
   checks.push(...(await roomChecks(env)));
   checks.push(...(await parityChecks(env)));
+  checks.push(...(await exportChecks(env)));
   const { check: cpu, cpu: cpuReport } = await cpuCheck(opts);
   checks.push(cpu);
   return {

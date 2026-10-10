@@ -9,6 +9,12 @@ export interface ExportWorkerRequest {
   muteMask?: boolean[];
   startSeconds?: number;
   endSeconds?: number;
+  /**
+   * 'pcm' (FX rack export, #453): skip encoding and transfer the dry float
+   * render back — the main thread runs it through an OfflineAudioContext
+   * (workers have none) and encodes there. Default 'wav'.
+   */
+  output?: 'wav' | 'pcm';
 }
 
 export interface ExportWorkerProgress {
@@ -27,12 +33,23 @@ export interface ExportWorkerComplete {
   sampleRate: number;
 }
 
+export interface ExportWorkerPcm {
+  type: 'complete-pcm';
+  left: Float32Array;
+  right: Float32Array;
+  fileName: string;
+  metadataDurationSeconds: number;
+  renderedDurationSeconds: number;
+  frameCount: number;
+  sampleRate: number;
+}
+
 export interface ExportWorkerError {
   type: 'error';
   message: string;
 }
 
-export type ExportWorkerResult = ExportWorkerProgress | ExportWorkerComplete | ExportWorkerError;
+export type ExportWorkerResult = ExportWorkerProgress | ExportWorkerComplete | ExportWorkerPcm | ExportWorkerError;
 
 type IncomingMessage = ExportWorkerRequest;
 
@@ -65,12 +82,27 @@ async function handleMessage(message: IncomingMessage): Promise<void> {
       ...(message.endSeconds !== undefined ? { endSeconds: message.endSeconds } : {}),
     });
 
+    const stem = baseName(message.fileName).replace(/\.[^.]+$/, '') || 'export';
+    if (message.output === 'pcm') {
+      const pcm: ExportWorkerPcm = {
+        type: 'complete-pcm',
+        left: rendered.left,
+        right: rendered.right,
+        fileName: `${stem}.wav`,
+        metadataDurationSeconds: rendered.metadataDurationSeconds,
+        renderedDurationSeconds: rendered.renderedDurationSeconds,
+        frameCount: rendered.frameCount,
+        sampleRate: rendered.sampleRate,
+      };
+      self.postMessage(pcm, { transfer: [rendered.left.buffer, rendered.right.buffer] });
+      return;
+    }
+
     self.postMessage({ type: 'progress', stage: 'encode', percent: 90 } satisfies ExportWorkerProgress);
     const wavBlob = encodeStereoWav(rendered.left, rendered.right, {
       sampleRate: rendered.sampleRate,
     });
     const wavBuffer = await wavBlob.arrayBuffer();
-    const stem = baseName(message.fileName).replace(/\.[^.]+$/, '') || 'export';
 
     const response: ExportWorkerComplete = {
       type: 'complete',
