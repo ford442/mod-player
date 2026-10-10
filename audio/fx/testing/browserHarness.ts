@@ -21,9 +21,11 @@ import { FX_CROSSFADE_S } from '../automation';
 import { buildFxGraph } from '../buildFxGraph';
 import { ensureCharacterWorklet } from '../character/characterWorkletLoader';
 import { FxRack, type FxRackEnv } from '../FxRack';
+import { IR_MANIFEST } from '../room/irCatalog';
+import { sharedIrLoader } from '../room/irLoader';
 import { FX_FACTORY_PRESETS } from '../spec/presets';
 import { cloneFxRackState, defaultFxRackState, parseFxRackState } from '../spec/schema';
-import type { FxModuleId, FxRackState } from '../types';
+import type { FxModuleId, FxRackState, RoomIrId } from '../types';
 import { CLICK_LIMIT, conformanceResidual, discontinuity } from './clickMetric';
 import { lowSine, noise, program } from './testSignals';
 
@@ -263,11 +265,86 @@ async function crossfadeChecks(env: Omit<FxRackEnv, 'mode'>): Promise<HarnessChe
   return out;
 }
 
+// ── Room IRs: real Opus decode + send conformance ────────────────────────────
+
+async function roomChecks(env: Omit<FxRackEnv, 'mode'>): Promise<HarnessCheck[]> {
+  const out: HarnessCheck[] = [];
+  const loader = env.irLoader!;
+  for (const sampleRate of [48_000, 44_100]) {
+    for (const id of Object.keys(IR_MANIFEST) as RoomIrId[]) {
+      const ctx = new OfflineAudioContext(2, 128, sampleRate);
+      let energyError = Number.POSITIVE_INFINITY;
+      try {
+        const ir = await loader.load(ctx, id); // validates channels + duration
+        const energies = Array.from({ length: ir.numberOfChannels }, (_, c) =>
+          ir.getChannelData(c).reduce((sum, v) => sum + v * v, 0),
+        );
+        // Unit energy at 48 kHz; resampling to 44.1 kHz scales it by ~44.1/48.
+        const expected = sampleRate / 48_000;
+        energyError = Math.max(...energies.map((e) => Math.abs(e / expected - 1)));
+        if (ir.sampleRate !== sampleRate) energyError = Number.POSITIVE_INFINITY;
+      } catch {
+        energyError = Number.POSITIVE_INFINITY;
+      }
+      out.push(check(`ir ${id} @ ${sampleRate}: Opus decode, rate, length, energy error`, energyError, 0.25, 'below'));
+    }
+  }
+
+  // Toggled room vs a hand-built reference (dry + the same IR fed through the
+  // spec'd send ramp) — see tests/fxRoom.test.ts for why M1/M2 don't apply.
+  const input = lowSine({ sampleRate: SR, seconds: 2, freq: 55, amp: 0.25, dc: 0.1 });
+  const T1 = quantumTime(0.3, SR);
+  const T2 = quantumTime(0.8, SR);
+  const params = { ir: 'small' as const, mix: 0.6, predelay: 10, lowCut: 150 };
+  const state = (enabled: boolean) => {
+    const st = defaultFxRackState();
+    st.modules.room.enabled = enabled;
+    Object.assign(st.modules.room.params, params);
+    return parseFxRackState(st);
+  };
+  const toggled = await renderRack(env, input, SR, state(false), {
+    toggles: [
+      { at: T1, state: state(true) },
+      { at: T2, state: state(false) },
+    ],
+    prepare: ['room'],
+  });
+  const ctx = new OfflineAudioContext(2, input[0]!.length, SR);
+  const src = ctx.createBufferSource();
+  src.buffer = toBuffer(ctx, input);
+  const send = ctx.createGain();
+  const sendOn = T1 + FX_CROSSFADE_S;
+  send.gain.value = 0;
+  send.gain.setValueAtTime(0, sendOn);
+  send.gain.linearRampToValueAtTime(1, sendOn + FX_CROSSFADE_S);
+  send.gain.setValueAtTime(1, T2);
+  send.gain.linearRampToValueAtTime(0, T2 + FX_CROSSFADE_S);
+  const mix = ctx.createGain();
+  mix.gain.value = params.mix;
+  const predelay = ctx.createDelay(0.2);
+  predelay.delayTime.value = params.predelay / 1000;
+  const lowCut = ctx.createBiquadFilter();
+  lowCut.type = 'highpass';
+  lowCut.frequency.value = params.lowCut;
+  lowCut.Q.value = Math.SQRT1_2;
+  const conv = ctx.createConvolver();
+  conv.normalize = false;
+  conv.buffer = await loader.load(ctx, 'small');
+  src.connect(ctx.destination);
+  src.connect(send).connect(mix).connect(predelay).connect(lowCut).connect(conv).connect(ctx.destination);
+  src.start(0);
+  const reference = channelsOf(await ctx.startRendering());
+  out.push(check('room: toggled vs spec\'d send-ramp reference', maxAbsDiff(toggled, reference), CLICK_LIMIT, 'below'));
+  const back = Math.round((T2 + FX_CROSSFADE_S + 0.35 + 0.01 + 0.05 + FX_CROSSFADE_S) * SR) + 1;
+  out.push(check('room: exact wire again after the tail', maxAbsDiff(toggled, input, back), 0, 'zero'));
+  return out;
+}
+
 // ── Static vs live parity ────────────────────────────────────────────────────
 
 async function parityChecks(env: Omit<FxRackEnv, 'mode'>): Promise<HarnessCheck[]> {
   const out: HarnessCheck[] = [];
-  const presets = FX_FACTORY_PRESETS.filter((p) => !p.state.modules.room.enabled && p.id !== 'flat');
+  const presets = FX_FACTORY_PRESETS.filter((p) => p.id !== 'flat');
   for (const sampleRate of [44_100, 48_000]) {
     const input = program({ sampleRate, seconds: 0.5 });
     for (const preset of presets) {
@@ -350,10 +427,11 @@ export async function runAll(options: HarnessOptions): Promise<HarnessReport> {
     cpuLimit: 0.05,
     ...options,
   };
-  const env: Omit<FxRackEnv, 'mode'> = { characterWorkletUrl: opts.workletUrl };
+  const env: Omit<FxRackEnv, 'mode'> = { characterWorkletUrl: opts.workletUrl, irLoader: sharedIrLoader() };
   const checks: HarnessCheck[] = [];
   checks.push(...(await nullChecks(env)));
   checks.push(...(await crossfadeChecks(env)));
+  checks.push(...(await roomChecks(env)));
   checks.push(...(await parityChecks(env)));
   const { check: cpu, cpu: cpuReport } = await cpuCheck(opts);
   checks.push(cpu);

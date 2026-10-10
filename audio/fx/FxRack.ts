@@ -127,6 +127,15 @@ export class FxRack {
     return cloneFxRackState(this.state);
   }
 
+  /**
+   * Forget that a module was unavailable (e.g. its IR failed to load) and
+   * re-apply the current state, which retries creating it.
+   */
+  retry(id: FxModuleId): Promise<void> {
+    this.unavailable.delete(id);
+    return this.apply(this.state);
+  }
+
   /** Create modules ahead of enabling them (tests: no node creation mid-render). */
   async prepare(ids: readonly FxModuleId[]): Promise<void> {
     for (const id of ids) await this.ensureModule(id, this.state.modules[id].params);
