@@ -5,6 +5,10 @@
     "types": [],
     "noEmit": true
   },
-  "include": ["audio-worklet/js/**/*.ts", "audio-worklet/workletProtocolConstants.ts"],
+  "include": [
+    "audio-worklet/js/**/*.ts",
+    "audio-worklet/workletProtocolConstants.ts",
+    "audio-worklet/fxCharacterParams.ts"
+  ],
   "exclude": ["node_modules", "dist", "archive", "jules_patch"]
 }
