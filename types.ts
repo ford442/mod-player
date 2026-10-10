@@ -312,6 +312,16 @@ declare global {
     __PATTERN_DIAG__?: PatternDiagSnapshot;
     /** Headless Chrome / Playwright automation hooks (dev + CI) */
     __TEST_HOOKS__?: {
+      /** FX rack (#453): drive the store like the panel / MIDI would. */
+      fx?: {
+        setEnabled: (module: import('./audio/fx/types').FxModuleId | 'rack', enabled: boolean) => void;
+        setParam: (module: import('./audio/fx/types').FxModuleId, key: string, value: number | boolean | string) => void;
+        getState: () => {
+          rackStatus: string;
+          moduleStatus: Record<string, { status: string; detail?: string }>;
+          effective: import('./audio/fx/types').FxRackState;
+        };
+      };
       seekToRow: (row: number) => void;
       stopPlayback: () => void;
       startPlayback: () => void;

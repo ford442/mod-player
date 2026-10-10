@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /**
- * Audio product-flow smoke — real-browser AudioWorklet + libopenmpt session (#380).
+ * Audio product-flow smoke — real-browser AudioWorklet + libopenmpt session (#380),
+ * plus the FX rack live phase (#453).
  *
  * Usage (preview must be running):
  *   npm run build && npm run preview -- --port 4173 --host 127.0.0.1 &
@@ -185,6 +186,55 @@ async function loadXmMidPlayback(page, baseUrl) {
   });
 }
 
+/** Room IR fetches seen by the page (#453: none until the room is enabled). */
+const irRequests = [];
+
+function trackIrRequests(page) {
+  page.on('request', (req) => {
+    const url = typeof req.url === 'function' ? req.url() : String(req.url);
+    if (/\/ir\/[^/?]+\.opus/.test(url)) irRequests.push(url);
+  });
+}
+
+async function fxDiag(page) {
+  return evaluate(page, () => window.__FX_DIAG__ ?? null);
+}
+
+/**
+ * FX rack live phase (#453): enabling character + EQ mid-playback attaches the
+ * rack and playback keeps advancing; no IR is fetched until the room is
+ * enabled (then exactly one); switching everything off collapses the rack.
+ */
+async function runFxPhase(page) {
+  const hasFx = await evaluate(page, () => Boolean(window.__TEST_HOOKS__?.fx));
+  if (!hasFx) return { status: 'SKIP', reason: 'FX rack disabled in this build' };
+  if (irRequests.length) throw new Error(`fx: IR fetched before the room was enabled: ${irRequests.join(', ')}`);
+
+  await evaluate(page, () => {
+    const fx = window.__TEST_HOOKS__.fx;
+    fx.setParam('character', 'tapeOn', true);
+    fx.setParam('character', 'drive', 0.5);
+    fx.setEnabled('character', true);
+    fx.setParam('eq', 'lowGain', 4);
+    fx.setEnabled('eq', true);
+  });
+  await waitForFunction(page, () => window.__FX_DIAG__?.attached === true, { timeout: 20000 });
+  const onAdvance = await assertCountersAdvance(page, 'fx-on');
+  const onDiag = await fxDiag(page);
+  if (irRequests.length) throw new Error(`fx: IR fetched with only character + EQ on: ${irRequests.join(', ')}`);
+
+  await evaluate(page, () => window.__TEST_HOOKS__.fx.setEnabled('room', true));
+  await waitForFunction(page, () => window.__TEST_HOOKS__.fx.getState().moduleStatus.room?.status === 'ready', { timeout: 20000 });
+  if (irRequests.length !== 1 || !/small\.opus/.test(irRequests[0])) {
+    throw new Error(`fx: expected exactly one IR fetch (small.opus), got: ${irRequests.join(', ') || 'none'}`);
+  }
+
+  await evaluate(page, () => window.__TEST_HOOKS__.fx.setEnabled('rack', false));
+  await waitForFunction(page, () => window.__FX_DIAG__?.attached === false, { timeout: 10000 });
+  const offAdvance = await assertCountersAdvance(page, 'fx-off');
+  return { status: 'PASS', onDiag, irRequests: [...irRequests], onAdvance, offAdvance };
+}
+
 function auditConsole(phaseLines) {
   const { failures } = classifyAudioConsole(phaseLines);
   if (failures.length) {
@@ -223,6 +273,7 @@ async function main() {
   try {
     const { page, context } = await openPage(browser, engine);
     attachConsoleCollector(page, engine);
+    trackIrRequests(page);
 
     try {
       await goto(page, engine, appUrl, TIMEOUT);
@@ -273,6 +324,11 @@ async function main() {
         wrapBaseline: stopWrapBaseline,
         ...replayAdvance,
       });
+
+      const fxPhaseStart = phaseConsoleStart();
+      const fxPhase = await runFxPhase(page);
+      auditConsole(consoleLines.slice(fxPhaseStart));
+      report.phases.push({ id: 'fx-rack', ...fxPhase });
 
       const finalDiag = await evaluate(page, () => window.__AUDIO_DIAG__ ?? null);
       report.finalAudioDiag = finalDiag;

@@ -22,12 +22,14 @@ describe('room IR synth (#453)', () => {
       let el = 0;
       let er = 0;
       let cross = 0;
+      let finite = true;
       for (let i = 0; i < l!.length; i++) {
-        expect(Number.isFinite(l![i]!)).toBe(true);
+        finite &&= Number.isFinite(l![i]!) && Number.isFinite(r![i]!);
         el += l![i]! * l![i]!;
         er += r![i]! * r![i]!;
         cross += l![i]! * r![i]!;
       }
+      expect(finite).toBe(true);
       expect(el).toBeCloseTo(1, 4);
       expect(er).toBeCloseTo(1, 4);
       expect(Math.abs(cross)).toBeLessThan(0.3); // decorrelated channels
