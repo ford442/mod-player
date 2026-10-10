@@ -62,6 +62,7 @@
     "bench:engine": "node scripts/benchmark-engine-mainthread.mjs",
     "smoke:audio": "node scripts/audio-smoke.mjs",
     "smoke:audio:ci": "AUDIO_SMOKE_HEADLESS=1 node scripts/audio-smoke.mjs",
+    "smoke:fx:ci": "node scripts/fx-smoke.mjs",
     "check:cycles": "madge --circular --extensions ts,tsx src/renderers hooks/useWebGPURender.ts",
     "preflight": "npm run verify:lockfile && npm ci --dry-run --ignore-scripts --no-audit --no-fund --offline && npm run verify:wasm && npm run verify:js-libopenmpt && npm run verify:js-worklet-fresh && npm run lint && npm run typecheck && npm run typecheck:worklet && npm run typecheck:tests && npm test && npm run test:shader-includes && npm run build && npm run verify:build:root && npm run verify:bundle-budget"
   },

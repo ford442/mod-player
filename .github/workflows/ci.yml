@@ -153,12 +153,19 @@ jobs:
       - name: Audio smoke (JS worklet product flow)
         run: BASE_URL=http://127.0.0.1:4173 OUTPUT_DIR=./artifacts/audio-smoke npm run smoke:audio:ci
 
+      - name: FX rack harness (#453 — bypass null, crossfades, parity, character CPU)
+        # Chrome's Web Audio: the same scenarios as the vitest Web Audio tests,
+        # plus the character worklet's CPU share (< 5 % of one core at 48 kHz).
+        run: BASE_URL=http://127.0.0.1:4173 OUTPUT_DIR=./artifacts/fx-smoke npm run smoke:fx:ci
+
       - name: Upload audio smoke artifacts on failure
         if: failure()
         uses: actions/upload-artifact@v7
         with:
           name: audio-smoke-failure
-          path: artifacts/audio-smoke/
+          path: |
+            artifacts/audio-smoke/
+            artifacts/fx-smoke/
           retention-days: 5
 
       - name: Stop preview server
