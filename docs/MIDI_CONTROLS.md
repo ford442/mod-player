@@ -47,6 +47,26 @@ MIDI works even when keyboard shortcuts are blocked (e.g. focus in a text field)
 | CC **10** (pan) | Stereo pan −1…+1 |
 | **Program Change** | Select shader by index mod shader list length |
 
+### FX rack (#453)
+
+| MIDI | Command |
+|------|---------|
+| CC **91** (reverb send) | Room mix 0–100 % |
+| CC **74** (brightness) | EQ high shelf −12…+12 dB |
+| CC **71** (timbre) | Character drive 0…1 |
+
+A CC drives a param across its whole range along the param's own scale
+(linear or logarithmic — frequencies sweep geometrically), the same 0…1 the
+knobs use. Custom mappings can target any module param with
+`fxTarget: { module, param }` and `command: 'fx.setParam'`, toggle a module with
+`command: 'fx.toggle'` (a note toggles; a CC sets on at ≥ 64), or step presets
+with `command: 'fx.preset'` (a note steps by `fxTarget.step`, default +1; a
+Program Change selects preset *n*).
+
+When two mappings match, the one bound to the message's exact channel wins
+over an any-channel one — so a Program Change mapping on channel 2 can select
+FX presets while the default any-channel one still selects shaders.
+
 ## Conflict resolution
 
 | Situation | Keyboard | MIDI |

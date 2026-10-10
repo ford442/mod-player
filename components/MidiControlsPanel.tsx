@@ -81,6 +81,7 @@ export const MidiControlsPanel: React.FC<MidiControlsPanelProps> = ({ midi, isDa
               {m.kind === 'programChange' && 'Program Change'}
               {' → '}
               {COMMAND_LABELS[m.command]}
+              {m.fxTarget && ` (${m.fxTarget.module}${m.fxTarget.param ? `.${m.fxTarget.param}` : ''})`}
             </li>
           ))}
         </ul>

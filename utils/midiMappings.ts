@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { FxModuleId } from '../audio/fx/types';
 import type { PlayerCommandId } from './playerCommands';
 
 export type MidiMappingKind = 'noteOn' | 'cc' | 'programChange';
@@ -15,6 +16,16 @@ export interface MidiMapping {
   command: PlayerCommandId;
   /** For noteOn: only fire when velocity > 0 (default true) */
   noteOnOnly?: boolean;
+  /** FX rack target (#453) for fx.* commands: which module / param, or preset step. */
+  fxTarget?: MidiFxTarget;
+}
+
+export interface MidiFxTarget {
+  module: FxModuleId | 'rack';
+  /** fx.setParam: the param a CC drives (0…127 → 0…1 along its scale). */
+  param?: string;
+  /** fx.preset on a note: step direction (default +1). */
+  step?: 1 | -1;
 }
 
 const MidiMappingSchema = z.object({
@@ -25,6 +36,13 @@ const MidiMappingSchema = z.object({
   controller: z.number().int().min(0).max(127).optional(),
   command: z.string(),
   noteOnOnly: z.boolean().optional(),
+  fxTarget: z
+    .object({
+      module: z.enum(['character', 'eq', 'comp', 'room', 'rack']),
+      param: z.string().optional(),
+      step: z.union([z.literal(1), z.literal(-1)]).optional(),
+    })
+    .optional(),
 });
 
 const MidiMappingListSchema = z.array(MidiMappingSchema);
@@ -57,6 +75,10 @@ export const DEFAULT_MIDI_MAPPINGS: MidiMapping[] = [
   { id: 'cc-pan', kind: 'cc', controller: 10, command: 'pan.set' },
   // Shader program change
   { id: 'program-shader', kind: 'programChange', command: 'shader.selectByIndex' },
+  // FX rack (#453) on the GM controllers for reverb send, brightness and timbre
+  { id: 'cc-fx-room', kind: 'cc', controller: 91, command: 'fx.setParam', fxTarget: { module: 'room', param: 'mix' } },
+  { id: 'cc-fx-bright', kind: 'cc', controller: 74, command: 'fx.setParam', fxTarget: { module: 'eq', param: 'highGain' } },
+  { id: 'cc-fx-drive', kind: 'cc', controller: 71, command: 'fx.setParam', fxTarget: { module: 'character', param: 'drive' } },
 ];
 
 export function loadMidiMappings(): MidiMapping[] {
@@ -111,6 +133,18 @@ export function midiMessageType(status: number): number {
   return status & 0xf0;
 }
 
+/** First mapping on this exact channel, else the first any-channel one. */
+function findMapping(
+  mappings: MidiMapping[],
+  channel: number,
+  matches: (m: MidiMapping) => boolean,
+): MidiMapping | undefined {
+  return (
+    mappings.find((m) => matches(m) && m.channel === channel)
+    ?? mappings.find((m) => matches(m) && m.channel === undefined)
+  );
+}
+
 export function matchMidiMapping(
   mappings: MidiMapping[],
   status: number,
@@ -121,11 +155,7 @@ export function matchMidiMapping(
   const channel = midiChannelFromStatus(status);
 
   if (type === 0xb0) {
-    const mapping = mappings.find(
-      (m) => m.kind === 'cc'
-        && m.controller === data1
-        && (m.channel === undefined || m.channel === channel),
-    );
+    const mapping = findMapping(mappings, channel, (m) => m.kind === 'cc' && m.controller === data1);
     if (!mapping) return null;
     if (mapping.command === 'volume.set') {
       return { mapping, payload: { value: data2 / 127 } };
@@ -133,16 +163,23 @@ export function matchMidiMapping(
     if (mapping.command === 'pan.set') {
       return { mapping, payload: { value: (data2 / 127) * 2 - 1 } };
     }
+    const fx = mapping.fxTarget;
+    if (mapping.command === 'fx.setParam' && fx?.param && fx.module !== 'rack') {
+      return { mapping, payload: { module: fx.module, param: fx.param, value: data2 / 127, normalized: true } };
+    }
+    if (mapping.command === 'fx.toggle' && fx) {
+      return { mapping, payload: { module: fx.module, enabled: data2 >= 64 } };
+    }
     return { mapping };
   }
 
   if (type === 0xc0) {
-    const mapping = mappings.find(
-      (m) => m.kind === 'programChange'
-        && (m.channel === undefined || m.channel === channel),
-    );
+    const mapping = findMapping(mappings, channel, (m) => m.kind === 'programChange');
     if (!mapping) return null;
     if (mapping.command === 'shader.selectByIndex') {
+      return { mapping, payload: { index: data1 } };
+    }
+    if (mapping.command === 'fx.preset') {
       return { mapping, payload: { index: data1 } };
     }
     return { mapping };
@@ -153,11 +190,7 @@ export function matchMidiMapping(
   if (!isNoteOn && !isNoteOff) return null;
 
   const note = data1;
-  const mapping = mappings.find(
-    (m) => m.kind === 'noteOn'
-      && m.note === note
-      && (m.channel === undefined || m.channel === channel),
-  );
+  const mapping = findMapping(mappings, channel, (m) => m.kind === 'noteOn' && m.note === note);
   if (!mapping) return null;
   if (mapping.noteOnOnly !== false && isNoteOff) return null;
 
@@ -166,6 +199,12 @@ export function matchMidiMapping(
     if (Number.isFinite(order)) {
       return { mapping, payload: { order } };
     }
+  }
+  if (mapping.command === 'fx.toggle' && mapping.fxTarget) {
+    return { mapping, payload: { module: mapping.fxTarget.module } };
+  }
+  if (mapping.command === 'fx.preset') {
+    return { mapping, payload: { step: mapping.fxTarget?.step ?? 1 } };
   }
 
   return { mapping };
