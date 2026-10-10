@@ -65,6 +65,15 @@ export const IS_PUBLIC_MODE =
   _urlParams.get('public') === '1' ||
   _urlParams.get('demo') === '1';
 
+/**
+ * FX rack (#453): on in dev builds; public builds opt in with `VITE_FX_RACK=1`
+ * until the Safari Opus path and mobile CPU have had a soak. When off, nothing
+ * of the rack loads (no chunk, no IR fetch) and persisted FX state is ignored.
+ */
+export const FX_RACK_ENABLED =
+  !IS_PUBLIC_MODE ||
+  (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_FX_RACK === '1');
+
 /** Expose full shader catalog in public builds (`?shaderDebug=1` or localStorage). */
 export const IS_SHADER_DEBUG = (() => {
   if (_urlParams.get('shaderDebug') === '1' || _urlParams.get('debugShaders') === '1') {

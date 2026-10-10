@@ -27,6 +27,8 @@ const MAX_INITIAL_GZIP_BYTES = Number(process.env.MAX_INITIAL_GZIP_BYTES || 260 
 const THREE_CHUNK_PREFIX = 'three-r3f';
 const REACT_VENDOR_CHUNK_PREFIX = 'react-vendor';
 const LAZY_3D_CHUNK_PREFIX = 'App3DView';
+/** FX rack (#453): the rack graph (FxRack, modules, loaders) loads only once a module is enabled. */
+const LAZY_FX_CHUNK_PREFIX = 'fxRackController';
 /**
  * JS-engine assets under worklets/ (everything except the optional, gitignored openmpt-native.*):
  * libopenmpt-worklet.{js,wasm} + the generated processor. Was ~5 MB of wasm2js JS (fetched a
@@ -124,6 +126,18 @@ if (app3dChunks.length === 0) {
   errors.push('no App3DView-*.js lazy chunk found (3D view not code-split?)');
 }
 
+// FX rack (#453): its graph is a lazy chunk; the eager code only carries the store + bootstrap.
+const fxChunks = jsChunks(LAZY_FX_CHUNK_PREFIX);
+if (fxChunks.length === 0) {
+  errors.push(`no ${LAZY_FX_CHUNK_PREFIX}-*.js lazy chunk found (FX rack not code-split?)`);
+}
+// Room IRs are fetched on demand from dist/ir/, never bundled.
+{
+  const irDir = join(BUILD_DIR, 'ir');
+  const irs = existsSync(irDir) ? readdirSync(irDir).filter((f) => f.endsWith('.opus')) : [];
+  if (irs.length === 0) errors.push('dist/ir/*.opus missing (FX room IRs not shipped)');
+}
+
 // What the browser fetches before any user action: the entry, every <link rel="modulepreload">,
 // and all of their static imports. three-r3f and the lazy 3D view must not be in it.
 const preloadHrefs = modulePreloadHrefs(html);
@@ -160,7 +174,7 @@ const eagerChunks = new Map();
   }
 }
 
-for (const [rel, { via }] of eagerChunks) {
+for (const [rel, { via, code }] of eagerChunks) {
   const name = posix.basename(rel);
   if (name.startsWith(`${THREE_CHUNK_PREFIX}-`)) {
     errors.push(
@@ -170,6 +184,14 @@ for (const [rel, { via }] of eagerChunks) {
   }
   if (name.startsWith(`${LAZY_3D_CHUNK_PREFIX}-`)) {
     errors.push(`initial load statically imports ${name}${via ? ` (via ${via})` : ''} — 3D view is not lazy`);
+  }
+  if (name.startsWith(`${LAZY_FX_CHUNK_PREFIX}-`)) {
+    errors.push(`initial load statically imports ${name}${via ? ` (via ${via})` : ''} — FX rack is not lazy`);
+  }
+  // Node factory names survive minification, and only the FX rack's modules call them.
+  const text = code.toString('utf8');
+  if (text.includes('createConvolver') || text.includes('createDynamicsCompressor')) {
+    errors.push(`initial load chunk ${name} contains FX rack graph code — it must stay in its lazy chunk`);
   }
 }
 
@@ -233,6 +255,6 @@ console.log(
     `(${[...eagerChunks.keys()].map((r) => posix.basename(r)).join(', ')}), ` +
     `react-vendor=${kib(reactVendorChunks).toFixed(1)} KiB, ` +
     `three-r3f=${kib(threeChunks).toFixed(1)} KiB lazy (${threeChunks.length} file(s)), ` +
-    `App3DView lazy chunk present, ` +
+    `App3DView lazy chunk present, FX rack lazy chunk present, ` +
     `js-engine worklets/=${(jsEngineBytes / 1024).toFixed(1)} KiB`,
 );
