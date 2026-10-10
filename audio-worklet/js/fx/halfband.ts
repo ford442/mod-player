@@ -18,6 +18,9 @@ export const HALFBAND_TAPS = 47;
 export const HALFBAND_CENTER = 23;
 /** Non-zero polyphase taps (h[0], h[2], …, h[46]). */
 export const HALFBAND_PHASE_TAPS = 24;
+/** The polyphase branch is symmetric, so the MAC loop folds to half of it. */
+const HALF_PHASE = HALFBAND_PHASE_TAPS / 2;
+const LAST_TAP = HALFBAND_PHASE_TAPS - 1;
 const KAISER_BETA = 8;
 
 function besselI0(x: number): number {
@@ -106,8 +109,9 @@ export class HalfbandUpsampler {
       pos = pos === 0 ? size - 1 : pos - 1;
       buf[pos] = x;
       buf[pos + size] = x;
+      // The branch is symmetric (taps[j] = taps[23 − j]): fold it, 12 multiplies.
       let acc = 0;
-      for (let j = 0; j < HALFBAND_PHASE_TAPS; j++) acc += taps[j]! * buf[pos + j]!;
+      for (let j = 0; j < HALF_PHASE; j++) acc += taps[j]! * (buf[pos + j]! + buf[pos + LAST_TAP - j]!);
       dst[2 * i] = 2 * acc;
       // Centre tap (½) × zero-stuffing gain (2) = a pure delay of 11 input samples.
       dst[2 * i + 1] = buf[pos + 11]!;
@@ -146,7 +150,7 @@ export class HalfbandDownsampler {
       oddBuf[oddPos] = odd;
       oddBuf[oddPos + oddSize] = odd;
       let acc = 0;
-      for (let j = 0; j < HALFBAND_PHASE_TAPS; j++) acc += taps[j]! * evenBuf[evenPos + j]!;
+      for (let j = 0; j < HALF_PHASE; j++) acc += taps[j]! * (evenBuf[evenPos + j]! + evenBuf[evenPos + LAST_TAP - j]!);
       // h[23] = ½ multiplies v[2n − 23] = the odd sample from 12 steps ago.
       dst[i] = acc + 0.5 * oddBuf[oddPos + 12]!;
     }

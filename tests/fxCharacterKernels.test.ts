@@ -22,6 +22,7 @@ import {
   HalfbandDownsampler,
   HalfbandUpsampler,
   designHalfband,
+  halfbandPhaseTaps,
 } from '../audio-worklet/js/fx/halfband';
 import { SaturatorCurve, driveToK, saturate } from '../audio-worklet/js/fx/saturator';
 
@@ -97,6 +98,9 @@ describe('halfband ×2', () => {
       expect(h[k]).toBeCloseTo(h[h.length - 1 - k]!, 15); // linear phase
     }
     expect(even).toBeCloseTo(0.5, 14);
+    // The kernels fold the polyphase branch on this symmetry.
+    const taps = halfbandPhaseTaps(h);
+    for (let j = 0; j < taps.length; j++) expect(taps[j]).toBe(taps[taps.length - 1 - j]);
   });
 
   it('up → down passes DC at unity after the 23-frame latency', () => {

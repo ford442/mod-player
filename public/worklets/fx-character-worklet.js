@@ -199,6 +199,8 @@
   var HALFBAND_TAPS = 47;
   var HALFBAND_CENTER = 23;
   var HALFBAND_PHASE_TAPS = 24;
+  var HALF_PHASE = HALFBAND_PHASE_TAPS / 2;
+  var LAST_TAP = HALFBAND_PHASE_TAPS - 1;
   var KAISER_BETA = 8;
   function besselI0(x) {
     let sum = 1;
@@ -271,7 +273,7 @@
         buf[pos] = x;
         buf[pos + size] = x;
         let acc = 0;
-        for (let j = 0; j < HALFBAND_PHASE_TAPS; j++) acc += taps[j] * buf[pos + j];
+        for (let j = 0; j < HALF_PHASE; j++) acc += taps[j] * (buf[pos + j] + buf[pos + LAST_TAP - j]);
         dst[2 * i] = 2 * acc;
         dst[2 * i + 1] = buf[pos + 11];
       }
@@ -305,7 +307,7 @@
         oddBuf[oddPos] = odd;
         oddBuf[oddPos + oddSize] = odd;
         let acc = 0;
-        for (let j = 0; j < HALFBAND_PHASE_TAPS; j++) acc += taps[j] * evenBuf[evenPos + j];
+        for (let j = 0; j < HALF_PHASE; j++) acc += taps[j] * (evenBuf[evenPos + j] + evenBuf[evenPos + LAST_TAP - j]);
         dst[i] = acc + 0.5 * oddBuf[oddPos + 12];
       }
       this.evenRing.pos = evenPos;
