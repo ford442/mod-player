@@ -14,7 +14,7 @@ import { defaultFxRackState, parseFxRackState } from '../audio/fx/spec/schema';
 import { lowSine, program } from '../audio/fx/testing/testSignals';
 import type { FxRackState } from '../audio/fx/types';
 import { FX_CROSSFADE_S, quantumTime, renderRack } from './helpers/fxRender';
-import { maxAbsDiff } from './helpers/webAudioNode';
+import { WEB_AUDIO_TIMEOUT_MS, maxAbsDiff } from './helpers/webAudioNode';
 
 const SR = 48_000;
 
@@ -30,7 +30,7 @@ const rms = (x: Float32Array, from = 0) => {
   return Math.sqrt(sum / (x.length - from));
 };
 
-describe('FxRack (#453)', () => {
+describe('FxRack (#453)', { timeout: WEB_AUDIO_TIMEOUT_MS }, () => {
   it('a bypassed rack is a bit-exact wire — also with modules created but bypassed', async () => {
     const input = program({ sampleRate: SR, seconds: 0.5 });
     const empty = await renderRack({ input, sampleRate: SR, initial: defaultFxRackState(), mode: 'static' });

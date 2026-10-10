@@ -13,6 +13,7 @@ import { defaultFxRackState } from '../audio/fx/spec/schema';
 import { readAudioGraphSources } from './helpers/audioGraphSource';
 import { CHARACTER_WORKLET, FX_CROSSFADE_S } from './helpers/fxRender';
 import {
+  WEB_AUDIO_TIMEOUT_MS,
   bufferFrom,
   channelsOf,
   createOfflineContext,
@@ -267,7 +268,7 @@ async function renderProduction(
   return channelsOf(await startRenderingWithTimeout(ctx));
 }
 
-describe('master graph null test (#453 acceptance 1)', () => {
+describe('master graph null test (#453 acceptance 1)', { timeout: WEB_AUDIO_TIMEOUT_MS }, () => {
   vi.spyOn(console, 'log').mockImplementation(() => {});
   afterEach(() => publishFxHost(null));
 

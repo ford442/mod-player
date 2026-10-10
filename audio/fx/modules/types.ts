@@ -1,9 +1,19 @@
 /** FX module contract (#453): one Web Audio sub-graph per rack slot. */
+import type { IrLoader } from '../room/irLoader';
+import type { FxScheduler } from '../scheduler';
 import type { FxModuleId, FxParamsById } from '../types';
+
+export type FxModuleStatus = 'loading' | 'ready' | 'unavailable';
 
 export interface FxModuleEnv {
   /** Character worklet module URL; the browser default comes from character/fxWorkletUrl.ts. */
   characterWorkletUrl?: string;
+  /** Room IRs. Without one the room is unavailable. */
+  irLoader?: IrLoader;
+  /** Live: deferred cleanup on the audio clock (e.g. the room's idle convolver). */
+  scheduler?: FxScheduler;
+  /** Module lifecycle for the UI (room: loading its IR, or unavailable here). */
+  onStatus?: (module: FxModuleId, status: FxModuleStatus, detail?: string) => void;
 }
 
 export interface FxModuleInstance<K extends FxModuleId = FxModuleId> {

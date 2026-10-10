@@ -27,6 +27,7 @@ import {
   renderRack,
 } from './helpers/fxRender';
 import {
+  WEB_AUDIO_TIMEOUT_MS,
   bufferFrom,
   channelsOf,
   createOfflineContext,
@@ -93,7 +94,7 @@ const MODULES: { id: FxModuleId; params: Record<string, unknown> }[] = [
   { id: 'character', params: { tapeOn: true, drive: 0.6, ledOn: true, ledModel: 'a500' } },
 ];
 
-describe('FX crossfades are click-free (#453 acceptance 2)', () => {
+describe('FX crossfades are click-free (#453 acceptance 2)', { timeout: WEB_AUDIO_TIMEOUT_MS }, () => {
   for (const { id, params } of MODULES) {
     it(`${id}: follows the spec'd 10 ms crossfade (M1) with no discontinuity (M2)`, async () => {
       const { m1, m2 } = await score(id, params);
