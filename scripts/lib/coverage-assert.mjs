@@ -311,7 +311,6 @@ export function computeBrowserCoverage({ regions, lumaThreshold = 12 }) {
   }
 
   // Locate renderer and read pixels.
-  // eslint-disable-next-line no-undef
   const renderer = window.currentPatternRenderer;
   if (!renderer || typeof renderer.readPixels !== 'function') {
     return { error: 'no-renderer' };
@@ -328,7 +327,6 @@ export function computeBrowserCoverage({ regions, lumaThreshold = 12 }) {
   // Resolve canvas dimensions from the renderer's canvas or a fallback selector.
   const canvas =
     (typeof renderer.getCanvas === 'function' ? renderer.getCanvas() : null) ??
-    // eslint-disable-next-line no-undef
     document.querySelector('canvas[data-shader-preview-source="true"]');
   const width = canvas ? canvas.width : 1024;
   const height = canvas ? canvas.height : 1024;

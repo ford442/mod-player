@@ -29,7 +29,7 @@ let lock;
 try {
   lock = JSON.parse(readFileSync(lockPath, 'utf8'));
 } catch (err) {
-  console.error(`verify-lockfile: ${lockPath} is not valid JSON: ${err.message}`);
+  console.error(`verify-lockfile: ${lockPath} is not valid JSON: ${err instanceof Error ? err.message : err}`);
   process.exit(1);
 }
 

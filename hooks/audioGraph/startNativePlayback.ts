@@ -76,7 +76,7 @@ export async function startNativePlayback(
       throw new Error('Native AudioWorkletNode not available');
     }
     try { cppNode.disconnect(); } catch { /* not yet connected */ }
-    cppNode.connect(refs.analyserRef.current!);
+    cppNode.connect(refs.masterInputRef.current!);
     wireMasterOutput(ctx, refs, config.volume, config.panValue);
     refs.audioWorkletNodeRef.current = cppNode;
     log.log('Native engine: C++ node on shared AudioContext');

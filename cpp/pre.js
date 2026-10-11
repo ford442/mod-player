@@ -13,11 +13,12 @@
 //   - Emscripten AUDIO_WORKLET / WASM_WORKER startup
 // See docs/WORKLET_AUDIO_BUG.md (setTimeout polyfill).
 if (typeof globalThis.setTimeout !== 'function') {
-    globalThis.setTimeout = function (callback) {
+    // The host has no timers, so the DOM/Node typings of setTimeout don't describe it (cast for ts-check).
+    /** @type {any} */ (globalThis).setTimeout = function (callback) {
         Promise.resolve().then(callback);
         return 0;
     };
-    globalThis.clearTimeout = function () {};
+    /** @type {any} */ (globalThis).clearTimeout = function () {};
 }
 
 // Ensure Module exists

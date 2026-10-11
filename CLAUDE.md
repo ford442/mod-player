@@ -83,10 +83,10 @@ mod-player/
 npm run dev          # Start Vite dev server at http://localhost:5173
 npm run build        # tsc + Vite production build → dist/ (uses 4 GB heap)
 npm run preview      # Preview production build locally
-npm run typecheck    # TypeScript type-check only (no emit)
-npm run preflight    # Run before every commit: the whole `lint-and-build` chain, stops at first failure
+npm run typecheck    # TypeScript type-check only (no emit): app + vite/vitest configs + scripts/ (tsconfig.node.json, tsconfig.scripts.json)
+npm run preflight    # Run before every commit: CI's `lint-and-build` job *is* this chain (stops at first failure, no network needed after `npm ci`)
 npm run verify:lockfile # package-lock.json metadata guard (lockfileVersion 3, resolved + integrity)
-npm run lint         # ESLint (max 43 warnings budget; hard CI gate)
+npm run lint         # ESLint (max 40 warnings budget; hard CI gate)
 npm run build:emcc   # Native C++ worklet → openmpt-native.* (scripts/build-wasm.sh, emsdk 3.1.51)
 npm run build:worklet # Alias of build:emcc (never overwrites openmpt-worklet.js)
 npm run build:js-worklet # Compile audio-worklet/js/openmpt-processor.ts → public/worklets/openmpt-worklet.js (esbuild)
@@ -270,6 +270,18 @@ EngineState           // Worklet engine lifecycle state
     Debug info goes through `useThrottledDebugInfo`, not `useState`: it only
     re-renders PatternDisplay while the debug panel is open.
 
+15. **Master chain has a single input (#453):** every engine (JS worklet,
+    native, ScriptProcessor) connects to `masterInputRef`, **never** to
+    `analyserRef`: `engine → masterInput → masterDirect → analyser → panner →
+    gain → destination`. The FX rack attaches in parallel to `masterDirect`
+    (`masterInput → rack → analyser`) through `audio/fx/fxHost.ts`, and owns
+    `masterDirect.gain`. `ensureMasterOutputChain` is **connect-only** (a
+    duplicate `connect()` is a no-op per spec), so re-asserting it on every
+    play / hot reload keeps the performance-capture tap and the rack's edges.
+    Don't put a bare `disconnect()` on a master node back.
+    `tests/audioMasterGraph.test.ts` holds the topology and sample-exact null
+    tests (real Web Audio via node-web-audio-api, `tests/helpers/webAudioNode.ts`).
+
 ## Critical Data Flows
 
 ### Module Load → Playback
@@ -336,6 +348,7 @@ All shared canvas layout values live here:
 - **Do not** add broad glob patterns to `tailwind.config.js`
 - **Do not** remove the Vite CORS headers (breaks SharedArrayBuffer / WASM workers)
 - **Do not** add a second `new AudioContext` call site — `utils/audioContextFactory.ts` is the only one (see pitfall 11)
+- **Do not** connect an engine node to `analyserRef` or put a bare `disconnect()` on a master node — engines go to `masterInputRef` (see pitfall 15)
 - **Do not** assume WebGPU is available — always check for fallback paths
 - **Do not** commit Emscripten `a.out` / `a.out.*` — native outputs are only `public/worklets/openmpt-native.*` (gitignored build artifacts from `npm run build:emcc`)
 - **Do not** commit agent scratch files (`.swarm-state.md`, `weekly_plan.md`) — use `docs/planning/ROADMAP.md` and GitHub issues

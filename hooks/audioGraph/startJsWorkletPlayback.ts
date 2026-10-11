@@ -392,9 +392,10 @@ export async function startJsWorkletPlayback(
     }
 
     log.log('Connecting audio graph: worklet -> analyser -> panner -> gain -> destination');
+    console.log('[PLAY] Connecting audio graph: worklet -> master input -> analyser -> panner -> gain -> destination');
     if (!reuseWorkletNode) {
       try { node.disconnect(); } catch { /* ignore stale edges */ }
-      node.connect(refs.analyserRef.current!);
+      node.connect(refs.masterInputRef.current!);
     } else {
       log.log('Hot reload — keeping existing worklet wiring; re-asserting master output chain');
     }
