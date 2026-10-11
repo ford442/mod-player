@@ -8,7 +8,8 @@
  * Env:
  *   TEST_URL       — base URL (default http://localhost:5173)
  *   SHADER_FILE    — WGSL shader id (default patternv0.50.wgsl)
- *   RENDERER       — webgl2 | webgpu | html (default webgl2 for Colab GPU)
+ *   RENDERER       — webgl2 | webgpu | html (default webgl2: the only backend with a real readPixels()).
+ *                    webgl2 is the opt-in GLSL session (`?webgl2=1`, #462) — never persisted, never automatic.
  *   OUTPUT_DIR     — screenshot output dir (default /mnt/ramdisk/trigger-tail)
  *   SEEK_ROWS      — comma-separated rows to seek (default 0,8,16,32)
  */
@@ -21,6 +22,9 @@ const BASE_URL = process.env.TEST_URL || 'http://localhost:5173';
 const SHADER_FILE = process.env.SHADER_FILE || 'patternv0.50.wgsl';
 const RENDERER = process.env.RENDERER || 'webgl2';
 const OUTPUT_DIR = process.env.OUTPUT_DIR || '/mnt/ramdisk/trigger-tail';
+
+/** WebGL2 is opt-in only: canonical `?webgl2=1`. Other backends keep `?renderer=`. */
+const rendererQuery = (renderer) => (renderer === 'webgl2' ? 'webgl2=1' : `renderer=${renderer}`);
 const SEEK_ROWS = (process.env.SEEK_ROWS || '0,8,16,32').split(',').map(Number);
 const MODULE_URL = process.env.MODULE_URL || '';
 const TIMEOUT = Number(process.env.TIMEOUT || 45000);
@@ -113,11 +117,14 @@ async function run() {
   await page.goto(`${BASE_URL}/`, { waitUntil: 'domcontentloaded', timeout: TIMEOUT });
   await page.evaluate(({ shader, renderer }) => {
     localStorage.setItem('xasm1_last_shader', shader);
-    localStorage.setItem('xasm1_pattern_renderer', renderer);
-    window.DEBUG_RENDERER = renderer;
+    // A stored/DEBUG_RENDERER 'webgl2' is ignored (opt-in is per page load) — the URL carries it instead.
+    if (renderer !== 'webgl2') {
+      localStorage.setItem('xasm1_pattern_renderer', renderer);
+      window.DEBUG_RENDERER = renderer;
+    }
   }, { shader: SHADER_FILE, renderer: RENDERER });
 
-  const url = `${BASE_URL}/?renderer=${RENDERER}`;
+  const url = `${BASE_URL}/?${rendererQuery(RENDERER)}`;
   console.log(`Navigating to ${url}...`);
   await page.goto(url, { waitUntil: 'networkidle2', timeout: TIMEOUT });
 
@@ -133,6 +140,13 @@ async function run() {
   }
   console.log('Waiting for pattern renderer...');
   await waitForRenderer(page);
+
+  // Fail loudly if the backend that rendered isn't the one requested (`?renderer=webgl2` used to silently
+  // become WebGPU, whose readPixels() is a stub → "pixel stats" of nothing).
+  const activeBackend = await page.evaluate(() => window.currentPatternRenderer?.backend ?? null);
+  if (activeBackend !== RENDERER) {
+    throw new Error(`requested renderer=${RENDERER} but the active backend is ${activeBackend ?? 'none'}`);
+  }
 
   // Let pattern matrix pack + first render settle
   await new Promise((r) => setTimeout(r, 3000));

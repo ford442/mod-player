@@ -1,21 +1,20 @@
 #!/usr/bin/env node
 /**
- * Compiles the JS AudioWorklet processor from TypeScript.
+ * Compiles the typed AudioWorklet processors from TypeScript.
  *
  * AudioWorklet classic scripts cannot reliably import() across every target
- * we support, so the *output* stays a single classic script — only the
- * *source* moved to TypeScript. This bundles audio-worklet/js/openmpt-processor.ts
- * (which imports the shared audio-worklet/workletProtocolConstants.ts) into
- * public/worklets/openmpt-worklet.js.
+ * we support, so each *output* stays a single classic script — only the
+ * *sources* are TypeScript. Each entry in ENTRIES bundles one processor (plus
+ * the DOM-free modules it imports) into public/worklets/.
  *
- * Cache-busting: hooks/useWorkletLoader.ts imports
- * audio-worklet/js/worklet-version.generated.json for its `?v=` query param
- * instead of a hand-maintained version comment list. The version is a content
- * hash of the built output, so it only changes when the processor actually
- * changes (deterministic — safe for the freshness gate below).
+ * Cache-busting: each entry writes a content hash of its built output to its
+ * own `*.generated.json` (e.g. hooks/useWorkletLoader.ts imports
+ * audio-worklet/js/worklet-version.generated.json for its `?v=` query param).
+ * The version only changes when that processor actually changes
+ * (deterministic — safe for the freshness gate below).
  *
  * `--check` builds in memory and compares against the committed files instead of writing them,
- * exiting 1 when they differ (`npm run verify:js-worklet-fresh`, part of `npm run preflight`).
+ * exiting 1 when any differ (`npm run verify:js-worklet-fresh`, part of `npm run preflight`).
  * Unlike `build && git diff --exit-code` it ignores unrelated working-tree changes and can't be
  * satisfied trivially by having just regenerated the files.
  */
@@ -29,20 +28,33 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const ROOT = resolve(__dirname, '..');
 
-const ENTRY = join(ROOT, 'audio-worklet/js/openmpt-processor.ts');
-const OUTFILE = join(ROOT, 'public/worklets/openmpt-worklet.js');
-const VERSION_FILE = join(ROOT, 'audio-worklet/js/worklet-version.generated.json');
+/** One row per generated worklet. Paths are repo-relative. */
+const ENTRIES = [
+  {
+    entry: 'audio-worklet/js/openmpt-processor.ts',
+    outfile: 'public/worklets/openmpt-worklet.js',
+    versionFile: 'audio-worklet/js/worklet-version.generated.json',
+  },
+];
 
-const BANNER = [
-  '// generated — do not edit.',
-  '// Source: audio-worklet/js/openmpt-processor.ts',
-  '// Regenerate with: npm run build:js-worklet',
-].join('\n');
+/** @param {string} entry */
+function bannerFor(entry) {
+  return [
+    '// generated — do not edit.',
+    `// Source: ${entry}`,
+    '// Regenerate with: npm run build:js-worklet',
+  ].join('\n');
+}
 
-async function main() {
+/**
+ * @param {{ entry: string, outfile: string, versionFile: string }} spec
+ * @returns {Promise<{ outfile: string, versionFile: string, code: string, versionJson: string, version: string }>}
+ */
+async function buildEntry({ entry, outfile, versionFile }) {
+  const outPath = join(ROOT, outfile);
   const result = await esbuild.build({
-    entryPoints: [ENTRY],
-    outfile: OUTFILE,
+    entryPoints: [join(ROOT, entry)],
+    outfile: outPath,
     bundle: true,
     format: 'iife',
     target: 'es2020',
@@ -50,12 +62,12 @@ async function main() {
     minify: false,
     write: false,
     legalComments: 'none',
-    banner: { js: BANNER },
+    banner: { js: bannerFor(entry) },
   });
 
-  const output = result.outputFiles.find((f) => f.path === OUTFILE);
+  const output = result.outputFiles.find((f) => f.path === outPath);
   if (!output) {
-    throw new Error(`esbuild did not produce ${OUTFILE}`);
+    throw new Error(`esbuild did not produce ${outPath}`);
   }
   const code = output.text;
 
@@ -63,27 +75,40 @@ async function main() {
   // when the processor source hasn't changed, or the freshness gate would never be green.
   const version = createHash('sha256').update(code).digest('hex').slice(0, 10);
   const versionJson = JSON.stringify({ version }, null, 2) + '\n';
+  return { outfile, versionFile, code, versionJson, version };
+}
+
+async function main() {
+  const built = [];
+  for (const spec of ENTRIES) built.push(await buildEntry(spec));
 
   if (process.argv.includes('--check')) {
-    const stale = [
-      [OUTFILE, code],
-      [VERSION_FILE, versionJson],
-    ].filter(([path, expected]) => !existsSync(path) || readFileSync(path, 'utf8') !== expected);
+    const stale = built.flatMap(({ outfile, versionFile, code, versionJson }) =>
+      [
+        [outfile, code],
+        [versionFile, versionJson],
+      ].filter(([rel, expected]) => {
+        const path = join(ROOT, rel);
+        return !existsSync(path) || readFileSync(path, 'utf8') !== expected;
+      }),
+    );
     if (stale.length > 0) {
-      console.error('❌ generated JS worklet is out of date with audio-worklet/js/ sources:');
-      for (const [path] of stale) console.error(`   - ${path.replace(ROOT + '/', '')}`);
+      console.error('❌ generated JS worklets are out of date with audio-worklet/ sources:');
+      for (const [rel] of stale) console.error(`   - ${rel}`);
       console.error('   Run `npm run build:js-worklet` and commit the result.');
       process.exit(1);
     }
-    console.log(`✅ ${OUTFILE.replace(ROOT + '/', '')} is up to date (version ${version})`);
+    for (const { outfile, version } of built) console.log(`✅ ${outfile} is up to date (version ${version})`);
     return;
   }
 
-  mkdirSync(dirname(OUTFILE), { recursive: true });
-  writeFileSync(OUTFILE, code);
-  writeFileSync(VERSION_FILE, versionJson);
-
-  console.log(`✅ Built ${OUTFILE.replace(ROOT + '/', '')} (${code.length} bytes, version ${version})`);
+  for (const { outfile, versionFile, code, versionJson, version } of built) {
+    const outPath = join(ROOT, outfile);
+    mkdirSync(dirname(outPath), { recursive: true });
+    writeFileSync(outPath, code);
+    writeFileSync(join(ROOT, versionFile), versionJson);
+    console.log(`✅ Built ${outfile} (${code.length} bytes, version ${version})`);
+  }
 }
 
 main().catch((err) => {

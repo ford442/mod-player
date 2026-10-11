@@ -3,7 +3,7 @@ import react from '@vitejs/plugin-react'
 import { libopenmptHtmlPlugin } from './vite-plugins/libopenmptHtml'
 import {
   CROSS_ORIGIN_ISOLATION_HEADERS,
-  threeVendorManualChunk,
+  vendorManualChunk,
 } from './vite-plugins/crossOriginIsolationHeaders'
 
 // https://vitejs.dev/config/
@@ -62,6 +62,9 @@ export default defineConfig(({ mode }) => {
     },
     assetsInclude: ['**/*.wasm'],
     build: {
+      // WebGPU is required, so no supported browser needs ES2020 output (class fields,
+      // static blocks etc. stay native instead of being lowered to helper calls).
+      target: 'es2022',
       cssCodeSplit: true,
       rollupOptions: {
         output: {
@@ -69,7 +72,7 @@ export default defineConfig(({ mode }) => {
           entryFileNames: 'assets/[name]-[hash].js',
           chunkFileNames: 'assets/[name]-[hash].js',
           assetFileNames: 'assets/[name]-[hash][extname]',
-          manualChunks: threeVendorManualChunk,
+          manualChunks: vendorManualChunk,
         },
       },
     },
