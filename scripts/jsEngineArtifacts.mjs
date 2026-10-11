@@ -320,6 +320,7 @@ export async function smokeArtifacts({ root = REPO_ROOT, moduleBytes } = {}) {
 
     // 2. Corrupt input must be REPORTED (NULL), not abort the runtime — catching is what makes
     //    a bad upload survivable inside the shared AudioWorkletGlobalScope.
+    /** @type {number | 'unset'} */
     let garbageResult = 'unset';
     try {
       const junk = new Uint8Array(4096);

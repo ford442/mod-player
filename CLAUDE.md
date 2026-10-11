@@ -83,10 +83,10 @@ mod-player/
 npm run dev          # Start Vite dev server at http://localhost:5173
 npm run build        # tsc + Vite production build → dist/ (uses 4 GB heap)
 npm run preview      # Preview production build locally
-npm run typecheck    # TypeScript type-check only (no emit)
-npm run preflight    # Run before every commit: the whole `lint-and-build` chain, stops at first failure
+npm run typecheck    # TypeScript type-check only (no emit): app + vite/vitest configs + scripts/ (tsconfig.node.json, tsconfig.scripts.json)
+npm run preflight    # Run before every commit: CI's `lint-and-build` job *is* this chain (stops at first failure, no network needed after `npm ci`)
 npm run verify:lockfile # package-lock.json metadata guard (lockfileVersion 3, resolved + integrity)
-npm run lint         # ESLint (max 43 warnings budget; hard CI gate)
+npm run lint         # ESLint (max 40 warnings budget; hard CI gate)
 npm run build:emcc   # Native C++ worklet → openmpt-native.* (scripts/build-wasm.sh, emsdk 3.1.51)
 npm run build:worklet # Alias of build:emcc (never overwrites openmpt-worklet.js)
 npm run build:js-worklet # Compile audio-worklet/js/openmpt-processor.ts → public/worklets/openmpt-worklet.js (esbuild)

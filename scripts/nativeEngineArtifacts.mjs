@@ -63,6 +63,7 @@ function fileExists(filePath) {
 export function classifyNativeEngine(workletsDir) {
   const present = [];
   const missing = [];
+  /** @type {Record<string, number>} */
   const sizes = {};
   const errors = [];
 

@@ -1,0 +1,46 @@
+{
+  // Type-checks the Node build/verify scripts and the Emscripten glue snippets.
+  //
+  // Opt-in lives HERE, not in the files: only the scripts listed in "include" (and whatever they
+  // import) are checked, with checkJs on. A `// @ts-check` comment in a script would also switch on
+  // checking in tsconfig.test.json, whose strict options (and `allowJs`, used to load a few of these
+  // same files for the tests) are not meant for plain JS. The browser/Playwright scripts are mostly
+  // untyped `page.evaluate` callbacks and stay out until someone adds them to the list below and
+  // fixes what is reported.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": true,
+    "noEmit": true,
+    "lib": ["ES2022", "DOM"],
+    "types": ["node"],
+    // The base config is tuned for TypeScript sources; plain-JS scripts rely on inference and JSDoc.
+    "noImplicitAny": false,
+    "noUncheckedIndexedAccess": false,
+    "exactOptionalPropertyTypes": false,
+    "noUnusedParameters": false
+  },
+  "include": [
+    "scripts/build-js-worklet.mjs",
+    "scripts/jsEngineArtifacts.mjs",
+    "scripts/nativeEngineArtifacts.mjs",
+    "scripts/patch-native-glue.mjs",
+    "scripts/sync-shaders.mjs",
+    "scripts/verify-build.mjs",
+    "scripts/verify-bundle-budget.mjs",
+    "scripts/verify-js-libopenmpt.mjs",
+    "scripts/verify-lockfile.mjs",
+    "scripts/verify-native-exports.mjs",
+    "scripts/verify-native-simd.mjs",
+    "scripts/verify-shader-parity.mjs",
+    "scripts/verify-wasm-assets.mjs",
+    "scripts/lib/audio-smoke-config.mjs",
+    "scripts/lib/audio-smoke-counters.mjs",
+    "scripts/lib/synth-xm.mjs",
+    "scripts/lib/visual-smoke-config.mjs",
+    "cpp/pre.js",
+    "cpp/post.js",
+    "cpp/emscripten-globals.d.ts"
+  ],
+  "exclude": ["node_modules", "dist"]
+}
