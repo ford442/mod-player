@@ -6,6 +6,7 @@
   "include": [
     "tests/**/*.ts",
     "vite-env.d.ts",
+    "types/fileSystemAccess.d.ts",
     "scripts/sync-shaders.mjs",
     "scripts/sync-shaders.mjs.d.ts",
     "scripts/nativeEngineArtifacts.mjs",

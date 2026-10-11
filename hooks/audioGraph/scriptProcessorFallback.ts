@@ -95,7 +95,7 @@ export async function runScriptProcessorFallback(
       });
     };
 
-    spNode.connect(refs.analyserRef.current!);
+    spNode.connect(refs.masterInputRef.current!);
     wireMasterOutput(ctx, refs, config.volume, config.panValue);
     refs.scriptProcessorRef.current = spNode;
     refs.playbackEngineRef.current = 'scriptprocessor';

@@ -1,15 +1,25 @@
-import { ensureMasterOutputChain } from '../../utils/audioMasterGraph';
+import { publishFxHost } from '../../audio/fx/fxHost';
+import {
+  ensureMasterOutputChain,
+  releaseMasterNodes,
+  type MasterGraphRefs,
+} from '../../utils/audioMasterGraph';
 import type { AudioGraphRefs } from './types';
 
-function masterGraphRefs(refs: AudioGraphRefs) {
+function masterGraphRefs(refs: AudioGraphRefs): MasterGraphRefs {
   return {
+    masterInputRef: refs.masterInputRef,
+    masterDirectRef: refs.masterDirectRef,
     analyserRef: refs.analyserRef,
     stereoPannerRef: refs.stereoPannerRef,
     gainNodeRef: refs.gainNodeRef,
   };
 }
 
-/** Re-assert analyser → panner → gain → destination and apply live levels. */
+/**
+ * Re-assert masterInput → masterDirect → analyser → panner → gain → destination
+ * (connect-only, so taps and FX-rack edges survive) and apply live levels.
+ */
 export function wireMasterOutput(
   ctx: AudioContext,
   refs: AudioGraphRefs,
@@ -33,13 +43,31 @@ export function moduleBytesFromFileData(fileData: Uint8Array | null): ArrayBuffe
   return copy.buffer;
 }
 
-/** Create or refresh common master-graph nodes (panner, gain, analyser). */
+/** Create or refresh the master-graph nodes (input, direct, analyser, panner, gain). */
 export function ensureCommonMasterNodes(
   ctx: AudioContext,
   refs: AudioGraphRefs,
   volume: number,
   panValue: number,
 ): void {
+  // Nodes belong to one context, and connecting across contexts throws. If the
+  // shared context was closed and recreated (unmount/remount, HMR), start over.
+  const existing = refs.masterInputRef.current ?? refs.analyserRef.current;
+  if (existing && existing.context !== ctx) {
+    console.log('[PLAY] AudioContext changed — recreating master nodes');
+    publishFxHost(null);
+    releaseMasterNodes(masterGraphRefs(refs));
+  }
+
+  if (!refs.masterInputRef.current) {
+    // Unity gain, never automated: the one input every engine connects to.
+    refs.masterInputRef.current = ctx.createGain();
+  }
+  if (!refs.masterDirectRef.current) {
+    // Dry path around the FX rack; the rack controller owns its gain (#453).
+    refs.masterDirectRef.current = ctx.createGain();
+  }
+
   if (!refs.stereoPannerRef.current) {
     console.log('[PLAY] Creating StereoPanner node...');
     refs.stereoPannerRef.current = ctx.createStereoPanner();
@@ -60,4 +88,11 @@ export function ensureCommonMasterNodes(
     refs.analyserRef.current.smoothingTimeConstant = 0.8;
   }
   wireMasterOutput(ctx, refs, volume, panValue);
+
+  publishFxHost({
+    ctx,
+    masterInput: refs.masterInputRef.current,
+    masterDirect: refs.masterDirectRef.current,
+    analyser: refs.analyserRef.current,
+  });
 }

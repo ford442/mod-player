@@ -164,7 +164,7 @@ function analyzeLagSamples(samples) {
   };
 }
 
-async function checkCircularPaging(page, engine) {
+async function checkCircularPaging(page, _engine) {
   const rowChecks = [];
   for (const row of SEEK_ROWS) {
     await evaluate(page, async (r) => {

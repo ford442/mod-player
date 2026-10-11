@@ -44,9 +44,14 @@ export function usePlaylist(): UsePlaylistReturn {
       );
     }
 
-    Promise.all(readers).then(() => {
-      setItems(prev => [...prev, ...newItems]);
-    });
+    Promise.all(readers)
+      .then(() => {
+        setItems(prev => [...prev, ...newItems]);
+      })
+      .catch((err: unknown) => {
+        // An unreadable file rejects the whole batch; report it rather than leaving an unhandled rejection.
+        console.error('Failed to read playlist files:', err);
+      });
   }, []);
 
   const addItem = useCallback((item: PlaylistItem) => {

@@ -99,9 +99,19 @@ for (const href of stylesheetHrefs) {
   if (size < MIN_CSS_BYTES) {
     errors.push(`stylesheet ${rel} is only ${size} bytes (expected >= ${MIN_CSS_BYTES})`);
   }
-  const head = readFileSync(filePath, 'utf8').slice(0, 64);
-  if (head.includes('\0')) {
+  const css = readFileSync(filePath, 'utf8');
+  if (css.slice(0, 64).includes('\0')) {
     errors.push(`stylesheet ${rel} looks binary/UTF-16 (NUL byte in header)`);
+  }
+  // Tailwind turns bit-layout comments such as `[inst:8]` into bogus arbitrary-property utilities
+  // (`.\[inst\:8\]{inst:8}`) when its content globs reach non-view sources. They are never real
+  // classes, and esbuild's CSS minifier warns about the first one. Keep the globs .tsx-only.
+  const bogus = [...new Set(css.match(/\.\\\[[A-Za-z][\w-]*\\:\d+\\\]/g) ?? [])];
+  if (bogus.length > 0) {
+    errors.push(
+      `stylesheet ${rel} has ${bogus.length} bogus Tailwind arbitrary-property rule(s) generated from comments: ` +
+        `${bogus.slice(0, 5).join(' ')}${bogus.length > 5 ? ' …' : ''} (check tailwind.config.js content globs)`,
+    );
   }
 }
 

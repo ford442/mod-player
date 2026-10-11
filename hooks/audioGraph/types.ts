@@ -7,6 +7,10 @@ export interface AudioGraphRefs {
   fileDataRef:         React.MutableRefObject<Uint8Array | null>;
   audioContextRef:     React.MutableRefObject<AudioContext | null>;
   workletLoadedRef:    React.MutableRefObject<boolean>;
+  /** Unity-gain master input: every engine connects here, never to the analyser (#453). */
+  masterInputRef:      React.MutableRefObject<GainNode | null>;
+  /** Dry path around the FX rack; its gain belongs to the rack controller (#453). */
+  masterDirectRef:     React.MutableRefObject<GainNode | null>;
   stereoPannerRef:     React.MutableRefObject<StereoPannerNode | null>;
   gainNodeRef:         React.MutableRefObject<GainNode | null>;
   analyserRef:         React.MutableRefObject<AnalyserNode | null>;

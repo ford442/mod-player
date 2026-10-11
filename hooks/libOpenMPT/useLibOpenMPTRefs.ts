@@ -19,6 +19,8 @@ export function useLibOpenMPTRefs(): LibOpenMPTRefs {
   const spRightBufPtr = useRef<number>(0);
   const spFallbackTriggered = useRef<boolean>(false);
   const audioWorkletNodeRef = useRef<AudioWorkletNode | null>(null);
+  const masterInputRef = useRef<GainNode | null>(null);
+  const masterDirectRef = useRef<GainNode | null>(null);
   const stereoPannerRef = useRef<StereoPannerNode | null>(null);
   const gainNodeRef = useRef<GainNode | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
@@ -93,6 +95,8 @@ export function useLibOpenMPTRefs(): LibOpenMPTRefs {
     spRightBufPtr,
     spFallbackTriggered,
     audioWorkletNodeRef,
+    masterInputRef,
+    masterDirectRef,
     stereoPannerRef,
     gainNodeRef,
     analyserRef,
