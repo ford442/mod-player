@@ -9,12 +9,15 @@ import {
 import { usesCircularRowPaging } from '../utils/shaderVersion';
 import { circularPageStart, overlayActualRow } from '../utils/playheadPrediction';
 import type { PatternMatrix, PlaybackState } from '../types';
+import { deriveTransportState } from '../utils/transportClock';
 
 export interface UseAppTestHooksParams {
   seekToStep: (step: number) => void;
   stopMusic: (ended?: boolean) => void;
+  pause: () => void;
   playGuarded: () => void;
   isPlaying: boolean;
+  isPaused: boolean;
   getAudioContext: () => AudioContext | null | undefined;
   isModuleLoaded: boolean;
   sequencerMatrix: PatternMatrix | null;
@@ -35,8 +38,10 @@ export function useAppTestHooks(params: UseAppTestHooksParams): void {
   const {
     seekToStep,
     stopMusic,
+    pause,
     playGuarded,
     isPlaying,
+    isPaused,
     getAudioContext,
     isModuleLoaded,
     sequencerMatrix,
@@ -57,7 +62,9 @@ export function useAppTestHooks(params: UseAppTestHooksParams): void {
       seekToRow: (row: number) => seekToStep(row),
       stopPlayback: () => stopMusic(false),
       startPlayback: () => playGuarded(),
+      pausePlayback: () => pause(),
       getIsPlaying: () => isPlaying,
+      getTransportState: () => deriveTransportState(isPlaying, isPaused),
       getAudioContextState: () => getAudioContext()?.state ?? 'none',
       // #411 acceptance: a JS play and an ?engine=native play in the same tab
       // must report the same state and rate — there is one context per session.
@@ -225,5 +232,5 @@ export function useAppTestHooks(params: UseAppTestHooksParams): void {
       setMasterPan: (value: number) => applyAudioMasterLevels(volume, Math.max(-1, Math.min(1, value))),
     };
     return () => { delete window.__TEST_HOOKS__; };
-  }, [seekToStep, stopMusic, isModuleLoaded, sequencerMatrix, loadFile, setPlaybackRowFraction, playbackStateRef, activeEngine, liteMode, getMasterGainValue, getMasterPanValue, applyAudioMasterLevels, volume, pan]);
+  }, [seekToStep, stopMusic, pause, playGuarded, isPlaying, isPaused, isModuleLoaded, sequencerMatrix, loadFile, setPlaybackRowFraction, playbackStateRef, activeEngine, liteMode, getMasterGainValue, getMasterPanValue, applyAudioMasterLevels, volume, pan]);
 }

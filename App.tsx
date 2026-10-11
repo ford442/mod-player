@@ -92,6 +92,8 @@ function App() {
     isReady,
     isModuleLoaded,
     isPlaying,
+    isPaused,
+    pause,
     isLooping,
     playbackSeconds,
     playbackRowFraction,
@@ -179,8 +181,10 @@ function App() {
   useAppTestHooks({
     seekToStep,
     stopMusic,
+    pause,
     playGuarded,
     isPlaying,
+    isPaused,
     getAudioContext,
     isModuleLoaded,
     sequencerMatrix,
@@ -310,7 +314,9 @@ function App() {
 
   useAppKeyboardActions({
     isPlaying,
+    isPaused,
     stopMusic,
+    pause,
     playGuarded,
     seekToStep,
     playbackRowFraction,
@@ -395,6 +401,7 @@ function App() {
     isReady,
     isModuleLoaded,
     isPlaying,
+    isPaused,
     isLooping,
     playbackSeconds,
     playbackRowFraction,
@@ -430,6 +437,7 @@ function App() {
     oscBufferRef,
     audioReactiveRef,
     playGuarded,
+    pause,
     stopMusic,
     seekToStep,
     setIsLooping,
@@ -534,12 +542,14 @@ function App() {
           isModuleLoaded={isModuleLoaded}
           syncDebug={syncDebug}
           isPlaying={isPlaying}
+          isPaused={isPaused}
           playbackSeconds={playbackSeconds}
           channelStates={channelStates}
           volume={volume}
           pan={pan}
           isLooping={isLooping}
           play={playGuarded}
+          pause={pause}
           stopMusic={stopMusic}
           setIsLooping={setIsLooping}
           setVolume={setVolume}

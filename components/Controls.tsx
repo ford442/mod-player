@@ -7,9 +7,14 @@ import { cn } from '../utils/cn';
 interface ControlsProps {
   isReady: boolean;
   isPlaying: boolean;
+  /** Paused (silent, position kept): Play becomes Resume. */
+  isPaused?: boolean;
   isModuleLoaded: boolean;
   onFileSelected: (file: File) => void;
+  /** Starts from the beginning when stopped and resumes when paused. */
   onPlay: () => void;
+  /** When provided, the Play button turns into Pause while playing. Omit for a play-only surface. */
+  onPause?: () => void;
   onStop: () => void;
   onMediaAdd?: (file: File) => void;
   isLooping: boolean;
@@ -42,10 +47,12 @@ interface ControlsProps {
 
 export const Controls: React.FC<ControlsProps> = ({
   isReady,
-  isPlaying: _isPlaying,
+  isPlaying,
+  isPaused = false,
   isModuleLoaded,
   onFileSelected,
   onPlay,
+  onPause,
   onStop,
   onLoopToggle,
   isLooping,
@@ -74,7 +81,10 @@ export const Controls: React.FC<ControlsProps> = ({
   onToggleCrt,
   minimalSurface = false,
 }) => {
-  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+  // The play button is a play/pause toggle only on surfaces that wire onPause.
+  const showPause = isPlaying && onPause !== undefined;
+
+  const handleFileChange =(event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) {
       onFileSelected(file);
@@ -144,17 +154,25 @@ export const Controls: React.FC<ControlsProps> = ({
       )}
 
       {/* Playback Controls */}
-      <div className="flex items-center gap-2">
+      <div
+        className="flex items-center gap-2"
+        data-transport-state={isPlaying ? 'playing' : isPaused ? 'paused' : 'stopped'}
+      >
         <button
           onClick={(e) => {
             e.preventDefault();
             e.stopPropagation();
-            onPlay();
+            if (showPause) onPause();
+            else onPlay();
           }}
           disabled={!isReady || !isModuleLoaded}
-          className="px-4 py-2 bg-green-600 text-white text-sm font-semibold rounded-lg shadow-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          aria-label={showPause ? 'Pause' : isPaused ? 'Resume' : 'Play'}
+          className={cn(
+            'px-4 py-2 text-white text-sm font-semibold rounded-lg shadow-lg disabled:opacity-50 disabled:cursor-not-allowed transition-colors',
+            showPause ? 'bg-amber-600 hover:bg-amber-700' : 'bg-green-600 hover:bg-green-700',
+          )}
         >
-          ▶️ Play
+          {showPause ? '⏸️ Pause' : isPaused ? '▶️ Resume' : '▶️ Play'}
         </button>
         <button
           onClick={onStop}

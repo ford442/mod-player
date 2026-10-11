@@ -9,6 +9,7 @@ import {
   shouldReloadNativeModule,
 } from '../../utils/workletAudioLifecycle';
 import { createNativeClockAnchor } from '../../utils/nativeClockAnchor';
+import { silenceChannelStates } from '../../utils/transportClock';
 import { hasProjectMConsumer } from '../../utils/audioDiagOptions';
 import { broadcastPcmBlock } from '../../utils/projectMBridge';
 import { pcmBusHasSubscribers, publishPcmBlock, setPcmDemandListener } from '../../utils/pcmBus';
@@ -101,6 +102,8 @@ export async function startNativePlayback(
         refs.pendingSeekRef.current = null;
       }
 
+      if (refs.isPausedRef.current) silenceChannelStates(refs.channelStatesRef.current);
+
       if (data.patternData) {
         const matrix: PatternMatrix = workletPatternToMatrix(data.patternData, applied.order);
         refs.patternMatricesRef.current[applied.order] = matrix;
@@ -123,6 +126,20 @@ export async function startNativePlayback(
         callbacks.stopMusic(false);
       }
     });
+
+    // From here on the native engine is what renders (pause/resume drive this, not the selection state).
+    refs.playbackEngineRef.current = 'native-worklet';
+
+    if (refs.isPausedRef.current) {
+      // Loaded while paused (a module load with the transport paused): leave the engine silent.
+      // pause() is idempotent and play() would un-silence it.
+      engine.commitModule();
+      engine.pause();
+      console.log('[PLAY] Native C++/Wasm AudioWorklet engine loaded – staying paused');
+      callbacks.setStatus('Paused.');
+      refs.animationFrameHandle.current = requestAnimationFrame(refs.updateUIRef.current!);
+      return 'started';
+    }
 
     engine.play();
     console.log('[PLAY] Native C++/Wasm AudioWorklet engine started');

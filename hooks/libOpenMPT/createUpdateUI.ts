@@ -19,6 +19,7 @@ import {
 } from './constants';
 import type { UpdateUIParams } from './types';
 import { isPatternDiagEnabled, recordPatternBoundaryEvent } from '../../utils/patternBoundaryDiag';
+import { effectiveHeardTime } from '../../utils/transportClock';
 
 /** TIMING FIX: Improved updateUI with drift compensation and proper interpolation */
 export function createUpdateUI({
@@ -49,6 +50,8 @@ export function createUpdateUI({
     patternMatricesRef,
     channelStatesRef,
     isPlayingRef,
+    isPausedRef,
+    pauseClockRef,
     playheadLagTrackerRef,
     positionReportTrackerRef,
     lastPositionSampleTimeRef,
@@ -80,7 +83,9 @@ export function createUpdateUI({
   } = setters;
 
   return () => {
-    if (!isPlayingRef.current) return;
+    // The loop also runs while paused: the playhead finishes following the audio already in flight,
+    // then holds (effectiveHeardTime below), and the loop is already alive for resume.
+    if (!isPlayingRef.current && !isPausedRef.current) return;
 
     uiLoopActiveRef.current = true;
 
@@ -112,8 +117,11 @@ export function createUpdateUI({
       time = workletTimeRef.current;
       currentBpm = workletBpmRef.current;
 
+      // Paused: capped at the instant the engine stopped; just resumed: floored at the resume instant.
+      // Both stop the audio clock — which never pauses — from extrapolating over a silent engine.
+      const heardTime = effectiveHeardTime(getAudioHeardTime(audioCtx), pauseClockRef.current);
+
       if (sample) {
-        const heardTime = getAudioHeardTime(audioCtx);
         const rowsPerSec =
           workletRowsPerSecRef.current || rowsPerSecondFromBpm(sample.bpm || currentBpm);
         const predicted = predictPlayheadFromSample(sample, heardTime, rowsPerSec);
@@ -129,8 +137,8 @@ export function createUpdateUI({
         }
       }
 
-      if (sample && audioClockStartRef.current > 0) {
-        const heardTime = getAudioHeardTime(audioCtx);
+      // No samples arrive while paused, so there is nothing to measure drift against.
+      if (sample && audioClockStartRef.current > 0 && !isPausedRef.current) {
         const expectedTime = workletTimeAtStartRef.current + (heardTime - audioClockStartRef.current);
         const drift = time - expectedTime;
         driftAccumulatorRef.current = driftAccumulatorRef.current * 0.9 + drift * 0.1;
