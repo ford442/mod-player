@@ -10,6 +10,7 @@ export default defineConfig({
       ...configDefaults.exclude,
       'scripts/**',
       '**/_codeql_detected_source_root/**',
+      '.claude/**',
     ],
   },
 });

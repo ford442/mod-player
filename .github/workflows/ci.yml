@@ -28,6 +28,15 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: ALSA runtime for node-web-audio-api (#453)
+        # The vitest Web Audio harness (tests/helpers/webAudioNode.ts) is a native
+        # addon linked against libasound.so.2. Only install it when the image lacks it.
+        run: |
+          if ! ldconfig -p | grep -q 'libasound\.so\.2'; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq --no-install-recommends libasound2t64
+          fi
+
       # The whole gate lives in package.json so CI and `npm run preflight` cannot drift apart:
       # lockfile guards, wasm/js-engine verification, generated-worklet freshness (#435), lint,
       # type checks (app, worklet, tests), unit tests, shader include/parity, build, and the
@@ -68,7 +77,7 @@ jobs:
           done
           echo "preview failed to start"; exit 1
 
-      - name: Visual smoke (WebGL2 + HTML, CI profile)
+      - name: Visual smoke (HTML, CI profile)
         run: BASE_URL=http://127.0.0.1:4173 OUTPUT_DIR=./artifacts/visual-smoke npm run smoke:visual:ci
 
       - name: Upload smoke artifacts on failure

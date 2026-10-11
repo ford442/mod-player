@@ -43,6 +43,7 @@ if (typeof self !== 'undefined' && (!self.crypto || !self.crypto.getRandomValues
  */
 
 import { MAIN_TO_WORKLET, WORKLET_TO_MAIN } from '../workletProtocolConstants';
+import { ensureSharedLib } from '../libSingleton';
 import { waitForRuntimeInitialized } from '../libRuntimeReady';
 
 const MT = MAIN_TO_WORKLET;
@@ -286,18 +287,6 @@ function moduleBytesFromPayload(moduleData: ArrayBuffer | Uint8Array): Uint8Arra
   return new Uint8Array(moduleData);
 }
 
-function hasWasmBytes(wasmBytes: ArrayBuffer | Uint8Array | null | undefined): wasmBytes is ArrayBuffer | Uint8Array {
-  return wasmBytes != null && wasmBytes.byteLength > 0;
-}
-
-/** WebAssembly binary magic: \0asm. Guards against an HTML 404 body being seeded as wasmBinary. */
-function hasWasmMagic(wasmBytes: ArrayBuffer | Uint8Array): boolean {
-  const head = wasmBytes instanceof Uint8Array
-    ? wasmBytes
-    : new Uint8Array(wasmBytes, 0, Math.min(4, wasmBytes.byteLength));
-  return head.length >= 4 && head[0] === 0x00 && head[1] === 0x61 && head[2] === 0x73 && head[3] === 0x6d;
-}
-
 /** UTF-8 encode without relying on TextEncoder (not guaranteed in every worklet impl). */
 function utf8Bytes(str: string): Uint8Array {
   const escaped = unescape(encodeURIComponent(str));
@@ -317,81 +306,70 @@ function allocUtf8CString(lib: LibOpenMPT, str: string): number {
 }
 
 /**
+ * Host-specific half of the shared-scope libopenmpt singleton: evaluate the glue seeded with the real
+ * wasm bytes and wait until the runtime is ready. The policy around it (reuse, one init promise for
+ * concurrent callers, the real-wasm-bytes guards) is audio-worklet/libSingleton.ts, which is also what
+ * the unit tests run.
+ */
+async function bootstrapLibOpenMPT(
+  scriptText: string,
+  wasmBytes: ArrayBuffer | Uint8Array,
+): Promise<LibOpenMPT> {
+  log(
+    'Evaluating libopenmpt-worklet.js (',
+    scriptText.length,
+    ' chars, wasmBytes:',
+    wasmBytes.byteLength,
+    ')…',
+  );
+
+  if (typeof globalThis.performance === 'undefined') {
+    globalThis.performance = { now: () => currentTime * 1000 };
+  }
+
+  if (!globalThis.crypto || !globalThis.crypto.getRandomValues) {
+    globalThis.crypto = {
+      getRandomValues: function (array) {
+        for (let i = 0; i < array.length; i++) {
+          array[i] = Math.floor(Math.random() * 256);
+        }
+        return array;
+      },
+    };
+  }
+
+  globalThis.libopenmpt = { noInitialRun: true, wasmBinary: wasmBytes };
+
+  const cleanedScript = scriptText.replace(/^\s*export\s+(default\s+)?/gm, '');
+  const fn = new Function(cleanedScript);
+  fn.call(globalThis);
+
+  const lib = globalThis.libopenmpt as unknown as LibOpenMPT | undefined;
+  if (!lib || typeof lib !== 'object') {
+    throw new Error('globalThis.libopenmpt not set after script evaluation');
+  }
+
+  // Always wait: real-wasm glue defines lazy export stubs at eval time, so the presence of
+  // `_openmpt_*` proves nothing (see audio-worklet/libRuntimeReady.ts).
+  log('Waiting for WASM onRuntimeInitialized…');
+  await waitForRuntimeInitialized(lib, 25000);
+  return lib;
+}
+
+/**
  * Initialise libopenmpt once per AudioWorkletGlobalScope.
  * Every AudioWorkletNode shares this scope — re-evaluating the glue (and
  * re-instantiating the wasm) on each node creation resets heap state and breaks
  * module reload (XM/MOD).
  */
-async function ensureSharedLibOpenMPT(
+function ensureSharedLibOpenMPT(
   scriptText: string | undefined,
   wasmBytes: ArrayBuffer | Uint8Array | undefined,
 ): Promise<LibOpenMPT> {
-  const existing = globalThis.__openmptWorkletLib;
-  if (existing && typeof existing._openmpt_module_create_from_memory2 === 'function') {
-    log('Reusing shared libopenmpt instance');
-    return existing;
-  }
-
-  if (!globalThis.__openmptWorkletLibInitPromise) {
-    globalThis.__openmptWorkletLibInitPromise = (async () => {
-      if (!scriptText) {
-        throw new Error('initLib missing scriptText');
-      }
-
-      // The worklet scope has no fetch(): the real .wasm must arrive as bytes. Fail loudly (and
-      // early) instead of letting the glue try — and time out on — a network fetch it can't do.
-      if (!hasWasmBytes(wasmBytes)) {
-        throw new Error('initLib missing wasmBytes (libopenmpt-worklet.wasm) — the JS engine is real WebAssembly');
-      }
-      if (!hasWasmMagic(wasmBytes)) {
-        throw new Error('initLib wasmBytes is not a WebAssembly binary (missing \\0asm magic)');
-      }
-
-      log(
-        'Evaluating libopenmpt-worklet.js (',
-        scriptText.length,
-        ' chars, wasmBytes:',
-        wasmBytes.byteLength,
-        ')…',
-      );
-
-      if (typeof globalThis.performance === 'undefined') {
-        globalThis.performance = { now: () => currentTime * 1000 };
-      }
-
-      if (!globalThis.crypto || !globalThis.crypto.getRandomValues) {
-        globalThis.crypto = {
-          getRandomValues: function (array) {
-            for (let i = 0; i < array.length; i++) {
-              array[i] = Math.floor(Math.random() * 256);
-            }
-            return array;
-          },
-        };
-      }
-
-      globalThis.libopenmpt = { noInitialRun: true, wasmBinary: wasmBytes };
-
-      const cleanedScript = scriptText.replace(/^\s*export\s+(default\s+)?/gm, '');
-      const fn = new Function(cleanedScript);
-      fn.call(globalThis);
-
-      const lib = globalThis.libopenmpt as unknown as LibOpenMPT | undefined;
-      if (!lib || typeof lib !== 'object') {
-        throw new Error('globalThis.libopenmpt not set after script evaluation');
-      }
-
-      // Always wait: real-wasm glue defines lazy export stubs at eval time, so the presence of
-      // `_openmpt_*` proves nothing (see audio-worklet/libRuntimeReady.ts).
-      log('Waiting for WASM onRuntimeInitialized…');
-      await waitForRuntimeInitialized(lib, 25000);
-
-      globalThis.__openmptWorkletLib = lib;
-      return lib;
-    })();
-  }
-
-  return globalThis.__openmptWorkletLibInitPromise;
+  return ensureSharedLib<LibOpenMPT>(globalThis, scriptText, wasmBytes, {
+    bootstrap: bootstrapLibOpenMPT,
+    log,
+  });
 }
 
 // ── Audio-reactive SAB layout (must match utils/audioReactive.ts) ───────────

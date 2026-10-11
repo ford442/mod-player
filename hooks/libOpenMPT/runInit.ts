@@ -1,5 +1,7 @@
 import { logWorkletDiagnostics } from '../../audio-worklet/diagnostics';
+import { publishFxHost } from '../../audio/fx/fxHost';
 import { closeSharedPlayerAudioContext } from '../../utils/audioContextFactory';
+import { releaseMasterNodes } from '../../utils/audioMasterGraph';
 import { unwireAudioSuspendRecovery } from '../useAudioGraph';
 import { OpenMPTWorkletEngine } from '../../audio-worklet/OpenMPTWorkletEngine';
 import {
@@ -222,7 +224,10 @@ export function cleanupLibOpenMPT(refs: LibOpenMPTRefs) {
     delete window.__XASM1_NATIVE__;
   }
   if (refs.audioWorkletNodeRef.current) refs.audioWorkletNodeRef.current.disconnect();
-  if (refs.stereoPannerRef.current) refs.stereoPannerRef.current.disconnect();
+  // The FX rack (#453) detaches when its host goes away; then drop every master
+  // node so a remount builds fresh ones on the next context.
+  publishFxHost(null);
+  releaseMasterNodes(refs);
   // Drop wireAudioSuspendRecovery's global listeners before the context goes
   // away — otherwise they'd outlive it (a remount without a full page reload
   // would leak a second set bound to the new context) and could fire against

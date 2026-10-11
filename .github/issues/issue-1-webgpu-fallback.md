@@ -1,3 +1,5 @@
+> **Historical (2026-06) — superseded by #462.** `?renderer=webgl2` below was a silent no-op to WebGPU at the time; WebGL2 is now an explicit opt-in via `?webgl2=1` (alias `?renderer=webgl2`) and the failure-card button, never automatic. See `docs/VISUAL_SMOKE.md`.
+
 ## Summary
 
 On production (`https://test.1ink.us/xm-player/`), browsers that expose `navigator.gpu` but cannot obtain a usable GPU adapter (or fail during WebGPU device/pipeline init) get a hard error overlay instead of automatically falling back to WebGL2 or the HTML renderer.

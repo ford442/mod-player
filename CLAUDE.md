@@ -95,17 +95,17 @@ npm run verify:js-libopenmpt # Static + boot/render/corrupt-input checks of that
 python3 deploy.py    # Build + SFTP upload to production server
 ```
 
-**Browser requirement:** WebGPU requires Chrome 113+, Edge 113+, or Arc. For headless testing pass `--enable-unsafe-webgpu`. Use `?renderer=webgl2` when WebGPU is unavailable or for GLSL-based debugging.
+**Browser requirement:** WebGPU requires Chrome 113+, Edge 113+, or Arc. For headless testing pass `--enable-unsafe-webgpu`. When WebGPU is unavailable, use `?renderer=html` (DOM grid) or opt in to the GLSL WebGL2 session with `?webgl2=1` — it is never selected automatically.
 
 ### Pattern Renderer Backends
 
 | Backend | Entry | Use case |
 |---------|-------|----------|
 | `webgpu` | default | Production visuals (WGSL + bloom) — **required** for GPU viz this phase |
-| `webgl2` | deferred | GLSL reference path exists but is **not** auto-selected; `?renderer=webgl2` no-ops to WebGPU |
+| `webgl2` | `?webgl2=1` (alias `?renderer=webgl2`), or the **Use WebGL2 visualizer** button on the WebGPU failure card | **Opt-in only, never automatic, never persisted** (per page load). Simplified GLSL pattern + playhead with a persistent `WebGL2 fallback — WebGPU not in use` badge and one `console.warn`; `readPixels()` works. A stored / `DEBUG_RENDERER` `'webgl2'` is ignored |
 | `html` | `?renderer=html` | DOM pattern grid (tracker UI), not a GLSL shader session |
 
-Toggle via debug panel (🔍), `localStorage.xasm1_pattern_renderer`, or `window.DEBUG_RENDERER`. WebGL2 debug: **Alt+D** cycles wireframe/UV/playhead modes (dev only).
+Toggle `webgpu`/`html` via debug panel (🔍), `localStorage.xasm1_pattern_renderer`, or `window.DEBUG_RENDERER`; the debug panel lists the resolved backend + reason (`backend`, `backendReason`). Opt-in state lives in `src/renderers/webgl2/optIn.ts`. WebGL2 debug: **Alt+D** cycles wireframe/UV/playhead modes (dev only). Smoke-script renderer policy: `docs/VISUAL_SMOKE.md`.
 
 **Deployment env var:** `VITE_APP_BASE_PATH=/xm-player/ npm run build` for subdirectory hosting.
 
@@ -269,6 +269,34 @@ EngineState           // Worklet engine lifecycle state
     Debug info goes through `useThrottledDebugInfo`, not `useState`: it only
     re-renders PatternDisplay while the debug panel is open.
 
+15. **Transport is stopped / playing / paused — and pause is not stop (#461):**
+    `isPlaying` and `isPaused` are mutually exclusive (`deriveTransportState`).
+    *Pause* (`createPauseMusic`) silences the engine but keeps its cursor, the
+    clock refs and the last position sample; *stop* resets all of those. Never
+    implement pause with `stopMusic`, `AudioContext.suspend()` (pitfall 10) or a
+    new worklet message — it is `postPause()` / native `pause()` / the
+    ScriptProcessor callback reading `isPausedRef`. The playhead is
+    *extrapolated* from the last position sample on the audio clock, and that
+    clock does not pause, so `utils/transportClock.ts` caps heard time while
+    paused and rebases the stale sample on resume; skip that and resume jumps
+    the playhead forward by the pause length. `play()` while paused **resumes**
+    (`playShouldResume`); only `forceModuleLoad` really reloads, and a module
+    loaded while paused is *cued* (loads silent, stays paused). Choose the
+    engine to pause/resume from `playbackEngineRef` (written by the start
+    paths), **not** `activeEngine`: after a failed native start the app falls
+    back to the JS worklet but `activeEngine` can still say native.
+15. **Master chain has a single input (#453):** every engine (JS worklet,
+    native, ScriptProcessor) connects to `masterInputRef`, **never** to
+    `analyserRef`: `engine → masterInput → masterDirect → analyser → panner →
+    gain → destination`. The FX rack attaches in parallel to `masterDirect`
+    (`masterInput → rack → analyser`) through `audio/fx/fxHost.ts`, and owns
+    `masterDirect.gain`. `ensureMasterOutputChain` is **connect-only** (a
+    duplicate `connect()` is a no-op per spec), so re-asserting it on every
+    play / hot reload keeps the performance-capture tap and the rack's edges.
+    Don't put a bare `disconnect()` on a master node back.
+    `tests/audioMasterGraph.test.ts` holds the topology and sample-exact null
+    tests (real Web Audio via node-web-audio-api, `tests/helpers/webAudioNode.ts`).
+
 ## Critical Data Flows
 
 ### Module Load → Playback
@@ -335,6 +363,7 @@ All shared canvas layout values live here:
 - **Do not** add broad glob patterns to `tailwind.config.js`
 - **Do not** remove the Vite CORS headers (breaks SharedArrayBuffer / WASM workers)
 - **Do not** add a second `new AudioContext` call site — `utils/audioContextFactory.ts` is the only one (see pitfall 11)
+- **Do not** connect an engine node to `analyserRef` or put a bare `disconnect()` on a master node — engines go to `masterInputRef` (see pitfall 15)
 - **Do not** assume WebGPU is available — always check for fallback paths
 - **Do not** commit Emscripten `a.out` / `a.out.*` — native outputs are only `public/worklets/openmpt-native.*` (gitignored build artifacts from `npm run build:emcc`)
 - **Do not** commit agent scratch files (`.swarm-state.md`, `weekly_plan.md`) — use `docs/planning/ROADMAP.md` and GitHub issues

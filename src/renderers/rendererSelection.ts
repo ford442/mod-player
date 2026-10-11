@@ -1,13 +1,16 @@
 import type { PatternRendererBackend } from './types';
 import { isWebGPUApiAvailable, peekInFlightWebGPUDeviceRequest } from '../../utils/webgpuDevice';
+import { getWebGL2OptIn, requestWebGL2OptIn } from './webgl2/optIn';
 
 const STORAGE_KEY = 'xasm1_pattern_renderer';
 const WEBGPU_PROBE_CACHE_KEY = 'xasm1_webgpu_adapter_ok';
 const VALID_BACKENDS: ReadonlySet<PatternRendererBackend> = new Set(['webgpu', 'webgl2', 'html']);
 
 /**
- * Phase policy: GPU viz requires WebGPU. Automatic WebGPU → WebGL2/HTML
- * shader fallback is disabled. `?renderer=webgl2` is a no-op (stays WebGPU).
+ * Phase policy: GPU viz requires WebGPU. There is **no automatic** WebGPU →
+ * WebGL2/HTML shader fallback. WebGL2 is an explicit opt-in only — `?webgl2=1`
+ * (alias `?renderer=webgl2`) or the failure-card button — see `webgl2/optIn.ts`.
+ * A stored/`DEBUG_RENDERER` `'webgl2'` is ignored (the opt-in is per page load).
  * Explicit `?renderer=html` still selects the DOM pattern grid (tracker UI).
  */
 export const WEBGPU_VIZ_REQUIRED = true;
@@ -134,21 +137,26 @@ export async function probeWebGPUAdapter(): Promise<boolean> {
 /**
  * Resolve pattern renderer backend.
  *
+ * - WebGL2 opt-in (`?webgl2=1` / `?renderer=webgl2` / failure-card button) → `webgl2`.
+ *   The opt-in beats any stored or `DEBUG_RENDERER` preference, `html` included.
  * - Default / `webgpu` → WebGPU (required for GPU viz this phase)
  * - `html` → DOM pattern grid (tracker UI; not a GLSL shader session)
- * - `webgl2` → **no-op**: stays WebGPU (WebGL2 shader path deferred)
+ * - A bare `webgl2` preference (localStorage / `DEBUG_RENDERER`) is **not** an
+ *   opt-in: it stays WebGPU with a warning.
  */
 export function resolvePatternRenderer(
   preference: PatternRendererBackend | null = readRendererPreference(),
 ): PatternRendererBackend {
+  if (getWebGL2OptIn()) return 'webgl2';
+
   const want = preference ?? 'webgpu';
 
   if (want === 'html') return 'html';
 
   if (want === 'webgl2') {
     console.warn(
-      '[Renderer] ?renderer=webgl2 is deferred this phase — GPU viz requires WebGPU '
-        + '(WebGL2 shader path will not auto-start). Using webgpu.',
+      '[Renderer] A stored / DEBUG_RENDERER "webgl2" preference is ignored — WebGL2 is opt-in per '
+        + 'page load: use ?webgl2=1 or the "Use WebGL2 visualizer" button on the WebGPU failure card. Using webgpu.',
     );
     return 'webgpu';
   }
@@ -204,10 +212,21 @@ export function notifyRendererPreferenceChanged(): void {
   window.dispatchEvent(new Event('xasm1-renderer-change'));
 }
 
+/**
+ * "Use WebGL2 visualizer" button on the WebGPU failure card. Opts this page
+ * load into the WebGL2 backend (never persisted) and notifies subscribers so
+ * `PatternDisplay` swaps backend in place. Does not touch WebGPU acquisition.
+ */
+export function activateWebGL2FromFailureCard(reason: string): void {
+  requestWebGL2OptIn(reason);
+  notifyRendererPreferenceChanged();
+}
+
 export function setRendererOverride(backend: PatternRendererBackend): void {
   if (backend === 'webgl2') {
     console.warn(
-      '[Renderer] WebGL2 shader override deferred — selecting webgpu. Use html for DOM pattern grid only.',
+      '[Renderer] WebGL2 cannot be selected as a persisted override — selecting webgpu. '
+        + 'Opt in with ?webgl2=1 or the WebGPU failure-card button instead.',
     );
     backend = 'webgpu';
   }
