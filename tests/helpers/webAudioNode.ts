@@ -24,6 +24,13 @@ import * as nwa from 'node-web-audio-api';
 
 export { nwa };
 
+/**
+ * Per-test budget for suites that render on real Web Audio: worklet nodes run
+ * on worker threads, and under a full parallel vitest run a few offline renders
+ * can exceed vitest's 5 s default.
+ */
+export const WEB_AUDIO_TIMEOUT_MS = 30_000;
+
 const ROOT = resolve(fileURLToPath(new URL('../..', import.meta.url)));
 
 /** Absolute path for `audioWorklet.addModule()` (node-web-audio-api resolves relative paths from cwd). */

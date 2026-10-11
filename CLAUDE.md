@@ -93,6 +93,8 @@ npm run build:js-worklet # Compile the typed worklets (openmpt-processor.ts → 
 npm run build:js-libopenmpt # Real-WASM libopenmpt for the JS engine → public/worklets/libopenmpt-worklet.{js,wasm} (emsdk 3.1.51; committed)
 npm run verify:js-libopenmpt # Static + boot/render/corrupt-input checks of that pair (no emsdk needed)
 npm run smoke:fx:ci  # FX rack on headless Chrome (#453): bypass null, crossfade clicks, parity, character CPU (needs a preview on BASE_URL)
+npm run gen:irs      # Synthesize + Opus-encode the room IRs → public/ir/*.opus + manifest (needs ffmpeg/libopus; outputs committed)
+npm run verify:irs   # IR files match the manifest and the synth spec (no ffmpeg; tests/irAssets.test.ts runs it)
 python3 deploy.py    # Build + SFTP upload to production server
 ```
 
