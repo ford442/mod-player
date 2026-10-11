@@ -35,6 +35,42 @@
   var ALL_MAIN_TO_WORKLET_TYPES = Object.values(MAIN_TO_WORKLET);
   var ALL_WORKLET_TO_MAIN_TYPES = Object.values(WORKLET_TO_MAIN);
 
+  // audio-worklet/libSingleton.ts
+  function hasWasmBytes(wasmBytes) {
+    return wasmBytes != null && wasmBytes.byteLength > 0;
+  }
+  function hasWasmMagic(wasmBytes) {
+    const head = wasmBytes instanceof Uint8Array ? wasmBytes : new Uint8Array(wasmBytes, 0, Math.min(4, wasmBytes.byteLength));
+    return head.length >= 4 && head[0] === 0 && head[1] === 97 && head[2] === 115 && head[3] === 109;
+  }
+  function isReady(lib) {
+    return lib != null && typeof lib._openmpt_module_create_from_memory2 === "function";
+  }
+  async function ensureSharedLib(holder, scriptText, wasmBytes, deps) {
+    const existing = holder.__openmptWorkletLib;
+    if (existing && isReady(existing)) {
+      deps.log?.("Reusing shared libopenmpt instance");
+      return existing;
+    }
+    if (!holder.__openmptWorkletLibInitPromise) {
+      holder.__openmptWorkletLibInitPromise = (async () => {
+        if (!scriptText) {
+          throw new Error("initLib missing scriptText");
+        }
+        if (!hasWasmBytes(wasmBytes)) {
+          throw new Error("initLib missing wasmBytes (libopenmpt-worklet.wasm) \u2014 the JS engine is real WebAssembly");
+        }
+        if (!hasWasmMagic(wasmBytes)) {
+          throw new Error("initLib wasmBytes is not a WebAssembly binary (missing \\0asm magic)");
+        }
+        const lib = await deps.bootstrap(scriptText, wasmBytes);
+        holder.__openmptWorkletLib = lib;
+        return lib;
+      })();
+    }
+    return holder.__openmptWorkletLibInitPromise;
+  }
+
   // audio-worklet/libRuntimeReady.ts
   function waitForRuntimeInitialized(lib, timeoutMs, what = "WASM") {
     return new Promise((resolve, reject) => {
@@ -195,13 +231,6 @@
     }
     return new Uint8Array(moduleData);
   }
-  function hasWasmBytes(wasmBytes) {
-    return wasmBytes != null && wasmBytes.byteLength > 0;
-  }
-  function hasWasmMagic(wasmBytes) {
-    const head = wasmBytes instanceof Uint8Array ? wasmBytes : new Uint8Array(wasmBytes, 0, Math.min(4, wasmBytes.byteLength));
-    return head.length >= 4 && head[0] === 0 && head[1] === 97 && head[2] === 115 && head[3] === 109;
-  }
   function utf8Bytes(str) {
     const escaped = unescape(encodeURIComponent(str));
     const bytes = new Uint8Array(escaped.length);
@@ -216,58 +245,44 @@
     lib.HEAPU8[ptr + bytes.byteLength] = 0;
     return ptr;
   }
-  async function ensureSharedLibOpenMPT(scriptText, wasmBytes) {
-    const existing = globalThis.__openmptWorkletLib;
-    if (existing && typeof existing._openmpt_module_create_from_memory2 === "function") {
-      log("Reusing shared libopenmpt instance");
-      return existing;
+  async function bootstrapLibOpenMPT(scriptText, wasmBytes) {
+    log(
+      "Evaluating libopenmpt-worklet.js (",
+      scriptText.length,
+      " chars, wasmBytes:",
+      wasmBytes.byteLength,
+      ")\u2026"
+    );
+    if (typeof globalThis.performance === "undefined") {
+      globalThis.performance = { now: () => currentTime * 1e3 };
     }
-    if (!globalThis.__openmptWorkletLibInitPromise) {
-      globalThis.__openmptWorkletLibInitPromise = (async () => {
-        if (!scriptText) {
-          throw new Error("initLib missing scriptText");
+    if (!globalThis.crypto || !globalThis.crypto.getRandomValues) {
+      globalThis.crypto = {
+        getRandomValues: function(array) {
+          for (let i = 0; i < array.length; i++) {
+            array[i] = Math.floor(Math.random() * 256);
+          }
+          return array;
         }
-        if (!hasWasmBytes(wasmBytes)) {
-          throw new Error("initLib missing wasmBytes (libopenmpt-worklet.wasm) \u2014 the JS engine is real WebAssembly");
-        }
-        if (!hasWasmMagic(wasmBytes)) {
-          throw new Error("initLib wasmBytes is not a WebAssembly binary (missing \\0asm magic)");
-        }
-        log(
-          "Evaluating libopenmpt-worklet.js (",
-          scriptText.length,
-          " chars, wasmBytes:",
-          wasmBytes.byteLength,
-          ")\u2026"
-        );
-        if (typeof globalThis.performance === "undefined") {
-          globalThis.performance = { now: () => currentTime * 1e3 };
-        }
-        if (!globalThis.crypto || !globalThis.crypto.getRandomValues) {
-          globalThis.crypto = {
-            getRandomValues: function(array) {
-              for (let i = 0; i < array.length; i++) {
-                array[i] = Math.floor(Math.random() * 256);
-              }
-              return array;
-            }
-          };
-        }
-        globalThis.libopenmpt = { noInitialRun: true, wasmBinary: wasmBytes };
-        const cleanedScript = scriptText.replace(/^\s*export\s+(default\s+)?/gm, "");
-        const fn = new Function(cleanedScript);
-        fn.call(globalThis);
-        const lib = globalThis.libopenmpt;
-        if (!lib || typeof lib !== "object") {
-          throw new Error("globalThis.libopenmpt not set after script evaluation");
-        }
-        log("Waiting for WASM onRuntimeInitialized\u2026");
-        await waitForRuntimeInitialized(lib, 25e3);
-        globalThis.__openmptWorkletLib = lib;
-        return lib;
-      })();
+      };
     }
-    return globalThis.__openmptWorkletLibInitPromise;
+    globalThis.libopenmpt = { noInitialRun: true, wasmBinary: wasmBytes };
+    const cleanedScript = scriptText.replace(/^\s*export\s+(default\s+)?/gm, "");
+    const fn = new Function(cleanedScript);
+    fn.call(globalThis);
+    const lib = globalThis.libopenmpt;
+    if (!lib || typeof lib !== "object") {
+      throw new Error("globalThis.libopenmpt not set after script evaluation");
+    }
+    log("Waiting for WASM onRuntimeInitialized\u2026");
+    await waitForRuntimeInitialized(lib, 25e3);
+    return lib;
+  }
+  function ensureSharedLibOpenMPT(scriptText, wasmBytes) {
+    return ensureSharedLib(globalThis, scriptText, wasmBytes, {
+      bootstrap: bootstrapLibOpenMPT,
+      log
+    });
   }
   var OSC_SAMPLE_COUNT = 2048;
   var AUDIO_REACTIVE_FLOATS = 16;

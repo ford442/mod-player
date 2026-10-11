@@ -85,7 +85,7 @@ Before modifying the worklet or AudioWorklet-related code:
 |-------|-----------------|
 | `utils/workletAudioLifecycle.ts` + `tests/workletAudioLifecycle.test.ts` | `play()` re-sending `initLib` on module reload; `stopMusic` suspending the context; #354 helper smoke |
 | `tests/workletRegressionGuards.test.ts` | Position postMessage flood (fake-clock ≤~60 Hz); hot-reload disconnect; stale `loaded` ack token; SP structural immunity |
-| `utils/workletLibSingleton.ts` | Re-evaluating the glue / re-instantiating the wasm when `__openmptWorkletLib` already exists (mirror also enforces the real-wasm-bytes contract) |
+| `audio-worklet/libSingleton.ts` + `tests/workletAudioLifecycle.test.ts` | Re-evaluating the glue / re-instantiating the wasm when `__openmptWorkletLib` already exists; concurrent callers sharing one init promise; the real-wasm-bytes contract. This is the **same module the worklet bundle runs** (esbuild bundles it; only `bootstrap` — glue eval + runtime wait — is host-specific), not a mirror |
 | `tests/jsWorkletProcessor.integration.test.ts` | The **compiled** processor + the **real** committed wasm in a fake `AudioWorkletGlobalScope`: cold `initLib`, MOD→XM→MOD, hot-reload second node with no `initLib`, corrupt file then recovery, pause/play, seek, interpolation |
 | Source invariants | `stopMusic` body must not call `.suspend()`; worklet must keep `ensureSharedLibOpenMPT` singleton + position throttle `if`; hooks must call token helpers |
 

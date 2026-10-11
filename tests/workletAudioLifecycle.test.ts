@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { readLibOpenMPTSources, readTransportActionsSource } from './helpers/libOpenMPTSource';
 import { readAudioGraphSources } from './helpers/audioGraphSource';
 import {
@@ -18,15 +18,13 @@ import {
   nativeModuleFingerprint,
   WORKLET_POSITION_REPORT_INTERVAL_SEC,
 } from '../utils/workletAudioLifecycle';
-import {
-  ensureSharedLibOpenMPT,
-  resetWorkletLibSingleton,
-  type WorkletLibGlobals,
-} from '../utils/workletLibSingleton';
+import { ensureSharedLib, type SharedLibHolder } from '../audio-worklet/libSingleton';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 
-function mockLib(): NonNullable<WorkletLibGlobals['__openmptWorkletLib']> {
+interface FakeLib { _openmpt_module_create_from_memory2?: unknown }
+
+function mockLib(): FakeLib {
   return { _openmpt_module_create_from_memory2: () => 1 };
 }
 
@@ -88,88 +86,127 @@ describe('workletAudioLifecycle (#330 AudioContext keep-alive)', () => {
   });
 });
 
-describe('workletLibSingleton (#329 shared-scope init)', () => {
-  it('evaluates glue only once across repeated ensureSharedLibOpenMPT calls', async () => {
-    const globals: WorkletLibGlobals = {};
-    let evalCount = 0;
+describe('ensureSharedLib (#329 shared-scope init) — the code the worklet bundle runs', () => {
+  // Previously these tests ran a hand-copied mirror in utils/workletLibSingleton.ts that lacked the
+  // real function's glue evaluation, polyfills and runtime wait. The policy is now one shared module
+  // (audio-worklet/libSingleton.ts, bundled into openmpt-worklet.js); only `bootstrap` is host-specific.
+  const run = (
+    holder: SharedLibHolder<FakeLib>,
+    bootstrap: (script: string, bytes: ArrayBuffer | Uint8Array) => Promise<FakeLib>,
+    script: string | undefined = 'glue',
+    bytes: ArrayBuffer | Uint8Array | null | undefined = WASM_BYTES,
+    log?: (...args: unknown[]) => void,
+  ) => ensureSharedLib<FakeLib>(holder, script, bytes, { bootstrap, ...(log ? { log } : {}) });
 
-    const evalScript = async () => {
-      evalCount += 1;
-      globals.__openmptWorkletLib = mockLib();
-    };
+  it('evaluates glue only once across repeated calls', async () => {
+    const holder: SharedLibHolder<FakeLib> = {};
+    let bootstraps = 0;
+    const bootstrap = async () => { bootstraps += 1; return mockLib(); };
 
-    await ensureSharedLibOpenMPT(globals, 'fake-glue', WASM_BYTES, evalScript);
-    await ensureSharedLibOpenMPT(globals, 'other-glue', WASM_BYTES, evalScript);
+    await run(holder, bootstrap, 'glue');
+    await run(holder, bootstrap, 'other-glue');
 
-    expect(evalCount).toBe(1);
-    expect(globals.__openmptWorkletLib).toBeDefined();
+    expect(bootstraps).toBe(1);
+    expect(holder.__openmptWorkletLib).toBeDefined();
   });
 
   it('shares one init promise for concurrent callers', async () => {
-    const globals: WorkletLibGlobals = {};
-    let evalCount = 0;
-
-    const evalScript = async () => {
-      evalCount += 1;
+    const holder: SharedLibHolder<FakeLib> = {};
+    let bootstraps = 0;
+    const bootstrap = async () => {
+      bootstraps += 1;
       await new Promise((r) => setTimeout(r, 5));
-      globals.__openmptWorkletLib = mockLib();
+      return mockLib();
     };
 
-    const [a, b] = await Promise.all([
-      ensureSharedLibOpenMPT(globals, 'glue', WASM_BYTES, evalScript),
-      ensureSharedLibOpenMPT(globals, 'glue', WASM_BYTES, evalScript),
-    ]);
+    const [a, b] = await Promise.all([run(holder, bootstrap), run(holder, bootstrap)]);
 
-    expect(evalCount).toBe(1);
+    expect(bootstraps).toBe(1);
     expect(a).toBe(b);
   });
 
-  it('seeds the real wasm bytes as Module.wasmBinary before evaluating the glue', async () => {
-    const globals: WorkletLibGlobals = {};
-    let seenBinary: unknown;
-    await ensureSharedLibOpenMPT(globals, 'glue', WASM_BYTES, (_text, g) => {
-      seenBinary = g.libopenmpt?.wasmBinary;
-      g.__openmptWorkletLib = mockLib();
-    });
-    expect(seenBinary).toBe(WASM_BYTES);
+  it('hands bootstrap the script text and the real wasm bytes', async () => {
+    const holder: SharedLibHolder<FakeLib> = {};
+    let seen: [string, unknown] | undefined;
+    await run(holder, async (script, bytes) => { seen = [script, bytes]; return mockLib(); }, 'the-glue');
+    expect(seen).toEqual(['the-glue', WASM_BYTES]);
+    expect(seen?.[1]).toBe(WASM_BYTES);
+  });
+
+  it('publishes the instance only after bootstrap resolves, never a half-initialised one', async () => {
+    const holder: SharedLibHolder<FakeLib> = {};
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const pending = run(holder, async () => { await gate; return mockLib(); });
+
+    expect(holder.__openmptWorkletLib).toBeUndefined();
+    expect(holder.__openmptWorkletLibInitPromise).toBeDefined();
+    release();
+    const lib = await pending;
+    expect(holder.__openmptWorkletLib).toBe(lib);
   });
 
   it('requires real wasm bytes — there is no wasm2js (JS-only) init path', async () => {
-    const globals: WorkletLibGlobals = {};
-    let evalCount = 0;
-    const evalScript = () => { evalCount += 1; };
+    let bootstraps = 0;
+    const bootstrap = async () => { bootstraps += 1; return mockLib(); };
 
-    await expect(ensureSharedLibOpenMPT(globals, 'glue', null, evalScript)).rejects.toThrow(/missing wasmBytes/);
-    resetWorkletLibSingleton(globals);
+    await expect(run({}, bootstrap, 'glue', null)).rejects.toThrow(/missing wasmBytes/);
+    await expect(run({}, bootstrap, 'glue', new Uint8Array(0))).rejects.toThrow(/missing wasmBytes/);
+    expect(bootstraps).toBe(0);
+  });
+
+  it('requires the glue script text', async () => {
+    let bootstraps = 0;
     await expect(
-      ensureSharedLibOpenMPT(globals, 'glue', new Uint8Array(0), evalScript),
-    ).rejects.toThrow(/missing wasmBytes/);
-    expect(evalCount).toBe(0);
+      run({}, async () => { bootstraps += 1; return mockLib(); }, ''),
+    ).rejects.toThrow(/missing scriptText/);
+    expect(bootstraps).toBe(0);
   });
 
   it('rejects wasmBytes without the \\0asm magic (e.g. an HTML 404 body)', async () => {
-    const globals: WorkletLibGlobals = {};
     const html = new TextEncoder().encode('<!doctype html><title>404</title>');
+    let bootstraps = 0;
     await expect(
-      ensureSharedLibOpenMPT(globals, 'glue', html, () => {}),
+      run({}, async () => { bootstraps += 1; return mockLib(); }, 'glue', html),
     ).rejects.toThrow(/missing \\0asm magic/);
+    expect(bootstraps).toBe(0);
   });
 
-  it('reuses existing lib without re-evaluating when already initialised', async () => {
+  it('reuses an existing lib without bootstrapping, and says so', async () => {
     const lib = mockLib();
-    const globals: WorkletLibGlobals = { __openmptWorkletLib: lib };
-    let evalCount = 0;
+    const holder: SharedLibHolder<FakeLib> = { __openmptWorkletLib: lib };
+    const log = vi.fn();
+    let bootstraps = 0;
 
-    const result = await ensureSharedLibOpenMPT(
-      globals,
-      'should-not-run',
-      null,
-      () => { evalCount += 1; },
-    );
+    // Nothing needs to be valid on the reuse path: a second node attaches without initLib data.
+    const result = await run(holder, async () => { bootstraps += 1; return mockLib(); }, '', null, log);
 
-    expect(evalCount).toBe(0);
+    expect(bootstraps).toBe(0);
     expect(result).toBe(lib);
-    resetWorkletLibSingleton(globals);
+    expect(log).toHaveBeenCalledWith('Reusing shared libopenmpt instance');
+  });
+
+  it('does not treat a lib whose exports are still lazy stubs as ready', async () => {
+    // The glue defines `_openmpt_*` lazily at eval time, so a present-but-not-a-function export means
+    // the runtime has not finished initialising.
+    const holder: SharedLibHolder<FakeLib> = { __openmptWorkletLib: { _openmpt_module_create_from_memory2: undefined } };
+    let bootstraps = 0;
+    const ready = mockLib();
+    const result = await run(holder, async () => { bootstraps += 1; return ready; });
+    expect(bootstraps).toBe(1);
+    expect(result).toBe(ready);
+  });
+
+  it('a failed init rejects every waiting caller and stays cached (a retry needs a fresh scope)', async () => {
+    // Existing behaviour, pinned rather than changed here: the rejected promise is kept in the holder.
+    const holder: SharedLibHolder<FakeLib> = {};
+    let bootstraps = 0;
+    const failing = async () => { bootstraps += 1; throw new Error('runtime init timeout'); };
+
+    const results = await Promise.allSettled([run(holder, failing), run(holder, failing)]);
+    expect(results.map((r) => r.status)).toEqual(['rejected', 'rejected']);
+    await expect(run(holder, async () => mockLib())).rejects.toThrow('runtime init timeout');
+    expect(bootstraps).toBe(1);
   });
 });
 

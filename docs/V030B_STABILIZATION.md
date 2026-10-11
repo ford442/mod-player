@@ -109,7 +109,7 @@ Systematic code + test verification of the three #329/#354 guards.
 |----------|--------|--------|
 | `public/worklets/openmpt-worklet.js:94–177` | ✅ | Returns existing `globalThis.__openmptWorkletLib` if `_openmpt_module_create_from_memory2` exists; otherwise one shared `__openmptWorkletLibInitPromise` |
 | `openmpt-worklet.js:231–239` | ✅ | New processor nodes attach to pre-initialised lib (`Attached to pre-initialised shared libopenmpt`) |
-| `utils/workletLibSingleton.ts` | ✅ | Testable mirror; 3 unit tests assert single eval + concurrent promise sharing |
+| `audio-worklet/libSingleton.ts` | ✅ | The singleton policy itself, bundled into the worklet and unit-tested directly (single eval, concurrent promise sharing, real-wasm guards); the old hand-copied mirror in `utils/` is gone |
 | `hooks/useAudioGraph.ts:751` | ✅ | `shouldPostInitLib(reuseWorkletNode, …)` — **no `initLib` on hot reload** |
 
 #### B. Hot-reload reuses `AudioWorkletNode` (no disconnect/reconnect)
