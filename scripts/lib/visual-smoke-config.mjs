@@ -133,7 +133,9 @@ export const FULL_SHADER_FILES = [
 //   v0.56 Instrument Palette (#347)
 //   v0.57 Velocity LEDs
 //
-// NOTE: CI uses HTML pattern grid (WebGL2 shader viz deferred this phase).
+// NOTE: CI uses HTML pattern grid. WebGL2 is opt-in only (?webgl2=1, #462) and is not in this matrix.
+// Deliberate skip: no WebGL2 cell runs in CI. The manual cell is scripts/webgl2-optin-acceptance.mjs
+// (see docs/VISUAL_SMOKE.md, "Renderer policy for smoke scripts").
 // WGSL night-theme / oscilloscope / instrument-palette paths are verified under
 // SMOKE_PROFILE=full with WebGPU (--enable-unsafe-webgpu). HTML smoke still
 // catches severe mount/play regressions without starting a GLSL session.
@@ -176,7 +178,7 @@ export function renderersForProfile(profile) {
   if (process.env.RENDERERS) {
     return process.env.RENDERERS.split(',').map((s) => s.trim()).filter(Boolean);
   }
-  // WebGL2 shader viz is deferred: GPU sessions require WebGPU; HTML is DOM tracker UI.
+  // GPU sessions require WebGPU; WebGL2 is opt-in only (see docs/VISUAL_SMOKE.md); HTML is DOM tracker UI.
   if (profile === 'ci') return ['html'];
   return ['html', 'webgpu'];
 }

@@ -5,6 +5,10 @@ import { useWebGLOverlay } from '../hooks/useWebGLOverlay';
 import { useWebGPURender } from '../hooks/useWebGPURender';
 import type { WebGPURenderParams, DebugInfo } from '../src/renderers/params';
 import { useWebGL2PatternRender } from '../src/renderers/webgl2/useWebGL2PatternRender';
+import { WebGL2FallbackBadge } from '../src/renderers/webgl2/WebGL2FallbackBadge';
+import { getWebGL2OptIn, logWebGL2FallbackActivation } from '../src/renderers/webgl2/optIn';
+import { activateWebGL2FromFailureCard } from '../src/renderers/rendererSelection';
+import { getWebGPUHardFailStage, getWebGPUHardFailStatus } from '../utils/webgpuProbe';
 import { PatternHTMLFallback } from '../src/renderers/html/PatternHTMLFallback';
 import { setCurrentPatternRenderer } from '../src/renderers/global';
 import { BloomPostProcessor } from '../utils/bloomPostProcessor';
@@ -24,6 +28,7 @@ import { usePatternBloom } from '../src/renderers/hooks/usePatternBloom';
 import { useShaderCanvasHitTest } from '../src/renderers/hooks/useShaderCanvasHitTest';
 import { usePatternRenderLoop } from '../src/renderers/hooks/usePatternRenderLoop';
 import { useThrottledDebugInfo } from '../src/renderers/hooks/useThrottledDebugInfo';
+import { useBackendDebugInfo } from '../src/renderers/hooks/useBackendDebugInfo';
 
 const DEFAULT_CHANNELS = 4;
 
@@ -167,7 +172,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   crtEnabledRef.current = crtEnabled;
 
   const [webgpuAvailable, setWebgpuAvailable] = useState(true);
-  const { activeBackend, setActiveBackend, setWebgl2Available } =
+  const { activeBackend, setActiveBackend, webgl2Available, setWebgl2Available } =
     usePatternRendererBackend(webgpuAvailable);
 
   const [localTime, setLocalTime] = useState(0);
@@ -193,6 +198,17 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   const useWebGL2 = activeBackend === 'webgl2';
   const useHTML = activeBackend === 'html';
   const isOverlayActive = useWebGPU && !liteMode && WEBGL_HYBRID_SHADERS.has(shaderFile);
+
+  // Resolved backend + why, surfaced in DebugInfo.uniforms (debug panel) for every backend.
+  const backendReason = useWebGL2
+    ? (getWebGL2OptIn()?.reason ?? 'opt-in')
+    : useHTML ? 'explicit' : (getWebGPUHardFailStatus() ?? 'default');
+  const backendDebugInfo = useBackendDebugInfo(setDebugInfo, activeBackend, backendReason);
+
+  // The one-and-only activation warn (module-guarded: StrictMode / shader-switch remounts can't repeat it).
+  useEffect(() => {
+    if (useWebGL2) logWebGL2FallbackActivation(getWebGL2OptIn()?.reason ?? 'opt-in');
+  }, [useWebGL2]);
 
   const { canvasMetrics, syncCanvasSize, handleResize } = usePatternCanvasMetrics({
     containerRef,
@@ -290,7 +306,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
 
   const { gpuReady, vizOffline, render: renderWebGPU, deviceRef: gpuDevRef, deviceStatus, contextRef: gpuHookContextRef } = useWebGPURender(
     canvasRef, glCanvasRef, shaderFile,
-    syncCanvasSize, renderParamsRef, matrix, padTopChannel, setDebugInfo, setWebgpuAvailable,
+    syncCanvasSize, renderParamsRef, matrix, padTopChannel, backendDebugInfo, setWebgpuAvailable,
     bloomRef,
     oscTextureRef,
     liteMode,
@@ -299,7 +315,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
 
   const { glReady, render: renderWebGL2 } = useWebGL2PatternRender(
     canvasRef, shaderFile,
-    syncCanvasSize, renderParamsRef, matrix, padTopChannel, setDebugInfo, setWebgl2Available,
+    syncCanvasSize, renderParamsRef, matrix, padTopChannel, backendDebugInfo, setWebgl2Available,
     liteMode,
     crtEnabledRef,
     useWebGL2,
@@ -463,6 +479,22 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
             className="absolute inset-0 pointer-events-none"
             style={{ display: isOverlayActive ? 'block' : 'none', zIndex: 2, width: '100%', height: '100%' }}
           />
+          {useWebGL2 && <WebGL2FallbackBadge />}
+        </div>
+      )}
+
+      {useWebGL2 && !webgl2Available && (
+        <div
+          className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-black/85 text-red-400 text-sm font-mono p-4 text-center"
+          role="alert"
+          data-webgl2-init-failed="true"
+        >
+          <div className="font-bold text-red-300">WebGL2 visualizer unavailable</div>
+          <div className="text-red-400/90 max-w-md">
+            The WebGL2 context or shaders could not be created (see the console / debug panel
+            errors). If WebGPU already claimed this canvas, reload with
+            <code className="mx-1">?webgl2=1</code>. Tracker audio can still play.
+          </div>
         </div>
       )}
 
@@ -499,10 +531,26 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
         >
           <div className="font-bold text-red-300">WebGPU visualizer unavailable</div>
           <div className="text-red-400/90 max-w-md">
-            GPU viz requires WebGPU. WebGL2 shader fallback is deferred — tracker
-            audio can still play. See console / debug panel for probe details
+            GPU viz requires WebGPU. A WebGL2 visualizer is available as an explicit opt-in
+            (it never starts automatically) — tracker audio can still play. See console /
+            debug panel for probe details
             (<code className="mx-1">window.__WEBGPU_PROBE__</code>).
           </div>
+          {getWebGPUHardFailStage() === 'lost' ? (
+            <div className="text-[11px] text-amber-300 max-w-md">
+              This canvas is already bound to WebGPU — reload the page with
+              <code className="mx-1">?webgl2=1</code> to use the WebGL2 visualizer.
+            </div>
+          ) : (
+            <button
+              type="button"
+              data-webgl2-optin-button="true"
+              onClick={() => activateWebGL2FromFailureCard(getWebGPUHardFailStatus() ?? deviceStatus)}
+              className="mt-1 rounded border border-amber-400/60 bg-amber-500/20 px-3 py-1 font-bold text-amber-200 hover:bg-amber-500/30"
+            >
+              Use WebGL2 visualizer
+            </button>
+          )}
           {(deviceStatus === 'unsupported' || deviceStatus === 'no-adapter') && (
             <div className="text-[11px] text-gray-400 mt-1">
               Status: {deviceStatus}

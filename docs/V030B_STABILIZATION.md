@@ -61,7 +61,7 @@ http://localhost:5173/?engine=js&renderer=webgpu&shader=patternv0.30b.wgsl
 | `renderer=webgpu` | WebGPU backend | v0.30b is a WGSL shader; production target |
 | `shader=patternv0.30b.wgsl` | Pin target shader | Bypasses localStorage shader memory |
 
-**Cloud VM fallback** (no WebGPU): append `renderer=webgl2` instead. Visual semantics are ported but pixel-identical checks use WebGPU.
+**Cloud VM fallback** (no WebGPU): append `webgl2=1` (opt-in WebGL2 session — shows a "WebGL2 fallback — WebGPU not in use" badge) or `renderer=html`. Nothing falls back automatically. Visual semantics are approximated; pixel-identical checks use WebGPU.
 
 ### Known-good test modules
 
@@ -388,7 +388,7 @@ npm run build && npm run preview
 |------|------------|
 | Audio regression on worklet edit | Bump `WORKLET_VERSION`; run `npm test -- worklet`; manual audible checklist |
 | Packing/shader drift | `test:duration-parity` + `test:trigger-tail`; never edit `public/shaders/` by hand |
-| WebGPU unavailable in CI/Cloud | Use `?renderer=webgl2` for functional checks; WebGPU for pixel-accurate v0.30b |
+| WebGPU unavailable in CI/Cloud | Use `?renderer=html` (or the opt-in `?webgl2=1`) for functional checks; WebGPU for pixel-accurate v0.30b |
 | localStorage shader override | Use `?shader=patternv0.30b.wgsl` or clear `xasm1_last_shader` |
 | Stale worklet cache | Hard refresh; check Network tab shows `openmpt-worklet.js?v=8` |
 

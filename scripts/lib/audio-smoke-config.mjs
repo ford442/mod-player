@@ -46,7 +46,12 @@ export const AUDIO_CHROME_ARGS = [
   '--window-size=1280,720',
 ];
 
-export function buildAudioSmokeUrl(baseUrl, { audioDiag = true, engine = 'js', renderer = 'webgl2' } = {}) {
+/**
+ * Audio-only smoke never looks at pixels, and AUDIO_CHROME_ARGS has no WebGPU flags (GPU-less CI/cloud VMs),
+ * so it uses the DOM `html` pattern grid. (`renderer=webgl2` used to be the default here, but WebGL2 is
+ * opt-in only (#462): `?renderer=webgl2` was a silent no-op → WebGPU hard-fail card on these hosts.)
+ */
+export function buildAudioSmokeUrl(baseUrl, { audioDiag = true, engine = 'js', renderer = 'html' } = {}) {
   const root = baseUrl.replace(/\/$/, '');
   const params = new URLSearchParams();
   params.set('renderer', renderer);
