@@ -43,10 +43,6 @@ export default tseslint.config(
       '.claude/**',
       // Generated / non-app surfaces
       '**/*.cjs',
-      // Dead tier-A shader-migration tools (one is not even parseable); removed from the repo in
-      // the dead-code cleanup, at which point these two entries go too.
-      'scripts/apply-tier-a-includes.mjs',
-      'scripts/migrate-tier-a.mjs',
       // Emscripten --pre-js/--post-js snippets run in emcc's injected scope; tsconfig.scripts.json checks them.
       'cpp/**',
     ],

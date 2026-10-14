@@ -36,7 +36,6 @@ jobs:
             sudo apt-get update -qq
             sudo apt-get install -y -qq --no-install-recommends libasound2t64
           fi
-
       # The whole gate lives in package.json so CI and `npm run preflight` cannot drift apart:
       # lockfile guards, wasm/js-engine verification, generated-worklet freshness (#435), lint,
       # type checks (app, worklet, tests), unit tests, shader include/parity, build, and the

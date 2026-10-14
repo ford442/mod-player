@@ -49,7 +49,7 @@ python3 deploy.py                                # Build + SFTP upload to produc
 ### The Four Tiers of Audio-Visual Processing
 
 #### 1. Main Thread (`hooks/useLibOpenMPT.ts`)
-- Initializes libopenmpt WASM from CDN (`window.libopenmptReady` promise set in `index.html`)
+- Initializes libopenmpt WASM (self-hosted `public/worklets/libopenmpt-worklet.{js,wasm}`, injected into `index.html` by `vite-plugins/libopenmptHtml.ts`; `window.libopenmptReady` resolves when the runtime is up)
 - Loads module files into WASM memory
 - Manages React state (play/pause, volume, pan, loop, seek)
 - Creates `AudioContext` and instantiates either `AudioWorkletNode` (preferred) or `ScriptProcessorNode` (fallback)
@@ -64,7 +64,7 @@ python3 deploy.py                                # Build + SFTP upload to produc
 #### 3. WebGPU Renderer (`components/PatternDisplay.tsx`)
 - Initializes WebGPU context on a canvas
 - Dynamically loads WGSL shader files from `/shaders` directory
-- Parses shader filename (e.g., `patternv0.37.wgsl`) to determine rendering strategy:
+- Resolves the shader's `ShaderMeta` from `utils/shaderRegistry.ts` (keyed by filename, e.g., `patternv0.37.wgsl`) to determine rendering strategy:
   - **Layout:** simple, horizontal, or circular
   - **Buffer strategy:** standard 1×u32 or high-precision 2×u32 packing
   - **Canvas size:** version-specific (v0.26 → 2048×2016, v0.37 → 1024×1024)
@@ -88,7 +88,7 @@ User drops .mod file
 ```
 
 ### Shader Versioning (Critical)
-Shaders are named `patternv0.XX.wgsl` and `chassisv0.XX.wgsl`. The version number in the filename **controls multiple behaviors** detected at runtime by parsing the string:
+Shaders are named `patternv0.XX.wgsl` and `chassisv0.XX.wgsl`. Each pattern shader has a `ShaderMeta` entry in `utils/shaderRegistry.ts` that **controls multiple behaviors**; the table below is the rough shape, the registry is the source of truth:
 
 | Version Range | Layout Type | Buffer Strategy | Canvas Size | Notes |
 |---|---|---|---|---|
@@ -98,7 +98,7 @@ Shaders are named `patternv0.XX.wgsl` and `chassisv0.XX.wgsl`. The version numbe
 | `v0.35`, `v0.37`, `v0.38` | Circular | High-precision | 1024×1024 | Hybrid UI |
 | `v0.45–v0.50` | Circular | High-precision | — | Alpha blending enabled |
 
-**DO NOT refactor the `if (shaderFile.includes('v0.XX'))` chains in `PatternDisplay.tsx`** — they are load-bearing. When adding a new shader, update the corresponding version checks in `PatternDisplay.tsx`.
+**DO NOT add `shaderFile.includes('v0.XX')` chains** to `PatternDisplay.tsx` or the hooks — `tests/shaderRegistry.test.ts` fails if one appears. When adding a new shader, register one `ShaderMeta` block in `utils/shaderRegistry.ts` and add a picker entry in `appConfig.ts`.
 
 ### Data Packing for GPU
 Tracker cells are bit-packed into `Uint32Array` before upload:
@@ -148,12 +148,12 @@ All strict flags are enabled (see `tsconfig.json`):
 - `Cross-Origin-Opener-Policy: same-origin`
 - `Cross-Origin-Embedder-Policy: credentialless`
 
-These enable `SharedArrayBuffer` / Atomics for Emscripten WASM workers while allowing cross-origin CDN resources (e.g., libopenmpt). **Do not remove these headers.**
+These enable `SharedArrayBuffer` / Atomics for Emscripten WASM workers while still allowing cross-origin resources such as the esm.sh React importmap in `index.html`. **Do not remove these headers.**
 
 ### Asset Caching Gotchas
 - **AudioWorklet files** are cached aggressively. After editing `public/worklets/openmpt-worklet.js`, hard-refresh or disable cache in DevTools.
 - **Shader files** must exist in both `/shaders` (source) and `/public/shaders` (served). Keep them in sync. Vite copies `public/` to `dist/`.
-- **libopenmpt:** Loaded from CDN (`https://wasm.noahcohn.com/libmpt/`) in `index.html`. The app waits on `window.libopenmptReady` promise before starting audio.
+- **libopenmpt:** Self-hosted (`public/worklets/libopenmpt-worklet.{js,wasm}`), loaded in `index.html` with SRI and a content-hash `?v=`. The app waits on `window.libopenmptReady` promise before starting audio.
 
 ### Base Path Awareness
 Almost all asset URLs use `import.meta.env.BASE_URL` to support deployment under a subdirectory. When deploying to a non-root path, set `VITE_APP_BASE_PATH` before building.
@@ -171,21 +171,19 @@ Almost all asset URLs use `import.meta.env.BASE_URL` to support deployment under
 
 ### Pattern: Shader-Driven Rendering Strategy
 1. `PatternDisplay.tsx` receives `shaderFile` prop (e.g., `patternv0.37.wgsl`)
-2. Filename is parsed to extract version number
-3. Version number triggers version-specific checks:
+2. `resolveShaderMeta(shaderFile)` looks up that shader's capabilities in `SHADER_REGISTRY` (`utils/shaderRegistry.ts`)
+3. The `ShaderMeta` fields drive the host code, e.g. for v0.37:
    ```typescript
-   if (shaderFile.includes('v0.37')) {
-     // Use high-precision 2×u32 packing
-     // Expect polar-coordinate UI zone definitions
-     // Set canvas size to 1024×1024
-     // Enable shader-embedded UI input handling
-   }
+   // highPrecisionPacking → PackedA/PackedB (2×u32 per cell)
+   // hitTestProfile set → polar-coordinate UI zone hit-testing
+   // canvas size → 1024×1024
+   // shader-embedded UI input handling enabled
    ```
-4. Correct uniform struct is sent via `createUniformPayload()`
+4. Correct uniform struct is sent via `fillUniformPayload()` (`utils/gpuPacking.ts`)
 5. Correct GPU buffers (layout, packing strategy) are allocated
 
 **When modifying a shader's `struct Uniforms`:**
-1. Update `createUniformPayload()` in `PatternDisplay.tsx` to match
+1. Update `fillUniformPayload()` in `utils/gpuPacking.ts` to match
 2. Test with `npm run dev` to ensure no garbage/corruption on screen
 3. Verify in production build via `npm run build && npm run preview`
 
@@ -208,8 +206,8 @@ Do not broaden the `content` glob in `tailwind.config.js`. The explicit scoping 
 ### 5. Node OOM During Build
 The production build uses `--max-old-space-size=4096` (see `package.json`). If you hit OOM anyway, check `tailwind.config.js` — a broad glob pattern likely matched too many files.
 
-### 6. libopenmpt CDN Load
-`libopenmptjs.js` must load from `https://wasm.noahcohn.com/libmpt/` in `index.html`. If offline, host it locally and update the script src. The app waits on `window.libopenmptReady` before starting.
+### 6. libopenmpt Load
+`libopenmpt-worklet.js` (+ `.wasm`) is served same-origin from `/worklets/` and injected into `index.html` by `vite-plugins/libopenmptHtml.ts` (SRI-pinned). It works offline. If it fails to load, check that `public/worklets/libopenmpt-worklet.{js,wasm}` match `audio-worklet/js/libopenmpt-worklet.generated.json` (`npm run verify:js-libopenmpt`). The app waits on `window.libopenmptReady` before starting.
 
 ### 7. ScriptProcessorNode vs. AudioWorkletNode
 When debugging audio glitches, determine which path is active. The messaging structure differs:
@@ -244,7 +242,7 @@ HTML5 native loop wasn't smooth enough for the aesthetic. `PatternDisplay.tsx` u
 | `utils/geometryConstants.ts` | Canvas layout, polar rings, layout detection |
 | `utils/bloomPostProcessor.ts` | WebGPU bloom post-processing |
 | `public/worklets/openmpt-worklet.js` | AudioWorklet processor (static asset) |
-| `index.html` | Entry point; loads libopenmpt from CDN |
+| `index.html` | Entry point; loads the self-hosted libopenmpt |
 | `vite.config.ts` | CORS headers, WASM assets, symlink handling |
 | `tailwind.config.js` | Scoped content paths (explicit, not broad globs) |
 
@@ -292,7 +290,7 @@ The `deploy.py` script automatically derives the base path and handles SFTP uplo
 ## Module Load Failures & Debugging
 
 ### Common Issues
-1. **"Failed to load libopenmpt script from CDN"** — Check internet connection; libopenmpt CDN may be down
+1. **"Failed to load libopenmpt script"** — The file is self-hosted under `/worklets/`; check the deploy served `libopenmpt-worklet.js` and `.wasm` (as `application/wasm`) and that `?v=`/SRI match the committed pair
 2. **CORS errors loading media files** — Remote server must send proper CORS headers
 3. **WebGPU device lost** — GPU driver crash; refresh the page or update drivers
 4. **Shader syntax error** — Check WGSL shader file for typos; use `npm run dev` to see GPU errors in console
