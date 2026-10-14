@@ -212,7 +212,7 @@ python3 deploy.py
 - **Test TypeScript:** `npm run typecheck:tests` type-checks `tests/**/*.ts` via `tsconfig.test.json` (CI gate).
 - **Shader registry invariant:** `tests/shaderRegistry.test.ts` (also `npm run test:shader-registry`) verifies registry ↔ `SHADER_GROUPS` ↔ `shaderVersion.ts` helper agreement, bloom profiles, note-age range, and bans new `shaderFile.includes('v0.…')` chains. It runs as part of `npm test`.
 - **No ad-hoc test scripts:** the old `utils/__debug__/*.test.cjs` scripts (which shelled out to `npx tsx`) were ported to Vitest under `tests/` and the directory was removed. New tests go in `tests/**/*.test.ts`.
-- **Shader renderer screenshot check:** `scripts/screenshot-shader-check.mjs` is a legacy alias that forwards to `scripts/visual-smoke.mjs` (profile `quick`; WebGL2 is opt-in via `?webgl2=1`, see `docs/VISUAL_SMOKE.md`). Run it against a local preview with:
+- **Shader renderer screenshot check:** `scripts/screenshot-shader-check.mjs` is a legacy alias that forwards to `scripts/visual-smoke.mjs` (profile `quick`; renderers per `RENDERERS`, `html`/`webgpu` only — WebGL2 is opt-in via `?webgl2=1`, see `docs/VISUAL_SMOKE.md`). Run it against a local preview with:
   ```bash
   npm run preview -- --port 4173 &
   npm run screenshot:shaders
@@ -221,11 +221,10 @@ python3 deploy.py
 - **GitHub Actions** (`.github/workflows/ci.yml`) runs PR jobs plus a scheduled native build:
   1. `lint-and-build` – `npm ci` → **`npm run preflight`** (the same chain contributors run locally: lockfile guards, `verify:wasm`, `verify:js-libopenmpt`, worklet freshness, lint, typechecks, `npm test`, shader includes/parity, build, `verify:build:root`, `verify:bundle-budget`).
   2. `visual-smoke` – Build, preview server, Playwright smoke (`smoke:visual:ci`) on the HTML renderer.
-  3. `visual-smoke-webgpu` – Best-effort WebGPU coverage (`continue-on-error`), in a separate job.
-  4. `audio-smoke` and `playhead-smoke` – Browser-level audio and playback-position checks.
-  5. `wasm-smoke-test` – Installs Emscripten **3.1.51**, verifies safe native build scripts, `verify:native-exports`, `bash -n`, and that tracked `openmpt-worklet.js` still looks like the JS processor.
-  6. `native-full-build` – Path-filtered full `npm run build:emcc` when `cpp/**`, `scripts/build-wasm.sh`, or `audio-worklet/**` change; caches `vendor/libopenmpt-0.8.4+release`.
-  7. `native-wasm-scheduled.yml` – Weekly (and manual) full `npm run build:emcc` with the same libopenmpt cache; uploads `openmpt-native.*` artifacts and asserts the JS worklet is unchanged.
+     `visual-smoke-webgpu` runs experimental WebGPU coverage in parallel.
+  3. `wasm-smoke-test` – Installs Emscripten **3.1.51**, verifies safe native build scripts, `verify:native-exports`, `bash -n`, and that tracked `openmpt-worklet.js` still looks like the JS processor.
+  4. `native-full-build` – Path-filtered full `npm run build:emcc` when `cpp/**`, `scripts/build-wasm.sh`, or `audio-worklet/**` change; caches `vendor/libopenmpt-0.8.4+release`.
+  5. `native-wasm-scheduled.yml` – Weekly (and manual) full `npm run build:emcc` with the same libopenmpt cache; uploads `openmpt-native.*` artifacts and asserts the JS worklet is unchanged.
 
 ## Security & CORS Considerations
 - **COOP/COEP headers:** `vite.config.ts` sets:

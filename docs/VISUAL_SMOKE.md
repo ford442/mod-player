@@ -217,7 +217,7 @@ Two jobs in `.github/workflows/ci.yml` run in parallel, each with its own `npm r
 
 **`visual-smoke`** (required)
 1. `npm run build`, then `vite preview`
-2. `SMOKE_PROFILE=ci npm run smoke:visual` — HTML renderer, coverage assertions included
+2. `SMOKE_PROFILE=ci npm run smoke:visual` — HTML, coverage assertions included
 3. Uploads `artifacts/visual-smoke/` on failure (5-day retention)
 
 **`visual-smoke-webgpu`** (experimental, best-effort)
