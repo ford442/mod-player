@@ -117,7 +117,7 @@ When introducing a new shader version:
 1. **Create the WGSL file** in the root `shaders/` directory with a sequential version number (e.g., `patternv0.52.wgsl`)
 2. **Reuse shared logic** from `shaders/lib/` via `//#include "lib/<fragment>.wgsl"` where possible. This keeps common code (e.g. `octaveBrightness`, DURA duration unpacking, three-emitter lens cap) in one place.
 3. **Sync to public/**: Run `npm run sync:shaders`. The script resolves includes and writes flat, self-contained WGSL to `public/shaders/`. Do not hand-edit `public/shaders/`.
-4. **Update App.tsx**: Add the shader to the appropriate `SHADER_GROUPS` array (SQUARE, CIRCULAR, or VIDEO)
+4. **Update `appConfig.ts`**: Add the shader to the appropriate group in `SHADER_GROUPS_ALL` (and in `SHADER_GROUPS_PUBLIC` if it ships in the public build)
 5. **Update version checks** in:
    - `utils/shaderVersion.ts` — Add version to layout type, background selection, and alpha blending checks
    - `components/PatternDisplay.tsx` — Update canvas size and buffer packing logic

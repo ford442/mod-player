@@ -74,6 +74,7 @@ CANDIDATES=(
     "/usr/local/emsdk/emsdk_env.sh"
 )
 for f in "${CANDIDATES[@]}"; do
+    # shellcheck source=/dev/null  # emsdk env file: the path is only known at run time
     if [ -f "$f" ]; then source "$f"; break; fi
 done
 
@@ -163,6 +164,7 @@ else
         -ffunction-sections -fdata-sections
     )
     CXX_ONLY_FLAGS=(-fno-exceptions -fno-rtti)
+    # shellcheck disable=SC2054  # -Wl,... is ONE linker pass-through argument, not a comma-separated list
     LINK_FLAGS=(-Wl,--gc-sections)
     EMSCRIPTEN_FLAGS=(
         -sASSERTIONS=0
@@ -297,7 +299,7 @@ resolve_libopenmpt_paths() {
     local include_root lib_dir
 
     if [[ -n "${LIBOPENMPT_INCLUDE:-}" ]] && [[ -f "$(libopenmpt_header_path "$LIBOPENMPT_INCLUDE")" ]]; then
-        LIBOPENMPT_INCLUDE="$LIBOPENMPT_INCLUDE"
+        : # the caller-provided LIBOPENMPT_INCLUDE is valid — keep it
     elif include_root="$(find_libopenmpt_include_root "$LIBOPENMPT_DIR")"; then
         LIBOPENMPT_INCLUDE="$include_root"
     else
@@ -305,7 +307,7 @@ resolve_libopenmpt_paths() {
     fi
 
     if [[ -n "${LIBOPENMPT_LIB:-}" ]] && [[ -f "$LIBOPENMPT_LIB/libopenmpt.a" ]]; then
-        LIBOPENMPT_LIB="$LIBOPENMPT_LIB"
+        : # the caller-provided LIBOPENMPT_LIB is valid — keep it
     elif lib_dir="$(find_libopenmpt_lib_dir "$LIBOPENMPT_DIR")"; then
         LIBOPENMPT_LIB="$lib_dir"
     else
