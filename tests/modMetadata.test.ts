@@ -12,6 +12,7 @@ import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { LibOpenMPT } from '../types';
 import { extractModuleMetadataWithLib, resolveModuleTitle, titleFromFileName } from '../utils/modMetadata';
+import { loadLibOpenMPTNode } from './helpers/libopenmptNode';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 
@@ -67,37 +68,14 @@ describe('extractModuleMetadataWithLib failure paths (no WASM)', () => {
 
 describe('extractModuleMetadataWithLib with the real libopenmpt WASM', () => {
   let lib: LibOpenMPT;
-  const g = globalThis as Record<string, unknown>;
-  const previous = g.libopenmpt;
+  let restore = () => {};
 
   beforeAll(async () => {
-    const glue = readFileSync(join(ROOT, 'public/worklets/libopenmpt-worklet.js'), 'utf8');
-    const wasmBinary = readFileSync(join(ROOT, 'public/worklets/libopenmpt-worklet.wasm'));
-    g.libopenmpt = { noInitialRun: true, wasmBinary };
-    new Function(glue.replace(/^\s*export\s+(default\s+)?/gm, '')).call(globalThis);
-    const raw = g.libopenmpt as Record<string, unknown> & { calledRun?: boolean; onRuntimeInitialized?: () => void };
-    await new Promise<void>((resolveReady) => {
-      if (raw.calledRun) resolveReady();
-      else raw.onRuntimeInitialized = () => resolveReady();
-    });
-    // The glue deliberately does not export stringToUTF8 (its signature clashes with the app's
-    // polyfill: it returns an allocated pointer), so provide the app-style one here.
-    const l = raw as unknown as LibOpenMPT & { stringToUTF8?: (s: string) => number };
-    l.stringToUTF8 = (s: string) => {
-      const bytes = new TextEncoder().encode(s);
-      const ptr = l._malloc(bytes.length + 1);
-      l.HEAPU8.set(bytes, ptr);
-      l.HEAPU8[ptr + bytes.length] = 0;
-      return ptr;
-    };
-    lib = l;
+    ({ lib, restore } = await loadLibOpenMPTNode());
   }, 30_000);
 
-  afterAll(() => {
-    // Leave no global behind for other test files in this worker.
-    if (previous === undefined) delete g.libopenmpt;
-    else g.libopenmpt = previous;
-  });
+  // Leave no global behind for other test files in this worker.
+  afterAll(() => restore());
 
   const sample = (relative: string) => new Uint8Array(readFileSync(join(ROOT, relative)));
 
