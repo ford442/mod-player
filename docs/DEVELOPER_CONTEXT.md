@@ -43,7 +43,7 @@
 1. Add the WGSL under `shaders/` (sync to `public/shaders/`)
 2. One block in `SHADER_REGISTRY`
 3. Picker entry in `appConfig.ts` `SHADER_GROUPS`
-4. `npm run test:shader-registry`
+4. `npm run test:shader-registry` (Vitest: `tests/shaderRegistry.test.ts`)
 
 **Agent Warning:** Do **not** reintroduce `shaderFile.includes('v0.XX')` chains in PatternDisplay/hooks. Extend `ShaderMeta` instead. Unregistered filenames fall through `inferLegacyMeta` only as a safety net.
 
@@ -119,7 +119,7 @@ Unit tests run via **Vitest** (`npm test`). Suites live under `tests/*.test.ts` 
 
 **PackedA/PackedB bit-layout changes** must update `tests/gpuPacking.test.ts` (pack→unpack round-trip) and the duration parity assertions in `tests/durationParity.test.ts`. These are the invariants that #318 (WGSL includes) and #307 (GPU lifecycle) must not break.
 
-Ad-hoc Node scripts under `utils/__debug__/*.test.cjs` and `components/__debug__/*.test.cjs` are being migrated incrementally; unported scripts are excluded from `npm test` via `vitest.config.ts`.
+The former ad-hoc Node scripts under `utils/__debug__/*.test.cjs` have all been ported to Vitest (`tests/shaderRegistry.test.ts`, `libraryStore`, `folderImport`, `parserPromise`, `modMetadata`) and the directory removed; there are no unported test scripts left.
 
 ---
 

@@ -1,14 +1,22 @@
 import { useEffect, useLayoutEffect } from 'react';
 import { playerCommands, trackInputFocusForCommands } from '../utils/playerCommands';
+import { mediaSessionPlaybackState, type TransportState } from '../utils/transportClock';
 
 interface KeyboardShortcutOptions {
   cheatsheetOpen: boolean;
+  /** Mirrored to `navigator.mediaSession.playbackState` so the OS media card shows play vs pause. */
+  transportState?: TransportState;
 }
 
-export function useKeyboardShortcuts({ cheatsheetOpen }: KeyboardShortcutOptions) {
+export function useKeyboardShortcuts({ cheatsheetOpen, transportState = 'stopped' }: KeyboardShortcutOptions) {
   useLayoutEffect(() => {
     playerCommands.setState({ cheatsheetOpen });
   }, [cheatsheetOpen]);
+
+  useEffect(() => {
+    if (!('mediaSession' in navigator)) return;
+    navigator.mediaSession.playbackState = mediaSessionPlaybackState(transportState);
+  }, [transportState]);
 
   useEffect(() => trackInputFocusForCommands(), []);
 

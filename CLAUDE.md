@@ -1,7 +1,7 @@
 # CLAUDE.md — AI Assistant Guide for mod-player (XASM-1 Player)
 
 > **Read this file first.** It supersedes any other documentation for the purpose of making code changes.
-> Refer to `DEVELOPER_CONTEXT.md` for deeper architectural rationale and `AGENTS.md` for additional directives.
+> Refer to `docs/DEVELOPER_CONTEXT.md` for deeper architectural rationale and `AGENTS.md` for additional directives.
 
 ---
 
@@ -11,7 +11,7 @@
 
 **Core technology stack:**
 - **React 18 + TypeScript + Vite** — UI framework and build tooling
-- **libopenmpt (WASM)** — Accurate tracker module audio playback, loaded from CDN
+- **libopenmpt (WASM)** — Accurate tracker module audio playback; a self-hosted real-WASM build (`public/worklets/libopenmpt-worklet.{js,wasm}`, see pitfall 4)
 - **Web Audio API + AudioWorklet** — Audio rendering pipeline (ScriptProcessorNode fallback)
 - **WebGPU + WGSL** — Hardware-accelerated visualization; **WebGL2** GLSL reference renderer and **HTML** grid as fallbacks
 - **Tailwind CSS** — Styling
@@ -23,55 +23,51 @@
 
 ```
 mod-player/
-├── App.tsx                      # Root React component; orchestrates all state
-├── index.tsx                    # React entry point
-├── index.html                   # HTML shell; loads libopenmpt from CDN
+├── App.tsx                      # Root React component; wires state into the session/features contexts
+├── appConfig.ts                 # SHADER_GROUPS (picker), default shader, theme/feature config
+├── index.tsx, index.html        # Entry point; HTML shell (libopenmpt glue is injected by vite-plugins/libopenmptHtml.ts)
 ├── types.ts                     # Core TypeScript interfaces (PatternCell, ChannelShadowState, etc.)
 │
+├── app/                         # App-level hooks split out of App.tsx (keyboard actions, playlist, media, test hooks, lazy 3D shell)
+├── context/                     # PlayerSession / PlayerFeatures contexts (refs stay on mutable objects, not Zustand)
+├── store/                       # Zustand stores (player UI, shader prefs, local library)
 ├── hooks/
-│   ├── useLibOpenMPT.ts         # PRIMARY AUDIO HOOK — WASM init, playback, channel state
-│   ├── useKeyboardShortcuts.ts  # Keyboard event handling
-│   └── usePlaylist.ts           # Playlist management
+│   ├── useLibOpenMPT.ts         # PRIMARY AUDIO HOOK — composes the pieces below
+│   ├── libOpenMPT/              # Refs/state, module loading, transport actions, UI loop (createUpdateUI)
+│   ├── audioGraph/              # Engine start paths: JS worklet, native C++ worklet, ScriptProcessor fallback
+│   └── useKeyboardShortcuts.ts, usePlaylist.ts, useWebGPURender.ts, …
 │
 ├── components/
 │   ├── PatternDisplay.tsx       # PRIMARY VISUALIZATION — WebGPU context, shaders, render loop
-│   ├── Controls.tsx             # File upload, play/stop, volume/pan sliders
+│   ├── Controls.tsx, TransportBar.tsx, SeekBar.tsx   # Transport UI
 │   ├── PatternSequencer.tsx     # HTML fallback pattern grid (wired via src/renderers/html/)
-│   ├── MediaOverlay.tsx         # Synchronized image/video overlay during playback
-│   ├── MediaPanel.tsx           # Media file management UI
-│   ├── ChannelMeters.tsx        # Real-time per-channel VU meters
-│   ├── MetadataPanel.tsx        # Module metadata (title, artist, BPM, channels)
-│   ├── Header.tsx               # Status bar
-│   ├── SeekBar.tsx              # Playback position scrubber
-│   ├── Playlist.tsx             # Playlist UI
-│   ├── Studio3D.tsx             # Three.js 3D mode
-│   ├── CameraRig.tsx            # 3D camera controller
-│   └── Icons.tsx                # SVG icon definitions
+│   ├── ChannelMeters.tsx, MetadataPanel.tsx, Playlist.tsx, MediaOverlay.tsx, …
+│   └── Studio3D.tsx, CameraRig.tsx, icons.tsx        # Three.js 3D mode (lazy), SVG icons
 │
 ├── audio-worklet/
-│   ├── OpenMPTWorkletEngine.ts  # WASM engine wrapper for the worklet thread
-│   └── types.ts                 # Worklet-specific types (WorkletPatternRow, EngineState, etc.)
+│   ├── js/openmpt-processor.ts  # JS AudioWorklet processor SOURCE (esbuild → public/worklets/openmpt-worklet.js)
+│   ├── libRuntimeReady.ts, workletProtocolConstants.ts   # Bundled into the worklet
+│   ├── protocol.ts, jsWorkletDispatch.ts     # Main-thread side of the worklet message protocol
+│   └── OpenMPTWorkletEngine.ts  # Native C++ engine wrapper
 │
-├── utils/
-│   ├── geometryConstants.ts     # Canvas layout constants, polar ring geometry, layout detection
-│   ├── bloomPostProcessor.ts    # WebGPU multi-pass bloom effect
-│   └── remoteMedia.ts           # Fetches/caches MOD files and media from remote servers
-│
+├── workers/                     # Parser and export Web Workers
+├── utils/                       # Pure helpers: shaderRegistry/shaderVersion, gpuPacking, geometryConstants, playheadPrediction, …
 ├── src/renderers/               # Pattern renderer abstraction (webgpu/webgl2/html selection)
-│   ├── rendererSelection.ts     # ?renderer= URL param, localStorage, DEBUG_RENDERER
-│   ├── webgl2/                  # GLSL 3.00 ES reference renderer + bloom
-│   └── html/                    # PatternHTMLFallback (wraps PatternSequencer)
-├── shaders/                     # WGSL source shaders (~56 files, e.g. patternv0.45.wgsl)
-├── shaders-enhanced/            # Experimental enhanced shader variants
+├── shaders/                     # WGSL source shaders (+ shaders/lib/ includes); synced to public/shaders/
+├── cpp/                         # Native libopenmpt AudioWorklet engine (C++/emscripten)
+├── vite-plugins/                # COOP/COEP headers + chunking, libopenmpt <script> injection
+├── scripts/                     # Build/verify/smoke scripts (Node + shell)
+├── tests/                       # Vitest suite (npm test)
+├── docs/                        # Architecture notes, planning, smoke-test guides
 ├── public/
-│   ├── worklets/                # openmpt-worklet.js (AudioWorklet processor) + libopenmpt-worklet.{js,wasm} (real-WASM libopenmpt: worklet, main thread, parser worker) (static assets)
-│   ├── shaders/                 # Public-served copies of shaders
-│   └── utils/                   # Static utility scripts
+│   ├── worklets/                # openmpt-worklet.js (generated processor) + libopenmpt-worklet.{js,wasm} (real-WASM libopenmpt: worklet, main thread, parser worker) (static assets)
+│   └── shaders/                 # Public-served copies of shaders
+├── archive/                     # Experimental code that is NOT built or linted
 │
-├── vite.config.ts               # Vite config (base path, CORS headers, WASM assets)
-├── tsconfig.json                # TypeScript config (strict, ES2020, ESNext modules)
+├── vite.config.ts               # Vite config (base path, CORS headers, WASM assets, chunking)
+├── tsconfig*.json               # app (strict), node (configs), scripts, worklet, tests
 ├── tailwind.config.js           # Tailwind (scoped content paths to avoid OOM)
-├── postcss.config.js
+├── eslint.config.js, postcss.config.js
 └── package.json
 ```
 
@@ -81,12 +77,12 @@ mod-player/
 
 ```bash
 npm run dev          # Start Vite dev server at http://localhost:5173
-npm run build        # tsc + Vite production build → dist/ (uses 4 GB heap)
+npm run build        # tsc + Vite production build → dist/
 npm run preview      # Preview production build locally
-npm run typecheck    # TypeScript type-check only (no emit)
-npm run preflight    # Run before every commit: the whole `lint-and-build` chain, stops at first failure
+npm run typecheck    # TypeScript type-check only (no emit): app + vite/vitest configs + scripts/ (tsconfig.node.json, tsconfig.scripts.json)
+npm run preflight    # Run before every commit: CI's `lint-and-build` job *is* this chain (stops at first failure, no network needed after `npm ci`)
 npm run verify:lockfile # package-lock.json metadata guard (lockfileVersion 3, resolved + integrity)
-npm run lint         # ESLint (max 43 warnings budget; hard CI gate)
+npm run lint         # ESLint (max 40 warnings budget; hard CI gate)
 npm run build:emcc   # Native C++ worklet → openmpt-native.* (scripts/build-wasm.sh, emsdk 3.1.51)
 npm run build:worklet # Alias of build:emcc (never overwrites openmpt-worklet.js)
 npm run build:js-worklet # Compile audio-worklet/js/openmpt-processor.ts → public/worklets/openmpt-worklet.js (esbuild)
@@ -95,17 +91,17 @@ npm run verify:js-libopenmpt # Static + boot/render/corrupt-input checks of that
 python3 deploy.py    # Build + SFTP upload to production server
 ```
 
-**Browser requirement:** WebGPU requires Chrome 113+, Edge 113+, or Arc. For headless testing pass `--enable-unsafe-webgpu`. Use `?renderer=webgl2` when WebGPU is unavailable or for GLSL-based debugging.
+**Browser requirement:** WebGPU requires Chrome 113+, Edge 113+, or Arc. For headless testing pass `--enable-unsafe-webgpu`. When WebGPU is unavailable, use `?renderer=html` (DOM grid) or opt in to the GLSL WebGL2 session with `?webgl2=1` — it is never selected automatically.
 
 ### Pattern Renderer Backends
 
 | Backend | Entry | Use case |
 |---------|-------|----------|
 | `webgpu` | default | Production visuals (WGSL + bloom) — **required** for GPU viz this phase |
-| `webgl2` | deferred | GLSL reference path exists but is **not** auto-selected; `?renderer=webgl2` no-ops to WebGPU |
+| `webgl2` | `?webgl2=1` (alias `?renderer=webgl2`), or the **Use WebGL2 visualizer** button on the WebGPU failure card | **Opt-in only, never automatic, never persisted** (per page load). Simplified GLSL pattern + playhead with a persistent `WebGL2 fallback — WebGPU not in use` badge and one `console.warn`; `readPixels()` works. A stored / `DEBUG_RENDERER` `'webgl2'` is ignored |
 | `html` | `?renderer=html` | DOM pattern grid (tracker UI), not a GLSL shader session |
 
-Toggle via debug panel (🔍), `localStorage.xasm1_pattern_renderer`, or `window.DEBUG_RENDERER`. WebGL2 debug: **Alt+D** cycles wireframe/UV/playhead modes (dev only).
+Toggle `webgpu`/`html` via debug panel (🔍), `localStorage.xasm1_pattern_renderer`, or `window.DEBUG_RENDERER`; the debug panel lists the resolved backend + reason (`backend`, `backendReason`). Opt-in state lives in `src/renderers/webgl2/optIn.ts`. WebGL2 debug: **Alt+D** cycles wireframe/UV/playhead modes (dev only). Smoke-script renderer policy: `docs/VISUAL_SMOKE.md`.
 
 **Deployment env var:** `VITE_APP_BASE_PATH=/xm-player/ npm run build` for subdirectory hosting.
 
@@ -116,15 +112,15 @@ Toggle via debug panel (🔍), `localStorage.xasm1_pattern_renderer`, or `window
 Audio logic is split strictly between two contexts that **cannot share state directly**.
 
 ### Main Thread (`hooks/useLibOpenMPT.ts`)
-- Initializes libopenmpt WASM from CDN (`window.libopenmptReady` promise)
+- Initializes the self-hosted real-WASM libopenmpt (`window.libopenmptReady` promise; see pitfall 4)
 - Loads module files into WASM memory (`libopenmpt_module_create_from_memory2()`)
 - Acquires the one shared `AudioContext` from `utils/audioContextFactory.ts` and attempts to use `AudioWorkletNode`; falls back to `ScriptProcessorNode`
 - Sends control messages to the worklet via `port.postMessage()`
 - Reads current row/channel state from WASM, double-buffers via mutable refs (`channelStatesRef`) to avoid React re-render floods
 - Performs drift detection and timing correction for audio-visual sync
 
-### Worklet Thread (`public/worklets/openmpt-processor.js`)
-- Runs the actual libopenmpt render loop at audio sample rate (44.1 kHz)
+### Worklet Thread (`audio-worklet/js/openmpt-processor.ts`, compiled to `public/worklets/openmpt-worklet.js`)
+- Runs the actual libopenmpt render loop at the AudioContext sample rate (locked to 48 kHz, pitfall 12)
 - Sends position + VU data back to the main thread every ~16 ms (60 fps)
 - **Rule:** No React state, no DOM APIs inside the worklet. All communication is strictly via `port.postMessage()`.
 
@@ -165,7 +161,7 @@ Capabilities (layout, packing, canvas size, hit-test, oscilloscope, palette, blo
 1. Add `shaders/patternvX.YY.wgsl` (reuse `shaders/lib/` via `//#include`; run `npm run sync:shaders`)
 2. Register one `ShaderMeta` block in `utils/shaderRegistry.ts`
 3. Add a picker entry in `appConfig.ts` `SHADER_GROUPS`
-4. Ensure WGSL uniforms match `fillUniformPayload` / `createUniformPayload`
+4. Ensure WGSL uniforms match `fillUniformPayload` (`utils/gpuPacking.ts`, called from `src/renderers/webgpu/frameDraw.ts`)
 5. Run `npm run test:shader-includes` + `npm run test:shader-registry`
 
 **Include migration:** See `shaders/README.md` and `AGENTS.md` migration table. Capabilities live in `utils/shaderRegistry.ts` (not `shaderFile.includes()` chains).
@@ -201,15 +197,15 @@ EngineState           // Worklet engine lifecycle state
 - **TypeScript:** Strict mode. All strict flags enabled including `noUnusedLocals`, `noUnusedParameters`, `exactOptionalPropertyTypes`, `noUncheckedIndexedAccess`
 - **React patterns:** Functional components with hooks only; no class components
 - **Mutable refs for audio state:** Channel states use refs, not React state, to prevent render-cycle flooding from high-frequency audio data
-- **No test framework currently:** Validation is done via `tsc --noEmit` and ESLint; manual browser testing for WebGPU/audio features
+- **Tests:** Vitest (`npm test` runs `tests/**/*.test.ts`), plus `tsc` (app, worklet, tests, configs, scripts) and ESLint — all part of `npm run preflight`. WebGPU/audio behaviour needs a real browser: CI runs the Playwright smoke jobs (`smoke:visual`, `smoke:audio`, `smoke:playhead`)
 
 ---
 
 ## Common Pitfalls & Warnings
 
-1. **Worklet cache:** Browsers cache AudioWorklet files aggressively. After editing `openmpt-processor.js`, hard-refresh or disable cache in DevTools.
+1. **Worklet cache:** Browsers cache AudioWorklet files aggressively. After editing `audio-worklet/js/openmpt-processor.ts` (and rebuilding `public/worklets/openmpt-worklet.js`), hard-refresh or disable cache in DevTools. The loader appends a content-hash `?v=`, so normal users pick up changes automatically.
 
-2. **Shader-uniform coupling:** Shaders are **not** pure assets — they are tightly coupled to TypeScript host code. Any change to a shader's `struct Uniforms {}` requires a matching change in `createUniformPayload` in `PatternDisplay.tsx`.
+2. **Shader-uniform coupling:** Shaders are **not** pure assets — they are tightly coupled to TypeScript host code. Any change to a shader's `struct Uniforms {}` requires a matching change in `fillUniformPayload` in `utils/gpuPacking.ts`.
 
 3. **CORS / SharedArrayBuffer:** The Vite dev server sets `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: credentialless`. These are required for Emscripten WASM workers. Do not remove them.
 
@@ -269,6 +265,34 @@ EngineState           // Worklet engine lifecycle state
     Debug info goes through `useThrottledDebugInfo`, not `useState`: it only
     re-renders PatternDisplay while the debug panel is open.
 
+15. **Transport is stopped / playing / paused — and pause is not stop (#461):**
+    `isPlaying` and `isPaused` are mutually exclusive (`deriveTransportState`).
+    *Pause* (`createPauseMusic`) silences the engine but keeps its cursor, the
+    clock refs and the last position sample; *stop* resets all of those. Never
+    implement pause with `stopMusic`, `AudioContext.suspend()` (pitfall 10) or a
+    new worklet message — it is `postPause()` / native `pause()` / the
+    ScriptProcessor callback reading `isPausedRef`. The playhead is
+    *extrapolated* from the last position sample on the audio clock, and that
+    clock does not pause, so `utils/transportClock.ts` caps heard time while
+    paused and rebases the stale sample on resume; skip that and resume jumps
+    the playhead forward by the pause length. `play()` while paused **resumes**
+    (`playShouldResume`); only `forceModuleLoad` really reloads, and a module
+    loaded while paused is *cued* (loads silent, stays paused). Choose the
+    engine to pause/resume from `playbackEngineRef` (written by the start
+    paths), **not** `activeEngine`: after a failed native start the app falls
+    back to the JS worklet but `activeEngine` can still say native.
+15. **Master chain has a single input (#453):** every engine (JS worklet,
+    native, ScriptProcessor) connects to `masterInputRef`, **never** to
+    `analyserRef`: `engine → masterInput → masterDirect → analyser → panner →
+    gain → destination`. The FX rack attaches in parallel to `masterDirect`
+    (`masterInput → rack → analyser`) through `audio/fx/fxHost.ts`, and owns
+    `masterDirect.gain`. `ensureMasterOutputChain` is **connect-only** (a
+    duplicate `connect()` is a no-op per spec), so re-asserting it on every
+    play / hot reload keeps the performance-capture tap and the rack's edges.
+    Don't put a bare `disconnect()` on a master node back.
+    `tests/audioMasterGraph.test.ts` holds the topology and sample-exact null
+    tests (real Web Audio via node-web-audio-api, `tests/helpers/webAudioNode.ts`).
+
 ## Critical Data Flows
 
 ### Module Load → Playback
@@ -288,7 +312,7 @@ User drops .mod file
 User selects a new shader in UI
   → App.tsx updates shaderFile state
   → PatternDisplay receives new shaderFile prop
-  → Parses filename for version → determines layout/buffer strategy/canvas size
+  → Resolves the shader's ShaderMeta from the registry → determines layout/buffer strategy/canvas size
   → Re-initializes WebGPU pipeline (loads new WGSL, re-creates bind groups)
   → Resumes render loop with new pipeline
 ```
@@ -317,7 +341,6 @@ All shared canvas layout values live here:
 
 ## Build Notes
 
-- Production build requires `node --max-old-space-size=4096` (set in `package.json`)
 - WASM `.wasm` files are included as Vite assets (`assetsInclude: ['**/*.wasm']`)
 - `openmpt-native` is excluded from Vite's pre-bundling optimization
 - Emscripten native worklet: `npm run build:emcc` → `public/worklets/openmpt-native.*` only (emsdk **3.1.51**)
@@ -334,7 +357,8 @@ All shared canvas layout values live here:
 - **Do not** use DOM APIs inside the AudioWorklet processor
 - **Do not** add broad glob patterns to `tailwind.config.js`
 - **Do not** remove the Vite CORS headers (breaks SharedArrayBuffer / WASM workers)
-- **Do not** add a second `new AudioContext` call site — `utils/audioContextFactory.ts` is the only one (see pitfall 11)
+- **Do not** add a second `new AudioContext` call site — `utils/audioContextFactory.ts` is the only one (see pitfall 12)
+- **Do not** connect an engine node to `analyserRef` or put a bare `disconnect()` on a master node — engines go to `masterInputRef` (see pitfall 15)
 - **Do not** assume WebGPU is available — always check for fallback paths
 - **Do not** commit Emscripten `a.out` / `a.out.*` — native outputs are only `public/worklets/openmpt-native.*` (gitignored build artifacts from `npm run build:emcc`)
 - **Do not** commit agent scratch files (`.swarm-state.md`, `weekly_plan.md`) — use `docs/planning/ROADMAP.md` and GitHub issues

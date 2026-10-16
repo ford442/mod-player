@@ -7,7 +7,8 @@ import {
   createPositionReportTracker,
 } from '../../utils/playheadLagMonitor';
 import type { NativeClockAnchor } from '../../utils/nativeClockAnchor';
-import type { LibOpenMPTRefs } from './types';
+import { createPauseClock, type PauseClock } from '../../utils/transportClock';
+import type { LibOpenMPTRefs, PlaybackEngine } from './types';
 
 export function useLibOpenMPTRefs(): LibOpenMPTRefs {
   const libopenmptRef = useRef<import('../../types').LibOpenMPT | null>(null);
@@ -18,6 +19,8 @@ export function useLibOpenMPTRefs(): LibOpenMPTRefs {
   const spRightBufPtr = useRef<number>(0);
   const spFallbackTriggered = useRef<boolean>(false);
   const audioWorkletNodeRef = useRef<AudioWorkletNode | null>(null);
+  const masterInputRef = useRef<GainNode | null>(null);
+  const masterDirectRef = useRef<GainNode | null>(null);
   const stereoPannerRef = useRef<StereoPannerNode | null>(null);
   const gainNodeRef = useRef<GainNode | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
@@ -46,6 +49,9 @@ export function useLibOpenMPTRefs(): LibOpenMPTRefs {
   const patternBackfillAbortRef = useRef<AbortController | null>(null);
   const channelStatesRef = useRef<ChannelShadowState[]>([]);
   const isPlayingRef = useRef<boolean>(false);
+  /** Transport is paused (engine silent, position kept). Mutually exclusive with isPlayingRef. */
+  const isPausedRef = useRef<boolean>(false);
+  const pauseClockRef = useRef<PauseClock>(createPauseClock());
   const playRef = useRef<((options?: { forceModuleLoad?: boolean }) => Promise<void>) | null>(null);
   const workletLoadedRef = useRef<boolean>(false);
   const workletModuleTokenRef = useRef<number>(0);
@@ -65,6 +71,7 @@ export function useLibOpenMPTRefs(): LibOpenMPTRefs {
   const nativeEngineRef = useRef<OpenMPTWorkletEngine | null>(null);
   const nativeSharedBufferRef = useRef<SharedArrayBuffer | null>(null);
   const activeEngineRef = useRef<'worklet' | 'native-worklet'>('worklet');
+  const playbackEngineRef = useRef<PlaybackEngine | null>(null);
   const nativeClockAnchorRef = useRef<NativeClockAnchor | null>(null);
   const nativeBridgeLatencyRef = useRef<number>(0);
   const oscBufferRef = useRef<Float32Array | null>(null);
@@ -88,6 +95,8 @@ export function useLibOpenMPTRefs(): LibOpenMPTRefs {
     spRightBufPtr,
     spFallbackTriggered,
     audioWorkletNodeRef,
+    masterInputRef,
+    masterDirectRef,
     stereoPannerRef,
     gainNodeRef,
     analyserRef,
@@ -116,6 +125,8 @@ export function useLibOpenMPTRefs(): LibOpenMPTRefs {
     patternBackfillAbortRef,
     channelStatesRef,
     isPlayingRef,
+    isPausedRef,
+    pauseClockRef,
     playRef,
     workletLoadedRef,
     workletModuleTokenRef,
@@ -135,6 +146,7 @@ export function useLibOpenMPTRefs(): LibOpenMPTRefs {
     nativeEngineRef,
     nativeSharedBufferRef,
     activeEngineRef,
+    playbackEngineRef,
     nativeClockAnchorRef,
     nativeBridgeLatencyRef,
     oscBufferRef,

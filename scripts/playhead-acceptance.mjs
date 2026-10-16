@@ -46,9 +46,13 @@ const nativeArtifactsPresent = () =>
   existsSync(NATIVE_GLUE)
   && existsSync(join(process.cwd(), 'public', 'worklets', 'openmpt-native.wasm'));
 
+// Renderer = what these runs actually need: none. Playhead math is renderer-independent
+// (__PLAYHEAD_DEBUG__), and the CI `playhead-smoke` job is GPU-less, so the DOM `html` grid avoids a
+// WebGPU hard-fail card / presentation flake there. (`renderer=webgl2` used to be requested here, but it
+// was a silent no-op → WebGPU; WebGL2 is opt-in only since #462.)
 const SCENARIOS_BASE = [
-  { id: 'square', shader: 'patternv0.44.wgsl', renderer: 'webgl2', paging: false, lagCheck: true },
-  { id: 'circular', shader: 'patternv0.46.wgsl', renderer: 'webgl2', paging: true, lagCheck: false },
+  { id: 'square', shader: 'patternv0.44.wgsl', renderer: 'html', paging: false, lagCheck: true },
+  { id: 'circular', shader: 'patternv0.46.wgsl', renderer: 'html', paging: true, lagCheck: false },
 ];
 
 function buildScenarios() {
@@ -164,7 +168,7 @@ function analyzeLagSamples(samples) {
   };
 }
 
-async function checkCircularPaging(page, engine) {
+async function checkCircularPaging(page, _engine) {
   const rowChecks = [];
   for (const row of SEEK_ROWS) {
     await evaluate(page, async (r) => {

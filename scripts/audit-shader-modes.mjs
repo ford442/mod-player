@@ -3,14 +3,17 @@
  * Full Trigger + Sustain Tail audit — WebGL2 vs WebGPU vs HTML.
  * Real module note verification via window.__TEST_HOOKS__.
  *
+ * The `webgl2` pass is the opt-in GLSL session (`?webgl2=1`, #462): it is the only backend with a real
+ * `readPixels()`. Every pass asserts the backend it was asked for is the one that rendered, so a silent
+ * substitution (what `?renderer=webgl2` used to do: → WebGPU) fails loudly instead of auditing the wrong renderer.
+ *
  * Usage: node scripts/audit-shader-modes.mjs
  * Env: TEST_URL, OUTPUT_DIR (/mnt/ramdisk/shader-audit), SHADER_FILE
  */
 
 import puppeteer from '/content/headless-chrome-nvidia-t4-gpu-support/examples/puppeteer/node_modules/puppeteer/lib/puppeteer/puppeteer.js';
 import { mkdirSync, writeFileSync, readFileSync, readdirSync } from 'fs';
-import { join, basename } from 'path';
-import { execSync } from 'child_process';
+import { join } from 'path';
 
 const BASE_URL = process.env.TEST_URL || 'http://localhost:5173';
 const OUTPUT_DIR = process.env.OUTPUT_DIR || '/mnt/ramdisk/shader-audit';
@@ -24,6 +27,9 @@ const MODULES = [
 ];
 
 const RENDERERS = ['webgl2', 'webgpu', 'html'];
+
+/** WebGL2 is opt-in only: canonical `?webgl2=1`. Other backends keep `?renderer=`. */
+const rendererQuery = (renderer) => (renderer === 'webgl2' ? 'webgl2=1' : `renderer=${renderer}`);
 const SEEK_ROWS = [0, 8, 16, 24, 32];
 
 const CHROME_ARGS = [
@@ -94,11 +100,14 @@ async function runRendererPass(browser, renderer, mod, shader) {
   await page.goto(`${BASE_URL}/`, { waitUntil: 'domcontentloaded', timeout: TIMEOUT });
   await page.evaluate(({ shader, renderer }) => {
     localStorage.setItem('xasm1_last_shader', shader);
-    localStorage.setItem('xasm1_pattern_renderer', renderer);
-    window.DEBUG_RENDERER = renderer;
+    // A stored/DEBUG_RENDERER 'webgl2' is ignored (opt-in is per page load) — the URL carries it instead.
+    if (renderer !== 'webgl2') {
+      localStorage.setItem('xasm1_pattern_renderer', renderer);
+      window.DEBUG_RENDERER = renderer;
+    }
   }, { shader, renderer });
 
-  await page.goto(`${BASE_URL}/?renderer=${renderer}`, { waitUntil: 'networkidle2', timeout: TIMEOUT });
+  await page.goto(`${BASE_URL}/?${rendererQuery(renderer)}`, { waitUntil: 'networkidle2', timeout: TIMEOUT });
   await page.waitForFunction(() => window.__TEST_HOOKS__?.isModuleLoaded?.(), { timeout: TIMEOUT });
 
   try {
@@ -125,6 +134,10 @@ async function runRendererPass(browser, renderer, mod, shader) {
 
   const tailStats = await page.evaluate(() => window.__TEST_HOOKS__?.getTriggerTailStats?.());
   const activeRenderer = await page.evaluate(() => window.__TEST_HOOKS__?.getActiveRenderer?.());
+  // webgpu may legitimately be null (no adapter in headless); webgl2/html must be exactly what was requested.
+  const backendMismatch = renderer !== 'webgpu' && activeRenderer !== renderer
+    ? `requested ${renderer} but active backend is ${activeRenderer ?? 'none'}`
+    : null;
 
   const rowVerifications = [];
   const packingIssues = [];
@@ -192,7 +205,8 @@ async function runRendererPass(browser, renderer, mod, shader) {
     bufferWarnings: bufferWarnings.length,
     flooding,
     rowVerifications,
-    status: packingIssues.length > 0 ? 'FAIL' : bufferWarnings.length > 0 ? 'FAIL' : 'PASS',
+    ...(backendMismatch ? { backendMismatch } : {}),
+    status: backendMismatch ? 'FAIL' : packingIssues.length > 0 ? 'FAIL' : bufferWarnings.length > 0 ? 'FAIL' : 'PASS',
   };
 }
 
@@ -218,6 +232,7 @@ async function main() {
       const result = await runRendererPass(browser, renderer, mod, SHADER_FILE);
       runs.push(result);
       console.log(`  status=${result.status} triggers=${result.tailStats?.triggers ?? '?'} sustains=${result.tailStats?.sustains ?? '?'}`);
+      if (result.backendMismatch) console.log(`  BACKEND MISMATCH: ${result.backendMismatch}`);
       if (result.packingIssues?.length) {
         console.log(`  packing issues: ${result.packingIssues.slice(0, 3).join('; ')}`);
       }

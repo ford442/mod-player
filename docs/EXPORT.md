@@ -24,7 +24,7 @@ The offline renderer uses 44.1 kHz stereo, Sinc+LP interpolation (`OPENMPT_MODUL
 
 | Browser | Offline WAV | `canvas.captureStream` (WebGL2) | `canvas.captureStream` (WebGPU) | MediaRecorder VP9+Opus | Notes |
 |---------|-------------|----------------------------------|----------------------------------|------------------------|-------|
-| Chrome 120+ | ✅ | ✅ | ⚠️ Varies | ✅ `video/webm;codecs=vp9,opus` | Prefer `?renderer=webgl2` for reliable capture |
+| Chrome 120+ | ✅ | ✅ | ⚠️ Varies | ✅ `video/webm;codecs=vp9,opus` | Prefer the opt-in WebGL2 session (`?webgl2=1`) for reliable capture |
 | Edge 120+ | ✅ | ✅ | ⚠️ Varies | ✅ | Same Chromium stack as Chrome |
 | Firefox 115+ | ✅ | ✅ | ❌ / limited | ✅ VP8+Opus typical | WebGPU capture often unavailable |
 | Safari 17+ | ✅ | ✅ | ❌ | ⚠️ Often `video/mp4` only | May need user gesture; test mime fallback |

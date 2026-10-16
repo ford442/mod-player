@@ -6,14 +6,19 @@ export default {
     // Explicit source paths only — the previous "./**/*.{js,ts,jsx,tsx}" glob
     // accidentally matched every file in node_modules (three.js, fiber, etc.)
     // and caused a JS heap-OOM during production builds.
+    //
+    // `.tsx` only, and only directories that render JSX: Tailwind's scanner reads comments
+    // too, so scanning hooks/, utils/ or audio-worklet/ turned bit-layout notes like
+    // `[inst:8]` into bogus arbitrary-property rules (and the build's
+    // `"inst" is not a known CSS property` warning). tests/tailwindContent.test.ts keeps this
+    // list in sync with the directories that actually contain .tsx files.
     "./index.html",
     "./index.tsx",
     "./App.tsx",
-    "./components/**/*.{js,ts,jsx,tsx}",
-    "./hooks/**/*.{js,ts,jsx,tsx}",
-    "./store/**/*.{js,ts,jsx,tsx}",
-    "./utils/**/*.{js,ts,jsx,tsx}",
-    "./audio-worklet/**/*.{js,ts,jsx,tsx}",
+    "./app/**/*.tsx",
+    "./components/**/*.tsx",
+    "./context/**/*.tsx",
+    "./src/**/*.tsx",
   ],
   theme: {
     extend: {

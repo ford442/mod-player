@@ -21,6 +21,11 @@ export interface ModuleActionsDeps {
   stopMusic: (destroy?: boolean) => void;
 }
 
+export interface ProcessModuleOptions {
+  /** Keep the transport paused across the load: the new module is cued at order 0 row 0, not played. */
+  keepPaused?: boolean;
+}
+
 export function createEnsureMainThreadModule(refs: LibOpenMPTRefs) {
   return async (data: Uint8Array) => {
     const lib = refs.libopenmptRef.current;
@@ -99,7 +104,7 @@ export function createProcessModuleData(deps: ModuleActionsDeps) {
     setChannelStates,
   } = setters;
 
-  return async (fileData: Uint8Array, fileName: string) => {
+  return async (fileData: Uint8Array, fileName: string, options?: ProcessModuleOptions) => {
     const lib = libopenmptRef.current;
     if (!lib) {
       console.error('[processModuleData] libopenmpt not initialized');
@@ -114,6 +119,14 @@ export function createProcessModuleData(deps: ModuleActionsDeps) {
     positionReportTrackerRef.current = createPositionReportTracker();
     lastPositionSampleTimeRef.current = -1;
     stopMusic(false);
+    if (options?.keepPaused) {
+      // stopMusic cleared the pause, but a module loaded while paused is cued rather than played.
+      // Re-assert it in the same tick (React batches both writes, so the UI never flashes "stopped").
+      refs.isPausedRef.current = true;
+      setters.setIsPaused(true);
+      const audioCtx = refs.audioContextRef.current;
+      refs.pauseClockRef.current = { pausedAt: audioCtx ? audioCtx.currentTime : 0, resumedAt: null };
+    }
 
     setIsModuleLoaded(false);
     setPlaybackRowFraction(0);
@@ -322,13 +335,17 @@ export function createProcessModuleData(deps: ModuleActionsDeps) {
 export function createLoadModule(
   refs: LibOpenMPTRefs,
   setStatus: (status: string) => void,
-  processModuleData: (fileData: Uint8Array, fileName: string) => Promise<void>,
+  processModuleData: (fileData: Uint8Array, fileName: string, options?: ProcessModuleOptions) => Promise<void>,
 ) {
   return async (fileData: Uint8Array, fileName: string) => {
     if (!refs.libopenmptRef.current) return;
     refs.userModuleLoadedRef.current = true;
     setStatus(`Loading "${fileName}"...`);
-    await processModuleData(fileData, fileName);
+    // Loading a module while paused cues it (loads from the start, stays paused) instead of starting
+    // it — useful to line up the next track and release it with play / MIDI. Loading while playing or
+    // stopped still starts it. forceModuleLoad makes play() do a real (re)load instead of resuming.
+    const wasPaused = refs.isPausedRef.current;
+    await processModuleData(fileData, fileName, wasPaused ? { keepPaused: true } : undefined);
     if (refs.playRef.current) await refs.playRef.current({ forceModuleLoad: true });
   };
 }

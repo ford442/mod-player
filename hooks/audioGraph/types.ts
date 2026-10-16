@@ -7,6 +7,10 @@ export interface AudioGraphRefs {
   fileDataRef:         React.MutableRefObject<Uint8Array | null>;
   audioContextRef:     React.MutableRefObject<AudioContext | null>;
   workletLoadedRef:    React.MutableRefObject<boolean>;
+  /** Unity-gain master input: every engine connects here, never to the analyser (#453). */
+  masterInputRef:      React.MutableRefObject<GainNode | null>;
+  /** Dry path around the FX rack; its gain belongs to the rack controller (#453). */
+  masterDirectRef:     React.MutableRefObject<GainNode | null>;
   stereoPannerRef:     React.MutableRefObject<StereoPannerNode | null>;
   gainNodeRef:         React.MutableRefObject<GainNode | null>;
   analyserRef:         React.MutableRefObject<AnalyserNode | null>;
@@ -28,6 +32,14 @@ export interface AudioGraphRefs {
   spLeftBufPtr:        React.MutableRefObject<number>;
   spRightBufPtr:       React.MutableRefObject<number>;
   isPlayingRef:        React.MutableRefObject<boolean>;
+  /**
+   * Transport is paused (see hooks/libOpenMPT/createTransportActions.ts). Engine start paths read it so
+   * a node (re)started while paused — worklet fault recovery, loading a module — comes up paused,
+   * and the ScriptProcessor callback reads it to render silence.
+   */
+  isPausedRef:         React.MutableRefObject<boolean>;
+  /** Written by each engine start path: which engine is really rendering (pause/resume drive this one). */
+  playbackEngineRef:   React.MutableRefObject<'worklet' | 'native-worklet' | 'scriptprocessor' | null>;
   animationFrameHandle: React.MutableRefObject<number>;
   currentModulePtr:    React.MutableRefObject<number>;
   channelStatesRef:    React.MutableRefObject<ChannelShadowState[]>;

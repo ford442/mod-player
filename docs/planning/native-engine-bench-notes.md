@@ -16,7 +16,7 @@ Compare **main-thread** cost of the native C++ engine vs the production JS Audio
 3. Load the same large IT twice in separate sessions:
    - Native: `?engine=native` (or leave `auto` with artifacts present)
    - JS: `?engine=js`
-4. Play ~30–60 s from the same order/row; keep the visualizer on (WebGL2 is fine: `?renderer=webgl2`).
+4. Play ~30–60 s from the same order/row; keep the visualizer on (`?renderer=webgpu`; `bench:engine` uses this).
 5. Record:
 
 | Metric | How to capture |
@@ -46,7 +46,7 @@ Native should typically show **lower main-thread message overhead** (poll vs hig
 ### 2026-09-18 — default module, headless Chromium (CI-style container)
 
 `npm run build && npm run preview -- --port 4173 && npm run bench:engine`,
-`PLAY_MS=4000`, 241 samples, `?renderer=webgl2&lite=0`.
+`PLAY_MS=4000`, 241 samples, `?renderer=webgpu&lite=0` (recorded as `?renderer=webgl2`, which was a silent no-op → WebGPU until WebGL2 became opt-in only in #462 — same backend, so the baseline still holds).
 
 | Metric | JS (`?engine=js`) | Native (`?engine=native`) |
 |--------|-------------------|---------------------------|

@@ -7,6 +7,9 @@ import { setCurrentPatternRenderer } from '../global';
 import type { CurrentPatternRenderer, WebGL2DebugMode } from '../types';
 import { cycleDebugMode } from './debugModes';
 
+/** DebugInfo.errors prefix for WebGL2 session init failures (mirrors `DEVICE-INIT:` / `SHADER-INIT:`). */
+const INIT_ERROR_PREFIX = 'WEBGL2-INIT:';
+
 export function useWebGL2PatternRender(
   canvasRef: React.RefObject<HTMLCanvasElement>,
   shaderFile: string,
@@ -35,12 +38,29 @@ export function useWebGL2PatternRender(
 
     syncCanvasSize(canvas, null);
     const renderer = new WebGL2PatternRenderer();
-    const ok = renderer.init(canvas, shaderFile);
+    let initError: string | null = null;
+    let ok = false;
+    try {
+      ok = renderer.init(canvas, shaderFile);
+      // `getContext('webgl2')` returns null when the canvas already holds another context
+      // type (WebGPU after a late hard-fail) or when WebGL2 is unavailable.
+      if (!ok) initError = 'no WebGL2 context on this canvas (unsupported, or already bound to WebGPU)';
+    } catch (err) {
+      // Shader compile/link failures throw; there is no ErrorBoundary, so never let one escape.
+      initError = err instanceof Error ? err.message : String(err);
+      renderer.destroy();
+    }
     if (!ok) {
+      console.error(`[Renderer] WebGL2 init failed: ${initError}`);
+      setDebugInfo((prev) => ({
+        ...prev,
+        errors: [...prev.errors.filter((e) => !e.startsWith(INIT_ERROR_PREFIX)), `${INIT_ERROR_PREFIX} ${initError}`],
+      }));
       setWebgl2Available(false);
       setGlReady(false);
       return;
     }
+    setDebugInfo((prev) => ({ ...prev, errors: prev.errors.filter((e) => !e.startsWith(INIT_ERROR_PREFIX)) }));
 
     rendererRef.current = renderer;
     setWebgl2Available(true);
@@ -67,16 +87,16 @@ export function useWebGL2PatternRender(
       setGlReady(false);
       setCurrentPatternRenderer(null);
     };
-  }, [shaderFile, canvasRef, syncCanvasSize, setWebgl2Available, enabled]);
+  }, [shaderFile, canvasRef, syncCanvasSize, setWebgl2Available, setDebugInfo, enabled]);
 
   // DEV: Alt+D cycles WebGL2 debug visualization modes
   useEffect(() => {
     if (!import.meta.env.DEV) return;
     const handler = (e: KeyboardEvent) => {
       if (!e.altKey || e.key !== 'd') return;
-      e.preventDefault();
       const r = rendererRef.current;
-      if (!r) return;
+      if (!r) return; // no WebGL2 session active — leave Alt+D alone
+      e.preventDefault();
       const next = cycleDebugMode(r.getDebugConfig().mode);
       r.setDebugConfig({ mode: next });
       console.log(`[WebGL2 debug] mode: ${next}`);
@@ -105,7 +125,9 @@ export function useWebGL2PatternRender(
           ...prev,
           layoutMode: info.layoutMode,
           uniforms: { ...prev.uniforms, ...info.uniforms, backend: 'webgl2' },
-          errors: info.errors,
+          // Per-frame GL errors replace the previous frame's, but keep entries owned by other
+          // stages (e.g. a DEVICE-INIT: cause) instead of wiping them on the first frame.
+          errors: [...prev.errors.filter((e) => !e.startsWith('GL error')), ...info.errors],
         }));
       },
     );

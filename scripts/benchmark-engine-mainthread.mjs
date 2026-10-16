@@ -36,7 +36,9 @@ mkdirSync(OUTPUT_DIR, { recursive: true });
 async function benchEngine(browser, playwrightEngine, audioEngine) {
   const { page, context } = await openPage(browser, playwrightEngine);
   const engineParam = audioEngine === 'native' ? '&engine=native' : '&engine=js';
-  const url = `${BASE_URL}/?renderer=webgl2&lite=0${engineParam}`;
+  // webgpu = what this bench has really measured (default launcher passes --enable-unsafe-webgpu; the old
+  // `renderer=webgl2` was a silent no-op → WebGPU). WebGL2 is opt-in only (#462) and not needed here.
+  const url = `${BASE_URL}/?renderer=webgpu&lite=0${engineParam}`;
 
   try {
     await goto(page, playwrightEngine, url, TIMEOUT);

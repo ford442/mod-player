@@ -19,12 +19,14 @@ interface App3DViewProps {
   isModuleLoaded: boolean;
   syncDebug: SyncDebugInfo;
   isPlaying: boolean;
+  isPaused: boolean;
   playbackSeconds: number;
   channelStates: ChannelShadowState[];
   volume: number;
   pan: number;
   isLooping: boolean;
   play: () => void;
+  pause: () => void;
   stopMusic: (v: boolean) => void;
   setIsLooping: (v: boolean | ((prev: boolean) => boolean)) => void;
   setVolume: (v: number | ((prev: number) => number)) => void;
@@ -64,12 +66,14 @@ export function App3DView({
   isModuleLoaded,
   syncDebug,
   isPlaying,
+  isPaused,
   playbackSeconds,
   channelStates,
   volume,
   pan,
   isLooping,
   play,
+  pause,
   stopMusic,
   setIsLooping,
   setVolume,
@@ -135,9 +139,11 @@ export function App3DView({
             <Controls
               isReady={isReady}
               isPlaying={isPlaying}
+              isPaused={isPaused}
               isModuleLoaded={isModuleLoaded}
               onFileSelected={handleFileSelected}
               onPlay={play}
+              onPause={pause}
               onStop={() => stopMusic(false)}
               isLooping={isLooping}
               onLoopToggle={() => setIsLooping(!isLooping)}
