@@ -22,6 +22,9 @@ import type {
   AudioGraphConfig,
   AudioGraphRefs,
 } from './audioGraph/types';
+import { createLogger } from '../utils/log';
+
+const log = createLogger('PLAY');
 
 export type {
   AudioGraphCallbacks,
@@ -149,7 +152,7 @@ export async function startAudioPlayback(
     if (moduleNeedsWorkletLoad) {
       const moduleBuf = moduleBytesFromFileData(refs.fileDataRef.current);
       if (moduleBuf) {
-        console.log('[PLAY] Hot reload while playing — posting load to worklet:', moduleBuf.byteLength, 'bytes');
+        log.log('Hot reload while playing — posting load to worklet:', moduleBuf.byteLength, 'bytes');
         refs.lastWorkletModuleTokenSentRef.current = moduleToken;
         refs.audioWorkletNodeRef.current.port.postMessage(postLoad(moduleBuf));
         callbacks.setStatus('Loading audio engine...');
@@ -160,7 +163,7 @@ export async function startAudioPlayback(
     // Recover from "UI playing / worklet paused" races: stopMusic pauses the
     // processor but a stale React render used to clear isPlayingRef. Always
     // nudge the worklet + resume the context instead of hard-ignoring.
-    console.log('[PLAY] Already marked playing — ensuring worklet render + context resume');
+    log.log('Already marked playing — ensuring worklet render + context resume');
     try {
       refs.audioWorkletNodeRef.current.port.postMessage(postPlay());
     } catch { /* ignore */ }
@@ -183,7 +186,7 @@ export async function startAudioPlayback(
     return;
   }
 
-  console.log('[PLAY] Starting playback...', {
+  log.log('Starting playback...', {
     engine: config.activeEngine,
     isWorkletSupported: config.isWorkletSupported,
     hasFileData: !!refs.fileDataRef.current,
@@ -195,22 +198,22 @@ export async function startAudioPlayback(
       // Single construction site for the page session — see
       // utils/audioContextFactory.ts. Locked to 48 kHz; `latencyHint` comes
       // from the stage-mode / ?latency= profile resolved at create time.
-      console.log('[PLAY] Acquiring shared player AudioContext...');
+      log.log('Acquiring shared player AudioContext...');
       refs.audioContextRef.current = createPlayerAudioContext();
       refs.workletLoadedRef.current = false;
     }
 
     const ctx = refs.audioContextRef.current;
-    console.log('[PLAY] AudioContext state:', ctx.state);
+    log.log('AudioContext state:', ctx.state);
     wireAudioSuspendRecovery(ctx, refs, callbacks);
 
     // AUDIO-001 FIX COMPLETE: Log diagnostics
     if (import.meta.env.DEV) logWorkletDiagnostics(config.WORKLET_URL, ctx);
 
     if (ctx.state === 'suspended') {
-      console.log('[PLAY] Resuming suspended AudioContext...');
+      log.log('Resuming suspended AudioContext...');
       await ctx.resume();
-      console.log('[PLAY] AudioContext resumed, new state:', ctx.state);
+      log.log('AudioContext resumed, new state:', ctx.state);
     }
 
     // TIMING FIX: Initialize audio clock reference
@@ -230,7 +233,7 @@ export async function startAudioPlayback(
 
     const staleWorkletNode = refs.audioWorkletNodeRef.current;
     if (shouldDisconnectWorkletOnPlay(staleWorkletNode != null, reuseWorkletNode) && staleWorkletNode) {
-      console.log('[PLAY] Disconnecting previous AudioWorkletNode...');
+      log.log('Disconnecting previous AudioWorkletNode...');
       try { staleWorkletNode.port.postMessage(postPause()); } catch { /* ignore */ }
       try { staleWorkletNode.port.onmessage = null; } catch { /* ignore */ }
       try { staleWorkletNode.disconnect(); } catch { /* ignore */ }

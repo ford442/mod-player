@@ -30,6 +30,9 @@
 import { resolveStageModePreference } from './stageModeSelection';
 import { setAudioSuspended } from './audioSuspendState';
 import { PLAYER_SAMPLE_RATE, type PlayerSampleRate } from './sampleRates';
+import { createLogger } from './log';
+
+const log = createLogger('AudioEngine');
 
 export type AudioGraphProfile = 'playback' | 'interactive';
 
@@ -180,7 +183,7 @@ export function createPlayerAudioContext(
   applySinkId(ctx, opts.sinkId);
   wireStateChangeReporting(ctx);
 
-  console.log('[AudioEngine] AudioContext created', {
+  log.log('AudioContext created', {
     profile,
     latencyHint,
     requestedSampleRate: sampleRate,

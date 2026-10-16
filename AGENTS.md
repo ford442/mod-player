@@ -151,7 +151,7 @@ npm run dev        # Vite dev server (needs WebGPU-enabled browser, e.g., Chrome
 ```bash
 npm run build           # tsc && vite build
 npm run typecheck       # tsc --noEmit
-npm run lint            # eslint . --max-warnings 40 (hard CI gate; ratchet down over time)
+npm run lint            # eslint . --max-warnings 27 (hard CI gate; ratchet down over time)
 npm run preview         # Preview the production build locally
 ```
 
@@ -205,7 +205,7 @@ python3 deploy.py
 - **Fix comments:** The codebase prefixes engineering fixes with identifiers like `AUDIO-001 FIX` and `TIMING FIX`.
 - **Base URL awareness:** Almost all asset URLs are constructed with `import.meta.env.BASE_URL` so the app works when deployed under a subdirectory.
 - **React patterns:** Functional components with hooks only; no class components. State for UI logic; mutable refs for high-frequency audio data. Props are preferred over context except for deeply nested state.
-- **ESLint:** Configured in `eslint.config.js` (typescript-eslint + react-hooks + react-refresh). `npm run lint` runs `eslint . --max-warnings 40` (exactly the current warning count) and is a **hard CI gate**. Ratchet the budget down as warnings are fixed; never raise it.
+- **ESLint:** Configured in `eslint.config.js` (typescript-eslint + react-hooks + react-refresh). `npm run lint` runs `eslint . --max-warnings 27` (exactly the current warning count) and is a **hard CI gate**. Ratchet the budget down as warnings are fixed; never raise it.
 
 ## Testing
 - **Unit tests (Vitest):** `npm test` runs the full suite (`tests/**/*.test.ts`) — packing, duration parity, trigger tails, shader includes, share state, pattern edit, WAV encoder, and more. Use `npm run test:watch` during development. Focused scripts: `test:shader-includes`, `test:duration-parity`, `test:trigger-tail`, `test:octave-brightness`.
@@ -223,7 +223,7 @@ python3 deploy.py
   2. `visual-smoke` – Build, preview server, Playwright smoke (`smoke:visual:ci`) on the HTML renderer.
      `visual-smoke-webgpu` runs experimental WebGPU coverage in parallel.
   3. `wasm-smoke-test` – Installs Emscripten **3.1.51**, verifies safe native build scripts, `verify:native-exports`, `bash -n`, and that tracked `openmpt-worklet.js` still looks like the JS processor.
-  4. `native-full-build` – Path-filtered full `npm run build:emcc` when `cpp/**`, `scripts/build-wasm.sh`, or `audio-worklet/**` change; caches `vendor/libopenmpt-0.8.4+release`.
+  4. `native-full-build` – Path-filtered full `npm run build:emcc` when `cpp/**`, `scripts/build-wasm.sh`, or `audio-worklet/**` change; caches `vendor/libopenmpt-0.8.4+release-native-release`, keyed on the flag stamp from `scripts/build-wasm.sh --print-flag-stamp` (no prefix fallback).
   5. `native-wasm-scheduled.yml` – Weekly (and manual) full `npm run build:emcc` with the same libopenmpt cache; uploads `openmpt-native.*` artifacts and asserts the JS worklet is unchanged.
 
 ## Security & CORS Considerations
