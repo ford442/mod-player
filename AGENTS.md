@@ -151,7 +151,7 @@ npm run dev        # Vite dev server (needs WebGPU-enabled browser, e.g., Chrome
 ```bash
 npm run build           # tsc && vite build
 npm run typecheck       # tsc --noEmit
-npm run lint            # eslint . --max-warnings 40 (hard CI gate; ratchet down over time)
+npm run lint            # eslint . --max-warnings 27 (hard CI gate; ratchet down over time)
 npm run preview         # Preview the production build locally
 ```
 
@@ -205,7 +205,7 @@ python3 deploy.py
 - **Fix comments:** The codebase prefixes engineering fixes with identifiers like `AUDIO-001 FIX` and `TIMING FIX`.
 - **Base URL awareness:** Almost all asset URLs are constructed with `import.meta.env.BASE_URL` so the app works when deployed under a subdirectory.
 - **React patterns:** Functional components with hooks only; no class components. State for UI logic; mutable refs for high-frequency audio data. Props are preferred over context except for deeply nested state.
-- **ESLint:** Configured in `eslint.config.js` (typescript-eslint + react-hooks + react-refresh). `npm run lint` runs `eslint . --max-warnings 40` (exactly the current warning count) and is a **hard CI gate**. Ratchet the budget down as warnings are fixed; never raise it.
+- **ESLint:** Configured in `eslint.config.js` (typescript-eslint + react-hooks + react-refresh). `npm run lint` runs `eslint . --max-warnings 27` (exactly the current warning count) and is a **hard CI gate**. Ratchet the budget down as warnings are fixed; never raise it.
 
 ## Testing
 - **Unit tests (Vitest):** `npm test` runs the full suite (`tests/**/*.test.ts`) — packing, duration parity, trigger tails, shader includes, share state, pattern edit, WAV encoder, and more. Use `npm run test:watch` during development. Focused scripts: `test:shader-includes`, `test:duration-parity`, `test:trigger-tail`, `test:octave-brightness`.

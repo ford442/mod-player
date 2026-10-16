@@ -412,14 +412,14 @@ export function useWebGLOverlay(
         stepsLength: p.stepsLength,
       });
 
-      const setUniform = <T extends (loc: WebGLUniformLocation | null, ...args: any[]) => void>(
+      const setUniform = <A extends unknown[]>(
         _name: string,
         location: WebGLUniformLocation | null | undefined,
-        setter: T,
-        ...args: Parameters<T> extends [any, ...infer R] ? R : never
+        setter: (loc: WebGLUniformLocation, ...args: A) => void,
+        ...args: A
       ) => {
         if (location != null) {
-          (setter as any)(location, ...args);
+          setter(location, ...args);
           return true;
         }
         return false;

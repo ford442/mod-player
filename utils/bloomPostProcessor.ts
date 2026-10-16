@@ -209,7 +209,7 @@ export class BloomPostProcessor {
       const r = await fetch(path);
       if (!r.ok) throw new Error(`fetch failed: ${r.status}`);
       return await r.text();
-    } catch (e) {
+    } catch {
       throw new Error(`Could not load shader at ${path}. Provide shader code directly via options.shader* or import with ?raw in Vite.`);
     }
   }

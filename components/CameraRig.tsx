@@ -14,10 +14,16 @@ const PRESET_POSITIONS: Record<CameraPreset, [number, number, number]> = {
   dj:       [8,  5,  8],
 };
 
+/** The part of drei's OrbitControls (three-stdlib) the rig drives. */
+export interface OrbitControlsHandle {
+  target: THREE.Vector3;
+  update(): void;
+}
+
 interface CameraRigProps {
   isPlaying: boolean;
   playheadX: number;
-  controlsRef: React.MutableRefObject<any>;
+  controlsRef: React.RefObject<OrbitControlsHandle>;
   cameraPreset?: CameraPreset;
 }
 

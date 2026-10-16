@@ -80,7 +80,7 @@ const BackgroundShaderPlane: React.FC<{ dimFactor: number; playheadX: number }> 
   dimFactor,
   playheadX,
 }) => {
-  const materialRef = useRef<any>(null);
+  const materialRef = useRef<THREE.ShaderMaterial & { iTime: number; dimFactor: number; cameraPos: THREE.Vector3 }>(null);
   const { camera } = useThree();
 
   useFrame((state) => {
@@ -203,7 +203,7 @@ export const Studio3D: React.FC<Studio3DProps> = ({
   onExitStudio,
   onViewModeToggle,
 }) => {
-  const controlsRef = useRef<any>(null);
+  const controlsRef = useRef<React.ElementRef<typeof OrbitControls>>(null);
   const [cameraPreset, setCameraPreset] = useState<CameraPreset>('front');
 
   // Keyboard shortcuts: Escape = exit studio, V = cycle camera presets

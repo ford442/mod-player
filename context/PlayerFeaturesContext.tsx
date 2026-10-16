@@ -1,6 +1,6 @@
 import React, { createContext, useContext } from 'react';
 import type { PlaylistItem } from '../components/Playlist';
-import type { MediaFades } from '../components/MediaPanel';
+import type { MediaFades } from '../utils/mediaFades';
 import type { MediaItem } from '../types';
 import type { LibraryEntry, LibraryImportProgress, LibraryRoot } from '../types/localLibrary';
 import type { PatternCellPatch, PatternEditField } from '../utils/patternEdit';
