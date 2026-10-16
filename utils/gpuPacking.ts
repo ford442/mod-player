@@ -469,7 +469,6 @@ export const packPatternMatrixHighPrecision = (matrix: PatternMatrix | null, pad
 
   let notesPacked = 0;
   let cellsWritten = 0;
-  let expressionOnlyCount = 0;
   const maxOffset = packedData.length - 1;
 
   for (let r = 0; r < numRows; r++) {
@@ -545,7 +544,6 @@ export const packPatternMatrixHighPrecision = (matrix: PatternMatrix | null, pad
       const isExpressionOnly = !hasNote && hasExpression;
       
       if (isExpressionOnly) {
-        expressionOnlyCount++;
         // Use bit 15 (0x8000) of the inst field to flag expression-only rows
         // Instrument is limited to 7 bits (0-127) in the shader when this flag is used
         inst = (inst & 0x7F) | 0x80;
