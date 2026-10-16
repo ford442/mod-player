@@ -20,6 +20,9 @@ import {
 } from '../../../utils/computeNoteDuration';
 import { usesHighPrecisionPacking, type LayoutType } from '../../../utils/shaderVersion';
 import type { GpuResourcePool } from '../../../utils/gpuResourcePool';
+import { createLogger } from '../../../utils/log';
+
+const log = createLogger('DURA-PARITY');
 
 const CELLS_USAGE = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST;
 
@@ -88,7 +91,7 @@ export function uploadCellsBuffer(options: CellsUploadOptions): CellsUploadResul
           if (!parity.ok && parity.errorSummary) {
             options.onParityError!(parity.errorSummary);
           } else if (parity.ok) {
-            console.log('[DURA-PARITY] ✓');
+            log.log('✓');
           }
         }
       })();

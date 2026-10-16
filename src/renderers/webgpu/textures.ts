@@ -3,6 +3,9 @@ import { resolveShaderMeta, usesVideoPatternTexture } from '../../../utils/shade
 import { preferredSampledImageFormat } from '../../../utils/webgpuDevice';
 import type { GpuResourcePool } from '../../../utils/gpuResourcePool';
 import type { BindGroupTextureResources } from './bindGroup';
+import { createLogger } from '../../../utils/log';
+
+const log = createLogger('WebGPU');
 
 export async function loadBezelTexture(
   device: GPUDevice,
@@ -59,7 +62,7 @@ export async function ensureButtonTexture(
       ? withBase('unlit-button-2.png')
       : withBase('unlit-button.png');
   if (import.meta.env.DEV) {
-    console.log('[WebGPU] Loading button texture:', textureUrl);
+    log.log('Loading button texture:', textureUrl);
   }
   let bitmap: ImageBitmap;
   try {

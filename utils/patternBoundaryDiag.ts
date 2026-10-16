@@ -152,6 +152,7 @@ function logEvent(event: PatternBoundaryEvent): void {
   if (event.ms >= warnThreshold(event.kind)) {
     console.warn(line);
   } else {
+    // eslint-disable-next-line no-console -- explicit opt-in printer (?patternDiag=1), must work in production
     console.log(line);
   }
 }

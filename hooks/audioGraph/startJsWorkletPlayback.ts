@@ -37,6 +37,9 @@ import { silenceChannelStates } from '../../utils/transportClock';
 import { moduleBytesFromFileData, wireMasterOutput } from './masterGraph';
 import { runScriptProcessorFallback } from './scriptProcessorFallback';
 import type { AudioGraphCallbacks, AudioGraphConfig, AudioGraphRefs } from './types';
+import { createLogger } from '../../utils/log';
+
+const log = createLogger('PLAY');
 
 // AUDIO-001 FIX COMPLETE: Centralized worklet URL from useWorkletLoader
 const WORKLET_URL = getWorkletUrl();
@@ -116,7 +119,7 @@ export async function acceptWorkletLoaded(
   }
 
   if (refs.isPausedRef.current) {
-    console.log('[PLAY] Worklet loaded module while paused – staying paused');
+    log.log('Worklet loaded module while paused – staying paused');
     // A paused start already sent pause before load; repeating it keeps the node's state explicit.
     node.port.postMessage(postPause());
     // The module (re)loaded from order 0 row 0, so that is where we are paused: bring the playhead
@@ -128,7 +131,7 @@ export async function acceptWorkletLoaded(
     return;
   }
 
-  console.log('[PLAY] Worklet loaded module – starting animation');
+  log.log('Worklet loaded module – starting animation');
   refs.isPlayingRef.current = true;
   callbacks.setIsPlaying(true);
   callbacks.setStatus('Playing...');
@@ -151,7 +154,7 @@ export async function startJsWorkletPlayback(
   ctx: AudioContext,
   reuseWorkletNode: boolean,
 ): Promise<JsWorkletPlaybackResult> {
-  console.log('[PLAY] Using AudioWorklet engine...');
+  log.log('Using AudioWorklet engine...');
 
   try {
     // AUDIO-001 FIX COMPLETE: Enhanced worklet module loading with better error handling
@@ -159,11 +162,11 @@ export async function startJsWorkletPlayback(
       // Use centralized WORKLET_URL for consistency
       const workletUrl = WORKLET_URL || config.WORKLET_URL;
 
-      console.log('[PLAY] ==================================================');
-      console.log('[PLAY] Loading AudioWorklet module...');
-      console.log('[PLAY] Resolved URL:', workletUrl);
-      console.log('[PLAY] AudioContext state:', ctx.state);
-      console.log('[PLAY] ==================================================');
+      log.log('==================================================');
+      log.log('Loading AudioWorklet module...');
+      log.log('Resolved URL:', workletUrl);
+      log.log('AudioContext state:', ctx.state);
+      log.log('==================================================');
 
       try {
         // AUDIO-001 FIX COMPLETE: Add timeout for worklet loading to detect hanging
@@ -174,7 +177,7 @@ export async function startJsWorkletPlayback(
         await Promise.race([ctx.audioWorklet.addModule(workletUrl), loadTimeout]);
 
         refs.workletLoadedRef.current = true;
-        console.log('[PLAY] ✅ AudioWorklet module loaded successfully');
+        log.log('✅ AudioWorklet module loaded successfully');
       } catch (loadError) {
         console.error('[PLAY] ❌ Failed to load AudioWorklet module:', loadError);
         console.error('[PLAY] URL attempted:', workletUrl);
@@ -204,7 +207,7 @@ export async function startJsWorkletPlayback(
         throw loadError;
       }
     } else {
-      console.log('[PLAY] Worklet module already loaded (skipping addModule)');
+      log.log('Worklet module already loaded (skipping addModule)');
     }
 
     let node: AudioWorkletNode;
@@ -213,9 +216,9 @@ export async function startJsWorkletPlayback(
 
     if (reuseWorkletNode && refs.audioWorkletNodeRef.current) {
       node = refs.audioWorkletNodeRef.current;
-      console.log('[PLAY] Reusing existing AudioWorkletNode (hot module reload)');
+      log.log('Reusing existing AudioWorkletNode (hot module reload)');
     } else {
-      console.log('[PLAY] Creating AudioWorkletNode...');
+      log.log('Creating AudioWorkletNode...');
       // The JS engine's openmpt-processor.ts never reads processorOptions.memory —
       // it manages its own wasm memory internally (see ensureSharedLibOpenMPT).
       // A shared WebAssembly.Memory here was dead weight (16 MB allocated per
@@ -239,19 +242,19 @@ export async function startJsWorkletPlayback(
         throw nodeError;
       }
 
-      console.log('[PLAY] AudioWorkletNode created:', node);
+      log.log('AudioWorkletNode created:', node);
 
       // Fetch the real-WASM libopenmpt pair on the main thread and forward it to the worklet.
       // AudioWorklet classic scripts cannot use import() or importScripts() and the worklet
       // scope has no fetch(), so both files are downloaded here (in parallel) and validated
       // (\0asm magic, not-wasm2js, not an HTML 404) before anything is posted.
-      console.log('[PLAY] Fetching libopenmpt assets for worklet...');
+      log.log('Fetching libopenmpt assets for worklet...');
       try {
         const assets = await fetchWorkletLibAssets();
         libJsText = assets.scriptText;
         libWasmBuffer = assets.wasmBytes;
-        console.log(
-          '[PLAY] libopenmpt assets fetched — JS:',
+        log.log(
+          'libopenmpt assets fetched — JS:',
           libJsText.length,
           'chars, WASM:',
           libWasmBuffer.byteLength,
@@ -289,7 +292,7 @@ export async function startJsWorkletPlayback(
           break;
 
         case 'loaded-stale':
-          console.log('[PLAY] Ignoring stale worklet loaded ack (token mismatch)');
+          log.log('Ignoring stale worklet loaded ack (token mismatch)');
           return;
 
         case 'loaded-accepted':
@@ -297,7 +300,7 @@ export async function startJsWorkletPlayback(
           break;
 
         case 'ended':
-          console.log('[PLAY] Worklet reported module ended');
+          log.log('Worklet reported module ended');
           if (config.isLooping) {
             callbacks.seekToStepWrapper(0);
           } else {
@@ -412,7 +415,7 @@ export async function startJsWorkletPlayback(
 
     const moduleBuf = moduleBytesFromFileData(refs.fileDataRef.current);
     if (moduleBuf) {
-      console.log('[PLAY] Sending module data to worklet:', moduleBuf.byteLength, 'bytes');
+      log.log('Sending module data to worklet:', moduleBuf.byteLength, 'bytes');
       refs.lastWorkletModuleTokenSentRef.current = refs.workletModuleTokenRef.current;
       // A fresh processor renders as soon as its module loads (isPlaying defaults to true and load
       // never touches it), so when we are paused the pause must reach it BEFORE the load — acting on
@@ -423,12 +426,13 @@ export async function startJsWorkletPlayback(
       console.error("[PLAY] No buffer to send to worklet!");
     }
 
-    console.log('[PLAY] Connecting audio graph: worklet -> master input -> analyser -> panner -> gain -> destination');
+    log.log('Connecting audio graph: worklet -> analyser -> panner -> gain -> destination');
+    log.log('Connecting audio graph: worklet -> master input -> analyser -> panner -> gain -> destination');
     if (!reuseWorkletNode) {
       try { node.disconnect(); } catch { /* ignore stale edges */ }
       node.connect(refs.masterInputRef.current!);
     } else {
-      console.log('[PLAY] Hot reload — keeping existing worklet wiring; re-asserting master output chain');
+      log.log('Hot reload — keeping existing worklet wiring; re-asserting master output chain');
     }
     wireMasterOutput(ctx, refs, config.volume, config.panValue);
 
@@ -437,7 +441,7 @@ export async function startJsWorkletPlayback(
     // Show a loading state while the WASM finishes initialising.
     // isPlaying will be set to true via the 'loaded' message handler above.
     callbacks.setStatus("Loading audio engine...");
-    console.log('[PLAY] AudioWorklet setup complete – waiting for WASM loaded event');
+    log.log('AudioWorklet setup complete – waiting for WASM loaded event');
     return 'setup-complete';
   } catch (e) {
     console.error("[PLAY] Failed to create/load AudioWorkletNode:", e);
