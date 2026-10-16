@@ -27,6 +27,9 @@ import {
   createStopMusic,
 } from './libOpenMPT/createTransportActions';
 import { cleanupLibOpenMPT, runLibOpenMPTInit } from './libOpenMPT/runInit';
+import { createLogger } from '../utils/log';
+
+const log = createLogger('Engine');
 
 export function useLibOpenMPT(initialVolume: number = 0.4, liteMode: boolean = false) {
   const state = useLibOpenMPTState(initialVolume);
@@ -217,7 +220,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4, liteMode: boolean = f
 
     writeStoredAudioEngineOverride(overrideFromActiveEngine(newEngine));
 
-    console.log('[toggleEngine]', {
+    log.log('toggleEngine', {
       from: activeEngine,
       to: newEngine,
       isNativeAvailable: isNativeWorkletAvailable,

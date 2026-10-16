@@ -6,6 +6,9 @@ import { WebGL2PatternRenderer } from './WebGL2PatternRenderer';
 import { setCurrentPatternRenderer } from '../global';
 import type { CurrentPatternRenderer, WebGL2DebugMode } from '../types';
 import { cycleDebugMode } from './debugModes';
+import { createLogger } from '../../../utils/log';
+
+const log = createLogger('WebGL2 debug');
 
 /** DebugInfo.errors prefix for WebGL2 session init failures (mirrors `DEVICE-INIT:` / `SHADER-INIT:`). */
 const INIT_ERROR_PREFIX = 'WEBGL2-INIT:';
@@ -99,7 +102,7 @@ export function useWebGL2PatternRender(
       e.preventDefault();
       const next = cycleDebugMode(r.getDebugConfig().mode);
       r.setDebugConfig({ mode: next });
-      console.log(`[WebGL2 debug] mode: ${next}`);
+      log.log(`mode: ${next}`);
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);

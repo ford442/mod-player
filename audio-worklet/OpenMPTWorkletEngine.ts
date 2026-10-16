@@ -40,6 +40,9 @@ import {
     OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH,
     type OpenMPTInterpolationLength,
 } from '../utils/openmptRenderParams';
+import { createLogger } from '../utils/log';
+
+const log = createLogger('OpenMPTWorkletEngine');
 
 export {
     OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH,
@@ -330,8 +333,8 @@ export class OpenMPTWorkletEngine extends MiniEventEmitter<EngineEventMap> {
         this.module.HEAPU8.fill(0, ptr, ptr + byteSize);
         this.module._set_ring_buffer(ptr, frameCapacity);
         this.ringBufPtr = ptr;
-        console.log(
-            '[OpenMPTWorkletEngine] PCM ring allocated at WASM ptr',
+        log.log(
+            'PCM ring allocated at WASM ptr',
             ptr,
             '– capacity:',
             frameCapacity,

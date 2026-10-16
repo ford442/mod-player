@@ -5,6 +5,9 @@ import {
   type MasterGraphRefs,
 } from '../../utils/audioMasterGraph';
 import type { AudioGraphRefs } from './types';
+import { createLogger } from '../../utils/log';
+
+const log = createLogger('PLAY');
 
 function masterGraphRefs(refs: AudioGraphRefs): MasterGraphRefs {
   return {
@@ -54,7 +57,7 @@ export function ensureCommonMasterNodes(
   // shared context was closed and recreated (unmount/remount, HMR), start over.
   const existing = refs.masterInputRef.current ?? refs.analyserRef.current;
   if (existing && existing.context !== ctx) {
-    console.log('[PLAY] AudioContext changed — recreating master nodes');
+    log.log('AudioContext changed — recreating master nodes');
     publishFxHost(null);
     releaseMasterNodes(masterGraphRefs(refs));
   }
@@ -69,20 +72,20 @@ export function ensureCommonMasterNodes(
   }
 
   if (!refs.stereoPannerRef.current) {
-    console.log('[PLAY] Creating StereoPanner node...');
+    log.log('Creating StereoPanner node...');
     refs.stereoPannerRef.current = ctx.createStereoPanner();
   }
   refs.stereoPannerRef.current.pan.value = panValue;
 
   if (!refs.gainNodeRef.current) {
-    console.log('[PLAY] Creating Gain node...');
+    log.log('Creating Gain node...');
     refs.gainNodeRef.current = ctx.createGain();
   }
   // Always re-apply volume — App slider can change while the GainNode lives on.
   refs.gainNodeRef.current.gain.value = volume;
 
   if (!refs.analyserRef.current) {
-    console.log('[PLAY] Creating Analyser node...');
+    log.log('Creating Analyser node...');
     refs.analyserRef.current = ctx.createAnalyser();
     refs.analyserRef.current.fftSize = 2048;
     refs.analyserRef.current.smoothingTimeConstant = 0.8;
