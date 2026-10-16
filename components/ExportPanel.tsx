@@ -1,9 +1,10 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { cn } from '../utils/cn';
 import type { OfflineExportState } from '../hooks/useOfflineExport';
 import type { PerformanceCaptureState } from '../hooks/usePerformanceCapture';
 import type { PatternRendererBackend } from '../src/renderers/types';
 import { probeCanvasCaptureSupport } from '../utils/performanceCapture';
+import { EXPORT_SAMPLE_RATE, EXPORT_SAMPLE_RATE_OPTIONS, type ExportSampleRate } from '../utils/wavEncoder';
 
 interface ExportPanelProps {
   isModuleLoaded: boolean;
@@ -13,7 +14,7 @@ interface ExportPanelProps {
   numChannels: number;
   channelMuteMask: boolean[];
   onToggleChannelMute: (channel: number) => void;
-  onExportWav: () => void;
+  onExportWav: (sampleRate: ExportSampleRate) => void;
   onStartCapture: () => void;
   onStopCapture: () => void;
   offlineExport: OfflineExportState;
@@ -52,6 +53,7 @@ export function ExportPanel({
   );
 
   const mutedCount = channelMuteMask.filter(Boolean).length;
+  const [exportRate, setExportRate] = useState<ExportSampleRate>(EXPORT_SAMPLE_RATE);
 
   return (
     <section
@@ -75,10 +77,26 @@ export function ExportPanel({
         <p className={cn('text-xs', isDarkMode ? 'text-gray-400' : 'text-gray-600')}>
           Offline WAV render runs in a worker (faster than realtime). Channel mutes apply to export when any channel is muted.
         </p>
+        <label className={cn('flex items-center justify-between gap-2 text-xs', isDarkMode ? 'text-gray-300' : 'text-gray-700')}>
+          <span>Sample rate</span>
+          <select
+            value={exportRate}
+            disabled={isExporting}
+            onChange={(e) => setExportRate(Number(e.target.value) as ExportSampleRate)}
+            className={cn(
+              'rounded border px-2 py-1 font-mono',
+              isDarkMode ? 'bg-gray-800 border-white/10 text-gray-200' : 'bg-white border-gray-300 text-gray-800',
+            )}
+          >
+            {EXPORT_SAMPLE_RATE_OPTIONS.map(({ rate, label }) => (
+              <option key={rate} value={rate}>{label}</option>
+            ))}
+          </select>
+        </label>
         <button
           type="button"
           disabled={!isModuleLoaded || isExporting || isRecording}
-          onClick={onExportWav}
+          onClick={() => onExportWav(exportRate)}
           className={cn(
             'w-full px-3 py-2 rounded-lg font-medium transition-colors disabled:opacity-50',
             isDarkMode

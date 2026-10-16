@@ -1,5 +1,19 @@
-/** Standard CD-quality export sample rate used by offline render. */
-export const EXPORT_SAMPLE_RATE = 44100;
+import { CD_SAMPLE_RATE, PLAYER_SAMPLE_RATE, type PlayerSampleRate } from './sampleRates';
+
+/**
+ * Default WAV export rate = the live render rate (#490). Export at the rate you
+ * heard: libopenmpt's resampler, the 48 kHz-authored room IRs and the character
+ * stage's halfband then run exactly as they did live.
+ */
+export const EXPORT_SAMPLE_RATE = PLAYER_SAMPLE_RATE;
+
+export type ExportSampleRate = PlayerSampleRate;
+
+/** Export rate choices, default first. 44.1 kHz is an explicit "CD rate" option. */
+export const EXPORT_SAMPLE_RATE_OPTIONS: readonly { rate: ExportSampleRate; label: string }[] = [
+  { rate: PLAYER_SAMPLE_RATE, label: '48 kHz (as heard)' },
+  { rate: CD_SAMPLE_RATE, label: '44.1 kHz (CD)' },
+];
 
 /** One video frame at 30 fps — used as duration parity tolerance. */
 export const EXPORT_FRAME_SECONDS = 1 / 30;

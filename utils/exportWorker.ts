@@ -6,6 +6,7 @@ import type {
   ExportWorkerResult,
 } from '../workers/openmpt-export.worker';
 import exportWorkerUrl from '../workers/openmpt-export.worker.ts?worker&url';
+import type { ExportSampleRate } from './wavEncoder';
 
 export const EXPORT_WORKER_TIMEOUT_MS = 10 * 60_000;
 
@@ -38,6 +39,7 @@ export interface ExportWavOptions {
   muteMask?: boolean[];
   startSeconds?: number;
   endSeconds?: number;
+  sampleRate?: ExportSampleRate;
   onProgress?: (progress: ExportWorkerProgress) => void;
   timeoutMs?: number;
 }
@@ -69,6 +71,7 @@ function runExportWorker<T extends ExportWorkerComplete | ExportWorkerPcm>(
     ...(options.muteMask ? { muteMask: options.muteMask } : {}),
     ...(options.startSeconds !== undefined ? { startSeconds: options.startSeconds } : {}),
     ...(options.endSeconds !== undefined ? { endSeconds: options.endSeconds } : {}),
+    ...(options.sampleRate !== undefined ? { sampleRate: options.sampleRate } : {}),
     ...(output === 'pcm' ? { output } : {}),
   };
 

@@ -123,7 +123,7 @@ early reflections plus a two-band decaying tail, unit energy. Sizes are small
 (≈ 36 KB total).
 
 - **Loading:** files are fetched only when the room is first enabled, once per
-  page. Each context decodes them at its own rate (48 kHz live, 44.1 kHz export).
+  page. Each context decodes them at its own rate: 48 kHz live and for a default export, 44.1 kHz for a CD-rate export.
 - **Failures:** a decode failure (e.g. Safari without Ogg Opus) marks the room
   *unavailable*. It reads as off, the panel offers Retry, and export skips it
   with a warning.
@@ -207,6 +207,7 @@ EQ.
 | `fxCrossfade` | M1 / M2 click metric with its self-check |
 | `fxRack`, `fxRoom` | Rack and room behaviour |
 | `fxExportParity` | Every preset, export == live at 44.1 and 48 kHz; serialization completeness |
+| `exportLiveParity` | End to end at the default 48 kHz: the compiled JS worklet + real libopenmpt vs `renderModuleOffline`, dry (bit-exact) and through the rack (#490) |
 | `fxCharacter*` | Kernels, the bundle bit-exact against the kernels, zero allocation |
 
 The fake-node scheduling tests, `fxStore`, `fxController` and `fxCommands`
