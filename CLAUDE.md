@@ -137,7 +137,7 @@ Audio logic is split strictly between two contexts that **cannot share state dir
 ## Architecture: WebGPU Visualization
 
 ### `PatternDisplay.tsx` — The Rendering Engine
-This is the largest and most complex file. It:
+This is the central visualization file (578 lines; `audio-worklet/js/openmpt-processor.ts` and `src/renderers/webgpu/WebGPURenderer.ts` are larger). It:
 1. Initializes a WebGPU context on a `<canvas>` element
 2. Resolves **shader capabilities** from `utils/shaderRegistry.ts` (not filename `includes()` chains)
 3. Allocates GPU buffers for pattern data and channel states
