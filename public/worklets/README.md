@@ -125,7 +125,7 @@ npm run verify:native-exports
 ```
 
 - **Every PR:** script clobber greps + export audit (`ci.yml` → `wasm-smoke-test`); JS `playhead-smoke`.
-- **Path-filtered PR / push:** full `build:emcc` when `cpp/**`, `scripts/build-wasm.sh`, `audio-worklet/**`, or `hooks/audioGraph/**` change — caches `vendor/libopenmpt-0.8.4+release` (`libopenmpt.a`) — then **`smoke:playhead` with `AUDIO_ENGINE=native`** (requires active engine `native-worklet`, lag median &lt; 1 row).
+- **Path-filtered PR / push:** full `build:emcc` when `cpp/**`, `scripts/build-wasm.sh`, `audio-worklet/**`, or `hooks/audioGraph/**` change — caches `vendor/libopenmpt-0.8.4+release-native-release` (`libopenmpt.a`, keyed on `scripts/build-wasm.sh --print-flag-stamp`) — then **`smoke:playhead` with `AUDIO_ENGINE=native`** (requires active engine `native-worklet`, lag median &lt; 1 row).
 - **Weekly schedule:** `native-wasm-scheduled.yml` full build + artifact upload + **native playhead parity** (same cache).
 
 Never commit failed download bodies (404 HTML) as `.wasm`. Never commit `openmpt-native.*` into git.
