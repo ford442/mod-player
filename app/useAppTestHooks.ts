@@ -10,6 +10,7 @@ import { usesCircularRowPaging } from '../utils/shaderVersion';
 import { circularPageStart, overlayActualRow } from '../utils/playheadPrediction';
 import type { PatternMatrix, PlaybackState } from '../types';
 import { deriveTransportState } from '../utils/transportClock';
+import { useFxStore } from '../store/fxStore';
 
 export interface UseAppTestHooksParams {
   seekToStep: (step: number) => void;
@@ -59,6 +60,14 @@ export function useAppTestHooks(params: UseAppTestHooksParams): void {
 
   useEffect(() => {
     window.__TEST_HOOKS__ = {
+      fx: {
+        setEnabled: (module, enabled) => useFxStore.getState().setModuleEnabled(module, enabled),
+        setParam: (module, key, value) => useFxStore.getState().setParam(module, key, value),
+        getState: () => {
+          const s = useFxStore.getState();
+          return { rackStatus: s.rackStatus, moduleStatus: s.moduleStatus, effective: s.effective };
+        },
+      },
       seekToRow: (row: number) => seekToStep(row),
       stopPlayback: () => stopMusic(false),
       startPlayback: () => playGuarded(),

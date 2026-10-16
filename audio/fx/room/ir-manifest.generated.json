@@ -1,0 +1,29 @@
+{
+  "small": {
+    "file": "small.opus",
+    "version": "fc5bd2debd",
+    "bytes": 6780,
+    "durationSeconds": 0.35,
+    "channels": 2,
+    "sampleRate": 48000,
+    "sourceHash": "6c915e7585bf6aa7"
+  },
+  "medium": {
+    "file": "medium.opus",
+    "version": "91e5ae6687",
+    "bytes": 12326,
+    "durationSeconds": 0.7,
+    "channels": 2,
+    "sampleRate": 48000,
+    "sourceHash": "ddb892140b8fdf58"
+  },
+  "large": {
+    "file": "large.opus",
+    "version": "e94f61338a",
+    "bytes": 16922,
+    "durationSeconds": 1,
+    "channels": 2,
+    "sampleRate": 48000,
+    "sourceHash": "d7e2c25525fff033"
+  }
+}

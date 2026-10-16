@@ -16,6 +16,8 @@ import { usePlayerShare } from './hooks/usePlayerShare';
 import { useOpenGraph } from './hooks/useOpenGraph';
 import { ToastStack } from './components/ToastStack';
 import { useOfflineExport } from './hooks/useOfflineExport';
+import { useFxRackBootstrap } from './hooks/useFxRackBootstrap';
+import { useFxStore } from './store/fxStore';
 import { usePerformanceCapture } from './hooks/usePerformanceCapture';
 import { PlayerSessionProvider } from './context/PlayerSessionContext';
 import { PlayerFeaturesProvider } from './context/PlayerFeaturesContext';
@@ -35,6 +37,7 @@ import { usePlayerSessionValue } from './app/usePlayerSessionValue';
 import { usePlayerFeaturesValue } from './app/usePlayerFeaturesValue';
 
 function App() {
+  useFxRackBootstrap();
   const theme = usePlayerUiStore((s) => s.theme);
   const setTheme = usePlayerUiStore((s) => s.setTheme);
   const liteMode = usePlayerUiStore((s) => s.liteMode);
@@ -161,6 +164,8 @@ function App() {
       fileData,
       fileName: moduleFileName || 'export.mod',
       ...(channelMuteMask.some(Boolean) ? { muteMask: channelMuteMask } : {}),
+      // What plays is what's exported (#453): the effective FX rack, if any module is on.
+      fx: useFxStore.getState().exportSnapshot(),
     });
   }, [channelMuteMask, exportWav, getModuleFileData, moduleFileName]);
 

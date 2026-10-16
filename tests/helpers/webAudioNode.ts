@@ -16,6 +16,10 @@
  * Don't use OfflineAudioContext.suspend() here: node-web-audio-api registers
  * suspends asynchronously, so a fast render can race past the point and reject
  * it. Schedule AudioParam automation / rack changes ahead of time instead.
+ *
+ * getChannelData() views point into the AudioBuffer's native memory, which is
+ * freed when the AudioBuffer object is collected — even while a view is still
+ * referenced. Copy (channelsOf) or keep the AudioBuffer alive.
  */
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -23,6 +27,13 @@ import { vi } from 'vitest';
 import * as nwa from 'node-web-audio-api';
 
 export { nwa };
+
+/**
+ * Per-test budget for suites that render on real Web Audio: worklet nodes run
+ * on worker threads, and under a full parallel vitest run a few offline renders
+ * can exceed vitest's 5 s default.
+ */
+export const WEB_AUDIO_TIMEOUT_MS = 30_000;
 
 const ROOT = resolve(fileURLToPath(new URL('../..', import.meta.url)));
 

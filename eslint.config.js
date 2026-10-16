@@ -12,6 +12,7 @@ const WORKLET_FILES = [
   'audio-worklet/js/**/*.ts',
   'audio-worklet/workletProtocolConstants.ts',
   'audio-worklet/libRuntimeReady.ts',
+  'audio-worklet/fxCharacterParams.ts', // bundled into fx-character-worklet.js (#453)
 ];
 
 /** Window-only globals. AudioWorkletGlobalScope has none of them (CLAUDE.md: no DOM in the worklet). */

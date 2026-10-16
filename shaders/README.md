@@ -40,6 +40,7 @@ The root directory contains **30 actively-used shaders** that are production-rea
 - `patternv0.58.wgsl` — Reactive chassis (tier-B: `circular_led_reactive_body`)
 - `patternv0.59.wgsl` — Instrument highlight (palette + `highlightInstrument`, uniform slot 33)
 - `patternv0.60.wgsl` — **Spectrum chassis**: v0.59 LEDs + `bezel_spectrum.wgsl` lit from the GPU FFT bins (`spectrumBuffer`, see below)
+- `patternv0.61.wgsl` — **FX chassis** (#453): v0.60 + `bezel_fx.wgsl`, which also shows the FX rack's settings (`fxUniforms`, bezel slots 24–27)
 
 **Video overlay shaders (documented exceptions — no cell-packing path):**
 - `patternv0.23.wgsl` — Clouds (video texture mode)
@@ -50,6 +51,7 @@ The root directory contains **30 actively-used shaders** that are production-rea
 - `bezel.wgsl` — Hardware bezel photo (used by circular layouts v0.45+)
 - `bezel_audio.wgsl` — `bezel.wgsl` + multi-band edge lighting from the binding-3 `AudioReactive` uniform (v0.58)
 - `bezel_spectrum.wgsl` — `bezel.wgsl` + 32 radial spectrum bars read straight from the GPU bins buffer (binding 4; v0.60)
+- `bezel_fx.wgsl` — `bezel_spectrum.wgsl` + FX rack lights from `lib/fx_chassis.wgsl`: drive rim glow, tone tilt, room halo, module LEDs (bezel slots 24–27; v0.61)
 - `chassis_frosted.wgsl` — Procedural frosted panel (used by square layouts)
 - `chassis_video.wgsl` — Video background composite
 - `chassisv0.1.wgsl` — Legacy chassis (very old circular layouts)

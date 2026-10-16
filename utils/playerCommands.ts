@@ -2,6 +2,7 @@
  * Central command bus for keyboard, MIDI, gamepad, and future WebHID inputs.
  * Handlers register once; sources dispatch through shared gating rules.
  */
+import type { FxModuleId } from '../audio/fx/types';
 
 export type CommandSource = 'keyboard' | 'midi' | 'gamepad' | 'mediaSession' | 'ui';
 
@@ -27,13 +28,22 @@ export type PlayerCommandId =
   | 'cheatsheet.close'
   | 'shader.selectByIndex'
   | 'stage.toggle'
-  | 'stage.exit';
+  | 'stage.exit'
+  | 'fx.toggle'
+  | 'fx.setParam'
+  | 'fx.preset';
 
 export interface CommandPayloadMap {
   'seek.jumpToOrder': { order: number };
   'volume.set': { value: number };
   'pan.set': { value: number };
   'shader.selectByIndex': { index: number };
+  /** FX rack (#453): toggle a module (or the whole rack); `enabled` sets it instead. */
+  'fx.toggle': { module: FxModuleId | 'rack'; enabled?: boolean };
+  /** Physical value per the param spec, or 0…1 along its scale when `normalized` (MIDI CC). */
+  'fx.setParam': { module: FxModuleId; param: string; value: number; normalized?: boolean };
+  /** One of: a preset id, a step through the preset list, or an index into it. */
+  'fx.preset': { presetId?: string; step?: 1 | -1; index?: number };
 }
 
 export type CommandPayload<C extends PlayerCommandId> =
@@ -161,6 +171,9 @@ export const COMMAND_LABELS: Record<PlayerCommandId, string> = {
   'shader.selectByIndex': 'Select shader by program #',
   'stage.toggle': 'Toggle stage mode',
   'stage.exit': 'Exit stage mode',
+  'fx.toggle': 'Toggle FX module',
+  'fx.setParam': 'Set FX parameter',
+  'fx.preset': 'Select FX preset',
 };
 
 export function isTextInputFocused(): boolean {
@@ -168,6 +181,9 @@ export function isTextInputFocused(): boolean {
   if (!target) return false;
   const tag = target.tagName;
   if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true;
+  // Custom value controls (FX rack knobs, #453) own their arrow / page keys.
+  const role = target.getAttribute?.('role');
+  if (role === 'slider' || role === 'spinbutton') return true;
   return Boolean(target.isContentEditable);
 }
 

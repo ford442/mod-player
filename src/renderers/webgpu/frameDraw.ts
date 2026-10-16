@@ -23,8 +23,10 @@ import {
   usesOscilloscope,
   usesGpuSpectrum,
   usesSpectrumBuffer,
+  usesFxUniforms,
   WEBGL_HYBRID_SHADERS,
 } from '../../../utils/shaderVersion';
+import { FX_BEZEL_UNIFORM_BYTES, FX_UNIFORM_SLOTS, readFxVisual } from '../../../audio/fx/fxVisualState';
 import { GRID_RECT, getPolarRadii } from '../../../utils/geometryConstants';
 import { resolveWebGpuVisibleRows } from '../../../utils/overlayLayout';
 import { isV030bTimingDebugEnabled } from '../../../utils/timingDebug';
@@ -420,6 +422,13 @@ export function renderWebGPUFrame(ctx: FrameDrawContext): void {
       // to 0 for every other shader — this scratch outlives shader switches, and
       // a stale 1.0 must never leak into a background that reads slot 23.
       bezelData[23] = usesSpectrumBuffer(shaderFile) && p.reactiveMode ? 1.0 : 0.0;
+      // Slots 24–27: FX rack settings for fxUniforms chassis (v0.61, #453);
+      // zeroed for every other shader for the same reason as slot 23.
+      if (usesFxUniforms(shaderFile)) {
+        readFxVisual(performance.now(), bezelData, FX_UNIFORM_SLOTS.drive);
+      } else {
+        bezelData.fill(0, FX_UNIFORM_SLOTS.drive, FX_UNIFORM_SLOTS.modules + 1);
+      }
 
       if (needsUIFields) {
         const livePlayheadRow = p.playbackStateRef?.current?.playheadRow ?? p.playheadRow;
@@ -443,7 +452,15 @@ export function renderWebGPUFrame(ctx: FrameDrawContext): void {
         }
       }
 
-      device.queue.writeBuffer(state.bezelUniformBuffer, 0, scratch.bezelBufferData, 0, 96);
+      // 96 bytes cover slots 0–23; fx chassis backgrounds also read 24–27. The
+      // GPU buffer is alignTo(96, 256) = 256 bytes, so both fit.
+      device.queue.writeBuffer(
+        state.bezelUniformBuffer,
+        0,
+        scratch.bezelBufferData,
+        0,
+        usesFxUniforms(shaderFile) ? FX_BEZEL_UNIFORM_BYTES : 96,
+      );
       pass.setPipeline(bezelPipeline);
       pass.setBindGroup(0, state.bezelBindGroup);
       pass.draw(6, 1, 0, 0);

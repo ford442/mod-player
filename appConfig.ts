@@ -21,6 +21,7 @@ export const SHADER_GROUPS_ALL = {
     { id: 'patternv0.52.wgsl', label: 'v0.52 (Night)' },
     { id: 'patternv0.53.wgsl', label: 'v0.53 (Midnight)' },
     { id: 'patternv0.54.wgsl', label: 'v0.54 (Neon Night)' },
+    { id: 'patternv0.61.wgsl', label: 'v0.61 (FX Chassis)' },
     { id: 'patternv0.60.wgsl', label: 'v0.60 (Spectrum Chassis)' },
     { id: 'patternv0.58.wgsl', label: 'v0.58 (Reactive Chassis)' },
     { id: 'patternv0.57.wgsl', label: 'v0.57 (Velocity LED)' },
@@ -64,6 +65,15 @@ export const IS_PUBLIC_MODE =
   (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_PUBLIC_MODE === '1') ||
   _urlParams.get('public') === '1' ||
   _urlParams.get('demo') === '1';
+
+/**
+ * FX rack (#453): on in dev builds; public builds opt in with `VITE_FX_RACK=1`
+ * until the Safari Opus path and mobile CPU have had a soak. When off, nothing
+ * of the rack loads (no chunk, no IR fetch) and persisted FX state is ignored.
+ */
+export const FX_RACK_ENABLED =
+  !IS_PUBLIC_MODE ||
+  (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_FX_RACK === '1');
 
 /** Expose full shader catalog in public builds (`?shaderDebug=1` or localStorage). */
 export const IS_SHADER_DEBUG = (() => {
