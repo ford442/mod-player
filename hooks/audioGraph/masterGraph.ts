@@ -57,7 +57,7 @@ export function ensureCommonMasterNodes(
   // shared context was closed and recreated (unmount/remount, HMR), start over.
   const existing = refs.masterInputRef.current ?? refs.analyserRef.current;
   if (existing && existing.context !== ctx) {
-    console.log('[PLAY] AudioContext changed — recreating master nodes');
+    log.log('AudioContext changed — recreating master nodes');
     publishFxHost(null);
     releaseMasterNodes(masterGraphRefs(refs));
   }

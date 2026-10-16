@@ -121,6 +121,12 @@ export class WebGL2Bloom {
 
     const texel = [1 / this.width, 1 / this.height];
 
+    // The pattern pass leaves BLEND on with blendFunc(SRC_ALPHA, ONE). The blur and
+    // composite passes must *replace* their targets: with blending on, the composite
+    // added itself onto the previous frame's (never-cleared, preserveDrawingBuffer)
+    // default framebuffer and the LEDs washed out to white within a few frames (#462).
+    gl.disable(gl.BLEND);
+
     // Horizontal blur: scene → ping
     this.runBlur(this.sceneFbo.texture, this.pingFbo, [1, 0], texel);
     // Vertical blur: ping → pong
@@ -143,6 +149,8 @@ export class WebGL2Bloom {
     if (this.uCompositeBloomIntensity) gl.uniform1f(this.uCompositeBloomIntensity, this.intensity);
     if (this.uCompositeCrtEnabled) gl.uniform1f(this.uCompositeCrtEnabled, this.crtEnabled);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+    gl.enable(gl.BLEND);
   }
 
   private runBlur(

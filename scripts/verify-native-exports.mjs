@@ -317,22 +317,7 @@ function stripShellComments(src) {
     .join('\n');
 }
 
-// Root build-wasm.sh must not write openmpt-worklet outputs
-const rootBuild = join(ROOT, 'build-wasm.sh');
-if (existsSync(rootBuild)) {
-  const rootCode = stripShellComments(readFileSync(rootBuild, 'utf8'));
-  if (/-o\s+public\/worklets\/openmpt-worklet/.test(rootCode)) {
-    errors.push('root build-wasm.sh still writes public/worklets/openmpt-worklet.* — must delegate only');
-  }
-  if (/rm\s+-rf\s+public\/worklets/.test(rootCode)) {
-    errors.push('root build-wasm.sh must not rm -rf public/worklets');
-  }
-  if (!/scripts\/build-wasm\.sh/.test(rootCode)) {
-    errors.push('root build-wasm.sh should delegate to scripts/build-wasm.sh');
-  }
-}
-
-// Canonical script must not wipe worklets dir
+// The build script must not wipe the worklets dir (it also holds the tracked JS worklet)
 const scriptsCode = stripShellComments(buildSh);
 if (/rm\s+-rf\s+.*public\/worklets/.test(scriptsCode)) {
   errors.push('scripts/build-wasm.sh must not rm -rf public/worklets');

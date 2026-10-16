@@ -6,8 +6,10 @@ import {
   parseOscBufferMessage,
   postGetOscBuffer,
   postPause,
+  postPlay,
   postSeek,
 } from '../../audio-worklet/protocol';
+import { createPauseClock, rebaseSampleForResume, silenceChannelStates } from '../../utils/transportClock';
 import { viewsFromAudioSab } from '../../utils/audioReactive';
 import {
   createPlayheadLagTracker,
@@ -20,6 +22,7 @@ export interface TransportActionsDeps {
   setters: Pick<
     LibOpenMPTSetters,
     | 'setIsPlaying'
+    | 'setIsPaused'
     | 'setStatus'
     | 'setIsModuleLoaded'
     | 'setModuleInfo'
@@ -38,6 +41,8 @@ export function createStopMusic(deps: TransportActionsDeps) {
   const { refs, setters } = deps;
   const {
     isPlayingRef,
+    isPausedRef,
+    pauseClockRef,
     uiLoopActiveRef,
     animationFrameHandle,
     nativeEngineRef,
@@ -67,6 +72,7 @@ export function createStopMusic(deps: TransportActionsDeps) {
   } = refs;
   const {
     setIsPlaying,
+    setIsPaused,
     setStatus,
     setIsModuleLoaded,
     setInstrumentNames,
@@ -78,6 +84,10 @@ export function createStopMusic(deps: TransportActionsDeps) {
   return (destroy: boolean = false) => {
     isPlayingRef.current = false;
     setIsPlaying(false);
+    // Stop is the one way out of a pause that discards the position (the refs reset below).
+    isPausedRef.current = false;
+    setIsPaused(false);
+    pauseClockRef.current = createPauseClock();
     uiLoopActiveRef.current = false;
     if (animationFrameHandle.current) cancelAnimationFrame(animationFrameHandle.current);
 
@@ -149,6 +159,138 @@ export function createStopMusic(deps: TransportActionsDeps) {
     }
 
     setStatus('Stopped.');
+  };
+}
+
+/**
+ * Pause: silence the engine but keep everything needed to continue — the engine's own cursor, the
+ * clock refs and the last position sample. `stopMusic` is the opposite: it resets all of those.
+ *
+ * Engine side is the first half of what stop already did (`postPause()` for the JS worklet, the
+ * existing `pause()` export for the native engine — neither touches the AudioContext, CLAUDE.md pitfall
+ * 10). The ScriptProcessor fallback has no processor flag; its callback reads `isPausedRef`.
+ *
+ * The UI loop keeps running so the playhead can finish following the audio already in flight, then
+ * hold (see utils/transportClock.ts).
+ */
+export function createPauseMusic(deps: TransportActionsDeps) {
+  const { refs, setters } = deps;
+  const {
+    isPlayingRef,
+    isPausedRef,
+    pauseClockRef,
+    audioContextRef,
+    playbackEngineRef,
+    nativeEngineRef,
+    audioWorkletNodeRef,
+    channelStatesRef,
+  } = refs;
+  const { setIsPlaying, setIsPaused, setStatus } = setters;
+
+  return () => {
+    // Pause only means something while playing: a stopped or already-paused transport stays put.
+    if (!isPlayingRef.current) return;
+
+    const audioCtx = audioContextRef.current;
+    pauseClockRef.current = { pausedAt: audioCtx ? audioCtx.currentTime : 0, resumedAt: null };
+    isPlayingRef.current = false;
+    isPausedRef.current = true;
+    setIsPlaying(false);
+    setIsPaused(true);
+
+    // Drive the engine that actually started this playback. The selection state (activeEngine) is not
+    // reliable here: after a failed native start falls back to the JS worklet it can still say native.
+    const engine = playbackEngineRef.current;
+    if (engine === 'native-worklet' && nativeEngineRef.current) {
+      nativeEngineRef.current.pause();
+    } else if (engine === 'worklet' && audioWorkletNodeRef.current) {
+      try { audioWorkletNodeRef.current.port.postMessage(postPause()); } catch { /* node torn down */ }
+    }
+    // 'scriptprocessor' has no processor flag: its callback reads isPausedRef.
+
+    silenceChannelStates(channelStatesRef.current);
+
+    setStatus('Paused.');
+  };
+}
+
+/**
+ * Resume from a pause: continue from the same order/row. The engine kept its cursor, so this only
+ * has to un-silence it and re-anchor the main-thread clock — the last position sample is stale by the
+ * whole pause (see `rebaseSampleForResume`), and the drift detector is re-based so it doesn't read
+ * the pause as drift.
+ */
+export function createResumeMusic(deps: TransportActionsDeps) {
+  const { refs, setters } = deps;
+  const {
+    isPlayingRef,
+    isPausedRef,
+    pauseClockRef,
+    audioContextRef,
+    playbackEngineRef,
+    nativeEngineRef,
+    audioWorkletNodeRef,
+    nativeClockAnchorRef,
+    workletPositionSampleRef,
+    workletRowsPerSecRef,
+    workletTimeRef,
+    workletRowRef,
+    audioClockStartRef,
+    workletTimeAtStartRef,
+    driftAccumulatorRef,
+    lastWorkletUpdateRef,
+    uiLoopActiveRef,
+    animationFrameHandle,
+    updateUIRef,
+  } = refs;
+  const { setIsPlaying, setIsPaused, setStatus } = setters;
+
+  return () => {
+    if (!isPausedRef.current) return;
+
+    const audioCtx = audioContextRef.current;
+    const resumeAt = audioCtx ? audioCtx.currentTime : 0;
+    const { pausedAt } = pauseClockRef.current;
+
+    const sample = workletPositionSampleRef.current;
+    if (sample && pausedAt != null) {
+      const rowsPerSecond = workletRowsPerSecRef.current || rowsPerSecondFromBpm(sample.bpm);
+      const rebased = rebaseSampleForResume(sample, rowsPerSecond, pausedAt, resumeAt);
+      workletPositionSampleRef.current = rebased;
+      workletTimeRef.current = rebased.positionSeconds;
+      workletRowRef.current = rebased.rowInt;
+    }
+    pauseClockRef.current = { pausedAt: null, resumedAt: resumeAt };
+    audioClockStartRef.current = resumeAt;
+    workletTimeAtStartRef.current = workletTimeRef.current;
+    driftAccumulatorRef.current = 0;
+    lastWorkletUpdateRef.current = resumeAt;
+
+    isPausedRef.current = false;
+    isPlayingRef.current = true;
+    setIsPaused(false);
+    setIsPlaying(true);
+
+    const engine = playbackEngineRef.current;
+    if (engine === 'native-worklet' && nativeEngineRef.current) {
+      // The native frame clock (audioFramesRendered) stops while paused, so the anchor that maps it
+      // onto the audio clock is stale by the pause. Drop it: positions fall back to arrival-time
+      // mapping until the next play/seek re-anchors.
+      nativeClockAnchorRef.current = null;
+      nativeEngineRef.current.play();
+    } else if (engine === 'worklet' && audioWorkletNodeRef.current) {
+      try { audioWorkletNodeRef.current.port.postMessage(postPlay()); } catch { /* node torn down */ }
+    }
+
+    if (audioCtx && audioCtx.state === 'suspended') {
+      void audioCtx.resume().catch(() => { /* needs a user gesture; the suspend-recovery listener retries */ });
+    }
+
+    uiLoopActiveRef.current = true;
+    if (animationFrameHandle.current) cancelAnimationFrame(animationFrameHandle.current);
+    animationFrameHandle.current = requestAnimationFrame(() => { updateUIRef.current?.(); });
+
+    setStatus('Playing...');
   };
 }
 

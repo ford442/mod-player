@@ -117,7 +117,7 @@ When introducing a new shader version:
 1. **Create the WGSL file** in the root `shaders/` directory with a sequential version number (e.g., `patternv0.52.wgsl`)
 2. **Reuse shared logic** from `shaders/lib/` via `//#include "lib/<fragment>.wgsl"` where possible. This keeps common code (e.g. `octaveBrightness`, DURA duration unpacking, three-emitter lens cap) in one place.
 3. **Sync to public/**: Run `npm run sync:shaders`. The script resolves includes and writes flat, self-contained WGSL to `public/shaders/`. Do not hand-edit `public/shaders/`.
-4. **Update App.tsx**: Add the shader to the appropriate `SHADER_GROUPS` array (SQUARE, CIRCULAR, or VIDEO)
+4. **Update `appConfig.ts`**: Add the shader to the appropriate group in `SHADER_GROUPS_ALL` (and in `SHADER_GROUPS_PUBLIC` if it ships in the public build)
 5. **Update version checks** in:
    - `utils/shaderVersion.ts` — Add version to layout type, background selection, and alpha blending checks
    - `components/PatternDisplay.tsx` — Update canvas size and buffer packing logic
@@ -258,7 +258,7 @@ PackedB = [Reserved(16) | EffectCmd(8) | EffectVal(8)]
 ## Performance & Compatibility
 
 - **WebGPU Requirement:** Chrome 113+, Edge 113+, Arc, or other WebGPU-enabled browsers
-- **Fallbacks:** WebGPU → WebGL2 (`?renderer=webgl2`, GLSL reference) → HTML (`?renderer=html`)
+- **Fallbacks:** none are automatic. `?renderer=html` selects the DOM grid; the WebGL2 GLSL session is opt-in only (`?webgl2=1`, or the failure-card button after a WebGPU hard-fail)
 - **Canvas Sizes:** Most shaders use 1024×1024; legacy (v0.25–v0.26) use 2048×2016
 - **Bloom Pipeline:** Uses separate threshold, blur, and composite passes
 

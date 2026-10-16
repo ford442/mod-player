@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   detectBrowserBrand,
   getLastWebGPUProbeReport,
+  getWebGPUHardFailStage,
+  getWebGPUHardFailStatus,
   isWebGPUSessionBlocked,
   markWebGPUSessionFailed,
   publishWebGPUProbeReady,
@@ -50,6 +52,42 @@ describe('webgpuProbe', () => {
     publishWebGPUProbeReady({ vendor: 'test' });
     expect(isWebGPUSessionBlocked()).toBe(false);
     expect(getLastWebGPUProbeReport()?.ok).toBe(true);
+  });
+
+  it('keeps the first hard-fail status/stage when a remount re-marks the session (#462)', () => {
+    const quiet = vi.spyOn(console, 'error').mockImplementation(() => {});
+    expect(getWebGPUHardFailStatus()).toBeNull();
+    markWebGPUSessionFailed('adapter', 'requestAdapter returned null');
+    expect(getWebGPUHardFailStatus()).toBe('no-adapter');
+    expect(getWebGPUHardFailStage()).toBe('adapter');
+    // PatternDisplay remount: blocked session rethrows as device-failed and is marked again.
+    markWebGPUSessionFailed('device', 'WebGPU session blocked (no further requestDevice)');
+    expect(getWebGPUHardFailStatus()).toBe('no-adapter');
+    expect(getWebGPUHardFailStage()).toBe('adapter');
+    expect(getLastWebGPUProbeReport()?.stage).toBe('device');
+    quiet.mockRestore();
+  });
+
+  it.each([
+    ['api', 'unsupported'],
+    ['adapter', 'no-adapter'],
+    ['device', 'device-failed'],
+    ['canvas', 'device-failed'],
+    ['lost', 'device-failed'],
+  ] as const)('maps stage %s → status %s', (stage, status) => {
+    const quiet = vi.spyOn(console, 'error').mockImplementation(() => {});
+    markWebGPUSessionFailed(stage, 'x');
+    expect(getWebGPUHardFailStatus()).toBe(status);
+    quiet.mockRestore();
+  });
+
+  it('publishWebGPUProbeReady clears the remembered hard-fail', () => {
+    const quiet = vi.spyOn(console, 'error').mockImplementation(() => {});
+    markWebGPUSessionFailed('adapter', 'gone');
+    publishWebGPUProbeReady();
+    expect(getWebGPUHardFailStatus()).toBeNull();
+    expect(getWebGPUHardFailStage()).toBeNull();
+    quiet.mockRestore();
   });
 
   it('blocked session never reaches requestAdapter', async () => {

@@ -4,10 +4,15 @@ import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
 import { AVAILABLE_SHADERS } from '../appConfig';
 import type { PatternMatrix } from '../types';
 import { usePlayerUiStore } from '../store/playerUiStore';
+import { deriveTransportState } from '../utils/transportClock';
 
 export interface UseAppKeyboardActionsParams {
   isPlaying: boolean;
+  isPaused: boolean;
   stopMusic: (ended?: boolean) => void;
+  /** Pause in place (keeps the position); a no-op unless playing. */
+  pause: () => void;
+  /** Play from the start when stopped, resume when paused. */
   playGuarded: () => void;
   seekToStep: (step: number) => void;
   playbackRowFraction: number;
@@ -29,7 +34,9 @@ export interface UseAppKeyboardActionsParams {
 export function useAppKeyboardActions(params: UseAppKeyboardActionsParams) {
   const {
     isPlaying,
+    isPaused,
     stopMusic,
+    pause,
     playGuarded,
     seekToStep,
     playbackRowFraction,
@@ -61,12 +68,16 @@ export function useAppKeyboardActions(params: UseAppKeyboardActionsParams) {
     seekToStep(Math.max(0, targetStep));
   }, [seekToStep, sequencerMatrix?.numRows]);
 
+  // playGuarded is "play or resume": the hook's play() resumes when paused, so playing → pause and
+  // anything else → playGuarded covers stopped (start) and paused (resume) without a third branch.
   const onKbdPlayPause = useCallback(() => {
-    if (isPlaying) { stopMusic(false); } else { playGuarded(); }
-  }, [isPlaying, stopMusic, playGuarded]);
+    if (isPlaying) { pause(); } else { playGuarded(); }
+  }, [isPlaying, pause, playGuarded]);
 
   const onKbdPlay = useCallback(() => { playGuarded(); }, [playGuarded]);
-  const onKbdPause = useCallback(() => { stopMusic(false); }, [stopMusic]);
+  const onKbdPause = useCallback(() => { pause(); }, [pause]);
+  // transport.stop used to be an alias of pause; it is now a real stop (position resets).
+  const onKbdStop = useCallback(() => { stopMusic(false); }, [stopMusic]);
 
   const onKbdSeekForward = useCallback(() => seekToStep(Math.floor(playbackRowFraction) + 1),
     [seekToStep, playbackRowFraction]);
@@ -119,6 +130,7 @@ export function useAppKeyboardActions(params: UseAppKeyboardActionsParams) {
     onPlayPause: onKbdPlayPause,
     onPlay: onKbdPlay,
     onPause: onKbdPause,
+    onStop: onKbdStop,
     onSeekForward: onKbdSeekForward,
     onSeekBackward: onKbdSeekBackward,
     onSeekNextOrder: onKbdSeekNextOrder,
@@ -139,5 +151,5 @@ export function useAppKeyboardActions(params: UseAppKeyboardActionsParams) {
     onShaderSelectByIndex: onKbdShaderSelectByIndex,
   });
 
-  useKeyboardShortcuts({ cheatsheetOpen });
+  useKeyboardShortcuts({ cheatsheetOpen, transportState: deriveTransportState(isPlaying, isPaused) });
 }

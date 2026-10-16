@@ -8,6 +8,8 @@ export interface PlayerSessionValue {
   isReady: boolean;
   isModuleLoaded: boolean;
   isPlaying: boolean;
+  /** Paused: silent, position kept. Mutually exclusive with `isPlaying`. */
+  isPaused: boolean;
   isLooping: boolean;
   playbackSeconds: number;
   playbackRowFraction: number;
@@ -49,7 +51,10 @@ export interface PlayerSessionValue {
   channelStatesRef: React.MutableRefObject<ChannelShadowState[]>;
   oscBufferRef: React.MutableRefObject<Float32Array | null>;
   audioReactiveRef: React.MutableRefObject<Float32Array | null>;
+  /** Start from the beginning when stopped; resume when paused. */
   play: () => void;
+  /** Pause in place (keeps the position); a no-op unless playing. */
+  pause: () => void;
   stopMusic: (destroy?: boolean) => void;
   seekToStep: (step: number) => void;
   setIsLooping: (v: boolean | ((prev: boolean) => boolean)) => void;

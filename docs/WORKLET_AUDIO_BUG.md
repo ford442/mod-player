@@ -106,7 +106,7 @@ Headless CI cannot assert speaker output. After audio-path changes, verify **wit
 
 `npm run smoke:audio` / `npm run smoke:audio:ci` (`scripts/audio-smoke.mjs`) exercises a **live**
 `AudioWorkletNode` + libopenmpt session against `npm run preview` with
-`?renderer=webgl2&engine=js&audioDiag=1`. CI job: `audio-smoke` in `.github/workflows/ci.yml`
+`?renderer=html&engine=js&audioDiag=1` (audio-only; no GPU needed). CI job: `audio-smoke` in `.github/workflows/ci.yml`
 (uses preinstalled Chromium via `PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers`).
 
 Shared waits go through `scripts/lib/browser-launch.mjs` `waitForFunction`, which passes
