@@ -33,6 +33,15 @@ export interface OfflineRenderResult {
   frameCount: number;
 }
 
+/**
+ * Live playback pulls libopenmpt one AudioWorklet render quantum at a time, and its float mixer
+ * rounds differently depending on how many frames each call asks for (a 4096-frame read drifts
+ * ~1e-6 from 32 × 128). Reading in the same quanta makes the export bit-identical to what played
+ * (#490, tests/exportLiveParity.test.ts); a crush/bit-depth stage in the FX rack would otherwise
+ * turn that sub-LSB drift into whole quantization steps.
+ */
+const RENDER_QUANTUM_FRAMES = 128;
+
 function readChunk(
   lib: LibOpenMPT,
   modPtr: number,
@@ -41,7 +50,20 @@ function readChunk(
   leftPtr: number,
   rightPtr: number,
 ): number {
-  return lib._openmpt_module_read_float_stereo(modPtr, sampleRate, frames, leftPtr, rightPtr);
+  let total = 0;
+  while (total < frames) {
+    const want = Math.min(RENDER_QUANTUM_FRAMES, frames - total);
+    const written = lib._openmpt_module_read_float_stereo(
+      modPtr,
+      sampleRate,
+      want,
+      leftPtr + 4 * total,
+      rightPtr + 4 * total,
+    );
+    total += written;
+    if (written < want) break;
+  }
+  return total;
 }
 
 /**

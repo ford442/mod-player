@@ -11,6 +11,7 @@ import type { useLocalLibrary } from '../hooks/useLocalLibrary';
 import type { useLibrary, useSaveSong, useSyncLibrary } from '../hooks/useLibrary';
 import type { useRateShader } from '../hooks/useRateShader';
 import type { usePatternEdit } from '../hooks/usePatternEdit';
+import type { ExportSampleRate } from '../utils/wavEncoder';
 
 type Playlist = ReturnType<typeof usePlaylist>;
 type LocalLibrary = ReturnType<typeof useLocalLibrary>;
@@ -66,7 +67,7 @@ export interface UsePlayerFeaturesValueParams {
   handleSequencerCellEdit: (row: number, channel: number) => void;
   handleExportPatternDump: () => void;
   midiControls: MidiControls;
-  handleExportWav: () => void;
+  handleExportWav: (sampleRate: ExportSampleRate) => void;
   handleStartCapture: () => void;
   stopCapture: () => void;
   offlineExportState: OfflineExportState;

@@ -29,16 +29,14 @@
 
 import { resolveStageModePreference } from './stageModeSelection';
 import { setAudioSuspended } from './audioSuspendState';
+import { PLAYER_SAMPLE_RATE, type PlayerSampleRate } from './sampleRates';
 import { createLogger } from './log';
 
 const log = createLogger('AudioEngine');
 
 export type AudioGraphProfile = 'playback' | 'interactive';
 
-/** Locked render rate. Native (`--grow`) and the JS engine both render here. */
-export const PLAYER_SAMPLE_RATE = 48000;
-
-export type PlayerSampleRate = 44100 | 48000;
+export { PLAYER_SAMPLE_RATE, type PlayerSampleRate } from './sampleRates';
 
 export interface CreatePlayerAudioContextOptions {
   /** `playback` (default) or `interactive` (stage mode / low latency). */

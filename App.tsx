@@ -16,6 +16,7 @@ import { usePlayerShare } from './hooks/usePlayerShare';
 import { useOpenGraph } from './hooks/useOpenGraph';
 import { ToastStack } from './components/ToastStack';
 import { useOfflineExport } from './hooks/useOfflineExport';
+import type { ExportSampleRate } from './utils/wavEncoder';
 import { useFxRackBootstrap } from './hooks/useFxRackBootstrap';
 import { useFxStore } from './store/fxStore';
 import { usePerformanceCapture } from './hooks/usePerformanceCapture';
@@ -157,12 +158,13 @@ function App() {
     [channelStates],
   );
 
-  const handleExportWav = useCallback(async () => {
+  const handleExportWav = useCallback(async (sampleRate: ExportSampleRate) => {
     const fileData = getModuleFileData();
     if (!fileData) return;
     await exportWav({
       fileData,
       fileName: moduleFileName || 'export.mod',
+      sampleRate,
       ...(channelMuteMask.some(Boolean) ? { muteMask: channelMuteMask } : {}),
       // What plays is what's exported (#453): the effective FX rack, if any module is on.
       fx: useFxStore.getState().exportSnapshot(),

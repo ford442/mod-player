@@ -22,7 +22,7 @@ describe('wavEncoder', () => {
   });
 
   it('computes duration from frame count', () => {
-    const seconds = wavDurationSeconds(44100, EXPORT_SAMPLE_RATE);
+    const seconds = wavDurationSeconds(EXPORT_SAMPLE_RATE, EXPORT_SAMPLE_RATE);
     expect(seconds).toBeCloseTo(1, 6);
   });
 

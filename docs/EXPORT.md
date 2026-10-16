@@ -23,7 +23,7 @@ With the FX rack on, the check still applies to the dry render; the FX tail
 (room IR, compressor look-ahead, resampler delay) is appended on top and
 reported in the export message.
 
-The offline renderer uses 44.1 kHz stereo, Sinc+LP interpolation (`OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH` = 3, value 8), and `set_repeat_count(0)` for a single pass (no loop).
+The offline renderer defaults to **48 kHz** stereo, the rate playback renders at (`PLAYER_SAMPLE_RATE`, `utils/sampleRates.ts`). **44.1 kHz (CD)** is an explicit option in the Export panel. It uses Sinc+LP interpolation (`OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH` = 3, value 8) and `set_repeat_count(0)` for a single pass (no loop). It pulls libopenmpt in 128-frame render quanta, as the AudioWorklet does, because libopenmpt's float mixer rounds per call size. At the default rate the export is therefore **bit-identical** to the live JS-worklet output, dry and through the FX rack (`tests/exportLiveParity.test.ts`). One opt-in exception: `?interp=4` lowers *live* interpolation to cubic, and export stays at Sinc+LP.
 
 ## Browser support matrix — canvas + audio recording
 

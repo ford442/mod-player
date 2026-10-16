@@ -8,6 +8,7 @@ import type { RemoteSong, SongSaveRequest, ShaderMeta } from '../utils/storageAp
 import type { useMidiControls } from '../hooks/useMidiControls';
 import type { OfflineExportState } from '../hooks/useOfflineExport';
 import type { PerformanceCaptureState } from '../hooks/usePerformanceCapture';
+import type { ExportSampleRate } from '../utils/wavEncoder';
 
 /** Feature panels + library — stable callbacks from App composition root. */
 export interface PlayerFeaturesValue {
@@ -82,7 +83,7 @@ export interface PlayerFeaturesValue {
   onSequencerCellEdit?: (row: number, channel: number) => void;
   onExportPatternDump?: () => void;
   midiControls?: ReturnType<typeof useMidiControls>;
-  onExportWav: () => void;
+  onExportWav: (sampleRate: ExportSampleRate) => void;
   onStartCapture: () => void;
   onStopCapture: () => void;
   offlineExportState: OfflineExportState;

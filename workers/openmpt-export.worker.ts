@@ -1,6 +1,6 @@
 import { loadLibOpenMPTInWorker } from '../utils/libopenmptWorkerLoad';
 import { renderModuleOffline } from '../utils/offlineRender';
-import { encodeStereoWav } from '../utils/wavEncoder';
+import { encodeStereoWav, type ExportSampleRate } from '../utils/wavEncoder';
 
 export interface ExportWorkerRequest {
   type: 'render-wav';
@@ -9,6 +9,8 @@ export interface ExportWorkerRequest {
   muteMask?: boolean[];
   startSeconds?: number;
   endSeconds?: number;
+  /** Render rate; default EXPORT_SAMPLE_RATE (= the live 48 kHz, #490). */
+  sampleRate?: ExportSampleRate;
   /**
    * 'pcm' (FX rack export, #453): skip encoding and transfer the dry float
    * render back — the main thread runs it through an OfflineAudioContext
@@ -77,6 +79,7 @@ async function handleMessage(message: IncomingMessage): Promise<void> {
     const rendered = renderModuleOffline(lib, {
       fileData: message.fileData,
       loop: false,
+      ...(message.sampleRate !== undefined ? { sampleRate: message.sampleRate } : {}),
       ...(message.muteMask ? { muteMask: message.muteMask } : {}),
       ...(message.startSeconds !== undefined ? { startSeconds: message.startSeconds } : {}),
       ...(message.endSeconds !== undefined ? { endSeconds: message.endSeconds } : {}),

@@ -6,82 +6,10 @@
  * function": readiness was inferred from lazy export stubs) and the MOD↔XM / stop→play lifecycle
  * contracts (#329/#330): one libopenmpt per scope, node reuse, recovery after a bad file.
  */
-import { readFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import vm from 'node:vm';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { MAIN_TO_WORKLET as MT, WORKLET_TO_MAIN as WT } from '../audio-worklet/workletProtocolConstants';
 import { synthXm } from '../scripts/lib/synth-xm.mjs';
-
-const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
-const read = (rel: string) => readFileSync(join(ROOT, rel));
-
-const SAMPLE_RATE = 48000;
-const QUANTUM = 128;
-
-interface Posted { type: string; [k: string]: unknown }
-
-class FakeScope {
-  posted: Posted[] = [];
-  ctx: vm.Context;
-  Processor!: new (opts?: unknown) => { port: { onmessage: ((e: { data: unknown }) => Promise<void>) | null }; process: (i: unknown, o: Float32Array[][], p: unknown) => boolean };
-  private sandbox: Record<string, unknown>;
-
-  constructor() {
-    const posted = this.posted;
-    class AudioWorkletProcessor {
-      port = {
-        onmessage: null as null | ((e: { data: unknown }) => Promise<void>),
-        postMessage: (m: Posted) => { posted.push(m); },
-      };
-    }
-    this.sandbox = {
-      AudioWorkletProcessor,
-      registerProcessor: (_name: string, ctor: FakeScope['Processor']) => { this.Processor = ctor; },
-      currentTime: 0,
-      sampleRate: SAMPLE_RATE,
-      SharedArrayBuffer,
-      WebAssembly,
-      setTimeout,
-      clearTimeout,
-      console: { log() {}, warn() {}, error() {}, info() {}, debug() {} },
-    };
-    this.ctx = vm.createContext(this.sandbox);
-    vm.runInContext(read('public/worklets/openmpt-worklet.js').toString('utf8'), this.ctx, { filename: 'openmpt-worklet.js' });
-  }
-
-  /** Copy bytes into this scope's realm — the processor's `instanceof ArrayBuffer` checks are realm-bound. */
-  toRealm(bytes: Uint8Array): ArrayBuffer {
-    const fn = vm.runInContext(
-      '(function (a) { var u = new Uint8Array(a.length); u.set(a); return u.buffer; })',
-      this.ctx,
-    ) as (a: Uint8Array) => ArrayBuffer;
-    return fn(bytes);
-  }
-
-  advance(seconds: number): void {
-    (this.sandbox as { currentTime: number }).currentTime += seconds;
-  }
-
-  newNode() {
-    const node = new this.Processor({});
-    const send = async (data: unknown) => { await node.port.onmessage?.({ data }); };
-    return { node, send };
-  }
-
-  count(type: string): number {
-    return this.posted.filter((m) => m.type === type).length;
-  }
-}
-
-async function initLib(scope: FakeScope, send: (d: unknown) => Promise<void>): Promise<void> {
-  await send({
-    type: MT.initLib,
-    scriptText: read('public/worklets/libopenmpt-worklet.js').toString('utf8'),
-    wasmBytes: scope.toRealm(read('public/worklets/libopenmpt-worklet.wasm')),
-  });
-}
+import { FakeScope, QUANTUM, SAMPLE_RATE, initLib, read } from './helpers/workletScope';
 
 /** Render `quanta` 128-frame blocks; returns peak and a cheap PCM fingerprint. */
 function render(scope: FakeScope, node: ReturnType<FakeScope['newNode']>['node'], quanta: number) {

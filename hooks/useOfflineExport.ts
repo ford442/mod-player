@@ -7,7 +7,7 @@ import {
   exportWavInWorker,
   type ExportWorkerProgress,
 } from '../utils/exportWorker';
-import { encodeStereoWav, isDurationWithinFrameTolerance } from '../utils/wavEncoder';
+import { encodeStereoWav, isDurationWithinFrameTolerance, type ExportSampleRate } from '../utils/wavEncoder';
 
 export type OfflineExportStage = 'idle' | 'loading' | 'rendering' | 'fx' | 'encoding' | 'done' | 'error';
 
@@ -24,6 +24,8 @@ export interface OfflineExportRequest {
   muteMask?: boolean[];
   startSeconds?: number;
   endSeconds?: number;
+  /** WAV rate; default EXPORT_SAMPLE_RATE (= the live 48 kHz, #490). */
+  sampleRate?: ExportSampleRate;
   /** Render through the FX rack (#453); null / absent = dry, exactly as before. */
   fx?: FxRackState | null;
 }
@@ -72,6 +74,7 @@ export function useOfflineExport() {
       ...(request.muteMask ? { muteMask: request.muteMask } : {}),
       ...(request.startSeconds !== undefined ? { startSeconds: request.startSeconds } : {}),
       ...(request.endSeconds !== undefined ? { endSeconds: request.endSeconds } : {}),
+      ...(request.sampleRate !== undefined ? { sampleRate: request.sampleRate } : {}),
       onProgress: (progress: ExportWorkerProgress) => {
         const stage: OfflineExportStage =
           progress.stage === 'encode' ? 'encoding' : 'rendering';
