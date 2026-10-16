@@ -71,7 +71,7 @@ export function logWorkletDiagnostics(workletUrl: string, ctx?: AudioContext): v
     console.log('State:', ctx.state);
     console.log('Sample Rate:', ctx.sampleRate);
     console.log('Base Latency:', ctx.baseLatency);
-    console.log('Output Latency:', (ctx as any).outputLatency ?? 0);
+    console.log('Output Latency:', (ctx as Partial<Pick<AudioContext, 'outputLatency'>>).outputLatency ?? 0);
     console.groupEnd();
   }
 

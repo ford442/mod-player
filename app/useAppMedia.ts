@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { MediaItem } from '../types';
 import { readLocalStorage, writeLocalStorage } from '../utils/localStorageIO';
+import { DEFAULT_MEDIA_FADES, MEDIA_FADES_STORAGE_KEY, type MediaFades } from '../utils/mediaFades';
 
 export interface UseAppMediaResult {
   mediaVisible: boolean;
@@ -18,12 +19,12 @@ export function useAppMedia(): UseAppMediaResult {
   const [mediaVisible, setMediaVisible] = useState<boolean>(false);
   const [mediaItem, setMediaItem] = useState<MediaItem | null>(null);
   const mediaObjectUrlRef = useRef<string | null>(null);
-  const [mediaFades, setMediaFades] = useState<{ in: number; out: number }>(
-    () => readLocalStorage('xasm1_media_fades', { in: 500, out: 500 }),
+  const [mediaFades, setMediaFades] = useState<MediaFades>(
+    () => readLocalStorage(MEDIA_FADES_STORAGE_KEY, { ...DEFAULT_MEDIA_FADES }),
   );
 
   useEffect(() => {
-    writeLocalStorage('xasm1_media_fades', mediaFades);
+    writeLocalStorage(MEDIA_FADES_STORAGE_KEY, mediaFades);
   }, [mediaFades]);
 
   // Revoke any lingering media object URL on unmount

@@ -1,30 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import type { MediaItem } from '../types';
 import { deriveMediaCandidates, checkMediaAvailability, createRemoteMediaItem } from '../utils/remoteMedia';
-
-export interface MediaFades {
-  in: number;
-  out: number;
-}
-
-export const FADES_STORAGE_KEY = 'xasm1_media_fades';
-export const DEFAULT_FADES: MediaFades = { in: 500, out: 500 };
-
-export function loadMediaFades(): MediaFades {
-  try {
-    const raw = localStorage.getItem(FADES_STORAGE_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw) as Partial<MediaFades>;
-      return {
-        in: typeof parsed.in === 'number' ? parsed.in : DEFAULT_FADES.in,
-        out: typeof parsed.out === 'number' ? parsed.out : DEFAULT_FADES.out,
-      };
-    }
-  } catch {
-    /* ignore */
-  }
-  return { ...DEFAULT_FADES };
-}
+import { DEFAULT_MEDIA_FADES, type MediaFades } from '../utils/mediaFades';
 
 interface MediaPanelProps {
   media: MediaItem[];
@@ -43,7 +20,7 @@ export const MediaPanel: React.FC<MediaPanelProps> = ({ media, activeMediaId, on
   const [detectedUrl, setDetectedUrl] = useState<string | null>(null);
   const [detecting, setDetecting] = useState(false);
   const [detectError, setDetectError] = useState<string | null>(null);
-  const effectiveFades = fades ?? DEFAULT_FADES;
+  const effectiveFades = fades ?? DEFAULT_MEDIA_FADES;
 
   const mediaMap = useMemo(() => new Map(media.map(item => [item.id, item])), [media]);
 

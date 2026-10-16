@@ -3,6 +3,8 @@
  * Dev-only counters: created vs destroyed vs pooled reuse.
  */
 
+import { createLogger } from './log';
+
 export type GpuDisposable = { destroy(): void };
 
 export type GpuResourceScope = 'shader' | 'matrix' | 'persistent';
@@ -167,8 +169,8 @@ export class GpuResourcePool {
 
   logStats(label = 'GpuResourcePool'): void {
     const s = this.getStats();
-    console.log(
-      `[${label}] created=${s.created} destroyed=${s.destroyed} reused=${s.reused} ` +
+    createLogger(label).log(
+      `created=${s.created} destroyed=${s.destroyed} reused=${s.reused} ` +
         `pooled=${s.pooled} alive=${s.alive} pooledBuffers=${s.pooledBuffers}`,
     );
   }

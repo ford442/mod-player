@@ -6,6 +6,9 @@ import { parseModuleWithLib } from '../../utils/parseModuleWithLib';
 import { parserLog } from '../../utils/parserDebug';
 import { parseInWorker } from '../../utils/parserWorker';
 import type { WorkerParseError, WorkerParseResponse } from '../../types';
+import { createLogger } from '../../utils/log';
+
+const log = createLogger('Parser');
 
 export function isLibReadyForParse(lib: LibOpenMPT): boolean {
   return typeof lib._openmpt_module_create_from_memory2 === 'function';
@@ -21,8 +24,8 @@ function parseOnMainThread(
   if (!parsed.patternMatrices.length) {
     throw new Error('No pattern data in module');
   }
-  console.log(
-    `[Parser] main-thread fast parse OK (${fileName}):`,
+  log.log(
+    `main-thread fast parse OK (${fileName}):`,
     parsed.metadata.numOrders,
     'orders (order 0 ready, backfill pending),',
     parsed.metadata.numChannels,
