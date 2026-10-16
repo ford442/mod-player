@@ -157,7 +157,7 @@ describe('ScriptProcessor fallback', () => {
       libopenmptRef: ref(lib),
       spLeftBufPtr: ref(0),
       spRightBufPtr: ref(0),
-      analyserRef: ref({}),
+      masterInputRef: ref({}),
       scriptProcessorRef: ref(null),
       isPlayingRef: ref(false),
       isPausedRef: ref(paused),
