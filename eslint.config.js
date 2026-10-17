@@ -11,6 +11,8 @@ import tseslint from 'typescript-eslint';
 const WORKLET_FILES = [
   'audio-worklet/js/**/*.ts',
   'audio-worklet/workletProtocolConstants.ts',
+  'audio-worklet/workletProtocolGuard.ts',
+  'audio-worklet/positionRing.ts',
   'audio-worklet/libRuntimeReady.ts',
   'audio-worklet/fxCharacterParams.ts', // bundled into fx-character-worklet.js (#453)
 ];

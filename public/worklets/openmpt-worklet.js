@@ -18,7 +18,9 @@
     setRenderParam: "setRenderParam",
     ctlSetText: "ctlSetText",
     /** Hands a consumed projectm-pcm buffer back to the worklet's allocation pool. */
-    returnPcmBuffer: "returnPcmBuffer"
+    returnPcmBuffer: "returnPcmBuffer",
+    /** Shared position/VU ring (audio-worklet/positionRing.ts); replaces `position` messages when sent. */
+    setPositionRing: "setPositionRing"
   };
   var WORKLET_TO_MAIN = {
     position: "position",
@@ -34,6 +36,195 @@
   };
   var ALL_MAIN_TO_WORKLET_TYPES = Object.values(MAIN_TO_WORKLET);
   var ALL_WORKLET_TO_MAIN_TYPES = Object.values(WORKLET_TO_MAIN);
+  var MAX_VU_CHANNELS = 64;
+  var OSC_BUFFER_MIN_BYTES = (2048 + 16) * 4;
+  var req = (kind) => ({ kind });
+  var opt = (kind) => ({ kind, optional: true });
+  var MAIN_TO_WORKLET_SPEC = {
+    [MAIN_TO_WORKLET.initLib]: {
+      fields: { scriptText: req("nonEmptyString"), wasmBytes: opt("arrayBuffer") }
+    },
+    [MAIN_TO_WORKLET.load]: { fields: { moduleData: req("modulePayload") } },
+    [MAIN_TO_WORKLET.play]: { fields: {} },
+    [MAIN_TO_WORKLET.pause]: { fields: {} },
+    [MAIN_TO_WORKLET.seek]: {
+      fields: { order: req("nonNegInt"), row: req("nonNegInt"), timestamp: opt("finite") }
+    },
+    [MAIN_TO_WORKLET.getOscBuffer]: { fields: {} },
+    [MAIN_TO_WORKLET.setAudioLite]: { fields: { lite: req("boolean") } },
+    [MAIN_TO_WORKLET.setProjectmPcm]: { fields: { enabled: req("boolean") } },
+    [MAIN_TO_WORKLET.setAudioDiag]: { fields: { enabled: req("boolean") } },
+    [MAIN_TO_WORKLET.setChannelMute]: { fields: { channel: req("nonNegInt"), muted: req("boolean") } },
+    [MAIN_TO_WORKLET.setRenderParam]: { fields: { param: req("finite"), value: req("finite") } },
+    [MAIN_TO_WORKLET.ctlSetText]: { fields: { key: req("string"), value: req("string") } },
+    [MAIN_TO_WORKLET.returnPcmBuffer]: { fields: { buffer: req("float32Array") } },
+    [MAIN_TO_WORKLET.setPositionRing]: { fields: { buffer: req("sharedArrayBuffer") } }
+  };
+  var LEGACY_LOAD_SPEC = { fields: { moduleData: req("modulePayload") } };
+  var WORKLET_TO_MAIN_SPEC = {
+    [WORKLET_TO_MAIN.position]: {
+      fields: {
+        order: req("nonNegInt"),
+        row: req("nonNegInt"),
+        rowFraction: opt("finite"),
+        positionSeconds: req("finite"),
+        bpm: req("finite"),
+        speed: opt("finite"),
+        /** Audio timeline of the pre-render snapshot (preferred name). */
+        audioTime: opt("finite"),
+        /** Alias of audioTime kept for older handlers. */
+        workletTime: opt("finite"),
+        samplesWritten: opt("nonNegInt"),
+        sampleRate: opt("finite"),
+        channelVU: { kind: "finiteArray", optional: true, maxLength: MAX_VU_CHANNELS }
+      }
+    },
+    [WORKLET_TO_MAIN.loaded]: { fields: {} },
+    [WORKLET_TO_MAIN.ended]: { fields: {} },
+    [WORKLET_TO_MAIN.seekAck]: { fields: {} },
+    [WORKLET_TO_MAIN.error]: {
+      fields: {
+        message: req("string"),
+        /** process() caught a wasm trap and silenced output: the node needs a restart. */
+        fatal: opt("boolean")
+      }
+    },
+    [WORKLET_TO_MAIN.oscBuffer]: {
+      fields: { buffer: { kind: "sharedArrayBuffer", minBytes: OSC_BUFFER_MIN_BYTES } }
+    },
+    [WORKLET_TO_MAIN.needData]: { fields: {}, passthrough: true },
+    [WORKLET_TO_MAIN.starvation]: { fields: {}, passthrough: true },
+    [WORKLET_TO_MAIN.projectmPcm]: {
+      fields: {
+        buffer: req("float32Array"),
+        channels: req("pcmChannels"),
+        sampleRate: opt("finite"),
+        samplesPerChannel: opt("nonNegInt")
+      }
+    },
+    [WORKLET_TO_MAIN.audioDiag]: {
+      fields: {
+        budgetMs: req("finite"),
+        quanta: req("nonNegInt"),
+        avgProcessMs: req("finite"),
+        maxProcessMs: req("finite"),
+        overruns: req("nonNegInt"),
+        wraps: req("nonNegInt"),
+        wrapMaxProcessMs: req("finite"),
+        wrapOverruns: req("nonNegInt"),
+        order: req("nonNegInt"),
+        row: req("nonNegInt"),
+        audioTime: opt("finite"),
+        /** Quantum that set maxProcessMs in this window (not necessarily the wrap). */
+        slowMs: opt("finite"),
+        slowOrder: opt("nonNegInt"),
+        slowRow: opt("nonNegInt"),
+        pcmEnabled: opt("boolean"),
+        audioLite: opt("boolean"),
+        /** First wrap windows' maxProcessMs (session; wrap-0 vs wrap-N). */
+        wrapProcessMs: opt("finiteArray"),
+        /** Worst scheduling gap in this window (late callback), ms. */
+        maxCallbackGapMs: opt("finite"),
+        heapBytes: opt("nonNegInt"),
+        heapMoves: opt("nonNegInt"),
+        playingChannels: opt("nonNegInt")
+      }
+    }
+  };
+
+  // audio-worklet/workletProtocolGuard.ts
+  function compileFields(spec) {
+    return Object.keys(spec.fields).map((name) => ({ name, spec: spec.fields[name] }));
+  }
+  function compileTable(table) {
+    const out = {};
+    for (const type of Object.keys(table)) out[type] = compileFields(table[type]);
+    return out;
+  }
+  var MAIN_TO_WORKLET_FIELDS = compileTable(MAIN_TO_WORKLET_SPEC);
+  var WORKLET_TO_MAIN_FIELDS = compileTable(WORKLET_TO_MAIN_SPEC);
+  var LEGACY_LOAD_FIELDS = compileFields(LEGACY_LOAD_SPEC);
+  var hasOwn = Object.prototype.hasOwnProperty;
+  var lastError = "";
+  function protocolError() {
+    return lastError;
+  }
+  function isFinite(value) {
+    return typeof value === "number" && Number.isFinite(value);
+  }
+  function fieldValueMatches(spec, value) {
+    switch (spec.kind) {
+      case "nonNegInt":
+        return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+      case "finite":
+        return isFinite(value);
+      case "boolean":
+        return typeof value === "boolean";
+      case "string":
+        return typeof value === "string";
+      case "nonEmptyString":
+        return typeof value === "string" && value.length > 0;
+      case "arrayBuffer":
+        return value instanceof ArrayBuffer;
+      case "modulePayload":
+        return value instanceof ArrayBuffer || value instanceof Uint8Array;
+      case "float32Array":
+        return value instanceof Float32Array;
+      case "sharedArrayBuffer":
+        return typeof SharedArrayBuffer !== "undefined" && value instanceof SharedArrayBuffer && (spec.minBytes === void 0 || value.byteLength >= spec.minBytes);
+      case "finiteArray": {
+        if (!Array.isArray(value)) return false;
+        if (spec.maxLength !== void 0 && value.length > spec.maxLength) return false;
+        for (let i = 0; i < value.length; i++) {
+          if (!isFinite(value[i])) return false;
+        }
+        return true;
+      }
+      case "pcmChannels":
+        return value === 1 || value === 2;
+      default: {
+        const exhaustive = spec.kind;
+        return exhaustive;
+      }
+    }
+  }
+  function checkFields(fields, data) {
+    for (let i = 0; i < fields.length; i++) {
+      const field = fields[i];
+      const value = data[field.name];
+      if (value === void 0) {
+        if (field.spec.optional) continue;
+        lastError = `missing field "${field.name}"`;
+        return false;
+      }
+      if (!fieldValueMatches(field.spec, value)) {
+        lastError = `field "${field.name}" is not a valid ${field.spec.kind}`;
+        return false;
+      }
+    }
+    return true;
+  }
+  function isRecord(value) {
+    return value !== null && typeof value === "object" && !Array.isArray(value);
+  }
+  function validate(table, data, direction) {
+    if (!isRecord(data)) {
+      lastError = "message is not an object";
+      return false;
+    }
+    const type = data.type;
+    if (typeof type !== "string" || !hasOwn.call(table, type)) {
+      lastError = `unknown ${direction} message type: ${String(type)}`;
+      return false;
+    }
+    return checkFields(table[type], data);
+  }
+  function validateMainToWorklet(data) {
+    if (isRecord(data) && data.type === void 0) {
+      return checkFields(LEGACY_LOAD_FIELDS, data) ? data : null;
+    }
+    return validate(MAIN_TO_WORKLET_FIELDS, data, "main\u2192worklet") ? data : null;
+  }
 
   // audio-worklet/libSingleton.ts
   function hasWasmBytes(wasmBytes) {
@@ -139,88 +330,6 @@
   }
   function error(...args) {
     console.error("[Worklet]", ...args);
-  }
-  function isObject(v) {
-    return v != null && typeof v === "object";
-  }
-  function isFiniteNumber(v) {
-    return typeof v === "number" && Number.isFinite(v);
-  }
-  function isNonNegInt(v) {
-    return typeof v === "number" && Number.isInteger(v) && v >= 0;
-  }
-  function isModulePayload(v) {
-    return v instanceof ArrayBuffer || v instanceof Uint8Array;
-  }
-  function parseMainToWorkletMessage(data) {
-    if (!isObject(data)) {
-      return { ok: false, error: "message is not an object" };
-    }
-    const type = data.type;
-    if (type === MAIN_TO_WORKLET.initLib) {
-      if (typeof data.scriptText !== "string" || data.scriptText.length === 0) {
-        return { ok: false, error: "initLib requires scriptText" };
-      }
-      if (data.wasmBytes != null && !(data.wasmBytes instanceof ArrayBuffer)) {
-        return { ok: false, error: "wasmBytes must be ArrayBuffer" };
-      }
-      return { ok: true, message: data };
-    }
-    if (type === MAIN_TO_WORKLET.load) {
-      if (!isModulePayload(data.moduleData)) {
-        return { ok: false, error: "load requires moduleData" };
-      }
-      return { ok: true, message: data };
-    }
-    if (type === MAIN_TO_WORKLET.play || type === MAIN_TO_WORKLET.pause || type === MAIN_TO_WORKLET.getOscBuffer) {
-      return { ok: true, message: data };
-    }
-    if (type === MAIN_TO_WORKLET.seek) {
-      if (!isNonNegInt(data.order) || !isNonNegInt(data.row)) {
-        return { ok: false, error: "seek requires order/row" };
-      }
-      return { ok: true, message: data };
-    }
-    if (type === MAIN_TO_WORKLET.setAudioLite) {
-      if (typeof data.lite !== "boolean") {
-        return { ok: false, error: "setAudioLite requires lite boolean" };
-      }
-      return { ok: true, message: data };
-    }
-    if (type === MAIN_TO_WORKLET.setProjectmPcm || type === MAIN_TO_WORKLET.setAudioDiag) {
-      if (typeof data.enabled !== "boolean") {
-        return { ok: false, error: String(type) + " requires enabled boolean" };
-      }
-      return { ok: true, message: data };
-    }
-    if (type === MAIN_TO_WORKLET.setChannelMute) {
-      if (!isNonNegInt(data.channel) || typeof data.muted !== "boolean") {
-        return { ok: false, error: "setChannelMute requires channel/muted" };
-      }
-      return { ok: true, message: data };
-    }
-    if (type === MAIN_TO_WORKLET.setRenderParam) {
-      if (!isFiniteNumber(data.param) || !isFiniteNumber(data.value)) {
-        return { ok: false, error: "setRenderParam requires param/value" };
-      }
-      return { ok: true, message: data };
-    }
-    if (type === MAIN_TO_WORKLET.ctlSetText) {
-      if (typeof data.key !== "string" || typeof data.value !== "string") {
-        return { ok: false, error: "ctlSetText requires key/value strings" };
-      }
-      return { ok: true, message: data };
-    }
-    if (type === MAIN_TO_WORKLET.returnPcmBuffer) {
-      if (!(data.buffer instanceof Float32Array)) {
-        return { ok: false, error: "returnPcmBuffer requires a Float32Array buffer" };
-      }
-      return { ok: true, message: data };
-    }
-    if (type == null && isModulePayload(data.moduleData)) {
-      return { ok: true, message: data };
-    }
-    return { ok: false, error: "unknown main\u2192worklet message type: " + String(type) };
   }
   function moduleBytesFromPayload(moduleData) {
     if (moduleData instanceof Uint8Array) {
@@ -354,12 +463,11 @@
         }, 3e4);
       }
       this.port.onmessage = async (e) => {
-        const parsed = parseMainToWorkletMessage(e.data);
-        if (!parsed.ok) {
-          error("Rejected main\u2192worklet message:", parsed.error, e.data);
+        const msg = validateMainToWorklet(e.data);
+        if (!msg) {
+          error("Rejected main\u2192worklet message:", protocolError(), e.data);
           return;
         }
-        const msg = parsed.message;
         const type = msg.type;
         log("Received message:", type || "(legacy-load)");
         if (type === MT.initLib) {
@@ -860,7 +968,7 @@
       }
       if (shouldReportPosition) {
         const numCh = lib._openmpt_module_get_num_channels(mod);
-        const n = Math.min(numCh, 32);
+        const n = Math.min(numCh, MAX_VU_CHANNELS);
         let channelVU = this._channelVuArr;
         if (channelVU.length !== n) {
           channelVU = new Array(n);
