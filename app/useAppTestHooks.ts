@@ -29,6 +29,8 @@ export interface UseAppTestHooksParams {
   liteMode: boolean;
   getMasterGainValue: () => number | null;
   getMasterPanValue: () => number | null;
+  /** Engine that is really rendering (null before the first start); `activeEngine` is only the selection. */
+  getPlaybackEngine: () => string | null;
   applyAudioMasterLevels: (volume: number, pan: number) => void;
   volume: number;
   pan: number;
@@ -53,6 +55,7 @@ export function useAppTestHooks(params: UseAppTestHooksParams): void {
     liteMode,
     getMasterGainValue,
     getMasterPanValue,
+    getPlaybackEngine,
     applyAudioMasterLevels,
     volume,
     pan,
@@ -167,6 +170,9 @@ export function useAppTestHooks(params: UseAppTestHooksParams): void {
       getPlaybackRowFraction: () => playbackStateRef.current.playheadRow,
       getActiveRenderer: () => window.currentPatternRenderer?.backend ?? null,
       getAudioEngine: () => activeEngine,
+      // A failed native start falls back to the JS worklet while `activeEngine` can still say
+      // native (CLAUDE.md pitfall 15) — parity checks must read this one (#491).
+      getPlaybackEngine,
       getLiteMode: () => liteMode,
       getShaderFile: () => {
         const raw = localStorage.getItem('xasm1_last_shader');
@@ -241,5 +247,5 @@ export function useAppTestHooks(params: UseAppTestHooksParams): void {
       setMasterPan: (value: number) => applyAudioMasterLevels(volume, Math.max(-1, Math.min(1, value))),
     };
     return () => { delete window.__TEST_HOOKS__; };
-  }, [seekToStep, stopMusic, pause, playGuarded, isPlaying, isPaused, isModuleLoaded, sequencerMatrix, loadFile, setPlaybackRowFraction, playbackStateRef, activeEngine, liteMode, getMasterGainValue, getMasterPanValue, applyAudioMasterLevels, volume, pan]);
+  }, [seekToStep, stopMusic, pause, playGuarded, isPlaying, isPaused, isModuleLoaded, sequencerMatrix, loadFile, setPlaybackRowFraction, playbackStateRef, activeEngine, liteMode, getMasterGainValue, getMasterPanValue, getPlaybackEngine, applyAudioMasterLevels, volume, pan]);
 }

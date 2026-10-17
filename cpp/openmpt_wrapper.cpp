@@ -208,8 +208,9 @@ void OpenMPTModule::fillPositionInfo(PositionInfo& out) const {
         out.currentPattern = openmpt_module_get_order_pattern(mod_, out.currentOrder);
     }
 
-    // Integer rowFraction: GetLength/time-at-row is O(song) and must stay off
-    // the audio thread. Main thread extrapolates with BPM.
+    // Integer here: GetLength/time-at-row is O(song) and must stay off the
+    // audio thread. audio_process_cb adds the in-row fraction from the song
+    // position at the row's start (cheap, no GetLength).
 
     // Per-channel VU
     getChannelVU(out.channelVU, MAX_VU_CHANNELS);

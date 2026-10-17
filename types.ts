@@ -393,6 +393,8 @@ declare global {
       getPlayheadDebug: () => PlayheadDebugSnapshot | null;
       getMasterGainValue: () => number | null;
       getMasterPanValue: () => number | null;
+      /** Engine actually rendering ('worklet' | 'native-worklet' | 'scriptprocessor'), null before the first start. */
+      getPlaybackEngine: () => string | null;
       setMasterVolume: (value: number) => void;
       setMasterPan: (value: number) => void;
     };
