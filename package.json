@@ -63,6 +63,7 @@
     "smoke:audio": "node scripts/audio-smoke.mjs",
     "smoke:audio:ci": "AUDIO_SMOKE_HEADLESS=1 node scripts/audio-smoke.mjs",
     "smoke:fx:ci": "node scripts/fx-smoke.mjs",
+    "smoke:webgl2-context": "node scripts/webgl2-context-loss-smoke.mjs",
     "gen:irs": "node scripts/generate-irs.mjs",
     "verify:irs": "node scripts/generate-irs.mjs --check",
     "check:cycles": "madge --circular --extensions ts,tsx src/renderers hooks/useWebGPURender.ts",
