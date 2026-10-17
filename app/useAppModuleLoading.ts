@@ -2,15 +2,11 @@ import { useState, useCallback, useMemo } from 'react';
 import type { MutableRefObject } from 'react';
 import { computeModuleHash } from '../appConfig';
 import type { SongSaveRequest } from '../utils/storageApi';
-import type { PatternMatrix } from '../types';
+import { usePlayerEngine, usePlayerEngineInstance } from '../hooks/usePlayerEngine';
+import { useShaderPrefsStore } from '../store/shaderPrefsStore';
 
 export interface UseAppModuleLoadingParams {
-  loadFile: (fileData: Uint8Array, fileName: string) => void | Promise<void>;
-  setModuleHash: (hash: string) => void;
   patternEditDirtyRef: MutableRefObject<boolean>;
-  isModuleLoaded: boolean;
-  status: string;
-  sequencerMatrix: PatternMatrix | null;
   playlistItems: Array<{ fileName: string }>;
   playlistCurrentIndex: number;
 }
@@ -25,16 +21,12 @@ export interface UseAppModuleLoadingResult {
 }
 
 export function useAppModuleLoading(params: UseAppModuleLoadingParams): UseAppModuleLoadingResult {
-  const {
-    loadFile,
-    setModuleHash,
-    patternEditDirtyRef,
-    isModuleLoaded,
-    status,
-    sequencerMatrix,
-    playlistItems,
-    playlistCurrentIndex,
-  } = params;
+  const { patternEditDirtyRef, playlistItems, playlistCurrentIndex } = params;
+  const engine = usePlayerEngineInstance();
+  const isModuleLoaded = usePlayerEngine((s) => s.isModuleLoaded);
+  const moduleTitle = usePlayerEngine((s) => s.moduleInfo.title);
+  const numChannels = usePlayerEngine((s) => s.sequencerMatrix?.numChannels ?? 0);
+  const setModuleHash = useShaderPrefsStore((s) => s.setModuleHash);
 
   const [currentModuleFileName, setCurrentModuleFileName] = useState<string>('');
   const [moduleSourceUrl, setModuleSourceUrl] = useState<string | null>(null);
@@ -48,8 +40,8 @@ export function useAppModuleLoading(params: UseAppModuleLoadingParams): UseAppMo
     }
     setModuleHash(computeModuleHash(fileData));
     setCurrentModuleFileName(fileName);
-    loadFile(fileData, fileName);
-  }, [loadFile, setModuleHash, patternEditDirtyRef]);
+    void engine.loadFile(fileData, fileName);
+  }, [engine, setModuleHash, patternEditDirtyRef]);
 
   const handleFileSelected = useCallback(async (file: File) => {
     const arrayBuffer = await file.arrayBuffer();
@@ -60,17 +52,17 @@ export function useAppModuleLoading(params: UseAppModuleLoadingParams): UseAppMo
 
   const activeModuleForSave = useMemo((): SongSaveRequest | null => {
     if (!isModuleLoaded) return null;
-    const title = status.replace(/^Loaded "/, '').replace(/"$/, '') || 'Unknown';
+    // The module's title (it used to be parsed from the status line, which says "Playing..." mid-song).
+    const title = moduleTitle || 'Unknown';
     const currentItem = playlistItems[playlistCurrentIndex];
     const fileName = currentItem?.fileName;
     const req: SongSaveRequest = { title };
     if (fileName) req.fileName = fileName;
     const extension = fileName?.split('.').pop()?.trim().toLowerCase();
     if (extension) req.format = extension;
-    const numChannels = sequencerMatrix?.numChannels;
-    if (numChannels && numChannels > 0) req.channelCount = numChannels;
+    if (numChannels > 0) req.channelCount = numChannels;
     return req;
-  }, [isModuleLoaded, status, playlistItems, playlistCurrentIndex, sequencerMatrix]);
+  }, [isModuleLoaded, moduleTitle, playlistItems, playlistCurrentIndex, numChannels]);
 
   return {
     currentModuleFileName,

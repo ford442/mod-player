@@ -1,18 +1,23 @@
 import { Panel } from './Panel';
 import { PatternEditor } from './PatternEditor';
 import { IS_PUBLIC_MODE } from '../appConfig';
-import { usePlayerSession } from '../context/PlayerSessionContext';
+import { usePlayerEngine } from '../hooks/usePlayerEngine';
+import { usePlayerActions } from '../hooks/usePlayerView';
 import { usePlayerFeatures } from '../context/PlayerFeaturesContext';
 import { usePlayerUiStore } from '../store/playerUiStore';
 
 /** Pattern editor overlay, shown only while `editMode` is on (chrome mode only). */
 export function PatternEditorSection() {
-  const session = usePlayerSession();
   const features = usePlayerFeatures();
   const { editMode, selectedInstrumentIndex } = usePlayerUiStore();
 
   const showDevSurface = !IS_PUBLIC_MODE;
-  const { sequencerMatrix, playbackRowFraction, isPlaying, seekToStep } = session;
+  const visible = showDevSurface && editMode;
+  const sequencerMatrix = usePlayerEngine((s) => s.sequencerMatrix);
+  // Row-rate: subscribed only while the editor is on screen.
+  const playbackRowFraction = usePlayerEngine((s) => (visible ? s.playbackRowFraction : 0));
+  const isPlaying = usePlayerEngine((s) => s.isPlaying);
+  const { seekToStep } = usePlayerActions();
   const {
     patternEditDirty = false,
     onPatternCellEdit,

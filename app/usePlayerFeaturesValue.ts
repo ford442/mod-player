@@ -30,23 +30,20 @@ export interface UsePlayerFeaturesValueParams {
   mediaVisible: boolean;
   mediaFades: { in: number; out: number };
   currentModuleFileName: string;
-  moduleMediaHintText: string;
   setMediaVisible: (v: boolean) => void;
   setMediaItem: (item: MediaItem | null) => void;
   handleMediaRemove: (id: string) => void;
   setMediaFades: React.Dispatch<React.SetStateAction<{ in: number; out: number }>>;
   handleMediaAdd: (file: File) => void;
   handleRemoteMediaSelect: (item: MediaItem) => void;
+  handleFileSelected: (file: File) => void;
   shadersQuery: ShadersQuery;
   shaderCatalogErrorMessage: string | null;
   rateShaderMutation: RateShaderMutation;
-  validShaderFavorites: string[];
-  validShaderRecents: string[];
   localLibrary: LocalLibrary;
   activeLibraryEntryId: string | null;
   handleLocalLibraryPlay: (entry: import('../types/localLibrary').LibraryEntry) => Promise<void>;
   playlist: Playlist;
-  isPlaying: boolean;
   handlePlaylistSelect: (index: number) => void;
   handlePlaylistPrev: () => void;
   handlePlaylistNext: () => void;
@@ -74,7 +71,6 @@ export interface UsePlayerFeaturesValueParams {
   isExporting: boolean;
   captureState: PerformanceCaptureState;
   isRecording: boolean;
-  activeEngine: string;
 }
 
 export function usePlayerFeaturesValue(params: UsePlayerFeaturesValueParams): PlayerFeaturesValue {
@@ -85,23 +81,20 @@ export function usePlayerFeaturesValue(params: UsePlayerFeaturesValueParams): Pl
     mediaVisible,
     mediaFades,
     currentModuleFileName,
-    moduleMediaHintText,
     setMediaVisible,
     setMediaItem,
     handleMediaRemove,
     setMediaFades,
     handleMediaAdd,
     handleRemoteMediaSelect,
+    handleFileSelected,
     shadersQuery,
     shaderCatalogErrorMessage,
     rateShaderMutation,
-    validShaderFavorites,
-    validShaderRecents,
     localLibrary,
     activeLibraryEntryId,
     handleLocalLibraryPlay,
     playlist,
-    isPlaying,
     handlePlaylistSelect,
     handlePlaylistPrev,
     handlePlaylistNext,
@@ -129,7 +122,6 @@ export function usePlayerFeaturesValue(params: UsePlayerFeaturesValueParams): Pl
     isExporting,
     captureState,
     isRecording,
-    activeEngine,
   } = params;
 
   return useMemo((): PlayerFeaturesValue => ({
@@ -139,20 +131,18 @@ export function usePlayerFeaturesValue(params: UsePlayerFeaturesValueParams): Pl
     mediaVisible,
     mediaFades,
     moduleMediaFileName: currentModuleFileName,
-    moduleMediaHintText,
     setMediaVisible,
     setMediaItem,
     onMediaRemove: handleMediaRemove,
     onMediaFadesChange: setMediaFades,
     handleMediaAdd,
     handleRemoteMediaSelect,
+    handleFileSelected,
     shaderCatalog: shadersQuery.data ?? [],
     shaderCatalogLoading: shadersQuery.isLoading || shadersQuery.isFetching,
     shaderCatalogError: shaderCatalogErrorMessage,
     onRateShader: async (shaderId, score) => { await rateShaderMutation.mutateAsync({ id: shaderId, score }); },
     ratingInFlightShaderId: rateShaderMutation.isPending ? rateShaderMutation.variables?.id ?? null : null,
-    validShaderFavorites,
-    validShaderRecents,
     localLibraryRoots: localLibrary.roots,
     localLibraryLoading: localLibrary.isLoading,
     localLibraryImporting: localLibrary.isImporting,
@@ -168,7 +158,6 @@ export function usePlayerFeaturesValue(params: UsePlayerFeaturesValueParams): Pl
     onLocalLibraryPlay: handleLocalLibraryPlay,
     playlistItems: playlist.items,
     playlistCurrentIndex: playlist.currentIndex,
-    playlistIsPlaying: isPlaying,
     playlistShuffle: playlist.shuffle,
     playlistRepeat: playlist.repeat,
     onPlaylistSelect: handlePlaylistSelect,
@@ -214,15 +203,15 @@ export function usePlayerFeaturesValue(params: UsePlayerFeaturesValueParams): Pl
     getRendererBackend: () => window.currentPatternRenderer?.backend ?? null,
   }), [
     setIs3DMode, copyShareLink, mediaItem, mediaVisible, mediaFades, currentModuleFileName,
-    moduleMediaHintText, handleMediaRemove, handleMediaAdd, handleRemoteMediaSelect,
+    handleMediaRemove, handleMediaAdd, handleRemoteMediaSelect, handleFileSelected,
     shadersQuery.data, shadersQuery.isLoading, shadersQuery.isFetching, shaderCatalogErrorMessage,
-    rateShaderMutation, validShaderFavorites, validShaderRecents, localLibrary, activeLibraryEntryId,
-    handleLocalLibraryPlay, playlist, isPlaying, handlePlaylistSelect, handlePlaylistPrev,
+    rateShaderMutation, localLibrary, activeLibraryEntryId,
+    handleLocalLibraryPlay, playlist, handlePlaylistSelect, handlePlaylistPrev,
     handlePlaylistNext, handlePlaylistFilesAdded, songsQuery, libraryErrorMessage,
     handleLibrarySongLoad, syncLibraryMutation, activeModuleForSave, saveSongMutation,
     saveSongErrorMessage, patternEdit, handlePatternCellEdit, handlePatternCellPatch,
     handlePatternCellClear, handleSequencerCellEdit, handlePatternRevert, handleExportPatternDump,
     midiControls, handleExportWav, handleStartCapture, stopCapture, offlineExportState,
-    isExporting, captureState, isRecording, activeEngine, setMediaVisible, setMediaItem, setMediaFades,
+    isExporting, captureState, isRecording, setMediaVisible, setMediaItem, setMediaFades,
   ]);
 }

@@ -29,11 +29,13 @@ mod-player/
 ├── types.ts                     # Core TypeScript interfaces (PatternCell, ChannelShadowState, etc.)
 │
 ├── app/                         # App-level hooks split out of App.tsx (keyboard actions, playlist, media, test hooks, lazy 3D shell)
-├── context/                     # PlayerSession / PlayerFeatures contexts (refs stay on mutable objects, not Zustand)
+├── context/                     # PlayerFeatures context (library / media / export callbacks from App — no player state)
 ├── store/                       # Zustand stores (player UI, shader prefs, local library, fxStore: FX rack state + per-song presets)
+├── audio/engine/                # PlayerEngine (#492): the player as a framework-free object — transport FSM, refs bag, snapshot store, command bindings
 ├── hooks/
-│   ├── useLibOpenMPT.ts         # PRIMARY AUDIO HOOK — composes the pieces below
-│   ├── libOpenMPT/              # Refs/state, module loading, transport actions, UI loop (createUpdateUI)
+│   ├── usePlayerEngine.ts       # React binding: usePlayerEngine(selector) via useSyncExternalStore; usePlayerView.ts derives from it
+│   ├── useLibOpenMPT.ts         # Mounts the engine (init / dispose) — no longer holds player state
+│   ├── libOpenMPT/              # Action factories the engine composes: module loading, transport actions, UI loop (createUpdateUI)
 │   ├── audioGraph/              # Engine start paths: JS worklet, native C++ worklet, ScriptProcessor fallback
 │   └── useKeyboardShortcuts.ts, usePlaylist.ts, useWebGPURender.ts, …
 │
@@ -87,7 +89,7 @@ npm run preview      # Preview production build locally
 npm run typecheck    # TypeScript type-check only (no emit): app + vite/vitest configs + scripts/ (tsconfig.node.json, tsconfig.scripts.json)
 npm run preflight    # Run before every commit: CI's `lint-and-build` job *is* this chain (stops at first failure, no network needed after `npm ci`)
 npm run verify:lockfile # package-lock.json metadata guard (lockfileVersion 3, resolved + integrity)
-npm run lint         # ESLint (max 27 warnings budget; hard CI gate)
+npm run lint         # ESLint (max 7 warnings budget; hard CI gate)
 npm run build:emcc   # Native C++ worklet → openmpt-native.* (scripts/build-wasm.sh, emsdk 3.1.51)
 npm run build:worklet # Alias of build:emcc (never overwrites openmpt-worklet.js)
 npm run build:js-worklet # Compile the typed worklets (openmpt-processor.ts → openmpt-worklet.js, fx-character-processor.ts → fx-character-worklet.js; esbuild)
@@ -119,13 +121,14 @@ Toggle `webgpu`/`html` via debug panel (🔍), `localStorage.xasm1_pattern_rende
 
 Audio logic is split strictly between two contexts that **cannot share state directly**.
 
-### Main Thread (`hooks/useLibOpenMPT.ts`)
+### Main Thread (`audio/engine/PlayerEngine.ts`, mounted by `hooks/useLibOpenMPT.ts`)
 - Initializes the self-hosted real-WASM libopenmpt (`window.libopenmptReady` promise; see pitfall 4)
 - Loads module files into WASM memory (`libopenmpt_module_create_from_memory2()`)
 - Acquires the one shared `AudioContext` from `utils/audioContextFactory.ts` and attempts to use `AudioWorkletNode`; falls back to `ScriptProcessorNode`
 - Sends control messages to the worklet via `port.postMessage()`
-- Reads current row/channel state from WASM, double-buffers via mutable refs (`channelStatesRef`) to avoid React re-render floods
+- Reads current row/channel state from WASM, double-buffers via mutable refs (`channelStatesRef`, owned by the engine) to avoid React re-render floods
 - Performs drift detection and timing correction for audio-visual sync
+- React *observes* it (pitfall 17): components select snapshot fields with `usePlayerEngine(selector)`; the command bus, MIDI and `mediaSession` dispatch `EngineCommand`s
 
 ### Worklet Thread (`audio-worklet/js/openmpt-processor.ts`, compiled to `public/worklets/openmpt-worklet.js`)
 - Runs the actual libopenmpt render loop at the AudioContext sample rate (locked to 48 kHz, pitfall 12)
@@ -228,11 +231,11 @@ EngineState           // Worklet engine lifecycle state
 
 8. **ScriptProcessorNode fallback:** When debugging audio glitches, determine which path is active (Worklet vs. ScriptProcessor). The messaging structure differs between the two.
 
-9. **Race conditions in audio-visual sync:** `channelStatesRef` is a double-buffered mutable ref. Do not replace it with React state — it will cause jank.
+9. **Race conditions in audio-visual sync:** `channelStatesRef` is a double-buffered mutable ref owned by the PlayerEngine. Do not replace it with React state — it will cause jank. Render loops (the GPU, `ChannelMeters`) read it every frame; the snapshot only carries a ≤10 Hz copy.
 
 10. **MOD/XM playback regressions (#329 / #330):** libopenmpt must init **once** per `AudioWorkletGlobalScope`; reuse the worklet node on module reload; never `suspend()` `AudioContext` on normal stop; throttle worklet `position` postMessage to ~60 Hz; skip `node.disconnect()` on hot reload. See `docs/WORKLET_AUDIO_BUG.md` and `tests/workletAudioLifecycle.test.ts`.
 
-11. **JS worklet is generated (#435):** `public/worklets/openmpt-worklet.js` is compiled from `audio-worklet/js/openmpt-processor.ts` via `npm run build:js-worklet` (esbuild → classic IIFE script; AudioWorklet globals still can't `import()` reliably). It carries a `// generated — do not edit` header; edit the TS source instead, then rebuild. CI fails if the committed file drifts from a fresh build. `hooks/useWorkletLoader.ts`'s cache-busting `?v=` comes from a content hash in `audio-worklet/js/worklet-version.generated.json` (also written by the build script) — no manual version bump. `audio-worklet/workletProtocolConstants.ts` is the single source of message-type strings, imported by both `audio-worklet/protocol.ts` (main thread) and the processor source (bundled in) — there is no separate classic-script mirror. The same script builds the FX rack's character stage (#453): `audio-worklet/js/fx-character-processor.ts` → `public/worklets/fx-character-worklet.js`, versioned by its own `audio-worklet/js/fx-character-version.generated.json`, sharing its param contract with the main thread through `audio-worklet/fxCharacterParams.ts`. Its kernels (`audio-worklet/js/fx/`) must not allocate in `process()`: staged block loops with state in locals (no per-sample call that passes or returns a double), and a numeric initializer on every numeric field (the ES2020 bundle defines bare fields as `undefined`, which V8 then stores tagged). `tests/fxCharacterAlloc.test.ts` and the `@noalloc` source guard enforce this.
+11. **JS worklet is generated (#435):** `public/worklets/openmpt-worklet.js` is compiled from `audio-worklet/js/openmpt-processor.ts` via `npm run build:js-worklet` (esbuild → classic IIFE script; AudioWorklet globals still can't `import()` reliably). It carries a `// generated — do not edit` header; edit the TS source instead, then rebuild. CI fails if the committed file drifts from a fresh build. `audio/engine/workletUrls.ts`'s cache-busting `?v=` comes from a content hash in `audio-worklet/js/worklet-version.generated.json` (also written by the build script) — no manual version bump. `audio-worklet/workletProtocolConstants.ts` is the single source of message-type strings, imported by both `audio-worklet/protocol.ts` (main thread) and the processor source (bundled in) — there is no separate classic-script mirror. The same script builds the FX rack's character stage (#453): `audio-worklet/js/fx-character-processor.ts` → `public/worklets/fx-character-worklet.js`, versioned by its own `audio-worklet/js/fx-character-version.generated.json`, sharing its param contract with the main thread through `audio-worklet/fxCharacterParams.ts`. Its kernels (`audio-worklet/js/fx/`) must not allocate in `process()`: staged block loops with state in locals (no per-sample call that passes or returns a double), and a numeric initializer on every numeric field (the ES2020 bundle defines bare fields as `undefined`, which V8 then stores tagged). `tests/fxCharacterAlloc.test.ts` and the `@noalloc` source guard enforce this.
 
 ---
 
@@ -275,12 +278,13 @@ EngineState           // Worklet engine lifecycle state
     re-renders PatternDisplay while the debug panel is open.
 
 15. **Transport is stopped / playing / paused — and pause is not stop (#461):**
-    `isPlaying` and `isPaused` are mutually exclusive (`deriveTransportState`).
+    `isPlaying` and `isPaused` are mutually exclusive — both are derived from
+    the transport FSM's phase (pitfall 17).
     *Pause* (`createPauseMusic`) silences the engine but keeps its cursor, the
     clock refs and the last position sample; *stop* resets all of those. Never
     implement pause with `stopMusic`, `AudioContext.suspend()` (pitfall 10) or a
     new worklet message — it is `postPause()` / native `pause()` / the
-    ScriptProcessor callback reading `isPausedRef`. The playhead is
+    ScriptProcessor callback reading `isPausedRef` (a view of the FSM). The playhead is
     *extrapolated* from the last position sample on the audio clock, and that
     clock does not pause, so `utils/transportClock.ts` caps heard time while
     paused and rebases the stale sample on resume; skip that and resume jumps
@@ -316,17 +320,42 @@ EngineState           // Worklet engine lifecycle state
     per-song FX keys are SHA-256 fingerprints (`utils/songFingerprint.ts`),
     not `computeModuleHash`.
 
+17. **The player is a PlayerEngine React observes; the transport is an FSM (#492):**
+    `audio/engine/PlayerEngine.ts` owns the engine handles, the refs bag
+    (`audio/engine/engineRefs.ts`) and a snapshot store; it imports no React
+    (ESLint rule + `tests/playerEngineImports.test.ts` over the whole import
+    graph). The transport is one value, `phase` (idle / loading / ready /
+    playing / paused / stopped / faulted / recovering / spFallback), changed
+    only by `transport.send(event, to)` against the table in
+    `audio/engine/transport.ts` — an illegal edge throws in dev and tests.
+    **Never write a transport flag:** `isPlayingRef` / `isPausedRef` are views
+    of the FSM (writes are ignored); the start paths report through
+    `callbacks.setIsPlaying(true | false)` (= `started` / `fault`), and a report
+    that no longer fits the phase is stale (the engine silences it). Other
+    former duplicates are views too: `seekAcknowledgedRef` ↔ `pendingSeekRef`,
+    `spFallbackTriggered` ↔ `playbackEngineRef`, `workletLoadedRef` per
+    AudioContext. React reads with `usePlayerEngine(selector, isEqual?)`
+    (`hooks/usePlayerEngine.ts`) — select narrowly: a component re-renders for
+    the fields it selects, so keep row-rate fields (`playbackRowFraction`,
+    `playbackSeconds`) in small leaf components (`LiveSeekBar`). Transport /
+    seek / volume / pan / loop / mute commands are `EngineCommand`s
+    (`audio/engine/engineCommands.ts`); the bus validates MIDI payloads there.
+    Master volume / pan / mute are engine state (`setMasterVolume` — the
+    GainNode only, pitfall 16). Start-path config is live (getters), and
+    `processModuleData` drops a parse superseded by a newer load.
+
 ## Critical Data Flows
 
 ### Module Load → Playback
 ```
 User drops .mod file
-  → App.tsx calls loadModule() on useLibOpenMPT hook
-  → WASM allocates memory, parses module
+  → useAppModuleLoading → engine.loadFile() (FSM: stop → load → loading)
+  → WASM allocates memory, parses module (→ parsed → ready, or paused when cued) → engine.play() (start → loading)
   → AudioContext created → AudioWorkletNode (or ScriptProcessorNode) connected
   → Worklet starts audio render loop
-  → Main thread polling loop reads row/channel state from WASM
-  → React updates sequencerMatrix state
+  → Worklet's `loaded` ack → setIsPlaying(true) → FSM started → playing
+  → Main thread UI loop (createUpdateUI) reads row/channel state, writes the engine snapshot
+  → Components that select sequencerMatrix re-render (usePlayerEngine)
   → PatternDisplay receives new matrix → packs data → writes to GPU buffers → draw call
 ```
 
@@ -377,6 +406,8 @@ All shared canvas layout values live here:
 - **Do not** hand-edit `package-lock.json` — regenerate it with `npm install`
 - **Do not** reintroduce `shaderFile.includes('v0.XX')` chains — extend `ShaderMeta` instead
 - **Do not** replace `channelStatesRef` with React state
+- **Do not** write `isPlayingRef` / `isPausedRef` or add another transport flag — send a transport FSM event (pitfall 17)
+- **Do not** import React (or a React state library) into `audio/engine/`, `hooks/audioGraph/` or the `hooks/libOpenMPT/` factories
 - **Do not** use DOM APIs inside the AudioWorklet processor
 - **Do not** add broad glob patterns to `tailwind.config.js`
 - **Do not** remove the Vite CORS headers (breaks SharedArrayBuffer / WASM workers)

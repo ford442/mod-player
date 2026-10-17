@@ -26,7 +26,7 @@ Every request carries `?v=<content hash>` so a browser/service-worker cache can 
 
 ### Load sequence (worklet)
 
-1. Main thread: `audioWorklet.addModule(…/openmpt-worklet.js?v=N)` (`hooks/useWorkletLoader.ts`; `?v=` is a content hash of the compiled processor, from `audio-worklet/js/worklet-version.generated.json` — no manual bump needed).
+1. Main thread: `audioWorklet.addModule(…/openmpt-worklet.js?v=N)` (`audio/engine/workletUrls.ts`; `?v=` is a content hash of the compiled processor, from `audio-worklet/js/worklet-version.generated.json` — no manual bump needed).
 2. Main thread creates `AudioWorkletNode` with processor name `openmpt-processor`.
 3. Main thread fetches `libopenmpt-worklet.js` **and** `libopenmpt-worklet.wasm` in parallel and rejects anything wrong *here* (HTML 404 body, missing `\0asm` magic, a stale wasm2js glue).
 4. Main thread `postMessage({ type: 'initLib', scriptText, wasmBytes }, [wasmBytes])`, then `setRenderParam` (interpolation) and `load`.
@@ -71,7 +71,7 @@ npm run build:emcc
 | `npm run build:emcc` → `openmpt-native.*` | Write Emscripten glue as `openmpt-worklet.js` |
 | Keep tracked `openmpt-worklet.js` as JS processor | `rm -rf public/worklets` before build |
 
-Probed at runtime by `OpenMPTWorkletEngine` / `useWorkletLoader`. Root `./build-wasm.sh` only forwards to `scripts/build-wasm.sh`.
+Probed at runtime by `OpenMPTWorkletEngine` / `audio/engine/workletUrls.ts`. Root `./build-wasm.sh` only forwards to `scripts/build-wasm.sh`.
 
 ### Engine selection precedence
 

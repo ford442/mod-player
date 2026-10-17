@@ -315,6 +315,8 @@ declare global {
     __AUDIO_DIAG__?: AudioDiagSnapshot;
     /** Main-thread/GPU pattern-boundary timings (when ?patternDiag=1 or ?audioDiag=1) */
     __PATTERN_DIAG__?: PatternDiagSnapshot;
+    /** The page's PlayerEngine, in dev builds only (#492) — for the console and headless debugging. */
+    __PLAYER_ENGINE__?: import('./audio/engine/PlayerEngine').PlayerEngine;
     /** Headless Chrome / Playwright automation hooks (dev + CI) */
     __TEST_HOOKS__?: {
       /** FX rack (#453): drive the store like the panel / MIDI would. */

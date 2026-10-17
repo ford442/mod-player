@@ -199,10 +199,6 @@ export function sharePaletteFromMode(mode: number): 'instrument' | 'pitch' {
   return mode === 1 ? 'instrument' : 'pitch';
 }
 
-export function computeSeekStep(order: number, row: number, rowsPerPattern: number): number {
-  return Math.max(0, order * rowsPerPattern + row);
-}
-
 /** Fetch a short code payload from the storage API. */
 export async function resolveShareCode(code: string): Promise<PlayerShareState | null> {
   const trimmed = code.trim();

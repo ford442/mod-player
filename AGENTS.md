@@ -43,7 +43,7 @@ Managed by `hooks/useLibOpenMPT.ts`. Responsibilities:
 ### 2. JS AudioWorklet Engine
 Files: `public/worklets/openmpt-worklet.js` + `libopenmpt-worklet.{js,wasm}` (tracked in git)
 - `openmpt-worklet.js` is **generated** from `audio-worklet/js/openmpt-processor.ts` via `npm run build:js-worklet` (esbuild) — edit the TS source, never the generated file (#435).
-- Processor is an `AudioWorkletProcessor` loaded via `audioWorklet.addModule()` (cache-busted `?v=` — a content hash from `audio-worklet/js/worklet-version.generated.json`, via `useWorkletLoader.ts`).
+- Processor is an `AudioWorkletProcessor` loaded via `audioWorklet.addModule()` (cache-busted `?v=` — a content hash from `audio-worklet/js/worklet-version.generated.json`, via `audio/engine/workletUrls.ts`).
 - Main thread fetches `libopenmpt-worklet.js` (~100 KB Emscripten glue) **and** `libopenmpt-worklet.wasm` (~1.7 MB, **real WebAssembly**) and posts `{ type: 'initLib', scriptText, wasmBytes }` into the worklet; the worklet evaluates the glue with `new Function` (classic scripts cannot `import()` / `importScripts()`) seeded with `Module.wasmBinary`, then **waits for `onRuntimeInitialized`** (`audio-worklet/libRuntimeReady.ts` — never infer readiness from `_openmpt_*` existing).
 - **The same `libopenmpt-worklet.{js,wasm}` pair also serves the main thread (`<script>`) and the parser worker** — one artifact, built by `npm run build:js-libopenmpt` (emsdk 3.1.51; see `public/worklets/README.md`). It never replaces `globalThis.WebAssembly` (the old wasm2js `libmpt/` glue did; that workaround is gone). There is no wasm2js / JS-only path: `initLib` without `wasmBytes` is rejected. Do not commit an HTML/404 body as the `.wasm`, and do not export a real `stringToUTF8` from the glue (the app's polyfill has a different signature).
 - Interpolation defaults to Sinc+LP (8) on the JS engine; `?interp=4` opts down to cubic.
@@ -117,10 +117,11 @@ Tracker cells are bit-packed into `Uint32Array` before upload to the GPU:
 ## Directory Map
 - **`/components`** – React UI elements (`App.tsx`, `PatternDisplay.tsx`, `Controls.tsx`, `Studio3D.tsx`, `MediaOverlay.tsx`, `ChannelMeters.tsx`, `PatternSequencer.tsx`, `Playlist.tsx`, `SeekBar.tsx`, etc.)
 - **`/src/renderers`** – Pattern renderer selection, WebGPU engine (`webgpu/WebGPURenderer.ts`), WebGL2 reference (`webgl2/`), and HTML fallback wrapper. Shared per-frame params live in `params.ts`; backend types in `types.ts` must **not** import hooks. Run `npm run check:cycles` before merging renderer refactors.
+- **`/audio/engine`** – `PlayerEngine.ts` (#492): the player as a framework-free object React observes — transport FSM (`transport.ts`), refs bag (`engineRefs.ts`), snapshot store (`store.ts`), command-bus and mediaSession bindings, worklet URLs (`workletUrls.ts`)
 - **`/hooks`** – Core logic hooks
-  - `useLibOpenMPT.ts` – Main audio bridge and state
-  - `useAudioGraph.ts` – Audio graph construction and playback start
-  - `useWorkletLoader.ts` – AudioWorklet module loading with retry/diagnostics
+  - `usePlayerEngine.ts` – `usePlayerEngine(selector)`: components select engine snapshot fields (useSyncExternalStore); `usePlayerView.ts` derives from it
+  - `useLibOpenMPT.ts` – Mounts the PlayerEngine (init / dispose)
+  - `useAudioGraph.ts` – Audio graph construction and playback start (composed by the engine)
   - `usePlaylist.ts`, `useKeyboardShortcuts.ts`, `useWebGPURender.ts` (thin React glue; GPU logic in `src/renderers/webgpu/`), `useWebGLOverlay.ts`
 - **`/audio-worklet`** – `js/openmpt-processor.ts` (the JS worklet processor source), the modules esbuild bundles into it (`libRuntimeReady.ts`, `workletProtocolConstants.ts`), the main-thread side of the message protocol (`protocol.ts`, `jsWorkletDispatch.ts`), and the native C++ engine wrapper (`OpenMPTWorkletEngine.ts`, `types.ts`, `diagnostics.ts`)
 - **`/cpp`** – C++ source for the native worklet (`openmpt_wrapper.cpp`, `openmpt_wrapper.h`, `worklet_processor.cpp`, `pre.js`)
@@ -151,7 +152,7 @@ npm run dev        # Vite dev server (needs WebGPU-enabled browser, e.g., Chrome
 ```bash
 npm run build           # tsc && vite build
 npm run typecheck       # tsc --noEmit
-npm run lint            # eslint . --max-warnings 27 (hard CI gate; ratchet down over time)
+npm run lint            # eslint . --max-warnings 7 (hard CI gate; ratchet down over time)
 npm run preview         # Preview the production build locally
 ```
 
@@ -205,7 +206,7 @@ python3 deploy.py
 - **Fix comments:** The codebase prefixes engineering fixes with identifiers like `AUDIO-001 FIX` and `TIMING FIX`.
 - **Base URL awareness:** Almost all asset URLs are constructed with `import.meta.env.BASE_URL` so the app works when deployed under a subdirectory.
 - **React patterns:** Functional components with hooks only; no class components. State for UI logic; mutable refs for high-frequency audio data. Props are preferred over context except for deeply nested state.
-- **ESLint:** Configured in `eslint.config.js` (typescript-eslint + react-hooks + react-refresh). `npm run lint` runs `eslint . --max-warnings 27` (exactly the current warning count) and is a **hard CI gate**. Ratchet the budget down as warnings are fixed; never raise it.
+- **ESLint:** Configured in `eslint.config.js` (typescript-eslint + react-hooks + react-refresh). `npm run lint` runs `eslint . --max-warnings 7` (exactly the current warning count) and is a **hard CI gate**. Ratchet the budget down as warnings are fixed; never raise it.
 
 ## Testing
 - **Unit tests (Vitest):** `npm test` runs the full suite (`tests/**/*.test.ts`) — packing, duration parity, trigger tails, shader includes, share state, pattern edit, WAV encoder, and more. Use `npm run test:watch` during development. Focused scripts: `test:shader-includes`, `test:duration-parity`, `test:trigger-tail`, `test:octave-brightness`.

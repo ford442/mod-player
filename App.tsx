@@ -1,17 +1,13 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useCallback } from 'react';
 import { MainLayout } from './components/MainLayout';
-import { ProjectMEmbedView } from './components/ProjectMEmbedView';
 import { useLibOpenMPT } from './hooks/useLibOpenMPT';
-import { usePlayerEngine, usePlayerEngineInstance } from './hooks/usePlayerEngine';
+import { usePlayerEngine } from './hooks/usePlayerEngine';
+import { useDisplayShader } from './hooks/usePlayerView';
 import { usePlaylist } from './hooks/usePlaylist';
 import { useMidiControls } from './hooks/useMidiControls';
 import { useLibrary, useSaveSong, useSyncLibrary } from './hooks/useLibrary';
 import { useLocalLibrary } from './hooks/useLocalLibrary';
 import { useRateShader } from './hooks/useRateShader';
-import { startProjectMBridge } from './utils/projectMBridge';
-import { startAnalyserAnalysis } from './utils/audioAnalysisBus';
-import { supportsStepsLength, usesOscilloscope } from './utils/shaderVersion';
-import { preserveWindowScroll } from './utils/scrollContainer';
 import { useToast } from './hooks/useToast';
 import { usePlayerShare } from './hooks/usePlayerShare';
 import { useOpenGraph } from './hooks/useOpenGraph';
@@ -21,132 +17,46 @@ import type { ExportSampleRate } from './utils/wavEncoder';
 import { useFxRackBootstrap } from './hooks/useFxRackBootstrap';
 import { useFxStore } from './store/fxStore';
 import { usePerformanceCapture } from './hooks/usePerformanceCapture';
-import { PlayerSessionProvider } from './context/PlayerSessionContext';
 import { PlayerFeaturesProvider } from './context/PlayerFeaturesContext';
-import { usePlayerUiStore } from './store/playerUiStore';
-import { useShaderPrefsStore } from './store/shaderPrefsStore';
-import { LIGHT_THEMES, IS_PROJECTM_EMBED, IS_PUBLIC_MODE } from './appConfig';
+import { IS_PROJECTM_EMBED, IS_PUBLIC_MODE } from './appConfig';
 import { App3DModeShell } from './app/App3DModeShell';
+import { ProjectMEmbedHost } from './app/ProjectMEmbedHost';
 import { useAppTestHooks } from './app/useAppTestHooks';
 import { usePwaRegistration } from './app/usePwaRegistration';
 import { useAppMedia } from './app/useAppMedia';
 import { useAppDerivedState } from './app/useAppDerivedState';
+import { useAppAudioTaps, useAppPresentationEffects } from './app/useAppEffects';
 import { useAppModuleLoading } from './app/useAppModuleLoading';
 import { useAppPlaylistHandlers } from './app/useAppPlaylistHandlers';
 import { useAppKeyboardActions } from './app/useAppKeyboardActions';
 import { useAppPatternEdit, usePatternEditDirtyRef } from './app/useAppPatternEdit';
-import { usePlayerSessionValue } from './app/usePlayerSessionValue';
 import { usePlayerFeaturesValue } from './app/usePlayerFeaturesValue';
 
+/**
+ * Composition root. It mounts the PlayerEngine and wires the app-level features (library, playlist,
+ * media, export, share); it no longer threads player state or UI-store values down — components
+ * select what they need from the engine (hooks/usePlayerEngine.ts) and the stores (#492). App itself
+ * re-renders only on coarse changes (a module loaded, an order change), never per row.
+ */
 function App() {
   useFxRackBootstrap();
-  const theme = usePlayerUiStore((s) => s.theme);
-  const setTheme = usePlayerUiStore((s) => s.setTheme);
-  const liteMode = usePlayerUiStore((s) => s.liteMode);
-  const setLiteMode = usePlayerUiStore((s) => s.setLiteMode);
-  const cheatsheetOpen = usePlayerUiStore((s) => s.cheatsheetOpen);
-  const setCheatsheetOpen = usePlayerUiStore((s) => s.setCheatsheetOpen);
-  const editMode = usePlayerUiStore((s) => s.editMode);
-  const clearInstrumentSelection = usePlayerUiStore((s) => s.clearInstrumentSelection);
+  const engine = useLibOpenMPT();
+  useAppPresentationEffects();
+  useAppAudioTaps();
+  useAppKeyboardActions();
+  useAppTestHooks();
+  usePwaRegistration();
 
-  const shaderFile = useShaderPrefsStore((s) => s.storedShader);
-  const shaderFavorites = useShaderPrefsStore((s) => s.shaderFavorites);
-  const shaderRecents = useShaderPrefsStore((s) => s.shaderRecents);
-  const shaderThumbnails = useShaderPrefsStore((s) => s.shaderThumbnails);
-  const setShaderThumbnails = useShaderPrefsStore((s) => s.setShaderThumbnails);
-  const setModuleHash = useShaderPrefsStore((s) => s.setModuleHash);
-  const bloomPreset = useShaderPrefsStore((s) => s.bloomPreset);
-  const setBloomPreset = useShaderPrefsStore((s) => s.setBloomPreset);
-  const colorScheme = useShaderPrefsStore((s) => s.colorScheme);
-  const setColorScheme = useShaderPrefsStore((s) => s.setColorScheme);
-  const colorPalette = useShaderPrefsStore((s) => s.colorPalette);
-  const setColorPalette = useShaderPrefsStore((s) => s.setColorPalette);
-  const paletteMode = useShaderPrefsStore((s) => s.paletteMode);
-  const setPaletteMode = useShaderPrefsStore((s) => s.setPaletteMode);
-  const setStepsLength = useShaderPrefsStore((s) => s.setStepsLength);
-  const nightModeEnabled = useShaderPrefsStore((s) => s.nightModeEnabled);
-  const nightModePreset = useShaderPrefsStore((s) => s.nightModePreset);
-  const markSkipModuleShaderRestore = useShaderPrefsStore((s) => s.markSkipModuleShaderRestore);
-  const setShaderFile = useShaderPrefsStore((s) => s.selectShader);
-
-  // Master volume / pan / mute belong to the engine (#492); the commands and the sliders both go there.
-  const engine = usePlayerEngineInstance();
-  const volume = usePlayerEngine((s) => s.volume);
-  const pan = usePlayerEngine((s) => s.pan);
-  const setVolume = useCallback(
-    (v: number | ((prev: number) => number)) => engine.setMasterVolume(v),
-    [engine],
-  );
-  const setPan = useCallback((v: number) => engine.setMasterPan(v), [engine]);
+  const isModuleLoaded = usePlayerEngine((s) => s.isModuleLoaded);
+  const moduleTitle = usePlayerEngine((s) => s.moduleInfo.title);
+  const { shaderFile } = useDisplayShader();
 
   const [is3DMode, setIs3DMode] = useState<boolean>(false);
-  const isDarkMode = !LIGHT_THEMES.has(theme);
   const [viewMode, setViewMode] = useState<'device' | 'wall'>('device');
   // DOM node inside the R3F 3D studio's pattern-display panel (when open).
   // PerformanceStage teleports its live PatternDisplay into this node instead
   // of App3DView constructing a second instance — see Problem A.
   const [studioDisplayHost, setStudioDisplayHost] = useState<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    document.documentElement.setAttribute('data-theme', theme);
-  }, [theme]);
-
-  const isStepsShader = supportsStepsLength(shaderFile);
-  useEffect(() => {
-    if (!isStepsShader) setStepsLength(32);
-  }, [isStepsShader, setStepsLength]);
-
-  const {
-    isReady,
-    isModuleLoaded,
-    isPlaying,
-    isPaused,
-    pause,
-    isLooping,
-    playbackSeconds,
-    playbackRowFraction,
-    setPlaybackRowFraction,
-    totalPatternRows,
-    sequencerMatrix,
-    channelStates,
-    moduleInfo,
-    instrumentNames,
-    sampleNames,
-    moduleFormat,
-    instrumentTable,
-    moduleComments,
-    beatPhase,
-    grooveAmount,
-    kickTrigger,
-    activeChannels,
-    play,
-    stopMusic,
-    loadFile,
-    setIsLooping,
-    seekToStep,
-    applyMasterLevels: applyAudioMasterLevels,
-    getMasterGainValue,
-    getMasterPanValue,
-    replacePatternMatrix,
-    moduleDurationSeconds,
-    moduleFileName,
-    getModuleFileData,
-    toggleChannelMute,
-    getAudioContext,
-    getAudioTapNode,
-    activeEngine,
-    isWorkletSupported,
-    toggleAudioEngine,
-    status,
-    syncDebug,
-    analyserNode,
-    playbackStateRef,
-    channelStatesRef,
-    workletLoadError,
-    oscBufferRef,
-    audioReactiveRef,
-    requestOscBuffer,
-  } = useLibOpenMPT(liteMode);
 
   const { state: offlineExportState, exportWav, isExporting } = useOfflineExport();
   const {
@@ -156,69 +66,31 @@ function App() {
     isRecording,
   } = usePerformanceCapture();
 
-  const channelMuteMask = useMemo(
-    () => channelStates.map((ch) => (ch?.isMuted ?? 0) > 0),
-    [channelStates],
-  );
-
+  // Read at click time — none of this needs App to re-render while it changes.
   const handleExportWav = useCallback(async (sampleRate: ExportSampleRate) => {
-    const fileData = getModuleFileData();
+    const fileData = engine.getModuleFileData();
     if (!fileData) return;
+    const { moduleFileName, channelStates } = engine.getSnapshot();
+    const muteMask = channelStates.map((ch) => (ch?.isMuted ?? 0) > 0);
     await exportWav({
       fileData,
       fileName: moduleFileName || 'export.mod',
       sampleRate,
-      ...(channelMuteMask.some(Boolean) ? { muteMask: channelMuteMask } : {}),
+      ...(muteMask.some(Boolean) ? { muteMask } : {}),
       // What plays is what's exported (#453): the effective FX rack, if any module is on.
       fx: useFxStore.getState().exportSnapshot(),
     });
-  }, [channelMuteMask, exportWav, getModuleFileData, moduleFileName]);
+  }, [engine, exportWav]);
 
   const handleStartCapture = useCallback(async () => {
     const renderer = window.currentPatternRenderer;
     await startCapture({
       getRenderer: () => renderer,
-      audioContext: getAudioContext(),
-      audioTapNode: getAudioTapNode(),
+      audioContext: engine.getAudioContext(),
+      audioTapNode: engine.getAudioTapNode(),
       preferWebGL2: true,
     });
-  }, [getAudioContext, getAudioTapNode, startCapture]);
-
-  const playGuarded = useCallback(() => {
-    preserveWindowScroll(() => play());
-  }, [play]);
-
-  useAppTestHooks({
-    seekToStep,
-    stopMusic,
-    pause,
-    playGuarded,
-    isPlaying,
-    isPaused,
-    getAudioContext,
-    isModuleLoaded,
-    sequencerMatrix,
-    loadFile,
-    setPlaybackRowFraction,
-    playbackStateRef,
-    activeEngine,
-    liteMode,
-    getMasterGainValue,
-    getMasterPanValue,
-    applyAudioMasterLevels,
-    volume,
-    pan,
-  });
-
-  useEffect(() => {
-    const stopBridge = startProjectMBridge(analyserNode);
-    return stopBridge;
-  }, [analyserNode]);
-
-  // Fallback producer for the analysis bus. Parks itself while the WebGPU
-  // compute pass is publishing, so on a GPU-capable session this costs one idle
-  // RAF tick and no analyser reads; in lite mode it is the only producer.
-  useEffect(() => startAnalyserAnalysis(analyserNode), [analyserNode]);
+  }, [engine, startCapture]);
 
   const {
     mediaVisible,
@@ -249,64 +121,23 @@ function App() {
     handleFileSelected,
     activeModuleForSave,
   } = useAppModuleLoading({
-    loadFile,
-    setModuleHash,
     patternEditDirtyRef,
-    isModuleLoaded,
-    status,
-    sequencerMatrix,
     playlistItems: playlist.items,
     playlistCurrentIndex: playlist.currentIndex,
   });
 
   const {
-    channelVU,
-    moduleMetadata,
-    validShaderFavorites,
-    validShaderRecents,
     libraryErrorMessage,
     shaderCatalogErrorMessage,
     saveSongErrorMessage,
     syncLibraryErrorMessage,
-    moduleMediaHintText,
-    isNightShader,
-    nightConfig,
-    dimFactor,
-    displayShaderFile,
-    instrumentPalette,
     sharePageUrl,
   } = useAppDerivedState({
-    channelStates,
-    isModuleLoaded,
-    sequencerMatrix,
-    status,
-    activeEngine,
-    totalPatternRows,
-    instrumentNames,
-    sampleNames,
-    moduleFormat,
-    moduleComments,
-    moduleDurationSeconds,
-    moduleFileName,
-    clearInstrumentSelection,
-    shaderFile,
-    shaderFavorites,
-    shaderRecents,
-    shaderThumbnails,
-    setShaderThumbnails,
     songsQueryError: songsQuery.error,
     shadersQueryError: shadersQuery.error,
     saveSongMutationError: saveSongMutation.error,
     syncLibraryMutationError: syncLibraryMutation.error,
-    liteMode,
-    isDarkMode,
-    nightModeEnabled,
-    nightModePreset,
     moduleSourceUrl,
-    moduleInfoOrder: moduleInfo.order,
-    moduleInfoRow: moduleInfo.row,
-    paletteMode,
-    colorPalette,
     mediaItem,
   });
 
@@ -317,119 +148,37 @@ function App() {
     localLibrary,
   });
 
-  useAppKeyboardActions();
-
-  usePwaRegistration();
-
   const midiControls = useMidiControls();
-
-  useEffect(() => {
-    if (usesOscilloscope(displayShaderFile)) {
-      requestOscBuffer();
-    }
-  }, [displayShaderFile, requestOscBuffer]);
 
   const { toasts, showToast, dismissToast } = useToast();
 
   const patternModuleKey = isModuleLoaded
-    ? `${moduleSourceUrl ?? ''}|${moduleInfo.title}`
+    ? `${moduleSourceUrl ?? ''}|${moduleTitle}`
     : null;
 
   const patternEditHandlers = useAppPatternEdit({
-    sequencerMatrix,
-    replacePatternMatrix,
     patternModuleKey,
     isExporting,
-    moduleFileName,
     currentModuleFileName,
-    editMode,
     patternEditDirtyRef,
   });
 
   const { copyShareLink } = usePlayerShare({
-    isReady,
-    isModuleLoaded,
-    sequencerMatrix,
-    shaderFile,
-    paletteMode,
-    liteMode,
-    colorPalette,
     moduleSourceUrl,
-    moduleOrder: moduleInfo.order,
-    moduleRow: moduleInfo.row,
     mediaItem,
-    setShaderFile,
-    setPaletteMode,
-    setColorPalette,
-    setLiteMode,
     setModuleSourceUrl,
     loadFileWithHash,
-    seekToStep,
     setMediaItem,
     setMediaVisible,
     showToast,
-    onShareShaderApplied: markSkipModuleShaderRestore,
   });
 
   useOpenGraph({
-    ...(moduleMetadata?.title
-      ? { title: `${moduleMetadata.title} · MOD Player` }
-      : {}),
-    ...(moduleMetadata
-      ? { description: `Listen to "${moduleMetadata.title}" with shader ${shaderFile}` }
+    ...(isModuleLoaded ? { title: `${moduleTitle} · MOD Player` } : {}),
+    ...(isModuleLoaded
+      ? { description: `Listen to "${moduleTitle}" with shader ${shaderFile}` }
       : {}),
     url: sharePageUrl,
-  });
-
-  const playerSession = usePlayerSessionValue({
-    isReady,
-    isModuleLoaded,
-    isPlaying,
-    isPaused,
-    isLooping,
-    playbackSeconds,
-    playbackRowFraction,
-    totalPatternRows,
-    sequencerMatrix,
-    channelStates,
-    beatPhase,
-    grooveAmount,
-    kickTrigger,
-    activeChannels,
-    volume,
-    pan,
-    status,
-    activeEngine,
-    isWorkletSupported,
-    syncDebug,
-    workletLoadError,
-    analyserNode,
-    channelVU,
-    moduleMetadata,
-    moduleFileName,
-    moduleDurationSeconds,
-    instrumentTable,
-    channelMuteMask,
-    displayShaderFile,
-    instrumentPalette,
-    dimFactor,
-    isNightShader,
-    isStepsShader,
-    nightConfig,
-    playbackStateRef,
-    channelStatesRef,
-    oscBufferRef,
-    audioReactiveRef,
-    playGuarded,
-    pause,
-    stopMusic,
-    seekToStep,
-    setIsLooping,
-    setVolume,
-    setPan,
-    handleFileSelected,
-    toggleAudioEngine,
-    toggleChannelMute,
   });
 
   const playerFeatures = usePlayerFeaturesValue({
@@ -439,23 +188,20 @@ function App() {
     mediaVisible,
     mediaFades,
     currentModuleFileName,
-    moduleMediaHintText,
     setMediaVisible,
     setMediaItem,
     handleMediaRemove,
     setMediaFades,
     handleMediaAdd,
     handleRemoteMediaSelect,
+    handleFileSelected,
     shadersQuery,
     shaderCatalogErrorMessage,
     rateShaderMutation,
-    validShaderFavorites,
-    validShaderRecents,
     localLibrary,
     activeLibraryEntryId: playlistHandlers.activeLibraryEntryId,
     handleLocalLibraryPlay: playlistHandlers.handleLocalLibraryPlay,
     playlist,
-    isPlaying,
     handlePlaylistSelect: playlistHandlers.handlePlaylistSelect,
     handlePlaylistPrev: playlistHandlers.handlePlaylistPrev,
     handlePlaylistNext: playlistHandlers.handlePlaylistNext,
@@ -483,77 +229,31 @@ function App() {
     isExporting,
     captureState,
     isRecording,
-    activeEngine,
   });
 
   if (IS_PROJECTM_EMBED) {
-    return (
-      <ProjectMEmbedView
-        status={status}
-        isReady={isReady}
-        isModuleLoaded={isModuleLoaded}
-        isPlaying={isPlaying}
-        isLooping={isLooping}
-        playbackSeconds={playbackSeconds}
-        playbackRow={Math.floor(playbackRowFraction)}
-        totalRows={totalPatternRows}
-        moduleTitle={moduleMetadata?.title ?? null}
-        play={playGuarded}
-        stopMusic={stopMusic}
-        seekToStep={seekToStep}
-        setIsLooping={setIsLooping}
-        handleFileSelected={handleFileSelected}
-      />
-    );
+    return <ProjectMEmbedHost handleFileSelected={handleFileSelected} />;
   }
 
   return (
     <>
-      <PlayerSessionProvider value={playerSession}>
-        <PlayerFeaturesProvider value={playerFeatures}>
-          <MainLayout studioDisplayHost={studioDisplayHost} />
-        </PlayerFeaturesProvider>
-      </PlayerSessionProvider>
+      <PlayerFeaturesProvider value={playerFeatures}>
+        <MainLayout studioDisplayHost={studioDisplayHost} />
+      </PlayerFeaturesProvider>
       {is3DMode && !IS_PUBLIC_MODE && (
         <App3DModeShell
-          isDarkMode={isDarkMode}
           viewMode={viewMode}
           setViewMode={setViewMode}
           setIs3DMode={setIs3DMode}
-          setTheme={setTheme}
-          dimFactor={dimFactor}
-          status={status}
-          isModuleLoaded={isModuleLoaded}
-          syncDebug={syncDebug}
-          isPlaying={isPlaying}
-          isPaused={isPaused}
-          playbackSeconds={playbackSeconds}
-          channelStates={channelStates}
-          volume={volume}
-          pan={pan}
-          isLooping={isLooping}
-          play={playGuarded}
-          pause={pause}
-          stopMusic={stopMusic}
-          setIsLooping={setIsLooping}
-          setVolume={setVolume}
-          setPan={setPan}
           handleFileSelected={handleFileSelected}
           handleMediaAdd={handleMediaAdd}
           handleRemoteMediaSelect={handleRemoteMediaSelect}
           onStudioDisplayHostChange={setStudioDisplayHost}
-          bloomPreset={bloomPreset}
-          setBloomPreset={setBloomPreset}
-          colorScheme={colorScheme}
-          setColorScheme={setColorScheme}
           mediaItem={mediaItem}
           mediaVisible={mediaVisible}
           setMediaVisible={setMediaVisible}
           setMediaItem={setMediaItem}
           mediaFades={mediaFades}
-          isReady={isReady}
-          cheatsheetOpen={cheatsheetOpen}
-          setCheatsheetOpen={setCheatsheetOpen}
         />
       )}
       <ToastStack toasts={toasts} onDismiss={dismissToast} />

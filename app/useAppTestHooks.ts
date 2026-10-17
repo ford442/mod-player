@@ -1,5 +1,4 @@
 import { useEffect } from 'react';
-import type { MutableRefObject } from 'react';
 import {
   calculateNoteDurations,
   packPatternMatrixHighPrecision,
@@ -8,55 +7,16 @@ import {
 } from '../utils/gpuPacking';
 import { usesCircularRowPaging } from '../utils/shaderVersion';
 import { circularPageStart, overlayActualRow } from '../utils/playheadPrediction';
-import type { PatternMatrix, PlaybackState } from '../types';
-import { deriveTransportState } from '../utils/transportClock';
 import { useFxStore } from '../store/fxStore';
+import { usePlayerUiStore } from '../store/playerUiStore';
+import { usePlayerEngineInstance } from '../hooks/usePlayerEngine';
 
-export interface UseAppTestHooksParams {
-  seekToStep: (step: number) => void;
-  stopMusic: (ended?: boolean) => void;
-  pause: () => void;
-  playGuarded: () => void;
-  isPlaying: boolean;
-  isPaused: boolean;
-  getAudioContext: () => AudioContext | null | undefined;
-  isModuleLoaded: boolean;
-  sequencerMatrix: PatternMatrix | null;
-  loadFile: (fileData: Uint8Array, fileName: string) => void | Promise<void>;
-  setPlaybackRowFraction: (value: number) => void;
-  playbackStateRef: MutableRefObject<PlaybackState>;
-  activeEngine: string;
-  liteMode: boolean;
-  getMasterGainValue: () => number | null;
-  getMasterPanValue: () => number | null;
-  applyAudioMasterLevels: (volume: number, pan: number) => void;
-  volume: number;
-  pan: number;
-}
-
-/** Headless Chrome / Playwright automation hooks (dev server + CI captures). */
-export function useAppTestHooks(params: UseAppTestHooksParams): void {
-  const {
-    seekToStep,
-    stopMusic,
-    pause,
-    playGuarded,
-    isPlaying,
-    isPaused,
-    getAudioContext,
-    isModuleLoaded,
-    sequencerMatrix,
-    loadFile,
-    setPlaybackRowFraction,
-    playbackStateRef,
-    activeEngine,
-    liteMode,
-    getMasterGainValue,
-    getMasterPanValue,
-    applyAudioMasterLevels,
-    volume,
-    pan,
-  } = params;
+/**
+ * Headless Chrome / Playwright automation hooks (dev server + CI captures). They read the PlayerEngine
+ * when called (#492), so they are installed once instead of on every transport or pattern change.
+ */
+export function useAppTestHooks(): void {
+  const engine = usePlayerEngineInstance();
 
   useEffect(() => {
     window.__TEST_HOOKS__ = {
@@ -68,26 +28,27 @@ export function useAppTestHooks(params: UseAppTestHooksParams): void {
           return { rackStatus: s.rackStatus, moduleStatus: s.moduleStatus, effective: s.effective };
         },
       },
-      seekToRow: (row: number) => seekToStep(row),
-      stopPlayback: () => stopMusic(false),
-      startPlayback: () => playGuarded(),
-      pausePlayback: () => pause(),
-      getIsPlaying: () => isPlaying,
-      getTransportState: () => deriveTransportState(isPlaying, isPaused),
-      getAudioContextState: () => getAudioContext()?.state ?? 'none',
+      seekToRow: (row: number) => engine.seekToStep(row),
+      stopPlayback: () => engine.stop(false),
+      startPlayback: () => { void engine.play(); },
+      pausePlayback: () => engine.pause(),
+      getIsPlaying: () => engine.getSnapshot().isPlaying,
+      getTransportState: () => engine.getSnapshot().transportState,
+      getAudioContextState: () => engine.getAudioContext()?.state ?? 'none',
       // #411 acceptance: a JS play and an ?engine=native play in the same tab
       // must report the same state and rate — there is one context per session.
-      getAudioContextSampleRate: () => getAudioContext()?.sampleRate ?? 0,
-      isModuleLoaded: () => isModuleLoaded,
+      getAudioContextSampleRate: () => engine.getAudioContext()?.sampleRate ?? 0,
+      isModuleLoaded: () => engine.getSnapshot().isModuleLoaded,
       getPatternRenderer: () => window.currentPatternRenderer,
       loadModuleFromUrl: async (url: string) => {
         const resp = await fetch(url);
         if (!resp.ok) throw new Error(`fetch failed: ${resp.status}`);
         const buf = new Uint8Array(await resp.arrayBuffer());
         const name = url.split('/').pop() || 'module.mod';
-        await loadFile(buf, name);
+        await engine.loadFile(buf, name);
       },
       getTriggerTailStats: () => {
+        const sequencerMatrix = engine.getSnapshot().sequencerMatrix;
         if (!sequencerMatrix) return null;
         const d = calculateNoteDurations(sequencerMatrix);
         let triggers = 0;
@@ -107,6 +68,7 @@ export function useAppTestHooks(params: UseAppTestHooksParams): void {
       },
       /** Per-row note + TRIG-001 state for Playwright / grok cli verification */
       getRowNotes: (row: number) => {
+        const sequencerMatrix = engine.getSnapshot().sequencerMatrix;
         if (!sequencerMatrix) return null;
         const d = calculateNoteDurations(sequencerMatrix);
         const raw = sequencerMatrix.rows[row] ?? [];
@@ -130,6 +92,7 @@ export function useAppTestHooks(params: UseAppTestHooksParams): void {
       },
       /** Packed GPU cell + trigger bit for cross-check against duration oracle */
       getPackedCell: (row: number, ch: number) => {
+        const sequencerMatrix = engine.getSnapshot().sequencerMatrix;
         if (!sequencerMatrix) return null;
         const { packedData } = packPatternMatrixHighPrecision(sequencerMatrix, false);
         const cols = sequencerMatrix.numChannels;
@@ -155,19 +118,12 @@ export function useAppTestHooks(params: UseAppTestHooksParams): void {
         };
       },
       /** Force fractional playhead for paging regression (does not move audio) */
-      setPlayheadFraction: (value: number) => {
-        playbackStateRef.current = {
-          ...playbackStateRef.current,
-          playheadRow: value,
-          lastUpdateTimestamp: performance.now() / 1000,
-        };
-        setPlaybackRowFraction(value);
-      },
-      getPlaybackRow: () => Math.floor(playbackStateRef.current.playheadRow),
-      getPlaybackRowFraction: () => playbackStateRef.current.playheadRow,
+      setPlayheadFraction: (value: number) => engine.setPlayheadForTest(value),
+      getPlaybackRow: () => Math.floor(engine.playbackStateRef.current.playheadRow),
+      getPlaybackRowFraction: () => engine.playbackStateRef.current.playheadRow,
       getActiveRenderer: () => window.currentPatternRenderer?.backend ?? null,
-      getAudioEngine: () => activeEngine,
-      getLiteMode: () => liteMode,
+      getAudioEngine: () => engine.getSnapshot().activeEngine,
+      getLiteMode: () => usePlayerUiStore.getState().liteMode,
       getShaderFile: () => {
         const raw = localStorage.getItem('xasm1_last_shader');
         if (!raw) return null;
@@ -187,7 +143,7 @@ export function useAppTestHooks(params: UseAppTestHooksParams): void {
       },
       /** Circular hybrid paging — overlay must fetch rows from current page, not 0..N-1 */
       getCircularOverlayPaging: () => {
-        const matrix = sequencerMatrix;
+        const matrix = engine.getSnapshot().sequencerMatrix;
         if (!matrix) return { ok: false, reason: 'no matrix' };
         const raw = localStorage.getItem('xasm1_last_shader') ?? '';
         let shader = raw;
@@ -199,7 +155,7 @@ export function useAppTestHooks(params: UseAppTestHooksParams): void {
         if (!usesCircularRowPaging(shader)) {
           return { ok: true, skipped: true, reason: 'not circular-paging shader' };
         }
-        const playhead = playbackStateRef.current.playheadRow;
+        const playhead = engine.playbackStateRef.current.playheadRow;
         const numRows = matrix.numRows;
         const pageStart = circularPageStart(playhead, numRows);
         const overlayEl = document.querySelector('[data-overlay-canvas="true"]');
@@ -235,11 +191,11 @@ export function useAppTestHooks(params: UseAppTestHooksParams): void {
         };
       },
       getPlayheadDebug: () => window.__PLAYHEAD_DEBUG__ ?? null,
-      getMasterGainValue,
-      getMasterPanValue,
-      setMasterVolume: (value: number) => applyAudioMasterLevels(Math.max(0, Math.min(1, value)), pan),
-      setMasterPan: (value: number) => applyAudioMasterLevels(volume, Math.max(-1, Math.min(1, value))),
+      getMasterGainValue: () => engine.getMasterGainValue(),
+      getMasterPanValue: () => engine.getMasterPanValue(),
+      setMasterVolume: (value: number) => engine.setMasterVolume(value),
+      setMasterPan: (value: number) => engine.setMasterPan(value),
     };
     return () => { delete window.__TEST_HOOKS__; };
-  }, [seekToStep, stopMusic, pause, playGuarded, isPlaying, isPaused, isModuleLoaded, sequencerMatrix, loadFile, setPlaybackRowFraction, playbackStateRef, activeEngine, liteMode, getMasterGainValue, getMasterPanValue, applyAudioMasterLevels, volume, pan]);
+  }, [engine]);
 }

@@ -8,6 +8,9 @@ let instance: PlayerEngine | null = null;
  * test can point at another engine with `PlayerEngineProvider`; the command bus gets it at startup.
  */
 export function getPlayerEngine(): PlayerEngine {
-  instance ??= new PlayerEngine({ strictTransport: import.meta.env.DEV });
+  if (!instance) {
+    instance = new PlayerEngine({ strictTransport: import.meta.env.DEV });
+    if (import.meta.env.DEV && typeof window !== 'undefined') window.__PLAYER_ENGINE__ = instance;
+  }
   return instance;
 }
