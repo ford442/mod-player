@@ -21,6 +21,7 @@
  * singlePassComposite – chassis filename if shader owns background, else false
  * supportsStepsLength – slot [24] is stepsLength:u32 (not colorPalette)
  * bloomProfile        – BLOOM_PROFILES id or null
+ * hdrOutput           – extended-range rgba16float canvas on HDR displays (#492)
  * liteRecommended     – preferred on mobile / ?lite=1
  * padTopChannel       – reserve channel 0 as header/pad for packing
  * canvasSize          – logical render size (before DPR)
@@ -86,6 +87,18 @@ export interface ShaderMeta {
   supportsStepsLength: boolean;
   /** Bloom post-process profile id, or null to use BloomPostProcessor default. */
   bloomProfile: string | null;
+  /**
+   * Opt in to HDR output (#492): on a `(dynamic-range: high)` display whose
+   * WebGPU canvas implements `toneMapping`, the canvas is configured as
+   * `rgba16float` + `toneMapping: { mode: 'extended' }` and the bloom
+   * composite lets highlights run past SDR white (`HDR_OUTPUT_HEADROOM`)
+   * instead of clipping them. Anywhere else — SDR display, no tone-mapping
+   * support, lite mode — the shader renders exactly as without the flag.
+   *
+   * Optional and additive. Only meaningful with bloom (the extra range is the
+   * bloom glow), so opted-in shaders carry a layered bloom profile.
+   */
+  hdrOutput?: boolean;
   /** Recommended for lite/mobile mode — simple layout, low GPU cost. */
   liteRecommended?: boolean;
 
@@ -576,8 +589,12 @@ export const SHADER_REGISTRY: Readonly<Record<string, ShaderMeta>> = {
   }),
 
   // ── v0.58 — audio-reactive chassis (SAB bands → bezel + bloom) ────────────
+  // v0.58 / v0.60 / v0.61 — the chassis family — opt in to HDR output (#492):
+  // bright three-emitter bloom over a dark reactive chassis is where an 8-bit
+  // canvas visibly clips the glow.
   'patternv0.58.wgsl': circularLed({
     bloomProfile: 'three-emitter',
+    hdrOutput: true,
     stepsDrivenVisibleRows: true,
     audioReactive: true,
     usesGpuSpectrum: true,
@@ -589,6 +606,7 @@ export const SHADER_REGISTRY: Readonly<Record<string, ShaderMeta>> = {
   // (binding 4 background / 9 pattern) instead of the binding-8 SAB uniform.
   'patternv0.60.wgsl': circularLed({
     bloomProfile: 'three-emitter',
+    hdrOutput: true,
     instrumentPalette: true,
     instrumentHighlight: true,
     supportsReducedMotion: false,
@@ -603,6 +621,7 @@ export const SHADER_REGISTRY: Readonly<Record<string, ShaderMeta>> = {
   // 24–27) on top of the spectrum bars, which stay the dry GPU FFT.
   'patternv0.61.wgsl': circularLed({
     bloomProfile: 'three-emitter',
+    hdrOutput: true,
     instrumentPalette: true,
     instrumentHighlight: true,
     supportsReducedMotion: false,

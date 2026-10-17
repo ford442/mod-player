@@ -20,6 +20,10 @@ struct CRTUniforms {
 @group(0) @binding(4) var<uniform> uniforms: Uniforms;
 @group(0) @binding(5) var<uniform> crt: CRTUniforms;
 
+// Peak output relative to SDR white. Pipeline-overridable: the host sets it
+// only for an rgba16float + toneMapping 'extended' canvas (#492).
+override hdrHeadroom: f32 = 1.0;
+
 @fragment
 fn fs(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
     // The scene is rgba16float (HDR, unclamped): drop negative / runaway values
@@ -37,11 +41,14 @@ fn fs(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
     let vignette = 1.0 - crt.vignetteStrength * vd * vd;
     finalColor = mix(finalColor, finalColor * scanline * vignette, crt.intensity);
 
-    // ACES Filmic Tone Mapping — preserves note hue at high bloom intensity
+    // ACES Filmic Tone Mapping — preserves note hue at high bloom intensity.
+    // Scaled by hdrHeadroom: 1.0 (SDR) is the plain curve clipped at white; on
+    // an extended-range HDR canvas the shoulder lands at hdrHeadroom instead.
+    let x = finalColor / hdrHeadroom;
     let a = 2.51; let b = 0.03; let c = 2.43; let d = 0.59; let e = 0.14;
     let tonemapped = clamp(
-        (finalColor * (a * finalColor + b)) / (finalColor * (c * finalColor + d) + e),
+        (x * (a * x + b)) / (x * (c * x + d) + e),
         vec3<f32>(0.0), vec3<f32>(1.0)
-    );
+    ) * hdrHeadroom;
     return vec4(tonemapped, 1.0);
 }

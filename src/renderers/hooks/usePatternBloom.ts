@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
-import { BloomPostProcessor } from '../../../utils/bloomPostProcessor';
+import { BloomPostProcessor, HDR_OUTPUT_HEADROOM } from '../../../utils/bloomPostProcessor';
 import { getShaderMeta } from '../../../utils/shaderRegistry';
 import { getBloomProfile } from '../../../utils/bloomProfiles';
 import { detectRuntimeBase } from '../../lib/paths';
-import { configureCanvasContext } from '../../../utils/webgpuDevice';
+import type { CanvasOutput } from '../../../utils/webgpuDevice';
 import { createLogger } from '../../../utils/log';
 
 const log = createLogger('Bloom debug');
@@ -11,31 +11,30 @@ const log = createLogger('Bloom debug');
 export interface UsePatternBloomParams {
   bloomRef: React.MutableRefObject<BloomPostProcessor | null>;
   canvasRef: React.RefObject<HTMLCanvasElement>;
-  glCanvasRef: React.RefObject<HTMLCanvasElement>;
   shaderFile: string;
   gpuReady: boolean;
   useWebGPU: boolean;
   liteMode: boolean;
   gpuDevRef: React.MutableRefObject<GPUDevice | null>;
-  gpuHookContextRef: React.MutableRefObject<GPUCanvasContext | null>;
-  syncCanvasSize: (canvas: HTMLCanvasElement, gl: HTMLCanvasElement | null) => void;
+  /** The canvas configuration the renderer applied; the composite pass targets it. */
+  canvasOutput: CanvasOutput | null;
 }
 
 export function usePatternBloom(params: UsePatternBloomParams) {
   const {
     bloomRef,
     canvasRef,
-    glCanvasRef,
     shaderFile,
     gpuReady,
     useWebGPU,
     liteMode,
     gpuDevRef,
-    gpuHookContextRef,
-    syncCanvasSize,
+    canvasOutput,
   } = params;
 
   const [debugBloomLayer, setDebugBloomLayer] = useState<number>(-1);
+  const outputFormat = canvasOutput?.format ?? null;
+  const hdrOutput = canvasOutput?.hdr ?? false;
 
   useEffect(() => {
     const device = gpuDevRef.current;
@@ -50,9 +49,11 @@ export function usePatternBloom(params: UsePatternBloomParams) {
     const bloomLayers = meta?.bloomProfile
       ? getBloomProfile(meta.bloomProfile)
       : undefined;
-    const bloomOptions = bloomLayers
-      ? { layers: [...bloomLayers], finalFormat: navigator.gpu.getPreferredCanvasFormat() }
-      : { finalFormat: navigator.gpu.getPreferredCanvasFormat() };
+    const bloomOptions = {
+      finalFormat: outputFormat ?? navigator.gpu.getPreferredCanvasFormat(),
+      ...(hdrOutput ? { outputHeadroom: HDR_OUTPUT_HEADROOM } : {}),
+      ...(bloomLayers ? { layers: [...bloomLayers] } : {}),
+    };
     const bloom = new BloomPostProcessor(device, canvas, context, bloomOptions);
     bloom.setBaseUrl(detectRuntimeBase());
     void bloom.init().then(() => {
@@ -74,22 +75,7 @@ export function usePatternBloom(params: UsePatternBloomParams) {
         bloomRef.current = null;
       }
     };
-  }, [gpuReady, shaderFile, liteMode, useWebGPU, gpuDevRef, canvasRef, bloomRef]);
-
-  useEffect(() => {
-    if (!useWebGPU || !gpuReady) return;
-    const canvas = canvasRef.current;
-    const device = gpuDevRef.current;
-    const context = gpuHookContextRef.current;
-    if (!canvas || !device || !context) return;
-    syncCanvasSize(canvas, glCanvasRef.current);
-    try {
-      configureCanvasContext({ device, context });
-      bloomRef.current?.resize(canvas.width, canvas.height);
-    } catch (e) {
-      console.error('❌ WebGPU context configure-on-ready failed:', e);
-    }
-  }, [useWebGPU, gpuReady, syncCanvasSize, gpuDevRef, gpuHookContextRef, canvasRef, glCanvasRef, bloomRef]);
+  }, [gpuReady, shaderFile, liteMode, useWebGPU, gpuDevRef, canvasRef, bloomRef, outputFormat, hdrOutput]);
 
   useEffect(() => {
     if (!import.meta.env.DEV) return;

@@ -43,10 +43,30 @@
  * for compute readback and multi-buffer layouts). If the adapter cannot meet a
  * requested limit we skip it and log a clear console warning rather than failing hard.
  *
+ * ## Adapter / device ladder
+ *
+ * 1. core adapter → `requestDevice` with soft limits + optional features,
+ *    then features only, then bare;
+ * 2. only if the core adapter is null or every rung above failed:
+ *    `requestAdapter({ featureLevel: 'compatibility' })` and the same device
+ *    rungs (#492). Compatibility-mode hardware (OpenGL ES 3.1 / D3D11-class)
+ *    gets no core adapter at all; its default `maxStorageBuffersInVertexStage`
+ *    is 0 while the pattern shaders read cells from a vertex-visible storage
+ *    buffer, so that rung also asks for the adapter's per-stage maxima.
+ *
  * ## Power preference
  *
  * Lite mode (`?lite=1`, mobile detection, user toggle) → `low-power`.
  * Desktop / full mode → `high-performance`.
+ *
+ * ## Canvas configuration (#492)
+ *
+ * `configure()` runs once per device and once per output-format change — never
+ * on resize: the canvas texture follows `canvas.width/height` on the next
+ * `getCurrentTexture()`. The output is the preferred 8-bit format, or — only
+ * for `ShaderMeta.hdrOutput` shaders on a `(dynamic-range: high)` display whose
+ * WebGPU canvas implements `toneMapping` — `rgba16float` with
+ * `toneMapping: { mode: 'extended' }` (`resolveCanvasOutput`).
  */
 
 import {
@@ -55,6 +75,7 @@ import {
   markWebGPUSessionFailed,
   publishWebGPUProbeReady,
   readAdapterInfo,
+  type WebGPUProbeAdapterInfo,
 } from './webgpuProbe';
 import { createLogger } from './log';
 
@@ -133,9 +154,13 @@ export interface RequestWebGPUDeviceOptions {
   isCancelled?: () => boolean;
 }
 
+/** Which rung of the adapter ladder produced the device. */
+export type WebGPUFeatureLevel = 'core' | 'compatibility';
+
 export interface WebGPUDeviceResult {
   adapter: GPUAdapter;
   device: GPUDevice;
+  featureLevel: WebGPUFeatureLevel;
   /** Features that were successfully enabled on the device. */
   enabledFeatures: GPUFeatureName[];
   /** Limits that were successfully requested (subset of preferred). */
@@ -154,6 +179,8 @@ export interface ConfigureCanvasOptions {
   usage?: GPUTextureUsageFlags;
   viewFormats?: GPUTextureFormat[];
   colorSpace?: PredefinedColorSpace;
+  /** Omitted (= the browser's `standard` default) unless set. */
+  toneMapping?: GPUCanvasToneMapping;
 }
 
 export class WebGPUInitError extends Error {
@@ -199,16 +226,29 @@ export function selectOptionalFeatures(
   return selected;
 }
 
+const PREFERRED_LIMITS: Readonly<Record<string, number>> = {
+  maxStorageBufferBindingSize: PREFERRED_MAX_STORAGE_BUFFER_BINDING_SIZE,
+  maxStorageBuffersPerShaderStage: PREFERRED_MAX_STORAGE_BUFFERS_PER_SHADER_STAGE,
+};
+
+/**
+ * Compatibility rung only: its per-stage storage-buffer defaults are 0 in the
+ * vertex stage, which no pattern bind group layout can live with. Soft, like
+ * every other limit — clamped to whatever the adapter reports.
+ */
+export const COMPATIBILITY_PREFERRED_LIMITS: Readonly<Record<string, number>> = {
+  ...PREFERRED_LIMITS,
+  maxStorageBuffersInVertexStage: PREFERRED_MAX_STORAGE_BUFFERS_PER_SHADER_STAGE,
+  maxStorageBuffersInFragmentStage: PREFERRED_MAX_STORAGE_BUFFERS_PER_SHADER_STAGE,
+};
+
 /**
  * Build requiredLimits that are within adapter capabilities.
  * Skips any preferred limit the adapter cannot meet (soft fail + log).
  */
 export function buildSoftRequiredLimits(
   adapter: GPUAdapter,
-  preferred: Record<string, number> = {
-    maxStorageBufferBindingSize: PREFERRED_MAX_STORAGE_BUFFER_BINDING_SIZE,
-    maxStorageBuffersPerShaderStage: PREFERRED_MAX_STORAGE_BUFFERS_PER_SHADER_STAGE,
-  },
+  preferred: Readonly<Record<string, number>> = PREFERRED_LIMITS,
 ): Record<string, number> {
   const applied: Record<string, number> = {};
   const adapterLimits = adapter.limits as unknown as Record<string, number>;
@@ -234,6 +274,50 @@ export function buildSoftRequiredLimits(
   }
 
   return applied;
+}
+
+/**
+ * `requestAdapter` options, in the order they are tried. The compatibility
+ * rung (#492) is last and only reached when the core adapter is null or every
+ * `requestDevice` rung on it failed. A browser without feature levels ignores
+ * the member, so that rung then simply repeats the core request.
+ */
+export function adapterRequestLadder(powerPreference: GPUPowerPreference): GPURequestAdapterOptions[] {
+  return [
+    { powerPreference },
+    { powerPreference, featureLevel: 'compatibility' },
+  ];
+}
+
+/**
+ * The soft-limits device ladder on one adapter: preferred limits + optional
+ * features, then the features alone, then a bare device. Rejects with the last
+ * error once all three fail.
+ */
+export async function requestDeviceWithSoftLimits(
+  adapter: GPUAdapter,
+  requiredFeatures: GPUFeatureName[],
+  requiredLimits: Record<string, number>,
+): Promise<GPUDevice> {
+  try {
+    return await adapter.requestDevice({ requiredFeatures, requiredLimits });
+  } catch (err) {
+    // Retry without custom limits if the browser rejected the limit dict.
+    console.warn(
+      '[WebGPU] requestDevice with preferred limits failed; retrying with defaults:',
+      err instanceof Error ? err.message : err,
+    );
+  }
+  try {
+    return await adapter.requestDevice({ requiredFeatures });
+  } catch (err) {
+    // Last resort: bare device (no optional features) for maximum compatibility.
+    console.warn(
+      '[WebGPU] requestDevice with optional features failed; retrying bare device:',
+      err instanceof Error ? err.message : err,
+    );
+  }
+  return adapter.requestDevice();
 }
 
 let latestDeviceRequest: Promise<WebGPUDeviceResult> | null = null;
@@ -318,6 +402,21 @@ export async function requestWebGPUDevice(
   return requestPromise;
 }
 
+interface LadderFailure {
+  stage: 'adapter' | 'device';
+  message: string;
+  adapterInfo: WebGPUProbeAdapterInfo | undefined;
+}
+
+interface LadderPick {
+  adapter: GPUAdapter;
+  device: GPUDevice;
+  requiredFeatures: GPUFeatureName[];
+  appliedLimits: Record<string, number>;
+  adapterInfo: WebGPUProbeAdapterInfo | undefined;
+  featureLevel: WebGPUFeatureLevel;
+}
+
 async function requestWebGPUDeviceUncached(
   options: RequestWebGPUDeviceOptions = {},
 ): Promise<WebGPUDeviceResult> {
@@ -344,71 +443,66 @@ async function requestWebGPUDeviceUncached(
   const powerPreference =
     options.powerPreference ?? powerPreferenceForMode(liteMode);
 
-  const adapter = await navigator.gpu.requestAdapter({ powerPreference });
-  if (options.isCancelled?.()) {
-    throw new WebGPUInitError('WebGPU init cancelled', 'device-failed', true);
-  }
-  if (!adapter) {
-    const msg = `requestAdapter returned null (powerPreference=${powerPreference})`;
-    markWebGPUSessionFailed('adapter', msg);
-    throw new WebGPUInitError(msg, 'no-adapter', false);
-  }
-
-  const adapterInfo = await readAdapterInfo(adapter);
-
   // Hard-required features (rare — prefer optional for Safari/Firefox compatibility).
   const hardRequired = options.requiredFeatures ?? [];
-  const missingRequired = hardRequired.filter((f) => !adapter.features.has(f));
-  if (missingRequired.length > 0) {
-    const msg = `Required GPU features not available: ${missingRequired.join(', ')}`;
-    markWebGPUSessionFailed('device', msg, adapterInfo);
-    throw new WebGPUInitError(msg, 'device-failed', false);
-  }
+  let failure: LadderFailure | null = null;
+  let picked: LadderPick | null = null;
 
-  const optionalEnabled = selectOptionalFeatures(adapter, [
-    ...(options.extraOptionalFeatures ?? []),
-    ...(liteMode ? [] : OPTIONAL_FULL_MODE_FEATURES),
-  ]);
-  const requiredFeatures: GPUFeatureName[] = [
-    ...hardRequired,
-    ...optionalEnabled.filter((f) => !hardRequired.includes(f)),
-  ];
+  for (const rung of adapterRequestLadder(powerPreference)) {
+    const featureLevel: WebGPUFeatureLevel = rung.featureLevel === 'compatibility' ? 'compatibility' : 'core';
+    const adapter = await navigator.gpu.requestAdapter(rung);
+    if (options.isCancelled?.()) {
+      throw new WebGPUInitError('WebGPU init cancelled', 'device-failed', true);
+    }
+    if (!adapter) {
+      // A device failure on an earlier rung is the more useful report.
+      failure ??= {
+        stage: 'adapter',
+        message: `requestAdapter returned null (powerPreference=${powerPreference})`,
+        adapterInfo: undefined,
+      };
+      continue;
+    }
 
-  const appliedLimits = buildSoftRequiredLimits(adapter);
+    const adapterInfo = await readAdapterInfo(adapter);
 
-  let device: GPUDevice;
-  try {
-    device = await adapter.requestDevice({
-      requiredFeatures,
-      requiredLimits: appliedLimits,
-    });
-  } catch (err) {
-    // Retry without custom limits if the browser rejected the limit dict.
-    console.warn(
-      '[WebGPU] requestDevice with preferred limits failed; retrying with defaults:',
-      err instanceof Error ? err.message : err,
+    const missingRequired = hardRequired.filter((f) => !adapter.features.has(f));
+    if (missingRequired.length > 0) {
+      const msg = `Required GPU features not available: ${missingRequired.join(', ')}`;
+      markWebGPUSessionFailed('device', msg, adapterInfo);
+      throw new WebGPUInitError(msg, 'device-failed', false);
+    }
+
+    const optionalEnabled = selectOptionalFeatures(adapter, [
+      ...(options.extraOptionalFeatures ?? []),
+      ...(liteMode ? [] : OPTIONAL_FULL_MODE_FEATURES),
+    ]);
+    const requiredFeatures: GPUFeatureName[] = [
+      ...hardRequired,
+      ...optionalEnabled.filter((f) => !hardRequired.includes(f)),
+    ];
+    const appliedLimits = buildSoftRequiredLimits(
+      adapter,
+      featureLevel === 'compatibility' ? COMPATIBILITY_PREFERRED_LIMITS : PREFERRED_LIMITS,
     );
+
     try {
-      device = await adapter.requestDevice({ requiredFeatures });
-    } catch (err2) {
-      // Last resort: bare device (no optional features) for maximum compatibility.
-      console.warn(
-        '[WebGPU] requestDevice with optional features failed; retrying bare device:',
-        err2 instanceof Error ? err2.message : err2,
-      );
-      try {
-        device = await adapter.requestDevice();
-      } catch (err3) {
-        const msg = err3 instanceof Error ? err3.message : String(err3);
-        markWebGPUSessionFailed('device', `requestDevice failed: ${msg}`, adapterInfo);
-        throw new WebGPUInitError(
-          `requestDevice failed: ${msg}`,
-          'device-failed',
-          false,
-        );
-      }
+      const device = await requestDeviceWithSoftLimits(adapter, requiredFeatures, appliedLimits);
+      picked = { adapter, device, requiredFeatures, appliedLimits, adapterInfo, featureLevel };
+      break;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      failure = { stage: 'device', message: `requestDevice failed: ${msg}`, adapterInfo };
     }
   }
+
+  if (!picked) {
+    // Every ladder rung records a failure before moving on, so `failure` is set.
+    const { stage, message, adapterInfo } = failure!;
+    markWebGPUSessionFailed(stage, message, adapterInfo);
+    throw new WebGPUInitError(message, stage === 'adapter' ? 'no-adapter' : 'device-failed', false);
+  }
+  const { adapter, device, requiredFeatures, appliedLimits, adapterInfo, featureLevel } = picked;
 
   if (options.isCancelled?.()) {
     try {
@@ -424,13 +518,14 @@ async function requestWebGPUDeviceUncached(
   publishWebGPUProbeReady(adapterInfo);
 
   log.log(
-    `device ready (power=${powerPreference}, features=[${enabledFeatures.join(', ') || 'none'}], ` +
+    `device ready (featureLevel=${featureLevel}, power=${powerPreference}, features=[${enabledFeatures.join(', ') || 'none'}], ` +
       `limits={maxStorageBufferBindingSize=${device.limits.maxStorageBufferBindingSize}})`,
   );
 
   return {
     adapter,
     device,
+    featureLevel,
     enabledFeatures,
     appliedLimits,
     preferredCanvasFormat: navigator.gpu.getPreferredCanvasFormat(),
@@ -451,22 +546,28 @@ async function requestWebGPUDeviceUncached(
  * usage / format (bloom, screenshot and createImageBitmap paths all assume
  * one configuration). The probe's clear is fully opaque (a=1), so
  * premultiplied vs. opaque compositing reads back identically here.
+ *
+ * Also reports whether this browser's canvas implements `toneMapping` (the
+ * HDR output gate), read off the probe's own configuration so the real canvas
+ * is configured exactly once.
  */
 export async function probeWebGPUCanvasPresentation(
   device: GPUDevice,
   format?: GPUTextureFormat,
-): Promise<boolean> {
-  if (typeof document === 'undefined') return false;
+): Promise<CanvasPresentationProbe> {
+  const result = { presents: false, extendedToneMapping: false };
+  if (typeof document === 'undefined') return result;
 
   const canvas = document.createElement('canvas');
   canvas.width = 8;
   canvas.height = 8;
   const context = canvas.getContext('webgpu') as GPUCanvasContext | null;
-  if (!context) return false;
+  if (!context) return result;
 
   const fmt = format ?? navigator.gpu.getPreferredCanvasFormat();
   try {
     configureCanvasContext({ device, context, format: fmt });
+    result.extendedToneMapping = canvasSupportsToneMapping(context);
 
     const tex = context.getCurrentTexture();
     const encoder = device.createCommandEncoder();
@@ -497,7 +598,7 @@ export async function probeWebGPUCanvasPresentation(
     const ctx2d = offscreen.getContext('2d');
     if (!ctx2d) {
       bitmap.close();
-      return false;
+      return result;
     }
     ctx2d.drawImage(bitmap, 0, 0);
     bitmap.close();
@@ -512,7 +613,8 @@ export async function probeWebGPUCanvasPresentation(
     }
     // Opaque red clear must survive presentation. Transparent black (maxA === 0)
     // means the swapchain never reached the canvas.
-    return maxA > 128 && maxR > 128;
+    result.presents = maxA > 128 && maxR > 128;
+    return result;
   } catch (err) {
     if (import.meta.env.DEV) {
       console.warn(
@@ -520,7 +622,7 @@ export async function probeWebGPUCanvasPresentation(
         err instanceof Error ? err.message : err,
       );
     }
-    return false;
+    return result;
   } finally {
     try {
       context.unconfigure();
@@ -530,9 +632,18 @@ export async function probeWebGPUCanvasPresentation(
   }
 }
 
+export interface CanvasPresentationProbe {
+  /** An opaque clear reached the page (false = hard-fail viz). */
+  presents: boolean;
+  /** The canvas implements `toneMapping` (see `canvasSupportsToneMapping`). */
+  extendedToneMapping: boolean;
+}
+
 /**
  * Configure a canvas GPUCanvasContext with explicit usage for rendering and
- * optional screenshot copy-out. Re-call after canvas resize.
+ * optional screenshot copy-out. Once per device and per output format — a
+ * resize needs no reconfigure (the next `getCurrentTexture()` follows
+ * `canvas.width/height`), and `configure()` resets the canvas contents.
  *
  * Default `alphaMode` is `'premultiplied'`, not `'opaque'`: the chassis/bezel
  * pass and bloom composite the pattern canvas over dark HTML chrome, and
@@ -557,9 +668,72 @@ export function configureCanvasContext(options: ConfigureCanvasOptions): GPUText
   if (options.colorSpace) {
     config.colorSpace = options.colorSpace;
   }
+  if (options.toneMapping) {
+    config.toneMapping = options.toneMapping;
+  }
 
   options.context.configure(config);
   return format;
+}
+
+/** Canvas format for HDR output: always a valid canvas format, filterable and renderable. */
+export const HDR_CANVAS_FORMAT: GPUTextureFormat = 'rgba16float';
+
+/**
+ * `configure()` members added for HDR output. The colour space is explicit:
+ * the scene is authored as sRGB-encoded values, so `rgba16float` + 'srgb'
+ * shows [0, 1] exactly like the 8-bit canvas and only values above 1 brighter.
+ */
+export const HDR_CANVAS_CONFIG = {
+  colorSpace: 'srgb',
+  toneMapping: { mode: 'extended' },
+} as const satisfies Pick<ConfigureCanvasOptions, 'colorSpace' | 'toneMapping'>;
+
+/** Media query a display matches when it can show more than SDR white. */
+export const HIGH_DYNAMIC_RANGE_QUERY = '(dynamic-range: high)';
+
+/** The swapchain's output: `format` plus whether it is the extended-range HDR config. */
+export interface CanvasOutput {
+  format: GPUTextureFormat;
+  hdr: boolean;
+}
+
+/**
+ * HDR output only when every gate holds: the shader opted in
+ * (`ShaderMeta.hdrOutput`), the display reports high dynamic range, the
+ * browser's canvas implements `toneMapping`, and this is not lite mode (no
+ * bloom there, so nothing exceeds SDR white). Otherwise the preferred 8-bit
+ * format, exactly as before #492.
+ */
+export function resolveCanvasOutput(gates: {
+  preferredFormat: GPUTextureFormat;
+  shaderWantsHdr: boolean;
+  displayHdr: boolean;
+  toneMappingSupported: boolean;
+  liteMode: boolean;
+}): CanvasOutput {
+  const hdr = gates.shaderWantsHdr && gates.displayHdr && gates.toneMappingSupported && !gates.liteMode;
+  return { format: hdr ? HDR_CANVAS_FORMAT : gates.preferredFormat, hdr };
+}
+
+/**
+ * Feature detection the spec prescribes: an implementation without tone
+ * mapping leaves `toneMapping` out of `getConfiguration()`. Call on a
+ * configured context.
+ */
+export function canvasSupportsToneMapping(context: GPUCanvasContext): boolean {
+  try {
+    return context.getConfiguration?.()?.toneMapping !== undefined;
+  } catch {
+    return false;
+  }
+}
+
+/** The `(dynamic-range: high)` query — re-evaluated when the window changes display. Null without matchMedia. */
+export function highDynamicRangeQuery(): MediaQueryList | null {
+  return typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+    ? window.matchMedia(HIGH_DYNAMIC_RANGE_QUERY)
+    : null;
 }
 
 /**
@@ -581,33 +755,31 @@ export function getWebGPUCanvasContext(
 
 export interface DeviceLostHandlers {
   /**
-   * Called when the device is lost for any reason.
-   * `intentional` is true when the app called device.destroy() during cleanup.
+   * Called when the device is lost while still attached.
+   * `intentional` is true for `reason === 'destroyed'` (device.destroy()).
    */
   onLost: (info: GPUDeviceLostInfo, intentional: boolean) => void;
 }
 
 /**
- * Attach a device.lost watcher. Returns a disposer that marks subsequent lost
- * events as intentional (used on effect cleanup before device.destroy()).
+ * Attach a device.lost watcher. Returns a detach: after it runs, a lost event
+ * (typically the device.destroy() of an effect cleanup) is not delivered.
  */
 export function attachDeviceLostHandler(
   device: GPUDevice,
   handlers: DeviceLostHandlers,
 ): () => void {
-  let intentional = false;
-  let disposed = false;
+  let detached = false;
 
   device.lost.then((info) => {
-    if (disposed) return;
-    handlers.onLost(info, intentional || info.reason === 'destroyed');
+    if (detached) return;
+    handlers.onLost(info, info.reason === 'destroyed');
   }).catch(() => {
     /* device.lost rejection is not expected; ignore */
   });
 
   return () => {
-    intentional = true;
-    disposed = true;
+    detached = true;
   };
 }
 
