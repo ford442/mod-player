@@ -1,4 +1,4 @@
-import { getWorkletUrl, getAbsoluteWorkletUrl, withBase } from '../useWorkletLoader';
+import { getWorkletUrl, getAbsoluteWorkletUrl, withBase } from '../../audio/engine/workletUrls';
 import { createLogger } from '../../utils/log';
 
 const log = createLogger('AudioWorklet');
@@ -6,7 +6,7 @@ const log = createLogger('AudioWorklet');
 /** Default auto-load module (served from public/). */
 export const DEFAULT_MODULE_URL = withBase('4-mat_madness.mod');
 
-/** AUDIO-001 FIX COMPLETE: Use centralized worklet URL construction from useWorkletLoader */
+/** AUDIO-001 FIX COMPLETE: centralized worklet URL construction (audio/engine/workletUrls.ts) */
 export const WORKLET_URL = getWorkletUrl();
 
 // AUDIO-001 FIX COMPLETE: Enhanced logging for diagnostics

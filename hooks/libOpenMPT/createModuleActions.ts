@@ -13,7 +13,7 @@ import {
   isLibReadyForParse,
   resolveParsedModule,
 } from './parseModule';
-import type { LibOpenMPTRefs, LibOpenMPTSetters } from './types';
+import type { LibOpenMPTRefs, LibOpenMPTSetters, TransportPort } from './types';
 import { publishSongBytes } from '../../utils/songIdentity';
 import { createLogger } from '../../utils/log';
 
@@ -23,6 +23,7 @@ export interface ModuleActionsDeps {
   refs: LibOpenMPTRefs;
   setters: LibOpenMPTSetters;
   stopMusic: (destroy?: boolean) => void;
+  transport: TransportPort;
 }
 
 export interface ProcessModuleOptions {
@@ -57,7 +58,7 @@ export function createEnsureMainThreadModule(refs: LibOpenMPTRefs) {
 }
 
 export function createProcessModuleData(deps: ModuleActionsDeps) {
-  const { refs, setters, stopMusic } = deps;
+  const { refs, setters, stopMusic, transport } = deps;
   const {
     libopenmptRef,
     currentModulePtr,
@@ -119,15 +120,18 @@ export function createProcessModuleData(deps: ModuleActionsDeps) {
     log.log('processModuleData: Processing module:', fileName, 'size:', fileData.byteLength);
 
     workletModuleTokenRef.current += 1;
+    // Also this load's identity: a second load started while this one parses supersedes it.
+    const loadToken = workletModuleTokenRef.current;
+    const superseded = () => loadToken !== workletModuleTokenRef.current;
     playheadLagTrackerRef.current = createPlayheadLagTracker();
     positionReportTrackerRef.current = createPositionReportTracker();
     lastPositionSampleTimeRef.current = -1;
     stopMusic(false);
+    // A module loaded while paused is cued rather than played: `holdPaused` keeps the transport
+    // reading as paused through the load (the UI never flashes "stopped"), and it lands paused.
+    transport.send('load', undefined, { holdPaused: Boolean(options?.keepPaused) });
     if (options?.keepPaused) {
-      // stopMusic cleared the pause, but a module loaded while paused is cued rather than played.
-      // Re-assert it in the same tick (React batches both writes, so the UI never flashes "stopped").
-      refs.isPausedRef.current = true;
-      setters.setIsPaused(true);
+      // stopMusic reset the pause clock; the cued module is paused at its start from here on.
       const audioCtx = refs.audioContextRef.current;
       refs.pauseClockRef.current = { pausedAt: audioCtx ? audioCtx.currentTime : 0, resumedAt: null };
     }
@@ -226,17 +230,24 @@ export function createProcessModuleData(deps: ModuleActionsDeps) {
         loadedInstrumentTable = parsed.instrumentTable ?? emptyInstrumentTable();
       }
     } catch (err) {
+      if (superseded()) return;
       const message = err instanceof Error ? err.message : 'Module parse failed';
       console.error(`[processModuleData] Parse failed (${fileName}):`, err);
       setStatus(`Error: ${message}`);
+      transport.send('loadFailed');
       return;
     } finally {
       window.clearTimeout(slowHintTimer);
     }
 
+    if (superseded()) {
+      log.log(`processModuleData: "${fileName}" superseded by a newer load — dropping its result`);
+      return;
+    }
     if (!patternMatrices.length || !metadata.numOrders) {
       setStatus('Error: No pattern data in module');
       console.error('[Parser] empty patternMatrices after parse');
+      transport.send('loadFailed');
       return;
     }
 
@@ -336,6 +347,11 @@ export function createProcessModuleData(deps: ModuleActionsDeps) {
 
     setIsModuleLoaded(true);
     setStatus(`Loaded "${metadata.title || fileName}"`);
+    // A cued module lands paused at its start; one the user stopped mid-parse stays stopped.
+    transport.send(
+      'parsed',
+      transport.phase === 'stopped' ? 'stopped' : options?.keepPaused ? 'paused' : 'ready',
+    );
   };
 }
 

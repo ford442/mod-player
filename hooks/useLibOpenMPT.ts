@@ -1,360 +1,101 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useMemo } from 'react';
 import type { PatternMatrix } from '../types';
-import { startAudioPlayback, type AudioGraphCallbacks, type AudioGraphConfig, type AudioGraphRefs } from './useAudioGraph';
-import { useWorkletLoader } from './useWorkletLoader';
-import { postSetAudioLite } from '../audio-worklet/protocol';
-import {
-  overrideFromActiveEngine,
-  writeStoredAudioEngineOverride,
-} from '../utils/audioEngineSelection';
-import { hasShareModuleIntent } from '../utils/shareState';
-import { deriveTransportState, playShouldResume } from '../utils/transportClock';
-import { applyMasterLevels } from '../utils/audioMasterGraph';
-import { DEFAULT_MODULE_URL, WORKLET_URL } from './libOpenMPT/constants';
+import { usePlayerEngine, usePlayerEngineInstance } from './usePlayerEngine';
 import { useLibOpenMPTRefs } from './libOpenMPT/useLibOpenMPTRefs';
-import { useLibOpenMPTState } from './libOpenMPT/useLibOpenMPTState';
-import { createUpdateUI } from './libOpenMPT/createUpdateUI';
-import {
-  createEnsureMainThreadModule,
-  createLoadModule,
-  createProcessModuleData,
-} from './libOpenMPT/createModuleActions';
-import {
-  createPauseMusic,
-  createRequestOscBuffer,
-  createResumeMusic,
-  createSeekToStep,
-  createStopMusic,
-} from './libOpenMPT/createTransportActions';
-import { cleanupLibOpenMPT, runLibOpenMPTInit } from './libOpenMPT/runInit';
-import { createLogger } from '../utils/log';
 
-const log = createLogger('Engine');
-
+/**
+ * Thin adapter over the PlayerEngine (#492; see audio/engine/PlayerEngine.ts). It ties the engine's
+ * lifecycle to the component that mounts the player (init on mount, dispose on unmount) and returns
+ * the pre-#492 shape so callers can migrate to `usePlayerEngine(selector)` one at a time.
+ *
+ * Note the full-snapshot subscription: a caller of this hook re-renders on every snapshot change,
+ * exactly as it did when this hook held the state itself. Components that only need a few fields
+ * should select them instead.
+ */
 export function useLibOpenMPT(initialVolume: number = 0.4, liteMode: boolean = false) {
-  const state = useLibOpenMPTState(initialVolume);
-  const refs = useLibOpenMPTRefs();
-
-  const {
-    status, isReady, isPlaying, isPaused, isModuleLoaded, moduleInfo, patternData,
-    sequencerMatrix, sequencerCurrentRow, sequencerGlobalRow, totalPatternRows,
-    playbackSeconds, playbackRowFraction, channelStates, beatPhase, grooveAmount,
-    kickTrigger, activeChannels, isLooping, panValue, volume, activeEngine,
-    isWorkletSupported, isNativeWorkletAvailable, restartPlayback, syncDebug,
-    workletLoadError, instrumentNames, sampleNames, moduleFormat, instrumentTable, moduleComments,
-    moduleDurationSeconds, moduleFileName,
-    setStatus, setIsPlaying, setIsPaused, setIsModuleLoaded, setModuleInfo, setSequencerMatrix,
-    setInstrumentNames, setSampleNames, setModuleFormat, setInstrumentTable, setModuleComments, setModuleDurationSeconds,
-    setModuleFileName, setSequencerCurrentRow, setSequencerGlobalRow, setPlaybackSeconds,
-    setPlaybackRowFraction, setTotalPatternRows, setChannelStates, setBeatPhase,
-    setSyncDebug, setIsReady, setIsWorkletSupported, setIsNativeWorkletAvailable,
-    setActiveEngine, setWorkletLoadError, setIsLooping, setPanValue, _setVolume,
-    setRestartPlayback,
-  } = state;
-
-  const { verifyWorkletFile, isAudioWorkletSupported: checkWorkletSupport } = useWorkletLoader({
-    debug: true,
-  });
-
-  const setters = {
-    setStatus,
-    setIsPlaying,
-    setIsPaused,
-    setIsModuleLoaded,
-    setModuleInfo,
-    setSequencerMatrix,
-    setInstrumentNames,
-    setSampleNames,
-    setModuleFormat,
-    setInstrumentTable,
-    setModuleComments,
-    setModuleDurationSeconds,
-    setModuleFileName,
-    setSequencerCurrentRow,
-    setSequencerGlobalRow,
-    setPlaybackSeconds,
-    setPlaybackRowFraction,
-    setTotalPatternRows,
-    setChannelStates,
-    setBeatPhase,
-    setSyncDebug,
-    setIsReady,
-    setIsWorkletSupported,
-    setIsNativeWorkletAvailable,
-    setActiveEngine,
-    setWorkletLoadError,
-  };
-
-  refs.activeEngineRef.current = activeEngine;
-
-  const transportDeps = { refs, setters, activeEngine };
-
-  const stopMusic = useCallback(createStopMusic(transportDeps), []);
-  // Stable for the component's lifetime, like stopMusic (they only touch refs and React's stable
-  // setters). A lazily-initialised state value rather than useCallback(createX(deps), []), which the
-  // exhaustive-deps rule flags ("dependencies are unknown") and would add to the warning budget.
-  const [pauseMusic] = useState(() => createPauseMusic(transportDeps));
-  const [resumeMusic] = useState(() => createResumeMusic(transportDeps));
-  const seekToStepWrapper = useCallback(createSeekToStep(transportDeps), [activeEngine]);
-  const requestOscBuffer = useCallback(createRequestOscBuffer(refs), []);
-
-  const processModuleData = useCallback(
-    createProcessModuleData({ refs, setters, stopMusic }),
-    [stopMusic],
-  );
-  const ensureMainThreadModule = useCallback(createEnsureMainThreadModule(refs), []);
-  refs.ensureMainThreadModuleRef.current = ensureMainThreadModule;
-
-  const loadModule = useCallback(
-    createLoadModule(refs, setStatus, processModuleData),
-    [processModuleData],
-  );
-
-  const updateUI = useCallback(
-    createUpdateUI({
-      refs,
-      setters,
-      activeEngine,
-      kickTrigger,
-      grooveAmount,
-    }),
-    [activeEngine, kickTrigger, grooveAmount],
-  );
-  refs.updateUIRef.current = updateUI;
-
-  const play = useCallback(async (options?: { forceModuleLoad?: boolean }) => {
-    // "Play" while paused means resume, not a fresh start (see playShouldResume). A module load
-    // (forceModuleLoad) is the exception: it comes up cued/paused via the engine start paths.
-    if (playShouldResume(refs.isPausedRef.current, options)) {
-      resumeMusic();
-      return;
-    }
-    const audioRefs: AudioGraphRefs = {
-      libopenmptRef: refs.libopenmptRef,
-      fileDataRef: refs.fileDataRef,
-      audioContextRef: refs.audioContextRef,
-      workletLoadedRef: refs.workletLoadedRef,
-      masterInputRef: refs.masterInputRef,
-      masterDirectRef: refs.masterDirectRef,
-      stereoPannerRef: refs.stereoPannerRef,
-      gainNodeRef: refs.gainNodeRef,
-      analyserRef: refs.analyserRef,
-      audioWorkletNodeRef: refs.audioWorkletNodeRef,
-      nativeEngineRef: refs.nativeEngineRef,
-      workletOrderRef: refs.workletOrderRef,
-      workletRowRef: refs.workletRowRef,
-      workletTimeRef: refs.workletTimeRef,
-      lastWorkletUpdateRef: refs.lastWorkletUpdateRef,
-      workletBpmRef: refs.workletBpmRef,
-      workletSpeedRef: refs.workletSpeedRef,
-      workletRowsPerSecRef: refs.workletRowsPerSecRef,
-      workletPositionSampleRef: refs.workletPositionSampleRef,
-      pendingSeekRef: refs.pendingSeekRef,
-      seekAcknowledgedRef: refs.seekAcknowledgedRef,
-      workletTimestampRef: refs.workletTimestampRef,
-      spFallbackTriggered: refs.spFallbackTriggered,
-      scriptProcessorRef: refs.scriptProcessorRef,
-      spLeftBufPtr: refs.spLeftBufPtr,
-      spRightBufPtr: refs.spRightBufPtr,
-      isPlayingRef: refs.isPlayingRef,
-      isPausedRef: refs.isPausedRef,
-      playbackEngineRef: refs.playbackEngineRef,
-      animationFrameHandle: refs.animationFrameHandle,
-      currentModulePtr: refs.currentModulePtr,
-      channelStatesRef: refs.channelStatesRef,
-      patternMatricesRef: refs.patternMatricesRef,
-      audioClockStartRef: refs.audioClockStartRef,
-      workletTimeAtStartRef: refs.workletTimeAtStartRef,
-      driftAccumulatorRef: refs.driftAccumulatorRef,
-      updateUIRef: refs.updateUIRef,
-      nativeSharedBuffer: refs.nativeSharedBufferRef,
-      nativeClockAnchorRef: refs.nativeClockAnchorRef,
-      nativeBridgeLatencyRef: refs.nativeBridgeLatencyRef,
-      ensureMainThreadModuleRef: refs.ensureMainThreadModuleRef,
-      workletModuleTokenRef: refs.workletModuleTokenRef,
-      lastWorkletModuleTokenSentRef: refs.lastWorkletModuleTokenSentRef,
-    };
-    const audioCbs: AudioGraphCallbacks = {
-      setStatus,
-      setIsPlaying,
-      setActiveEngine,
-      setModuleInfo,
-      setSequencerMatrix,
-      stopMusic,
-      seekToStepWrapper,
-      updateUI,
-    };
-    const audioConfig: AudioGraphConfig = {
-      activeEngine,
-      isWorkletSupported,
-      isNativeWorkletAvailable,
-      panValue,
-      volume,
-      isLooping,
-      WORKLET_URL,
-      ...(options?.forceModuleLoad ? { forceModuleLoad: true } : {}),
-    };
-    await startAudioPlayback(audioRefs, audioCbs, audioConfig);
-    requestOscBuffer();
-  }, [
-    activeEngine, isWorkletSupported, isNativeWorkletAvailable, panValue, volume, isLooping,
-    stopMusic, resumeMusic, seekToStepWrapper, updateUI, requestOscBuffer,
-    setStatus, setIsPlaying, setActiveEngine, setModuleInfo, setSequencerMatrix,
-  ]);
-
-  /** Space / MIDI note 60 / the play button: pause while playing, otherwise play-or-resume. */
-  const togglePlayPause = useCallback(() => {
-    if (refs.isPlayingRef.current) pauseMusic();
-    else void play();
-  }, [pauseMusic, play, refs.isPlayingRef]);
-
-  refs.playRef.current = play;
-
-  const toggleAudioEngine = useCallback(() => {
-    let newEngine: 'worklet' | 'native-worklet';
-    if (activeEngine === 'native-worklet') {
-      newEngine = 'worklet';
-    } else {
-      newEngine = isNativeWorkletAvailable ? 'native-worklet' : 'worklet';
-    }
-
-    writeStoredAudioEngineOverride(overrideFromActiveEngine(newEngine));
-
-    log.log('toggleEngine', {
-      from: activeEngine,
-      to: newEngine,
-      isNativeAvailable: isNativeWorkletAvailable,
-      isWorkletSupported,
-      willRestart: isPlaying,
-    });
-
-    if (isPlaying) {
-      setRestartPlayback(true);
-      stopMusic(false);
-    } else if (isPaused) {
-      // A pause belongs to the engine that holds the cursor; the other engine cannot continue it.
-      // Stop (position resets) rather than leave a paused UI over an engine that no longer exists.
-      stopMusic(false);
-    }
-    setActiveEngine(newEngine);
-    setWorkletLoadError(null);
-  }, [activeEngine, isPlaying, isPaused, isNativeWorkletAvailable, isWorkletSupported, stopMusic, setActiveEngine, setWorkletLoadError, setRestartPlayback]);
+  const engine = usePlayerEngineInstance();
+  const s = usePlayerEngine((snapshot) => snapshot);
+  const { playbackStateRef, channelStatesRef, oscBufferRef, audioReactiveRef } = useLibOpenMPTRefs();
 
   useEffect(() => {
-    refs.audioWorkletNodeRef.current?.port.postMessage(postSetAudioLite(liteMode));
-  }, [liteMode]);
+    void engine.init();
+    return () => engine.dispose();
+  }, [engine]);
 
   useEffect(() => {
-    if (restartPlayback) {
-      setRestartPlayback(false);
-      void play();
-    }
-  }, [restartPlayback, play, setRestartPlayback]);
+    engine.setLiteMode(liteMode);
+  }, [engine, liteMode]);
 
   useEffect(() => {
-    void runLibOpenMPTInit({
-      refs,
-      setters,
-      checkWorkletSupport,
-      verifyWorkletFile,
-    });
-    return () => cleanupLibOpenMPT(refs);
-  }, []);
+    engine.setMasterVolume(initialVolume);
+  }, [engine, initialVolume]);
 
-  useEffect(() => {
-    _setVolume(initialVolume);
-  }, [initialVolume]);
-
-  useEffect(() => {
-    applyMasterLevels(
-      { gainNodeRef: refs.gainNodeRef, stereoPannerRef: refs.stereoPannerRef },
-      volume,
-      panValue,
-    );
-  }, [volume, panValue]);
-
-  const applyMasterLevelsNow = useCallback((vol: number, pan: number) => {
-    applyMasterLevels(
-      { gainNodeRef: refs.gainNodeRef, stereoPannerRef: refs.stereoPannerRef },
-      vol,
-      pan,
-    );
-  }, []);
-
-  const replacePatternMatrix = useCallback((matrix: PatternMatrix) => {
-    const order = matrix.order;
-    if (order >= 0 && order < refs.patternMatricesRef.current.length) {
-      const nextMatrices = [...refs.patternMatricesRef.current];
-      nextMatrices[order] = matrix;
-      refs.patternMatricesRef.current = nextMatrices;
-    }
-    setSequencerMatrix(matrix);
-  }, [setSequencerMatrix]);
-
-  const getModuleFileData = useCallback((): Uint8Array | null => {
-    return refs.fileDataRef.current ? refs.fileDataRef.current.slice() : null;
-  }, []);
-
-  const toggleChannelMute = useCallback((channelIndex: number) => {
-    setChannelStates((prev) => {
-      const next = [...prev];
-      const existing = next[channelIndex];
-      if (!existing) return prev;
-      const muted = (existing.isMuted ?? 0) > 0 ? 0 : 1;
-      next[channelIndex] = { ...existing, isMuted: muted };
-      refs.channelStatesRef.current[channelIndex] = next[channelIndex]!;
-      return next;
-    });
-  }, [setChannelStates]);
-
-  useEffect(() => {
-    if (isReady && !refs.userModuleLoadedRef.current && !hasShareModuleIntent()) {
-      const loadDefault = async () => {
-        const fileName = DEFAULT_MODULE_URL.split('/').pop() || 'default.mod';
-        setStatus(`Fetching "${fileName}"...`);
-        try {
-          const response = await fetch(DEFAULT_MODULE_URL);
-          if (!response.ok) throw new Error(`Failed to fetch module: ${response.statusText}`);
-          const arrayBuffer = await response.arrayBuffer();
-          const fileData = new Uint8Array(arrayBuffer);
-          await processModuleData(fileData, fileName);
-        } catch (e) {
-          console.error('Failed to load default module:', e);
-          setStatus('Error fetching default module. See console.');
-        }
-      };
-      void loadDefault();
-    }
-  }, [isReady, processModuleData, setStatus]);
+  // Stable for the engine's lifetime: callers put these in effect / callback deps.
+  const actions = useMemo(() => ({
+    loadFile: (fileData: Uint8Array, fileName: string) => engine.loadFile(fileData, fileName),
+    play: (options?: { forceModuleLoad?: boolean }) => engine.play(options),
+    stopMusic: (destroy?: boolean) => engine.stop(destroy),
+    pause: () => engine.pause(),
+    resume: () => engine.resume(),
+    togglePlayPause: () => engine.togglePlayPause(),
+    seekToStep: (step: number) => engine.seekToStep(step),
+    setIsLooping: (value: boolean | ((previous: boolean) => boolean)) => engine.setLooping(value),
+    setPanValue: (value: number | ((previous: number) => number)) => engine.setMasterPan(value),
+    setPlaybackRowFraction: (value: number) => engine.setPlayheadForTest(value),
+    toggleAudioEngine: () => engine.toggleAudioEngine(),
+    replacePatternMatrix: (matrix: PatternMatrix) => engine.replacePatternMatrix(matrix),
+    getModuleFileData: () => engine.getModuleFileData(),
+    toggleChannelMute: (channelIndex: number) => engine.toggleChannelMute(channelIndex),
+    getAudioContext: () => engine.getAudioContext(),
+    getAudioTapNode: () => engine.getAudioTapNode(),
+    getMasterGainValue: () => engine.getMasterGainValue(),
+    getMasterPanValue: () => engine.getMasterPanValue(),
+    applyMasterLevels: (volume: number, pan: number) => {
+      engine.setMasterVolume(volume);
+      engine.setMasterPan(pan);
+    },
+    requestOscBuffer: () => engine.requestOscBuffer(),
+  }), [engine]);
 
   return {
-    status, isReady, isPlaying, isPaused, isModuleLoaded, moduleInfo, patternData,
-    transportState: deriveTransportState(isPlaying, isPaused),
-    loadFile: loadModule, play, stopMusic, pause: pauseMusic, resume: resumeMusic, togglePlayPause, sequencerMatrix, sequencerCurrentRow, sequencerGlobalRow,
-    totalPatternRows, playbackSeconds, playbackRowFraction, setPlaybackRowFraction, channelStates, beatPhase, grooveAmount, kickTrigger, activeChannels,
-    instrumentNames,
-    sampleNames,
-    moduleFormat,
-    instrumentTable,
-    moduleComments,
-    isLooping, setIsLooping, seekToStep: seekToStepWrapper, panValue, setPanValue,
-    activeEngine, isWorkletSupported, toggleAudioEngine, syncDebug,
-    analyserNode: refs.analyserRef.current,
-    replacePatternMatrix,
-    moduleDurationSeconds,
-    moduleFileName,
-    getModuleFileData,
-    toggleChannelMute,
-    getAudioContext: () => refs.audioContextRef.current,
-    getAudioTapNode: () => refs.stereoPannerRef.current ?? refs.gainNodeRef.current,
-    getMasterGainValue: () => refs.gainNodeRef.current?.gain.value ?? null,
-    getMasterPanValue: () => refs.stereoPannerRef.current?.pan.value ?? null,
-    applyMasterLevels: applyMasterLevelsNow,
-    playbackStateRef: refs.playbackStateRef,
-    channelStatesRef: refs.channelStatesRef,
-    workletLoadError,
-    oscBufferRef: refs.oscBufferRef,
-    audioReactiveRef: refs.audioReactiveRef,
-    requestOscBuffer,
+    status: s.status,
+    isReady: s.isReady,
+    isPlaying: s.isPlaying,
+    isPaused: s.isPaused,
+    isModuleLoaded: s.isModuleLoaded,
+    moduleInfo: s.moduleInfo,
+    transportState: s.transportState,
+    sequencerMatrix: s.sequencerMatrix,
+    sequencerCurrentRow: s.sequencerCurrentRow,
+    sequencerGlobalRow: s.sequencerGlobalRow,
+    totalPatternRows: s.totalPatternRows,
+    playbackSeconds: s.playbackSeconds,
+    playbackRowFraction: s.playbackRowFraction,
+    channelStates: s.channelStates,
+    beatPhase: s.beatPhase,
+    grooveAmount: 0,
+    kickTrigger: 0,
+    activeChannels: NO_ACTIVE_CHANNELS,
+    instrumentNames: s.instrumentNames,
+    sampleNames: s.sampleNames,
+    moduleFormat: s.moduleFormat,
+    instrumentTable: s.instrumentTable,
+    moduleComments: s.moduleComments,
+    isLooping: s.isLooping,
+    panValue: s.pan,
+    activeEngine: s.activeEngine,
+    isWorkletSupported: s.isWorkletSupported,
+    syncDebug: s.syncDebug,
+    analyserNode: s.analyserNode,
+    moduleDurationSeconds: s.moduleDurationSeconds,
+    moduleFileName: s.moduleFileName,
+    workletLoadError: s.workletLoadError,
+    playbackStateRef,
+    channelStatesRef,
+    oscBufferRef,
+    audioReactiveRef,
+    ...actions,
   };
 }
+
+const NO_ACTIVE_CHANNELS: number[] = [];

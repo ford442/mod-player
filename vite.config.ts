@@ -37,7 +37,8 @@ export default defineConfig(({ mode }) => {
       // and adding an explicit ignore pattern both guard against this.
       watch: {
         followSymlinks: false,
-        ignored: ['**/_codeql_detected_source_root**', '**/node_modules/**'],
+        // .claude/: agent worktrees (nested checkouts) — their builds must not reload this dev server.
+        ignored: ['**/_codeql_detected_source_root**', '**/node_modules/**', '**/.claude/**'],
       },
       headers: CROSS_ORIGIN_ISOLATION_HEADERS,
       proxy: {

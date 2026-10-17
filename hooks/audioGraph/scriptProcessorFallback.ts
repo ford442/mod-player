@@ -19,6 +19,10 @@ export async function runScriptProcessorFallback(
   node: AudioWorkletNode,
 ): Promise<void> {
   refs.spFallbackTriggered.current = true;
+  // Claim playback for the fallback right away, before the awaits below: in PlayerEngine
+  // `spFallbackTriggered` is a view of this, and it guards against a second fallback meanwhile.
+  // It stays claimed if the fallback cannot start (no module) — like the guard always did — until stop.
+  refs.playbackEngineRef.current = 'scriptprocessor';
   console.warn('[PLAY] Worklet WASM init failed — falling back to ScriptProcessorNode');
   try { node.port.postMessage(postPause()); } catch (_e) { /* ignore */ }
   try { node.port.onmessage = null; } catch (_e) { /* ignore */ }
@@ -98,7 +102,6 @@ export async function runScriptProcessorFallback(
     spNode.connect(refs.masterInputRef.current!);
     wireMasterOutput(ctx, refs, config.volume, config.panValue);
     refs.scriptProcessorRef.current = spNode;
-    refs.playbackEngineRef.current = 'scriptprocessor';
 
     if (refs.isPausedRef.current) {
       // Started (e.g. after a worklet fault) while paused: the callback above already renders silence.
