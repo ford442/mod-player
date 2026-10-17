@@ -55,6 +55,11 @@ export async function startNativePlayback(
         engine.commitModule();
       } else {
         log.log('Native module already loaded — skipping duplicate parse');
+        // Play after stop restarts at the top, as on the JS engine (which re-posts the module). Stop
+        // only paused the C++ module, so rewind it here: the seek also re-zeros its frame clock, which
+        // the frameSecondsAtAnchor = 0 anchor below assumes — without it every play after a stop ran
+        // ~(stop position) ahead of the playhead (#491).
+        engine.seek(0, 0);
       }
     }
 
