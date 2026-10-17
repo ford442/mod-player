@@ -110,6 +110,9 @@ static int    g_renderSampleRate    = 48000;
 // Track last reported row to detect row changes
 static int g_lastReportedRow = -1;
 static double g_lastReportTimeS = 0.0;
+// Row whose start g_rowStartPosSec marks (audio thread only; -1 = re-detect).
+static int g_rowStartRow = -1;
+static double g_rowStartPosSec = 0.0;
 
 // ── Ring buffer for main-thread bridge routing ───────────────────────
 //
@@ -236,6 +239,7 @@ EM_BOOL audio_process_cb(
                 // Pair with TS createNativeClockAnchor(..., frameSecondsAtAnchor=0)
                 g_audioFramesRendered = 0.0;
                 g_lastReportedRow = -1;
+                g_rowStartRow = -1;
                 g_lastReportTimeS = 0.0;
                 apply_persisted_controls(g_module);
                 g_appliedMuteBits = g_muteBits.load(std::memory_order_acquire);
@@ -258,6 +262,7 @@ EM_BOOL audio_process_cb(
             // Re-zero frame clock so seek re-anchor (frameSecondsAtAnchor=0) matches
             g_audioFramesRendered = 0.0;
             g_lastReportedRow = -1;
+            g_rowStartRow = -1;
         }
     }
 
@@ -332,11 +337,26 @@ EM_BOOL audio_process_cb(
     {
         static double timeSinceLastReport = 0.0;
         const int currentRow = g_module.getCurrentRow();
+        if (currentRow != g_rowStartRow) {
+            // Seen at quantum resolution, so this is when the row started (±1 quantum).
+            g_rowStartRow = currentRow;
+            g_rowStartPosSec = g_module.getPositionSeconds();
+        }
         const bool rowChanged = (currentRow != g_lastReportedRow);
         const bool timeThreshold = (timeSinceLastReport >= (1.0 / 60.0));
         if (rowChanged || timeThreshold) {
             g_positionSeq.fetch_add(1, std::memory_order_acq_rel); // odd: write in progress
             g_module.fillPositionInfo(g_positionInfo);
+            // Fractional row, the same estimate the JS processor reports: time into
+            // the row × rows/s from the current BPM (4 rows per beat), kept < 1 row.
+            // An integer row made every sample look ~half a row late to the
+            // main-thread prediction.
+            const double bpm = g_positionInfo.bpm > 1.0 ? g_positionInfo.bpm : 1.0;
+            const double rowsPerSec = bpm / 60.0 * 4.0 > 0.25 ? bpm / 60.0 * 4.0 : 0.25;
+            double frac = (g_positionInfo.positionMs / 1000.0 - g_rowStartPosSec) * rowsPerSec;
+            if (!(frac > 0.0)) frac = 0.0;
+            if (frac > 0.999) frac = 0.999;
+            g_positionInfo.rowFraction = static_cast<float>(currentRow + frac);
             g_positionInfo.audioFramesRendered = g_audioFramesRendered;
             g_positionInfo.sampleRate = sr;
             g_positionSeq.fetch_add(1, std::memory_order_release); // even: stable again
@@ -409,15 +429,17 @@ EM_BOOL audio_process_cb(
     return EM_TRUE;
 }
 
-// ── Worklet thread created callback ─────────────────────────────────
+// ── Worklet thread / processor startup (both callbacks run on the main thread) ──
 
-static void worklet_thread_initialized(EMSCRIPTEN_WEBAUDIO_T audioCtx, EM_BOOL success, void* userData) {
+static const char* const kProcessorName = "openmpt-native-processor";
+
+static void worklet_processor_created(EMSCRIPTEN_WEBAUDIO_T audioCtx, EM_BOOL success, void* userData) {
+    (void)userData;
     if (!success) {
-        std::fprintf(stderr, "[worklet] Failed to initialize audio worklet thread\n");
+        std::fprintf(stderr, "[worklet] Failed to register the %s AudioWorkletProcessor\n", kProcessorName);
         return;
     }
 
-    // Create the AudioWorkletNode on the worklet thread
     int outputChannelCounts[] = { 2 }; // Stereo output
 
     EmscriptenAudioWorkletNodeCreateOptions opts;
@@ -428,7 +450,7 @@ static void worklet_thread_initialized(EMSCRIPTEN_WEBAUDIO_T audioCtx, EM_BOOL s
 
     g_workletNode = emscripten_create_wasm_audio_worklet_node(
         audioCtx,
-        "openmpt-native-processor",
+        kProcessorName,
         &opts,
         audio_process_cb,
         nullptr  // userData
@@ -451,6 +473,25 @@ static void worklet_thread_initialized(EMSCRIPTEN_WEBAUDIO_T audioCtx, EM_BOOL s
     }
 
     std::printf("[C++] Worklet thread initialized, node created\n");
+}
+
+static void worklet_thread_initialized(EMSCRIPTEN_WEBAUDIO_T audioCtx, EM_BOOL success, void* userData) {
+    (void)userData;
+    if (!success) {
+        std::fprintf(stderr, "[worklet] Failed to initialize audio worklet thread\n");
+        return;
+    }
+    // The node's processor name has to be registered in the AudioWorkletGlobalScope
+    // first. Without this step `new AudioWorkletNode(ctx, name)` throws
+    // ("node name … is not defined"), Emscripten reports the whole thread start as
+    // failed, and the host falls back to the JS engine after its 8 s wait — which
+    // is what every native start did before #491.
+    WebAudioWorkletProcessorCreateOptions opts;
+    std::memset(&opts, 0, sizeof(opts));
+    opts.name = kProcessorName;
+    opts.numAudioParams = 0;
+    opts.audioParamDescriptors = nullptr;
+    emscripten_create_wasm_audio_worklet_processor_async(audioCtx, &opts, worklet_processor_created, nullptr);
 }
 
 // ── Exported C functions (called from TypeScript via ccall/cwrap) ────
