@@ -301,7 +301,8 @@ export interface SyncDebugInfo {
 // Window extensions
 declare global {
   interface Window {
-    libopenmptReady: Promise<LibOpenMPT>;
+    /** Set by the libopenmpt glue `<script>` index.html loads (vite-plugins/libopenmptHtml.ts) — absent if it failed. */
+    libopenmptReady?: Promise<LibOpenMPT>;
     libopenmpt: LibOpenMPT;
     _libopenmptReject?: (reason: Error) => void;
     webkitAudioContext?: typeof AudioContext;
@@ -397,6 +398,13 @@ declare global {
       getMasterPanValue: () => number | null;
       setMasterVolume: (value: number) => void;
       setMasterPan: (value: number) => void;
+      /** #492: how position reports reach the main thread (shared ring vs messages), with counts. */
+      getPositionPathStats: () => { transport: 'ring' | 'message'; samples: number; dropped: number };
+      /** #492: a warmed-up position-path loop for allocation measurement (`run(n)` → reports applied). */
+      runPositionPathBenchmark: (
+        path: 'ring' | 'message',
+        iterations: number,
+      ) => Promise<{ applied: number; run: (n: number) => number }>;
     };
   }
 }
