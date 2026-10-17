@@ -264,6 +264,4 @@ decodes the real Opus IRs and gates the character CPU (< 5 %).
   follow-up.
 - **Shader prefs** still key on the 16-byte module hash, which collides for XM
   files.
-- **Pre-existing, out of scope:** the native engine applies volume twice
-  (C++ and GainNode).
 - **Public mode** is gated on `VITE_FX_RACK=1` until the soak.

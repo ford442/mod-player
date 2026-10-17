@@ -503,7 +503,10 @@ export class OpenMPTWorkletEngine extends MiniEventEmitter<EngineEventMap> {
         console.warn('[OpenMPTWorkletEngine] seekMs() not yet implemented in C++ side; use seek(order, row)');
     }
 
-    /** Set playback volume (0.0 – 1.0). */
+    /**
+     * Set the C++ render gain (0.0 – 1.0). The app keeps this at 1: master volume belongs to the
+     * master GainNode alone (startNativePlayback.ts, #489), so a non-unity value here is applied twice.
+     */
     setVolume(vol: number): void {
         this.module?._set_volume(Math.max(0, Math.min(1, vol)));
     }

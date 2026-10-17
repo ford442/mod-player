@@ -58,7 +58,10 @@ export async function startNativePlayback(
       }
     }
 
-    engine.setVolume(config.volume);
+    // Unity, always: the master GainNode owns volume (as for the JS engine). The C++ module scales
+    // its own output by this value too, so the slider value here would apply it twice (-12 dB at 0.5)
+    // and shrink the analyser / GPU-spectrum PCM taps, which sit before the GainNode (#489).
+    engine.setVolume(1);
     engine.setLoop(config.isLooping);
     // Sinc+LP. Render params die with the module — re-apply after every load.
     engine.setInterpolationLength(INTERPOLATION_SINC_LP);
