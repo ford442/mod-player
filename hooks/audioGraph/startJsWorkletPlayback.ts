@@ -1,4 +1,4 @@
-import { getWorkletUrl } from '../useWorkletLoader';
+import { getWorkletUrl } from '../../audio/engine/workletUrls';
 import { detectRuntimeBase } from '../../src/lib/paths';
 import { broadcastPcmBlock } from '../../utils/projectMBridge';
 import {
@@ -41,7 +41,7 @@ import { createLogger } from '../../utils/log';
 
 const log = createLogger('PLAY');
 
-// AUDIO-001 FIX COMPLETE: Centralized worklet URL from useWorkletLoader
+// AUDIO-001 FIX COMPLETE: Centralized worklet URL (audio/engine/workletUrls.ts)
 const WORKLET_URL = getWorkletUrl();
 
 export type JsWorkletPlaybackResult = 'setup-complete' | 'failed';

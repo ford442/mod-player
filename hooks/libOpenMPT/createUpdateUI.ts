@@ -1,4 +1,3 @@
-import { startTransition } from 'react';
 import type { ModuleInfo, PlayheadDebugSnapshot, SyncDebugInfo } from '../../types';
 import { computeNoteAges } from '../../utils/patternExtractor';
 import {
@@ -21,14 +20,15 @@ import type { UpdateUIParams } from './types';
 import { isPatternDiagEnabled, recordPatternBoundaryEvent } from '../../utils/patternBoundaryDiag';
 import { effectiveHeardTime } from '../../utils/transportClock';
 
-/** TIMING FIX: Improved updateUI with drift compensation and proper interpolation */
-export function createUpdateUI({
-  refs,
-  setters,
-  activeEngine,
-  kickTrigger,
-  grooveAmount,
-}: UpdateUIParams): () => void {
+/**
+ * TIMING FIX: Improved updateUI with drift compensation and proper interpolation.
+ *
+ * Runs on requestAnimationFrame while the transport is playing or paused, and reschedules itself for
+ * exactly as long (#492: the separate `uiLoopActiveRef` flag is gone). Snapshot writes go straight to
+ * PlayerEngine's store; only components that select a changed field re-render.
+ */
+export function createUpdateUI(params: UpdateUIParams): () => void {
+  const { refs, setters } = params;
   const {
     libopenmptRef,
     currentModulePtr,
@@ -56,7 +56,6 @@ export function createUpdateUI({
     positionReportTrackerRef,
     lastPositionSampleTimeRef,
     updateUIRef,
-    uiLoopActiveRef,
     lastUiOrderRef,
     lastUiRowIntRef,
     lastUiBpmRef,
@@ -65,7 +64,6 @@ export function createUpdateUI({
     lastChannelStatePublishMsRef,
     playbackStateRef,
     animationFrameHandle,
-    lastUpdateTimeRef,
     audioWorkletNodeRef,
     nativeEngineRef,
   } = refs;
@@ -87,8 +85,7 @@ export function createUpdateUI({
     // then holds (effectiveHeardTime below), and the loop is already alive for resume.
     if (!isPlayingRef.current && !isPausedRef.current) return;
 
-    uiLoopActiveRef.current = true;
-
+    const { activeEngine, kickTrigger, grooveAmount } = params;
     const wallNowMs = performance.now();
 
     const lib = libopenmptRef.current;
@@ -206,14 +203,12 @@ export function createUpdateUI({
       for (let i = 0; i < order; i++) {
         globalRow += patternMatricesRef.current[i]?.numRows || 64;
       }
-      startTransition(() => {
-        if (newMatrix) setSequencerMatrix(newMatrix);
-        setModuleInfo((prev: ModuleInfo) => ({ ...prev, order, row: rowIntUi, bpm: currentBpm }));
-        setSequencerCurrentRow(rowIntUi);
-        setPlaybackSeconds(time);
-        setPlaybackRowFraction(smoothedPlayhead);
-        setSequencerGlobalRow(globalRow + rowIntUi);
-      });
+      if (newMatrix) setSequencerMatrix(newMatrix);
+      setModuleInfo((prev: ModuleInfo) => ({ ...prev, order, row: rowIntUi, bpm: currentBpm }));
+      setSequencerCurrentRow(rowIntUi);
+      setPlaybackSeconds(time);
+      setPlaybackRowFraction(smoothedPlayhead);
+      setSequencerGlobalRow(globalRow + rowIntUi);
       lastUiOrderRef.current = order;
       lastUiRowIntRef.current = rowIntUi;
       lastUiBpmRef.current = currentBpm;
@@ -288,9 +283,7 @@ export function createUpdateUI({
       if (stateChanged && publishChannelUi) {
         const snapshot = channelStatesRef.current.slice();
         lastChannelStatePublishMsRef.current = wallNowMs;
-        startTransition(() => {
-          setChannelStates(snapshot);
-        });
+        setChannelStates(snapshot);
       }
     }
 
@@ -395,11 +388,8 @@ export function createUpdateUI({
       });
     }
 
-    lastUpdateTimeRef.current = wallNowMs / 1000;
-    if (uiLoopActiveRef.current) {
-      animationFrameHandle.current = requestAnimationFrame(() => {
-        updateUIRef.current?.();
-      });
-    }
+    animationFrameHandle.current = requestAnimationFrame(() => {
+      updateUIRef.current?.();
+    });
   };
 }

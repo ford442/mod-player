@@ -6,36 +6,69 @@ import { ExportPanel } from './ExportPanel';
 import { InstrumentPanel } from './InstrumentPanel';
 import { FX_RACK_ENABLED, IS_PUBLIC_MODE, LIGHT_THEMES } from '../appConfig';
 import { FxRackPanelLazy } from './fx/FxRackPanelLazy';
-import { usePlayerSession } from '../context/PlayerSessionContext';
+import { usePlayerEngine, usePlayerEngineInstance } from '../hooks/usePlayerEngine';
+import {
+  useChannelMuteMask,
+  useInstrumentPalette,
+  useModuleMetadata,
+  usePlayerActions,
+} from '../hooks/usePlayerView';
 import { usePlayerFeatures } from '../context/PlayerFeaturesContext';
 import { usePlayerUiStore } from '../store/playerUiStore';
 import { useShaderPrefsStore } from '../store/shaderPrefsStore';
 
+/** Module Info, bound to the engine; owns the row-rate subscription so the grid does not re-render per row. */
+function LiveMetadataPanel() {
+  const metadata = useModuleMetadata();
+  const sequencerMatrix = usePlayerEngine((s) => s.sequencerMatrix);
+  const currentRow = usePlayerEngine((s) => Math.floor(s.playbackRowFraction));
+  const playbackSeconds = usePlayerEngine((s) => s.playbackSeconds);
+  const isPlaying = usePlayerEngine((s) => s.isPlaying);
+  return (
+    <MetadataPanel
+      metadata={metadata}
+      currentOrder={sequencerMatrix?.order ?? 0}
+      currentRow={currentRow}
+      currentPattern={sequencerMatrix?.patternIndex ?? 0}
+      matrix={sequencerMatrix}
+      isPlaying={isPlaying}
+      playbackSeconds={playbackSeconds}
+    />
+  );
+}
+
+/** VU meters: they read the engine's live channel levels every frame, not a React snapshot. */
+function LiveChannelMeters() {
+  const { channelStatesRef } = usePlayerEngineInstance();
+  const numChannels = usePlayerEngine((s) => s.sequencerMatrix?.numChannels ?? 4);
+  const analyserNode = usePlayerEngine((s) => s.analyserNode);
+  const isPlaying = usePlayerEngine((s) => s.isPlaying);
+  return (
+    <ChannelMeters
+      channelLevelsRef={channelStatesRef}
+      numChannels={numChannels}
+      analyserNode={analyserNode}
+      isPlaying={isPlaying}
+    />
+  );
+}
+
 /** Side panels: FX rack (left, wide); Module Info, Instruments, VU Meters, MIDI/Hardware, Export (right). */
 export function SidePanelGrid() {
-  const session = usePlayerSession();
   const features = usePlayerFeatures();
   const { theme, showMetadata, showInstruments, showChannelMeters, showFxRack } = usePlayerUiStore();
   const { storedShader: shaderFile } = useShaderPrefsStore();
 
   const isDarkMode = !LIGHT_THEMES.has(theme);
   const showDevSurface = !IS_PUBLIC_MODE;
-  const {
-    isModuleLoaded,
-    isPlaying,
-    playbackSeconds,
-    playbackRowFraction,
-    sequencerMatrix,
-    channelVU,
-    analyserNode,
-    moduleMetadata,
-    moduleFileName,
-    moduleDurationSeconds,
-    instrumentTable,
-    channelMuteMask,
-    instrumentPalette,
-    toggleChannelMute: onToggleChannelMute,
-  } = session;
+  const isModuleLoaded = usePlayerEngine((s) => s.isModuleLoaded);
+  const numChannels = usePlayerEngine((s) => s.sequencerMatrix?.numChannels ?? 0);
+  const moduleFileName = usePlayerEngine((s) => s.moduleFileName);
+  const moduleDurationSeconds = usePlayerEngine((s) => s.moduleDurationSeconds);
+  const instrumentTable = usePlayerEngine((s) => s.instrumentTable);
+  const instrumentPalette = useInstrumentPalette();
+  const channelMuteMask = useChannelMuteMask();
+  const { toggleChannelMute: onToggleChannelMute } = usePlayerActions();
   const {
     midiControls,
     onExportWav,
@@ -63,15 +96,7 @@ export function SidePanelGrid() {
       <div className="flex flex-col gap-4">
         {showMetadata && (
           <Panel variant="bezel" title="Module Info" titleAccent>
-            <MetadataPanel
-              metadata={moduleMetadata}
-              currentOrder={sequencerMatrix?.order ?? 0}
-              currentRow={Math.floor(playbackRowFraction)}
-              currentPattern={sequencerMatrix?.patternIndex ?? 0}
-              matrix={sequencerMatrix}
-              isPlaying={isPlaying}
-              playbackSeconds={playbackSeconds}
-            />
+            <LiveMetadataPanel />
           </Panel>
         )}
         {showInstruments && showDevSurface && (
@@ -86,12 +111,7 @@ export function SidePanelGrid() {
         )}
         {showChannelMeters && (
           <Panel variant="bezel" title="VU Meters" titleAccent>
-            <ChannelMeters
-              channelVU={channelVU}
-              numChannels={sequencerMatrix?.numChannels ?? 4}
-              analyserNode={analyserNode}
-              isPlaying={isPlaying}
-            />
+            <LiveChannelMeters />
           </Panel>
         )}
         {midiControls && showDevSurface && (
@@ -106,7 +126,7 @@ export function SidePanelGrid() {
               isDarkMode={isDarkMode}
               moduleFileName={moduleFileName}
               moduleDurationSeconds={moduleDurationSeconds}
-              numChannels={sequencerMatrix?.numChannels ?? 0}
+              numChannels={numChannels}
               channelMuteMask={channelMuteMask}
               onToggleChannelMute={onToggleChannelMute}
               onExportWav={onExportWav}

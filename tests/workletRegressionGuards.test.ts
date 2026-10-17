@@ -193,7 +193,7 @@ describe('#354 production source invariants', () => {
   const workletSource = readFileSync(join(ROOT, 'public/worklets/openmpt-worklet.js'), 'utf8');
   const useAudioGraph = readAudioGraphSources(ROOT);
   const useLibOpenMPT = readLibOpenMPTSources(ROOT);
-  const useWorkletLoader = readFileSync(join(ROOT, 'hooks/useWorkletLoader.ts'), 'utf8');
+  const workletUrls = readFileSync(join(ROOT, 'audio/engine/workletUrls.ts'), 'utf8');
   const lifecycle = readFileSync(join(ROOT, 'utils/workletAudioLifecycle.ts'), 'utf8');
 
   it('worklet throttles position posts at 1/60 s (not every quantum)', () => {
@@ -315,10 +315,10 @@ describe('#354 production source invariants', () => {
     // derive the `?v=` cache-bust from a content hash of the compiled
     // processor (scripts/build-js-worklet.mjs), so it only changes when the
     // generated openmpt-worklet.js actually changes.
-    expect(useWorkletLoader).toMatch(
-      /from ['"]\.\.\/audio-worklet\/js\/worklet-version\.generated\.json['"]/,
+    expect(workletUrls).toMatch(
+      /from ['"](?:\.\.\/)+audio-worklet\/js\/worklet-version\.generated\.json['"]/,
     );
-    expect(useWorkletLoader).toContain('WORKLET_VERSION = workletVersionData.version');
+    expect(workletUrls).toContain('WORKLET_VERSION = workletVersionData.version');
 
     const versionJson = JSON.parse(
       readFileSync(join(ROOT, 'audio-worklet/js/worklet-version.generated.json'), 'utf8'),
@@ -383,6 +383,7 @@ describe('#354 ScriptProcessor fallback structural immunity', () => {
   it('stopMusic tears down ScriptProcessor on every stop/reload', () => {
     expect(transportActions).toContain('scriptProcessorRef.current.disconnect()');
     expect(transportActions).toContain('scriptProcessorRef.current = null');
-    expect(transportActions).toContain('spFallbackTriggered.current = false');
+    // #492: spFallbackTriggered is a view of playbackEngineRef; stop clears that, re-arming the fallback.
+    expect(transportActions).toContain('playbackEngineRef.current = null');
   });
 });

@@ -1,75 +1,94 @@
-import type React from 'react';
 import type { LibOpenMPT, PatternMatrix, ChannelShadowState, ModuleInfo } from '../../types';
 import type { OpenMPTWorkletEngine } from '../../audio-worklet/OpenMPTWorkletEngine';
+import type { Ref, StateSetter } from '../../audio/engine/store';
+import type { WorkletPositionSample } from '../../utils/playheadPrediction';
+import type { NativeClockAnchor } from '../../utils/nativeClockAnchor';
 
+/**
+ * What the engine start paths read and write. PlayerEngine passes its own refs bag (a superset; see
+ * hooks/libOpenMPT/types.ts for which members are FSM views), unit tests pass plain `{ current }`s.
+ */
 export interface AudioGraphRefs {
-  libopenmptRef:       React.MutableRefObject<LibOpenMPT | null>;
-  fileDataRef:         React.MutableRefObject<Uint8Array | null>;
-  audioContextRef:     React.MutableRefObject<AudioContext | null>;
-  workletLoadedRef:    React.MutableRefObject<boolean>;
+  libopenmptRef:       Ref<LibOpenMPT | null>;
+  fileDataRef:         Ref<Uint8Array | null>;
+  audioContextRef:     Ref<AudioContext | null>;
+  workletLoadedRef:    Ref<boolean>;
   /** Unity-gain master input: every engine connects here, never to the analyser (#453). */
-  masterInputRef:      React.MutableRefObject<GainNode | null>;
+  masterInputRef:      Ref<GainNode | null>;
   /** Dry path around the FX rack; its gain belongs to the rack controller (#453). */
-  masterDirectRef:     React.MutableRefObject<GainNode | null>;
-  stereoPannerRef:     React.MutableRefObject<StereoPannerNode | null>;
-  gainNodeRef:         React.MutableRefObject<GainNode | null>;
-  analyserRef:         React.MutableRefObject<AnalyserNode | null>;
-  audioWorkletNodeRef: React.MutableRefObject<AudioWorkletNode | null>;
-  nativeEngineRef:     React.MutableRefObject<OpenMPTWorkletEngine | null>;
-  workletOrderRef:     React.MutableRefObject<number>;
-  workletRowRef:       React.MutableRefObject<number>;
-  workletTimeRef:      React.MutableRefObject<number>;
-  workletTimestampRef: React.MutableRefObject<number>;
-  lastWorkletUpdateRef: React.MutableRefObject<number>;
-  workletBpmRef:       React.MutableRefObject<number>;
-  workletSpeedRef:     React.MutableRefObject<number>;
-  workletRowsPerSecRef: React.MutableRefObject<number>;
-  workletPositionSampleRef: React.MutableRefObject<import('../../utils/playheadPrediction').WorkletPositionSample | null>;
-  pendingSeekRef:      React.MutableRefObject<{ order: number; row: number; timestamp: number } | null>;
-  seekAcknowledgedRef: React.MutableRefObject<boolean>;
-  spFallbackTriggered: React.MutableRefObject<boolean>;
-  scriptProcessorRef:  React.MutableRefObject<ScriptProcessorNode | null>;
-  spLeftBufPtr:        React.MutableRefObject<number>;
-  spRightBufPtr:       React.MutableRefObject<number>;
-  isPlayingRef:        React.MutableRefObject<boolean>;
+  masterDirectRef:     Ref<GainNode | null>;
+  stereoPannerRef:     Ref<StereoPannerNode | null>;
+  gainNodeRef:         Ref<GainNode | null>;
+  analyserRef:         Ref<AnalyserNode | null>;
+  audioWorkletNodeRef: Ref<AudioWorkletNode | null>;
+  nativeEngineRef:     Ref<OpenMPTWorkletEngine | null>;
+  workletOrderRef:     Ref<number>;
+  workletRowRef:       Ref<number>;
+  workletTimeRef:      Ref<number>;
+  workletTimestampRef: Ref<number>;
+  lastWorkletUpdateRef: Ref<number>;
+  workletBpmRef:       Ref<number>;
+  workletSpeedRef:     Ref<number>;
+  workletRowsPerSecRef: Ref<number>;
+  workletPositionSampleRef: Ref<WorkletPositionSample | null>;
+  pendingSeekRef:      Ref<{ order: number; row: number; timestamp: number } | null>;
+  seekAcknowledgedRef: Ref<boolean>;
+  spFallbackTriggered: Ref<boolean>;
+  scriptProcessorRef:  Ref<ScriptProcessorNode | null>;
+  spLeftBufPtr:        Ref<number>;
+  spRightBufPtr:       Ref<number>;
+  /**
+   * Rendering audibly. In PlayerEngine this is a read-only view of the transport FSM: the start paths
+   * still assign it (their unit tests drive them with plain refs) and report the change through
+   * `callbacks.setIsPlaying`, which is what moves the FSM.
+   */
+  isPlayingRef:        Ref<boolean>;
   /**
    * Transport is paused (see hooks/libOpenMPT/createTransportActions.ts). Engine start paths read it so
    * a node (re)started while paused — worklet fault recovery, loading a module — comes up paused,
    * and the ScriptProcessor callback reads it to render silence.
    */
-  isPausedRef:         React.MutableRefObject<boolean>;
+  isPausedRef:         Ref<boolean>;
   /** Written by each engine start path: which engine is really rendering (pause/resume drive this one). */
-  playbackEngineRef:   React.MutableRefObject<'worklet' | 'native-worklet' | 'scriptprocessor' | null>;
-  animationFrameHandle: React.MutableRefObject<number>;
-  currentModulePtr:    React.MutableRefObject<number>;
-  channelStatesRef:    React.MutableRefObject<ChannelShadowState[]>;
-  patternMatricesRef:  React.MutableRefObject<(PatternMatrix | null)[]>;
-  audioClockStartRef:  React.MutableRefObject<number>;
-  workletTimeAtStartRef: React.MutableRefObject<number>;
-  driftAccumulatorRef: React.MutableRefObject<number>;
-  updateUIRef:         React.MutableRefObject<(() => void) | null>;
-  /** SharedArrayBuffer provided to the native engine constructor (may be null in non-isolated contexts). */
-  nativeSharedBuffer:  React.MutableRefObject<SharedArrayBuffer | null>;
-  nativeClockAnchorRef: React.MutableRefObject<import('../../utils/nativeClockAnchor').NativeClockAnchor | null>;
-  nativeBridgeLatencyRef: React.MutableRefObject<number>;
+  playbackEngineRef:   Ref<'worklet' | 'native-worklet' | 'scriptprocessor' | null>;
+  animationFrameHandle: Ref<number>;
+  currentModulePtr:    Ref<number>;
+  channelStatesRef:    Ref<ChannelShadowState[]>;
+  patternMatricesRef:  Ref<(PatternMatrix | null)[]>;
+  audioClockStartRef:  Ref<number>;
+  workletTimeAtStartRef: Ref<number>;
+  driftAccumulatorRef: Ref<number>;
+  updateUIRef:         Ref<(() => void) | null>;
+  nativeClockAnchorRef: Ref<NativeClockAnchor | null>;
+  nativeBridgeLatencyRef: Ref<number>;
   /** Callback to lazily create a main-thread libopenmpt module for ScriptProcessor fallback. */
-  ensureMainThreadModuleRef: React.MutableRefObject<((data: Uint8Array) => Promise<void>) | null>;
+  ensureMainThreadModuleRef: Ref<((data: Uint8Array) => Promise<void>) | null>;
   /** Incremented on each processModuleData — guards stale worklet `loaded` acks. */
-  workletModuleTokenRef: React.MutableRefObject<number>;
-  lastWorkletModuleTokenSentRef: React.MutableRefObject<number>;
+  workletModuleTokenRef: Ref<number>;
+  lastWorkletModuleTokenSentRef: Ref<number>;
 }
 
 export interface AudioGraphCallbacks {
   setStatus:         (s: string) => void;
+  /**
+   * The engine's report to the transport: `true` — it is rendering now; `false` — it stopped
+   * rendering on its own because it faulted (handleWorkletFault). PlayerEngine maps these onto the
+   * FSM's `started` / `fault` events, and treats a report that no longer fits as stale.
+   */
   setIsPlaying:      (v: boolean) => void;
-  setActiveEngine:   React.Dispatch<React.SetStateAction<'worklet' | 'native-worklet'>>;
-  setModuleInfo:     React.Dispatch<React.SetStateAction<ModuleInfo>>;
-  setSequencerMatrix: React.Dispatch<React.SetStateAction<PatternMatrix | null>>;
+  setActiveEngine:   StateSetter<'worklet' | 'native-worklet'>;
+  setModuleInfo:     StateSetter<ModuleInfo>;
+  setSequencerMatrix: StateSetter<PatternMatrix | null>;
   stopMusic:         (destroy?: boolean) => void;
   seekToStepWrapper: (step: number) => void;
   updateUI:          () => void;
 }
 
+/**
+ * Start-path configuration. PlayerEngine hands over an object whose fields are getters onto its live
+ * state, so a handler installed at start (the worklet's `ended`, the ScriptProcessor's loop check)
+ * sees a loop toggle made during playback instead of the value captured when play() was called.
+ */
 export interface AudioGraphConfig {
   activeEngine:           'worklet' | 'native-worklet';
   isWorkletSupported:     boolean;
@@ -81,3 +100,10 @@ export interface AudioGraphConfig {
   /** Set after processModuleData — always post `load` even if isPlayingRef is still true (#329). */
   forceModuleLoad?:       boolean;
 }
+
+/**
+ * What startAudioPlayback did: `pending` — the JS worklet is set up and plays on its `loaded` ack;
+ * `started` — the native engine is rendering (or paused, if the transport is); `nudged` — already
+ * playing, the node was re-poked; `failed` — nothing will render.
+ */
+export type AudioStartResult = 'pending' | 'started' | 'nudged' | 'failed';

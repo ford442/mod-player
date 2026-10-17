@@ -208,6 +208,8 @@ const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const SKIP_DIRS = new Set([
   'node_modules', 'dist', '.git', 'tests', 'vendor',
   '_codeql_detected_source_root',
+  // Agent worktrees: nested checkouts, not this tree's sources (eslint/vitest skip them too).
+  '.claude',
 ]);
 
 /** Strip comments so prose about the removed call sites does not trip a check. */

@@ -23,5 +23,5 @@
     "exactOptionalPropertyTypes": true
   },
   "include": ["."],
-  "exclude": ["node_modules", "dist", "vite.config.ts", "vitest.config.ts", "archive", "jules_patch", "tests", "audio-worklet/js", "cpp"]
+  "exclude": ["node_modules", ".claude", "dist", "vite.config.ts", "vitest.config.ts", "archive", "jules_patch", "tests", "audio-worklet/js", "cpp"]
 }

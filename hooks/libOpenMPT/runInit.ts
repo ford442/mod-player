@@ -13,7 +13,7 @@ import {
 import {
   getNativeGlueUrl,
   isNativeGlueAvailable,
-} from '../useWorkletLoader';
+} from '../../audio/engine/workletUrls';
 import { verifyParserWorkerUrl } from '../../utils/parserWorker';
 import type { LibOpenMPTRefs, LibOpenMPTSetters } from './types';
 import { WORKLET_URL } from './constants';
@@ -35,6 +35,12 @@ export interface InitDeps {
   >;
   checkWorkletSupport: () => boolean;
   verifyWorkletFile: () => Promise<boolean>;
+  /**
+   * True once the engine was disposed (or re-initialised) while this init was awaiting — React
+   * StrictMode mounts, unmounts and remounts in dev. A cancelled init stops at its next await
+   * instead of publishing a second native engine over the live one.
+   */
+  isCancelled?: () => boolean;
 }
 
 function polyfillLibStrings(lib: import('../../types').LibOpenMPT) {
@@ -71,6 +77,7 @@ function polyfillLibStrings(lib: import('../../types').LibOpenMPT) {
 
 export async function runLibOpenMPTInit(deps: InitDeps): Promise<void> {
   const { refs, setters, checkWorkletSupport, verifyWorkletFile } = deps;
+  const isCancelled = deps.isCancelled ?? (() => false);
   const {
     setStatus,
     setIsReady,
@@ -96,6 +103,7 @@ export async function runLibOpenMPTInit(deps: InitDeps): Promise<void> {
     log.log('Waiting for libopenmptReady...');
     const lib = await Promise.race([window.libopenmptReady, timeoutPromise]);
     log.log('libopenmptReady resolved');
+    if (isCancelled()) return;
 
     polyfillLibStrings(lib);
     refs.libopenmptRef.current = lib;
@@ -116,6 +124,7 @@ export async function runLibOpenMPTInit(deps: InitDeps): Promise<void> {
 
       if (hasWorkletSupport) {
         const fileAccessible = await verifyWorkletFile();
+        if (isCancelled()) return;
 
         if (fileAccessible) {
           setIsWorkletSupported(true);
@@ -160,12 +169,17 @@ export async function runLibOpenMPTInit(deps: InitDeps): Promise<void> {
         const nativeGlueUrl = getNativeGlueUrl();
         log.log('Probing for native engine at:', nativeGlueUrl);
         const glueIsSafe = await isNativeGlueAvailable(nativeGlueUrl);
+        if (isCancelled()) return;
 
         if (glueIsSafe) {
           log.log('Native C++/Wasm AudioWorklet glue detected');
 
           const engine = new OpenMPTWorkletEngine();
           await engine.init();
+          if (isCancelled()) {
+            engine.destroy();
+            return;
+          }
           refs.nativeEngineRef.current = engine;
           window.__XASM1_NATIVE__ = {
             setChannelMute: (channel, muted) => engine.setChannelMute(channel, muted),
@@ -241,10 +255,12 @@ export function cleanupLibOpenMPT(refs: LibOpenMPTRefs) {
   refs.audioContextRef.current = null;
   if (refs.currentModulePtr.current !== 0 && refs.libopenmptRef.current) {
     refs.libopenmptRef.current._openmpt_module_destroy(refs.currentModulePtr.current);
+    refs.currentModulePtr.current = 0;
   }
   if (refs.workerRef.current) {
     refs.workerRef.current.terminate();
     refs.workerRef.current = null;
   }
   cancelAnimationFrame(refs.animationFrameHandle.current);
+  refs.animationFrameHandle.current = 0;
 }

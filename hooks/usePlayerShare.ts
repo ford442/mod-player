@@ -1,10 +1,8 @@
 import { useCallback, useEffect, useRef } from 'react';
-import type { PatternMatrix } from '../types';
 import type { MediaItem } from '../types';
 import { createRemoteMediaItem } from '../utils/remoteMedia';
 import {
   buildShareUrl,
-  computeSeekStep,
   createShareCode,
   fetchShareModule,
   paletteModeFromShare,
@@ -14,57 +12,39 @@ import {
   type PlayerShareState,
 } from '../utils/shareState';
 import type { ToastKind } from './useToast';
+import { usePlayerEngine, usePlayerEngineInstance } from './usePlayerEngine';
+import { usePlayerUiStore } from '../store/playerUiStore';
+import { useShaderPrefsStore } from '../store/shaderPrefsStore';
 
 export interface UsePlayerShareOptions {
-  isReady: boolean;
-  isModuleLoaded: boolean;
-  sequencerMatrix: PatternMatrix | null;
-  shaderFile: string;
-  paletteMode: number;
-  liteMode: boolean;
-  colorPalette: number;
   moduleSourceUrl: string | null;
-  moduleOrder: number;
-  moduleRow: number;
   mediaItem: MediaItem | null;
-  setShaderFile: (shader: string) => void;
-  setPaletteMode: (mode: number) => void;
-  setColorPalette: (palette: number) => void;
-  setLiteMode: (lite: boolean) => void;
   setModuleSourceUrl: (url: string | null) => void;
   loadFileWithHash: (data: Uint8Array, fileName: string) => void;
-  seekToStep: (step: number) => void;
   setMediaItem: (item: MediaItem | null) => void;
   setMediaVisible: (visible: boolean) => void;
   showToast: (text: string, kind?: ToastKind) => void;
-  /** Skip per-module shader restore on the next load (share URL / deep link). */
-  onShareShaderApplied?: () => void;
 }
 
 export function usePlayerShare({
-  isReady,
-  isModuleLoaded,
-  sequencerMatrix,
-  shaderFile,
-  paletteMode,
-  liteMode,
-  colorPalette,
   moduleSourceUrl,
-  moduleOrder,
-  moduleRow,
   mediaItem,
-  setShaderFile,
-  setPaletteMode,
-  setColorPalette,
-  setLiteMode,
   setModuleSourceUrl,
   loadFileWithHash,
-  seekToStep,
   setMediaItem,
   setMediaVisible,
   showToast,
-  onShareShaderApplied,
 }: UsePlayerShareOptions) {
+  const engine = usePlayerEngineInstance();
+  const isReady = usePlayerEngine((s) => s.isReady);
+  const isModuleLoaded = usePlayerEngine((s) => s.isModuleLoaded);
+  const sequencerMatrix = usePlayerEngine((s) => s.sequencerMatrix);
+  const setShaderFile = useShaderPrefsStore((s) => s.selectShader);
+  const setPaletteMode = useShaderPrefsStore((s) => s.setPaletteMode);
+  const setColorPalette = useShaderPrefsStore((s) => s.setColorPalette);
+  /** Skip per-module shader restore on the next load (share URL / deep link). */
+  const onShareShaderApplied = useShaderPrefsStore((s) => s.markSkipModuleShaderRestore);
+  const setLiteMode = usePlayerUiStore((s) => s.setLiteMode);
   const hydratedRef = useRef(false);
   const pendingSeekRef = useRef<{ order: number; row: number } | null>(null);
   const shareWarningsShownRef = useRef(false);
@@ -81,7 +61,7 @@ export function usePlayerShare({
       }
     }
     if (state.shader) {
-      onShareShaderApplied?.();
+      onShareShaderApplied();
       setShaderFile(state.shader);
     }
     const paletteModeValue = paletteModeFromShare(state.palette);
@@ -125,7 +105,7 @@ export function usePlayerShare({
             return;
           }
           if (state.shader) {
-            onShareShaderApplied?.();
+            onShareShaderApplied();
             setShaderFile(state.shader);
           }
           const paletteModeValue = paletteModeFromShare(state.palette);
@@ -194,19 +174,21 @@ export function usePlayerShare({
     if (!isModuleLoaded || !sequencerMatrix || !pendingSeekRef.current) return;
     const { order, row } = pendingSeekRef.current;
     pendingSeekRef.current = null;
-    const rowsPerPattern = sequencerMatrix.numRows || 64;
-    const step = computeSeekStep(order, row, rowsPerPattern);
-    seekToStep(step);
-  }, [isModuleLoaded, sequencerMatrix, seekToStep]);
+    // Global step from the real pattern lengths (orders need not all have the same row count).
+    engine.seekToStep(Math.max(0, engine.stepOfOrder(order) + row));
+  }, [isModuleLoaded, sequencerMatrix, engine]);
 
+  // Read at click time: the position changes every row, and nothing else needs to re-render for it.
   const copyShareLink = useCallback(async () => {
+    const prefs = useShaderPrefsStore.getState();
+    const { moduleInfo } = engine.getSnapshot();
     const state: PlayerShareState = {
-      shader: shaderFile,
-      palette: sharePaletteFromMode(paletteMode),
-      lite: liteMode ? 1 : 0,
-      colorPalette,
-      order: moduleOrder,
-      row: moduleRow,
+      shader: prefs.storedShader,
+      palette: sharePaletteFromMode(prefs.paletteMode),
+      lite: usePlayerUiStore.getState().liteMode ? 1 : 0,
+      colorPalette: prefs.colorPalette,
+      order: moduleInfo.order,
+      row: moduleInfo.row,
     };
     if (moduleSourceUrl) {
       state.mod = moduleSourceUrl;
@@ -233,17 +215,7 @@ export function usePlayerShare({
     } catch {
       showToast('Could not copy link — copy from the address bar', 'warning');
     }
-  }, [
-    shaderFile,
-    paletteMode,
-    liteMode,
-    colorPalette,
-    moduleOrder,
-    moduleRow,
-    moduleSourceUrl,
-    mediaItem,
-    showToast,
-  ]);
+  }, [engine, moduleSourceUrl, mediaItem, showToast]);
 
   return { copyShareLink };
 }

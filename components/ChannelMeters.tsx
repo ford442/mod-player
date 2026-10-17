@@ -16,7 +16,12 @@ import {
 } from './channelMetersUtils';
 
 interface ChannelMetersProps {
-  channelVU: Float32Array | null;
+  /**
+   * Live per-channel levels, read on every animation frame — the engine's `channelStatesRef`. VU never
+   * goes through React state (pitfall 9, #492); a ≤10 Hz snapshot prop used to freeze the meters
+   * whenever the snapshot was not republished (it only is when a note age changes).
+   */
+  channelLevelsRef: { readonly current: ReadonlyArray<{ readonly volume: number }> };
   numChannels: number;
   analyserNode: AnalyserNode | null;
   isPlaying: boolean;
@@ -47,7 +52,7 @@ function ensureChannelStates(
 
 /** Per-channel VU meters (canvas, dB-scaled) with peak hold + stereo oscilloscope. */
 export const ChannelMeters: React.FC<ChannelMetersProps> = ({
-  channelVU,
+  channelLevelsRef,
   numChannels,
   analyserNode,
   isPlaying,
@@ -68,10 +73,10 @@ export const ChannelMeters: React.FC<ChannelMetersProps> = ({
    */
   const snapshotRef = useRef<AnalysisSnapshot | null>(null);
 
-  const channelVURef = useRef(channelVU);
+  const levelsRef = useRef(channelLevelsRef);
   const numChannelsRef = useRef(numChannels);
   const analyserNodeRef = useRef(analyserNode);
-  channelVURef.current = channelVU;
+  levelsRef.current = channelLevelsRef;
   numChannelsRef.current = numChannels;
   analyserNodeRef.current = analyserNode;
 
@@ -100,7 +105,7 @@ export const ChannelMeters: React.FC<ChannelMetersProps> = ({
     const barH = Math.round(METER_BAR_HEIGHT * dpr);
     const nCh = numChannelsRef.current;
     const states = channelStatesRef.current;
-    const currentVU = channelVURef.current;
+    const levels = levelsRef.current.current;
 
     ctx.fillStyle = METER_BG;
     ctx.fillRect(0, 0, w, h);
@@ -123,10 +128,7 @@ export const ChannelMeters: React.FC<ChannelMetersProps> = ({
 
     for (let i = 0; i < nCh; i++) {
       const x = i * colW + gap / 2;
-      const target =
-        currentVU && i < currentVU.length
-          ? Math.min(1, Math.max(0, currentVU[i] ?? 0))
-          : 0;
+      const target = Math.min(1, Math.max(0, levels[i]?.volume ?? 0));
 
       const state = states[i] ?? createChannelMeterState();
       if (!states[i]) states[i] = state;

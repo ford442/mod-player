@@ -4,14 +4,14 @@ import { cn } from '../utils/cn';
 import { setLiteOverride } from '../utils/deviceCapabilities';
 import { usesInstrumentPalette } from '../utils/shaderVersion';
 import { IS_PUBLIC_MODE, AVAILABLE_SHADERS, THEME_OPTIONS, LIGHT_THEMES, type AppTheme } from '../appConfig';
-import { usePlayerSession } from '../context/PlayerSessionContext';
+import { usePlayerEngine } from '../hooks/usePlayerEngine';
+import { useDisplayShader, usePlayerActions, useValidShaderLists } from '../hooks/usePlayerView';
 import { usePlayerFeatures } from '../context/PlayerFeaturesContext';
 import { usePlayerUiStore } from '../store/playerUiStore';
 import { useShaderPrefsStore } from '../store/shaderPrefsStore';
 
 /** Toolbar row: 3D mode, theme, engine, lite/reactive/stage toggles, edit mode, shader selector, palette/steps, accessibility. */
 export function GlobalControlsBar() {
-  const session = usePlayerSession();
   const features = usePlayerFeatures();
   const {
     theme,
@@ -41,7 +41,13 @@ export function GlobalControlsBar() {
 
   const isDarkMode = !LIGHT_THEMES.has(theme);
   const showDevSurface = !IS_PUBLIC_MODE;
-  const { isModuleLoaded, activeEngine, isWorkletSupported, workletLoadError, toggleAudioEngine, isStepsShader } = session;
+  const isModuleLoaded = usePlayerEngine((s) => s.isModuleLoaded);
+  const activeEngine = usePlayerEngine((s) => s.activeEngine);
+  const isWorkletSupported = usePlayerEngine((s) => s.isWorkletSupported);
+  const workletLoadError = usePlayerEngine((s) => s.workletLoadError);
+  const { toggleAudioEngine } = usePlayerActions();
+  const { isStepsShader } = useDisplayShader();
+  const { favorites: validShaderFavorites, recents: validShaderRecents } = useValidShaderLists();
   const {
     setIs3DMode,
     onCopyShareLink,
@@ -50,8 +56,6 @@ export function GlobalControlsBar() {
     shaderCatalogError,
     onRateShader,
     ratingInFlightShaderId,
-    validShaderFavorites,
-    validShaderRecents,
     patternEditDirty = false,
     canPatternUndo = false,
     canPatternRedo = false,
