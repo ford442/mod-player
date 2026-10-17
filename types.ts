@@ -301,7 +301,8 @@ export interface SyncDebugInfo {
 // Window extensions
 declare global {
   interface Window {
-    libopenmptReady: Promise<LibOpenMPT>;
+    /** Set by the libopenmpt glue `<script>` index.html loads (vite-plugins/libopenmptHtml.ts) — absent if it failed. */
+    libopenmptReady?: Promise<LibOpenMPT>;
     libopenmpt: LibOpenMPT;
     _libopenmptReject?: (reason: Error) => void;
     webkitAudioContext?: typeof AudioContext;

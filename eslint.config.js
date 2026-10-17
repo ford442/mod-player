@@ -99,18 +99,41 @@ export default tseslint.config(
     },
   },
   {
-    // Type-aware rules (need type information, so scoped to the directories where a dropped
-    // promise is a real bug rather than the whole repo). The worklet sources are outside the root
-    // tsconfig, hence the second project.
-    files: ['src/**/*.{ts,tsx}', 'hooks/**/*.{ts,tsx}', 'audio-worklet/**/*.ts', 'utils/**/*.{ts,tsx}', 'audio/engine/**/*.ts'],
+    // Type-aware rules (#492: projectService, so each file is checked against the tsconfig that owns
+    // it). Scoped to the async audio / GPU / engine code, where a dropped or misused promise is a real
+    // bug (an unawaited start path, an async handler whose rejection nobody sees) rather than the
+    // whole repo.
+    files: [
+      'audio/**/*.{ts,tsx}',
+      'hooks/**/*.{ts,tsx}',
+      'src/**/*.{ts,tsx}',
+      'utils/**/*.{ts,tsx}',
+      'audio-worklet/*.ts',
+    ],
     languageOptions: {
       parserOptions: {
-        project: ['./tsconfig.json', './tsconfig.worklet.json'],
+        projectService: true,
         tsconfigRootDir: import.meta.dirname,
       },
     },
     rules: {
       '@typescript-eslint/no-floating-promises': 'error',
+      '@typescript-eslint/no-misused-promises': 'error',
+    },
+  },
+  {
+    // The worklet sources live in their own tsconfig (no DOM lib), which the project service would not
+    // pick for them; same rules.
+    files: ['audio-worklet/js/**/*.ts'],
+    languageOptions: {
+      parserOptions: {
+        project: ['./tsconfig.worklet.json'],
+        tsconfigRootDir: import.meta.dirname,
+      },
+    },
+    rules: {
+      '@typescript-eslint/no-floating-promises': 'error',
+      '@typescript-eslint/no-misused-promises': 'error',
     },
   },
   {
