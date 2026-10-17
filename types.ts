@@ -397,6 +397,22 @@ declare global {
       getMasterPanValue: () => number | null;
       setMasterVolume: (value: number) => void;
       setMasterPan: (value: number) => void;
+      /** Output device (#492): what the engine snapshot says the context renders to. */
+      getOutputDevice: () => {
+        supported: boolean;
+        deviceId: string;
+        label: string;
+        switching: boolean;
+        error: string | null;
+      };
+      setOutputDevice: (deviceId: string, label?: string) => Promise<boolean>;
+      listOutputDevices: () => Promise<import('./utils/audioOutputDevices').AudioOutputList>;
+      /** A stable number per AudioContext object (0 = none) — an identity check across device switches. */
+      getAudioContextSerial: () => number;
+      /** Contexts the factory has constructed this page session (pitfall 12: stays 1). */
+      getAudioContextConstructions: () => number;
+      /** RMS of the master analyser's current time-domain window, or null before the master chain exists. */
+      getMasterRms: () => number | null;
     };
   }
 }

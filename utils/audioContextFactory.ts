@@ -25,6 +25,13 @@
  *    `interactive` when stage mode is on or `?latency=interactive` is present.
  *    Toggling stage mode later does *not* recreate the context — that would
  *    glitch audio mid-song. Switching profiles live is out of scope.
+ * 4. **The output device moves under the live context** (#492):
+ *    `switchPlayerAudioSink` → `AudioContext.setSinkId()` on the same context —
+ *    never suspend / close / recreate to change device. The context is always
+ *    constructed on the default output, not with the constructor's `sinkId`
+ *    option: Chromium accepts a stale id there without complaint and opens
+ *    nothing audible. The PlayerEngine switches it before any engine is
+ *    connected (audio/engine/outputDevice.ts).
  */
 
 import { resolveStageModePreference } from './stageModeSelection';
@@ -43,8 +50,6 @@ export interface CreatePlayerAudioContextOptions {
   profile?: AudioGraphProfile;
   /** Locked render rate. Default {@link PLAYER_SAMPLE_RATE}. */
   sampleRate?: PlayerSampleRate;
-  /** Optional output device id; ignored when `setSinkId` is unsupported. */
-  sinkId?: string;
 }
 
 /** `?latency=interactive|playback` — session-only, never persisted. */
@@ -83,6 +88,8 @@ export function resolveAudioGraphProfile(
 
 let sharedContext: AudioContext | null = null;
 let loggedSampleRateFallback = false;
+/** Contexts constructed since load (or the last test reset): 1 per page session, +1 per teardown/remount. */
+let constructionCount = 0;
 
 /**
  * Whether playback is currently expected (i.e. the UI thinks it's playing).
@@ -128,16 +135,49 @@ function resolveAudioContextCtor(): typeof AudioContext | null {
   return null;
 }
 
-function applySinkId(ctx: AudioContext, sinkId: string | undefined): void {
-  if (!sinkId) return;
-  // Chrome 110+ only; a plain no-op elsewhere.
+/** `AudioContext.prototype.setSinkId` exists (Chromium 110+; not Firefox or Safari as of 2026). */
+export function isAudioSinkSelectionSupported(): boolean {
+  const Ctor = resolveAudioContextCtor();
+  return Ctor != null && typeof (Ctor.prototype as { setSinkId?: unknown }).setSinkId === 'function';
+}
+
+/** What `readAudioSinkId` reports for an `AudioSinkInfo { type: 'none' }` sink (we never set one). */
+export const SILENT_SINK_ID = 'none';
+
+/** The output device `ctx` renders to: `''` is the system default (the spec's empty string). */
+export function readAudioSinkId(ctx: AudioContext): string {
+  const sink = (ctx as AudioContext & { sinkId?: string | { type?: string } }).sinkId;
+  if (typeof sink === 'string') return sink;
+  if (sink && typeof sink === 'object') return SILENT_SINK_ID;
+  return '';
+}
+
+/**
+ * Route `ctx` to another output device: `AudioContext.setSinkId()` on the SAME context, the one call
+ * site in the app. Never suspends, closes or recreates the context (rules 1 and 4) — the render clock,
+ * the worklet's module and cursor and every connection survive; the browser moves the output stream.
+ *
+ * Resolves with the sink in use afterwards. Rejects with the browser's error — `NotFoundError` for an
+ * unknown or unplugged id, `NotAllowedError` when permission policy forbids it, `InvalidStateError` on
+ * a closed context — and the previous sink stays; `NotSupportedError` where setSinkId is missing.
+ */
+export async function switchPlayerAudioSink(ctx: AudioContext, sinkId: string): Promise<string> {
   const setSinkId = (ctx as AudioContext & {
     setSinkId?: (id: string) => Promise<void>;
   }).setSinkId;
-  if (typeof setSinkId !== 'function') return;
-  void setSinkId.call(ctx, sinkId).catch((err: unknown) => {
-    console.warn('[AudioEngine] setSinkId failed — using default output', err);
+  if (typeof setSinkId !== 'function') {
+    throw new DOMException('AudioContext.setSinkId() is not supported', 'NotSupportedError');
+  }
+  await setSinkId.call(ctx, sinkId);
+  const actual = readAudioSinkId(ctx);
+  log.log('output device switched', {
+    requested: sinkId,
+    sinkId: actual,
+    state: ctx.state,
+    baseLatency: ctx.baseLatency,
+    outputLatency: ctx.outputLatency ?? 0,
   });
+  return actual;
 }
 
 /**
@@ -180,7 +220,7 @@ export function createPlayerAudioContext(
     ctx = new Ctor({ latencyHint });
   }
 
-  applySinkId(ctx, opts.sinkId);
+  constructionCount += 1;
   wireStateChangeReporting(ctx);
 
   log.log('AudioContext created', {
@@ -196,6 +236,15 @@ export function createPlayerAudioContext(
 
   sharedContext = ctx;
   return ctx;
+}
+
+/**
+ * Player contexts this module has constructed. Rule 1: one per page session (another only after
+ * `closeSharedPlayerAudioContext`, i.e. unmount). Tests and the output-device smoke assert it stays
+ * at 1 across device switches.
+ */
+export function getPlayerAudioContextConstructionCount(): number {
+  return constructionCount;
 }
 
 /** The live player context, or null before the first `createPlayerAudioContext`. */
@@ -227,4 +276,5 @@ export function __resetSharedPlayerAudioContextForTests(): void {
   sharedContext = null;
   loggedSampleRateFallback = false;
   playbackActiveQuery = null;
+  constructionCount = 0;
 }
