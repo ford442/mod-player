@@ -18,10 +18,10 @@ import {
   POSITION_RING_BYTES,
   POSITION_RING_SLOTS,
   PositionRingReader,
-  PositionRingWriter,
   canUsePositionRing,
   createPositionRingBuffer,
 } from '../audio-worklet/positionRing';
+import { PositionRingWriter } from '../audio-worklet/positionRingWriter';
 import { MAX_VU_CHANNELS, WORKLET_TO_MAIN } from '../audio-worklet/workletProtocolConstants';
 import { dispatchWorkletToMainMessage } from '../audio-worklet/jsWorkletDispatch';
 import { parseWorkletToMainMessage } from '../audio-worklet/protocol';

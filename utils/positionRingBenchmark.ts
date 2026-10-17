@@ -20,9 +20,9 @@ import {
   F_SAMPLE_RATE,
   F_SAMPLES_WRITTEN,
   F_SPEED,
-  PositionRingWriter,
   createPositionRingBuffer,
 } from '../audio-worklet/positionRing';
+import { PositionRingWriter } from '../audio-worklet/positionRingWriter';
 import { WORKLET_TO_MAIN } from '../audio-worklet/workletProtocolConstants';
 import { parseWorkletToMainMessage } from '../audio-worklet/protocol';
 import { dispatchWorkletToMainMessage } from '../audio-worklet/jsWorkletDispatch';

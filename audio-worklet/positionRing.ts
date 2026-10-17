@@ -15,8 +15,9 @@
  *   Float64 fields[SLOTS × 12] per slot: the report's index + its fields (F_* below)
  *   Float32 vu[SLOTS × 64]     per slot: channel VU
  *
- * Writer (audio thread): `begin()` marks the slot odd and returns its offsets; the caller fills the
- * typed arrays; `commit()` marks it even and publishes writeCount. Reader (main thread): `next()`
+ * Writer (audio thread, positionRingWriter.ts — a module of its own so it never ships in the main
+ * chunk): `begin()` marks the slot odd and returns its offsets; the caller fills the typed arrays;
+ * `commit()` marks it even and publishes writeCount. Reader (main thread): `next()`
  * copies the oldest unread report into preallocated scratch (`sample`, `vu`) and checks the slot's
  * seq did not change and its stored index is the one expected (a lapped slot holds a newer report and
  * counts as dropped). A reader that fell more than SLOTS behind skips to the newest SLOTS reports.
@@ -30,8 +31,10 @@ export const POSITION_RING_SLOTS = 8;
 
 const MAGIC = 0x52494e47; // 'RING'
 const H_MAGIC = 0;
-const H_WRITE_COUNT = 1;
-const SEQ_BASE = 2;
+/** @internal shared with positionRingWriter.ts */
+export const H_WRITE_COUNT = 1;
+/** @internal */
+export const SEQ_BASE = 2;
 const HEADER_INTS = SEQ_BASE + POSITION_RING_SLOTS;
 
 /** Float64 fields per slot. */
@@ -47,7 +50,8 @@ export const F_AUDIO_TIME = 7;
 export const F_SAMPLES_WRITTEN = 8;
 export const F_SAMPLE_RATE = 9;
 export const F_NUM_VU = 10;
-const SLOT_FIELDS = 12; // padded
+/** @internal Float64 fields per slot (padded). */
+export const SLOT_FIELDS = 12;
 
 const FIELDS_BYTE_OFFSET = Math.ceil((HEADER_INTS * 4) / 8) * 8;
 const VU_BYTE_OFFSET = FIELDS_BYTE_OFFSET + POSITION_RING_SLOTS * SLOT_FIELDS * 8;
@@ -67,7 +71,8 @@ export function createPositionRingBuffer(): SharedArrayBuffer {
   return buffer;
 }
 
-function views(buffer: SharedArrayBuffer) {
+/** @internal Typed views over a ring buffer. */
+export function views(buffer: SharedArrayBuffer) {
   if (buffer.byteLength < POSITION_RING_BYTES) {
     throw new RangeError(`position ring needs ${POSITION_RING_BYTES} bytes, got ${buffer.byteLength}`);
   }
@@ -76,44 +81,6 @@ function views(buffer: SharedArrayBuffer) {
     fields: new Float64Array(buffer, FIELDS_BYTE_OFFSET, POSITION_RING_SLOTS * SLOT_FIELDS),
     vu: new Float32Array(buffer, VU_BYTE_OFFSET, POSITION_RING_SLOTS * MAX_VU_CHANNELS),
   };
-}
-
-/** Audio-thread side. */
-export class PositionRingWriter {
-  /** Fill `fields[fieldOffset + F_*]` and `vu[vuOffset + channel]` between begin() and commit(). */
-  readonly fields: Float64Array;
-  readonly vu: Float32Array;
-  fieldOffset = 0;
-  vuOffset = 0;
-  private readonly header: Int32Array;
-  private writeCount = 0;
-  private slot = 0;
-  private seq = 0;
-
-  constructor(buffer: SharedArrayBuffer) {
-    const v = views(buffer);
-    this.header = v.header;
-    this.fields = v.fields;
-    this.vu = v.vu;
-    this.writeCount = Atomics.load(this.header, H_WRITE_COUNT);
-  }
-
-  /** Claim the next slot (marks it odd = being written). */
-  begin(): void {
-    this.slot = this.writeCount & (POSITION_RING_SLOTS - 1);
-    this.seq = Atomics.load(this.header, SEQ_BASE + this.slot);
-    Atomics.store(this.header, SEQ_BASE + this.slot, (this.seq + 1) | 0);
-    this.fieldOffset = this.slot * SLOT_FIELDS;
-    this.vuOffset = this.slot * MAX_VU_CHANNELS;
-    this.fields[this.fieldOffset + F_INDEX] = this.writeCount;
-  }
-
-  /** Publish the slot filled since begin(). */
-  commit(): void {
-    Atomics.store(this.header, SEQ_BASE + this.slot, (this.seq + 2) | 0);
-    this.writeCount = (this.writeCount + 1) | 0;
-    Atomics.store(this.header, H_WRITE_COUNT, this.writeCount);
-  }
 }
 
 /** One report, as read by PositionRingReader.next() (preallocated; numeric fields only). */

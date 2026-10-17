@@ -60,8 +60,8 @@ import {
   F_SAMPLE_RATE,
   F_SAMPLES_WRITTEN,
   F_SPEED,
-  PositionRingWriter,
 } from '../positionRing';
+import { PositionRingWriter } from '../positionRingWriter';
 import { ensureSharedLib } from '../libSingleton';
 import { waitForRuntimeInitialized } from '../libRuntimeReady';
 

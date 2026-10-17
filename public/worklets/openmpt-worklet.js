@@ -260,6 +260,8 @@
       vu: new Float32Array(buffer, VU_BYTE_OFFSET, POSITION_RING_SLOTS * MAX_VU_CHANNELS)
     };
   }
+
+  // audio-worklet/positionRingWriter.ts
   var PositionRingWriter = class {
     constructor(buffer) {
       /** Fill `fields[fieldOffset + F_*]` and `vu[vuOffset + channel]` between begin() and commit(). */

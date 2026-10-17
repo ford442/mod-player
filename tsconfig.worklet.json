@@ -10,6 +10,7 @@
     "audio-worklet/workletProtocolConstants.ts",
     "audio-worklet/workletProtocolGuard.ts",
     "audio-worklet/positionRing.ts",
+    "audio-worklet/positionRingWriter.ts",
     "audio-worklet/fxCharacterParams.ts"
   ],
   "exclude": ["node_modules", "dist", "archive", "jules_patch"]

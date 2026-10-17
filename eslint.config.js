@@ -13,6 +13,7 @@ const WORKLET_FILES = [
   'audio-worklet/workletProtocolConstants.ts',
   'audio-worklet/workletProtocolGuard.ts',
   'audio-worklet/positionRing.ts',
+  'audio-worklet/positionRingWriter.ts',
   'audio-worklet/libRuntimeReady.ts',
   'audio-worklet/fxCharacterParams.ts', // bundled into fx-character-worklet.js (#453)
 ];
