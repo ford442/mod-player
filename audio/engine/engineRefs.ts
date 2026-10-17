@@ -30,6 +30,22 @@ import type { TransportMachine } from './transport';
 
 const ref = <T,>(current: T): Ref<T> => ({ current });
 
+/**
+ * A number-only ref (#492). Every `{ current }` literal shares one V8 hidden class, and since some
+ * refs hold objects, `current` there is a tagged field: each double stored in it allocates a fresh
+ * HeapNumber. A class of its own keeps `current` an unboxed double field updated in place, so the
+ * position path (several doubles per report, 60 Hz) allocates nothing.
+ */
+class NumberRef implements Ref<number> {
+  // The numeric initializer matters: a bare `current: number;` is emitted as a field defined to
+  // `undefined` first (useDefineForClassFields), and V8 then keeps the field tagged.
+  current = 0;
+  constructor(value: number) {
+    this.current = value;
+  }
+}
+const num = (value: number): Ref<number> => new NumberRef(value);
+
 /** A `{ current }` whose value is computed; `write` decides what an assignment means (default: nothing). */
 function viewRef<T>(read: () => T, write: (value: T) => void = () => {}): Ref<T> {
   return Object.defineProperty({} as Ref<T>, 'current', {
@@ -64,11 +80,11 @@ export function createEngineRefs(sources: EngineRefSources): LibOpenMPTRefs {
 
   return {
     libopenmptRef: ref(null),
-    currentModulePtr: ref(0),
+    currentModulePtr: num(0),
     audioContextRef,
     scriptProcessorRef: ref(null),
-    spLeftBufPtr: ref(0),
-    spRightBufPtr: ref(0),
+    spLeftBufPtr: num(0),
+    spRightBufPtr: num(0),
     spFallbackTriggered: viewRef(() => playbackEngineRef.current === 'scriptprocessor'),
     audioWorkletNodeRef: ref(null),
     masterInputRef: ref(null),
@@ -80,20 +96,21 @@ export function createEngineRefs(sources: EngineRefSources): LibOpenMPTRefs {
     workerRef: ref(null),
     parserWorkerHealthyRef: ref(true),
     ensureMainThreadModuleRef: ref(null),
-    animationFrameHandle: ref(0),
-    workletOrderRef: ref(0),
-    workletRowRef: ref(0),
-    workletTimeRef: ref(0),
-    workletTimestampRef: ref(0),
-    workletBpmRef: ref(125),
-    workletSpeedRef: ref(6),
-    workletRowsPerSecRef: ref(rowsPerSecondFromBpm(125)),
+    animationFrameHandle: num(0),
+    workletOrderRef: num(0),
+    workletRowRef: num(0),
+    workletTimeRef: num(0),
+    workletTimestampRef: num(0),
+    workletBpmRef: num(125),
+    workletSpeedRef: num(6),
+    workletRowsPerSecRef: num(rowsPerSecondFromBpm(125)),
     workletPositionSampleRef: ref(null),
-    lastWorkletUpdateRef: ref(0),
-    audioClockStartRef: ref(0),
-    workletTimeAtStartRef: ref(0),
-    driftAccumulatorRef: ref(0),
-    lastCorrectedTimeRef: ref(0),
+    positionRingRef: ref(null),
+    lastWorkletUpdateRef: num(0),
+    audioClockStartRef: num(0),
+    workletTimeAtStartRef: num(0),
+    driftAccumulatorRef: num(0),
+    lastCorrectedTimeRef: num(0),
     pendingSeekRef,
     seekAcknowledgedRef: viewRef(
       () => pendingSeekRef.current === null,
@@ -117,24 +134,24 @@ export function createEngineRefs(sources: EngineRefSources): LibOpenMPTRefs {
         else workletModuleContexts.delete(ctx);
       },
     ),
-    workletModuleTokenRef: ref(0),
-    lastWorkletModuleTokenSentRef: ref(-1),
+    workletModuleTokenRef: num(0),
+    lastWorkletModuleTokenSentRef: num(-1),
     playheadLagTrackerRef: ref(createPlayheadLagTracker()),
     positionReportTrackerRef: ref(createPositionReportTracker()),
-    lastPositionSampleTimeRef: ref(-1),
+    lastPositionSampleTimeRef: num(-1),
     updateUIRef: ref(null),
-    lastUiOrderRef: ref(-1),
-    lastUiRowIntRef: ref(-1),
-    lastUiBpmRef: ref(-1),
-    lastSyncDebugUiMsRef: ref(0),
-    lastChannelStatePublishMsRef: ref(0),
+    lastUiOrderRef: num(-1),
+    lastUiRowIntRef: num(-1),
+    lastUiBpmRef: num(-1),
+    lastSyncDebugUiMsRef: num(0),
+    lastChannelStatePublishMsRef: num(0),
     noteAgesScratchRef: ref([]),
     userModuleLoadedRef: ref(false),
     nativeEngineRef: ref(null),
     activeEngineRef: viewRef(sources.activeEngine),
     playbackEngineRef,
     nativeClockAnchorRef: ref(null),
-    nativeBridgeLatencyRef: ref(0),
+    nativeBridgeLatencyRef: num(0),
     oscBufferRef: ref(null),
     audioReactiveRef: ref(null),
     playbackStateRef: ref(createInitialPlaybackState()),

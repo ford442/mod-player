@@ -11,6 +11,7 @@ import type { OpenMPTWorkletEngine } from '../../audio-worklet/OpenMPTWorkletEng
 import type { Ref, StateSetter } from '../../audio/engine/store';
 import type { TransportMachine } from '../../audio/engine/transport';
 import type { WorkletPositionSample } from '../../utils/playheadPrediction';
+import type { PositionRingConsumer } from '../../utils/positionRingConsumer';
 import type { NativeClockAnchor } from '../../utils/nativeClockAnchor';
 import type { PauseClock } from '../../utils/transportClock';
 import type {
@@ -58,6 +59,8 @@ export interface LibOpenMPTRefs {
   workletSpeedRef: Ref<number>;
   workletRowsPerSecRef: Ref<number>;
   workletPositionSampleRef: Ref<WorkletPositionSample | null>;
+  /** Shared position ring of the current JS worklet node (crossOriginIsolated pages); drained by the UI loop. */
+  positionRingRef: Ref<PositionRingConsumer | null>;
   lastWorkletUpdateRef: Ref<number>;
   audioClockStartRef: Ref<number>;
   workletTimeAtStartRef: Ref<number>;

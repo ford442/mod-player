@@ -49,6 +49,19 @@ import {
   type MainToWorkletMessage,
 } from '../workletProtocolConstants';
 import { protocolError, validateMainToWorklet } from '../workletProtocolGuard';
+import {
+  F_AUDIO_TIME,
+  F_BPM,
+  F_NUM_VU,
+  F_ORDER,
+  F_POSITION_SECONDS,
+  F_ROW,
+  F_ROW_FRACTION,
+  F_SAMPLE_RATE,
+  F_SAMPLES_WRITTEN,
+  F_SPEED,
+  PositionRingWriter,
+} from '../positionRing';
 import { ensureSharedLib } from '../libSingleton';
 import { waitForRuntimeInitialized } from '../libRuntimeReady';
 
@@ -309,6 +322,8 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
   declare _audioDiag: boolean;
   /** Reused channel VU snapshot (length grows once to numChannels, then stable). */
   declare _channelVuArr: number[];
+  /** Shared position/VU ring (#492, crossOriginIsolated pages): replaces `position` messages when set. */
+  declare _positionRing: PositionRingWriter | null;
   declare _lastChannelVU: number[];
   declare _prevRowInt: number;
   declare _lastOrder: number;
@@ -480,6 +495,9 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
           && this.pcmBufferPool.length < PCM_BUFFER_POOL_MAX) {
           this.pcmBufferPool.push(msg.buffer);
         }
+      } else if (type === MT.setPositionRing) {
+        this._positionRing = new PositionRingWriter(msg.buffer);
+        log('Position reports go through the shared ring');
       } else if (type === MT.ctlSetText) {
         const lib = this.lib;
         if (this.modulePtr && lib && typeof lib._openmpt_module_ctl_set_text === 'function') {
@@ -514,6 +532,7 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
     this._audioDiag = false;
     this._resetAudioDiag();
     this._channelVuArr = [];
+    this._positionRing = null;
     this._lastChannelVU = this._channelVuArr;
     this._prevRowInt = -1;
     this._lastOrder = 0;
@@ -1026,22 +1045,44 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
       this._updateAudioReactive(outL, outR, samplesWritten, channelVU);
 
       this._lastReportedRowInt = rowInt;
-      this.port.postMessage({
-        type: WT.position,
-        order,
-        row: rowInt,
-        rowFraction,
-        positionSeconds: posSec,
-        bpm,
-        speed,
-        /** Preferred name — audio timeline of pre-render snapshot. */
-        audioTime,
-        /** Alias kept for older main-thread handlers. */
-        workletTime: audioTime,
-        samplesWritten,
-        sampleRate,
-        channelVU,
-      });
+      const ring = this._positionRing;
+      if (ring) {
+        // Shared memory: no message object, no clone, no channelVU copy on the main thread.
+        ring.begin();
+        const f = ring.fields;
+        const o = ring.fieldOffset;
+        f[o + F_ORDER] = order;
+        f[o + F_ROW] = rowInt;
+        f[o + F_ROW_FRACTION] = rowFraction;
+        f[o + F_POSITION_SECONDS] = posSec;
+        f[o + F_BPM] = bpm;
+        f[o + F_SPEED] = speed;
+        f[o + F_AUDIO_TIME] = audioTime;
+        f[o + F_SAMPLES_WRITTEN] = samplesWritten;
+        f[o + F_SAMPLE_RATE] = sampleRate;
+        f[o + F_NUM_VU] = n;
+        const vu = ring.vu;
+        const vo = ring.vuOffset;
+        for (let i = 0; i < n; i++) vu[vo + i] = channelVU[i]!;
+        ring.commit();
+      } else {
+        this.port.postMessage({
+          type: WT.position,
+          order,
+          row: rowInt,
+          rowFraction,
+          positionSeconds: posSec,
+          bpm,
+          speed,
+          /** Preferred name — audio timeline of pre-render snapshot. */
+          audioTime,
+          /** Alias kept for older main-thread handlers. */
+          workletTime: audioTime,
+          samplesWritten,
+          sampleRate,
+          channelVU,
+        });
+      }
       this.lastPositionReportTime = currentTime;
     }
 

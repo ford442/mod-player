@@ -3,6 +3,10 @@
 // Regenerate with: npm run build:js-worklet
 "use strict";
 (() => {
+  var __defProp = Object.defineProperty;
+  var __defNormalProp = (obj, key, value) => key in obj ? __defProp(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
+  var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "symbol" ? key + "" : key, value);
+
   // audio-worklet/workletProtocolConstants.ts
   var MAIN_TO_WORKLET = {
     initLib: "initLib",
@@ -225,6 +229,70 @@
     }
     return validate(MAIN_TO_WORKLET_FIELDS, data, "main\u2192worklet") ? data : null;
   }
+
+  // audio-worklet/positionRing.ts
+  var POSITION_RING_SLOTS = 8;
+  var H_WRITE_COUNT = 1;
+  var SEQ_BASE = 2;
+  var HEADER_INTS = SEQ_BASE + POSITION_RING_SLOTS;
+  var F_INDEX = 0;
+  var F_ORDER = 1;
+  var F_ROW = 2;
+  var F_ROW_FRACTION = 3;
+  var F_POSITION_SECONDS = 4;
+  var F_BPM = 5;
+  var F_SPEED = 6;
+  var F_AUDIO_TIME = 7;
+  var F_SAMPLES_WRITTEN = 8;
+  var F_SAMPLE_RATE = 9;
+  var F_NUM_VU = 10;
+  var SLOT_FIELDS = 12;
+  var FIELDS_BYTE_OFFSET = Math.ceil(HEADER_INTS * 4 / 8) * 8;
+  var VU_BYTE_OFFSET = FIELDS_BYTE_OFFSET + POSITION_RING_SLOTS * SLOT_FIELDS * 8;
+  var POSITION_RING_BYTES = VU_BYTE_OFFSET + POSITION_RING_SLOTS * MAX_VU_CHANNELS * 4;
+  function views(buffer) {
+    if (buffer.byteLength < POSITION_RING_BYTES) {
+      throw new RangeError(`position ring needs ${POSITION_RING_BYTES} bytes, got ${buffer.byteLength}`);
+    }
+    return {
+      header: new Int32Array(buffer, 0, HEADER_INTS),
+      fields: new Float64Array(buffer, FIELDS_BYTE_OFFSET, POSITION_RING_SLOTS * SLOT_FIELDS),
+      vu: new Float32Array(buffer, VU_BYTE_OFFSET, POSITION_RING_SLOTS * MAX_VU_CHANNELS)
+    };
+  }
+  var PositionRingWriter = class {
+    constructor(buffer) {
+      /** Fill `fields[fieldOffset + F_*]` and `vu[vuOffset + channel]` between begin() and commit(). */
+      __publicField(this, "fields");
+      __publicField(this, "vu");
+      __publicField(this, "fieldOffset", 0);
+      __publicField(this, "vuOffset", 0);
+      __publicField(this, "header");
+      __publicField(this, "writeCount", 0);
+      __publicField(this, "slot", 0);
+      __publicField(this, "seq", 0);
+      const v = views(buffer);
+      this.header = v.header;
+      this.fields = v.fields;
+      this.vu = v.vu;
+      this.writeCount = Atomics.load(this.header, H_WRITE_COUNT);
+    }
+    /** Claim the next slot (marks it odd = being written). */
+    begin() {
+      this.slot = this.writeCount & POSITION_RING_SLOTS - 1;
+      this.seq = Atomics.load(this.header, SEQ_BASE + this.slot);
+      Atomics.store(this.header, SEQ_BASE + this.slot, this.seq + 1 | 0);
+      this.fieldOffset = this.slot * SLOT_FIELDS;
+      this.vuOffset = this.slot * MAX_VU_CHANNELS;
+      this.fields[this.fieldOffset + F_INDEX] = this.writeCount;
+    }
+    /** Publish the slot filled since begin(). */
+    commit() {
+      Atomics.store(this.header, SEQ_BASE + this.slot, this.seq + 2 | 0);
+      this.writeCount = this.writeCount + 1 | 0;
+      Atomics.store(this.header, H_WRITE_COUNT, this.writeCount);
+    }
+  };
 
   // audio-worklet/libSingleton.ts
   function hasWasmBytes(wasmBytes) {
@@ -527,6 +595,9 @@
           if (msg.buffer.length === this.pcmChunkSize * 2 && this.pcmBufferPool.length < PCM_BUFFER_POOL_MAX) {
             this.pcmBufferPool.push(msg.buffer);
           }
+        } else if (type === MT.setPositionRing) {
+          this._positionRing = new PositionRingWriter(msg.buffer);
+          log("Position reports go through the shared ring");
         } else if (type === MT.ctlSetText) {
           const lib = this.lib;
           if (this.modulePtr && lib && typeof lib._openmpt_module_ctl_set_text === "function") {
@@ -558,6 +629,7 @@
       this._audioDiag = false;
       this._resetAudioDiag();
       this._channelVuArr = [];
+      this._positionRing = null;
       this._lastChannelVU = this._channelVuArr;
       this._prevRowInt = -1;
       this._lastOrder = 0;
@@ -980,22 +1052,43 @@
         this._lastChannelVU = channelVU;
         this._updateAudioReactive(outL, outR, samplesWritten, channelVU);
         this._lastReportedRowInt = rowInt;
-        this.port.postMessage({
-          type: WT.position,
-          order,
-          row: rowInt,
-          rowFraction,
-          positionSeconds: posSec,
-          bpm,
-          speed,
-          /** Preferred name — audio timeline of pre-render snapshot. */
-          audioTime,
-          /** Alias kept for older main-thread handlers. */
-          workletTime: audioTime,
-          samplesWritten,
-          sampleRate,
-          channelVU
-        });
+        const ring = this._positionRing;
+        if (ring) {
+          ring.begin();
+          const f = ring.fields;
+          const o = ring.fieldOffset;
+          f[o + F_ORDER] = order;
+          f[o + F_ROW] = rowInt;
+          f[o + F_ROW_FRACTION] = rowFraction;
+          f[o + F_POSITION_SECONDS] = posSec;
+          f[o + F_BPM] = bpm;
+          f[o + F_SPEED] = speed;
+          f[o + F_AUDIO_TIME] = audioTime;
+          f[o + F_SAMPLES_WRITTEN] = samplesWritten;
+          f[o + F_SAMPLE_RATE] = sampleRate;
+          f[o + F_NUM_VU] = n;
+          const vu = ring.vu;
+          const vo = ring.vuOffset;
+          for (let i = 0; i < n; i++) vu[vo + i] = channelVU[i];
+          ring.commit();
+        } else {
+          this.port.postMessage({
+            type: WT.position,
+            order,
+            row: rowInt,
+            rowFraction,
+            positionSeconds: posSec,
+            bpm,
+            speed,
+            /** Preferred name — audio timeline of pre-render snapshot. */
+            audioTime,
+            /** Alias kept for older main-thread handlers. */
+            workletTime: audioTime,
+            samplesWritten,
+            sampleRate,
+            channelVU
+          });
+        }
         this.lastPositionReportTime = currentTime;
       }
       if (diagOn) {
