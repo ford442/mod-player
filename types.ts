@@ -223,7 +223,7 @@ export interface PlayheadDebugSnapshot {
 /**
  * Rolling AudioWorklet `process()` timing snapshot (?audioDiag=1).
  *
- * Each quantum is 128 frames (~2.9 ms @ 44.1 kHz); `budgetMs` is that deadline.
+ * Each quantum is 128 frames (~2.7 ms at the locked 48 kHz); `budgetMs` is that deadline.
  * `wrap*` fields cover only the quanta where the row counter went backwards —
  * a pattern wrap or order change — which is where hitches are reported.
  */

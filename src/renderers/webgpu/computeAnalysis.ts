@@ -30,6 +30,7 @@ import {
   type AudioBandSnapshot,
 } from '../../../utils/audioReactive';
 import { subscribePcm, type PcmBlock } from '../../../utils/pcmBus';
+import { PLAYER_SAMPLE_RATE } from '../../../utils/sampleRates';
 import { publishAnalysis } from '../../../utils/audioAnalysisBus';
 import type { GpuTimestampRecorder } from './timestampQuery';
 
@@ -170,7 +171,12 @@ export class PcmRing {
   private writeFrame = 0;
   private validFrames = 0;
   private interleavedChannels: 1 | 2 = 2;
-  private rate = 44100;
+  /**
+   * The rate comes from the context, through each block: the producers stamp it (`ctx.sampleRate` on
+   * the JS worklet path, the native engine's own rate). The GPU host has no context in reach, so
+   * until a stamped block arrives — or for a block without one — the locked playback rate stands in.
+   */
+  private rate: number = PLAYER_SAMPLE_RATE;
 
   constructor(readonly capacityFrames: number) {
     this.storage = new Float32Array(capacityFrames * 2);
