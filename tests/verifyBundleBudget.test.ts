@@ -16,6 +16,7 @@ const VENDOR = 'react-vendor-BBBB.js';
 const THREE = 'three-r3f-CCCC.js';
 const LAZY = 'App3DView-DDDD.js';
 const FX = 'fxRackController-EEEE.js';
+const WEBGL2 = 'WebGL2PatternRenderer-FFFF.js';
 
 interface Fixture {
   /** Extra `<link rel="modulepreload">` hrefs in index.html. */
@@ -28,13 +29,14 @@ interface Fixture {
 
 /**
  * A minimal dist/ the budget script accepts: entry → react-vendor, 3D view lazily → three-r3f,
- * FX rack lazily (#453), room IRs shipped.
+ * FX rack lazily (#453), the opt-in WebGL2 renderer lazily (#492), room IRs shipped.
  */
 function makeDist({ preloads = [], chunks = {}, irs = true }: Fixture = {}): string {
   const dir = mkdtempSync(join(tmp, 'dist-'));
   const defaults: Record<string, string> = {
-    [ENTRY]: `import{r as e}from"./${VENDOR}";const L=()=>import("./${LAZY}");const F=()=>import("./${FX}");export{L as lazy3d,F as fx};`,
+    [ENTRY]: `import{r as e}from"./${VENDOR}";const L=()=>import("./${LAZY}");const F=()=>import("./${FX}");const W=()=>import("./${WEBGL2}");export{L as lazy3d,F as fx,W as gl};`,
     [FX]: `import{r as e}from"./${VENDOR}";export const g=c=>c.createConvolver();`,
+    [WEBGL2]: `import{r as e}from"./${VENDOR}";export class R{};`,
     [VENDOR]: 'export const r=1;',
     [THREE]: `import{r as e}from"./${VENDOR}";export const T=2;`,
     [LAZY]: `import{r as e}from"./${VENDOR}";import{T}from"./${THREE}";export default T;`,
@@ -125,6 +127,18 @@ describe('verify-bundle-budget: three.js must stay off the initial load', () => 
     );
     expect(eager.status).toBe(1);
     expect(eager.out).toContain('FX rack is not lazy');
+  });
+
+  it('fails when the opt-in WebGL2 renderer chunk is missing, or loaded eagerly (#492)', () => {
+    const missing = run(makeDist({ chunks: { [WEBGL2]: null } }));
+    expect(missing.status).toBe(1);
+    expect(missing.out).toContain('no WebGL2PatternRenderer-*.js lazy chunk found');
+
+    const eager = run(
+      makeDist({ chunks: { [ENTRY]: `import{r as e}from"./${VENDOR}";import{R}from"./${WEBGL2}";export{R};` } }),
+    );
+    expect(eager.status).toBe(1);
+    expect(eager.out).toContain('the opt-in WebGL2 renderer is not lazy');
   });
 
   it('fails when the FX rack graph leaks into the initial load, or the IRs are missing (#453)', () => {
