@@ -243,6 +243,17 @@ export const COMPATIBILITY_PREFERRED_LIMITS: Readonly<Record<string, number>> = 
 };
 
 /**
+ * A compatibility adapter may allow no storage buffers at all in the vertex stage (that is its
+ * default). The pattern shaders read their cells there, so such a device could be created but no
+ * pattern pipeline would build: the session is better off with the "WebGPU unavailable" card (and
+ * its fallbacks) than with a device that only ever reports SHADER-INIT errors.
+ */
+export function compatibilityAdapterLacksVertexStorage(adapter: GPUAdapter): boolean {
+  const limit = (adapter.limits as unknown as Record<string, number>).maxStorageBuffersInVertexStage;
+  return typeof limit === 'number' && limit < 1;
+}
+
+/**
  * Build requiredLimits that are within adapter capabilities.
  * Skips any preferred limit the adapter cannot meet (soft fail + log).
  */
@@ -465,6 +476,18 @@ async function requestWebGPUDeviceUncached(
     }
 
     const adapterInfo = await readAdapterInfo(adapter);
+
+    if (featureLevel === 'compatibility' && compatibilityAdapterLacksVertexStorage(adapter)) {
+      // A core *device* failure, if there was one, is the more useful report; a null core adapter is not.
+      if (!failure || failure.stage === 'adapter') {
+        failure = {
+          stage: 'device',
+          message: 'compatibility adapter allows no vertex-stage storage buffers (the pattern shaders read their cells there)',
+          adapterInfo,
+        };
+      }
+      continue;
+    }
 
     const missingRequired = hardRequired.filter((f) => !adapter.features.has(f));
     if (missingRequired.length > 0) {

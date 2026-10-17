@@ -125,6 +125,25 @@ describe('adapter ladder (#492)', () => {
     expect(isWebGPUSessionBlocked()).toBe(false);
   });
 
+  it('skips a compatibility adapter that allows no vertex-stage storage buffers', async () => {
+    const compat = fakeAdapter('compat', log, 0, { maxStorageBuffersInVertexStage: 0 });
+    installGpu({ core: null, compatibility: compat.adapter }, log);
+    const err = await requestWebGPUDevice().catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(WebGPUInitError);
+    expect((err as WebGPUInitError).status).toBe('device-failed');
+    expect((err as Error).message).toMatch(/no vertex-stage storage buffers/);
+    expect(compat.adapter.requestDevice).not.toHaveBeenCalled();
+    expect(isWebGPUSessionBlocked()).toBe(true);
+  });
+
+  it('keeps the core device failure as the report when the compatibility adapter is unusable', async () => {
+    const core = fakeAdapter('core', log, 3);
+    const compat = fakeAdapter('compat', log, 0, { maxStorageBuffersInVertexStage: 0 });
+    installGpu({ core: core.adapter, compatibility: compat.adapter }, log);
+    const err = await requestWebGPUDevice().catch((e: unknown) => e);
+    expect((err as Error).message).toMatch(/requestDevice failed: core device rung 3 refused/);
+  });
+
   it('hard-fails with no-adapter when neither rung yields an adapter', async () => {
     installGpu({ core: null, compatibility: null }, log);
     const err = await requestWebGPUDevice().catch((e: unknown) => e);
