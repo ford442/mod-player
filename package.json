@@ -18,6 +18,7 @@
     "verify:native-exports": "node scripts/verify-native-exports.mjs",
     "verify:native-simd": "node scripts/verify-native-simd.mjs",
     "test:native-host": "bash scripts/native-host-test.sh",
+    "smoke:native-reload": "node scripts/native-reload-stress.mjs",
     "build": "tsc && vite build",
     "build:xm-player": "VITE_APP_BASE_PATH=/xm-player/ VITE_STORAGE_API_URL=https://storage.noahcohn.com npm run build",
     "build:go": "VITE_APP_BASE_PATH=/xm-player/ VITE_STORAGE_API_URL=https://storage.noahcohn.com VITE_PUBLIC_MODE=1 npm run build",

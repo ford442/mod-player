@@ -6,7 +6,8 @@
  * back to the JS worklet after its 8 s wait — while the native parity smoke
  * stayed green, because it read the engine *selection* before playback
  * started. Real-browser proof: `AUDIO_ENGINE=native npm run smoke:playhead`
- * (CI native-full-build); these source guards keep the pieces from regressing.
+ * (CI native-full-build) and scripts/native-reload-stress.mjs; these source
+ * guards keep the pieces from regressing.
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';

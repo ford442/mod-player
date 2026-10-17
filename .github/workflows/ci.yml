@@ -416,6 +416,7 @@ jobs:
               - 'cpp/**'
               - 'scripts/build-wasm.sh'
               - 'scripts/playhead-acceptance.mjs'
+              - 'scripts/native-reload-stress.mjs'
               - 'audio-worklet/**'
               - 'hooks/useAudioGraph.ts'
               - 'hooks/audioGraph/**'
@@ -532,6 +533,16 @@ jobs:
           OUTPUT_DIR=./artifacts/playhead-acceptance-native \
           AUDIO_ENGINE=native \
           npm run smoke:playhead
+
+      # Load + commit modules back to back while the real AudioWorklet renders (#491): the pre-#491
+      # engine lost the next file here (or freed the buffer it was parsing). Fails on an abort, a typed
+      # load error, silence, or the wrong module playing.
+      - name: Native reload stress (real wasm, real AudioWorklet)
+        if: steps.filter.outputs.native == 'true'
+        run: |
+          BASE_URL=http://127.0.0.1:4173 ROUNDS=300 \
+          OUTPUT_JSON=./artifacts/playhead-acceptance-native/reload-stress.json \
+          npm run smoke:native-reload
 
       - name: Upload native playhead artifacts on failure
         if: failure() && steps.filter.outputs.native == 'true'
