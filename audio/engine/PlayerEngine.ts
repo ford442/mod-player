@@ -55,6 +55,7 @@ import {
   writeStoredAudioEngineOverride,
 } from '../../utils/audioEngineSelection';
 import { applyMasterLevels } from '../../utils/audioMasterGraph';
+import { resetAudioHeardTime } from '../../utils/playheadPrediction';
 import { hasShareModuleIntent } from '../../utils/shareState';
 import { playShouldResume, type TransportState } from '../../utils/transportClock';
 import { createLogger } from '../../utils/log';
@@ -548,11 +549,13 @@ export class PlayerEngine {
   }
 
   /**
-   * The output moved (our switch, the browser's, a lost device). Output latency belongs to the device,
-   * so re-anchor the drift detector the way suspend recovery does (hooks/useAudioGraph.ts) — only
-   * while a play has anchored it (stop zeroes the anchor).
+   * The output moved (our switch, the browser's, a lost device). Output latency belongs to the device:
+   * drop the heard-time jitter hold (the new device's timestamps may step back legitimately) and
+   * re-anchor the drift detector the way suspend recovery does (hooks/useAudioGraph.ts) — the latter
+   * only while a play has anchored it (stop zeroes the anchor).
    */
   private onSinkMoved(ctx: AudioContext): void {
+    resetAudioHeardTime(ctx);
     if (this.refs.audioClockStartRef.current <= 0) return;
     this.refs.audioClockStartRef.current = ctx.currentTime;
     this.refs.workletTimeAtStartRef.current = this.refs.workletTimeRef.current || 0;

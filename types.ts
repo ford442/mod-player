@@ -214,6 +214,10 @@ export interface PlayheadDebugSnapshot {
   maxAbsLagRows?: number;
   /** Measured worklet position postMessage rate (Hz). */
   positionReportHz?: number;
+  /** Clock behind the heard time: `getOutputTimestamp()` or the latency formula (#492). */
+  heardTimeSource?: import('./utils/playheadPrediction').HeardTimeSource;
+  /** `currentTime − heardTime`: the output delay the playhead compensates (ms). */
+  outputDelayMs?: number;
 }
 
 /**
@@ -288,6 +292,8 @@ export interface SyncDebugInfo {
   lastWorkletUpdate: number;
   seekPending: boolean;
   bufferHealth?: number;
+  /** Clock behind the playhead's heard time (worklet engines): output timestamp or latency formula. */
+  heardTimeSource?: import('./utils/playheadPrediction').HeardTimeSource;
 
   // Playhead prediction (when debug enabled)
   sampleRow?: number;
@@ -413,6 +419,8 @@ declare global {
       getAudioContextConstructions: () => number;
       /** RMS of the master analyser's current time-domain window, or null before the master chain exists. */
       getMasterRms: () => number | null;
+      /** Which clock the playhead's heard time comes from right now, and the output delay it implies. */
+      getHeardTime: () => { source: import('./utils/playheadPrediction').HeardTimeSource; outputDelayMs: number } | null;
     };
   }
 }

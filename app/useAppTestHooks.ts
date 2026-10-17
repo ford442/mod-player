@@ -6,7 +6,7 @@ import {
   isTriggerFromPackedB,
 } from '../utils/gpuPacking';
 import { usesCircularRowPaging } from '../utils/shaderVersion';
-import { circularPageStart, overlayActualRow } from '../utils/playheadPrediction';
+import { circularPageStart, overlayActualRow, resolveAudioHeardTime } from '../utils/playheadPrediction';
 import { getPlayerAudioContextConstructionCount } from '../utils/audioContextFactory';
 import { listAudioOutputDevices } from '../utils/audioOutputDevices';
 import { useFxStore } from '../store/fxStore';
@@ -237,6 +237,12 @@ export function useAppTestHooks(): void {
       getAudioContextSerial: () => audioContextSerial(engine.getAudioContext()),
       getAudioContextConstructions: () => getPlayerAudioContextConstructionCount(),
       getMasterRms: () => analyserRms(engine.getSnapshot().analyserNode),
+      getHeardTime: () => {
+        const ctx = engine.getAudioContext();
+        if (!ctx) return null;
+        const heard = resolveAudioHeardTime(ctx);
+        return { source: heard.source, outputDelayMs: (ctx.currentTime - heard.time) * 1000 };
+      },
     };
     return () => { delete window.__TEST_HOOKS__; };
   }, [engine]);

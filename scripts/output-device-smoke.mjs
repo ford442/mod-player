@@ -80,7 +80,11 @@ async function assertStillPlaying(page, label, baseline) {
   const audio = await sampleAudio(page);
   check(audio.maxRms > RMS_FLOOR, `${label}: master analyser carries signal (rms ${audio.maxRms.toFixed(4)})`);
   check(audio.moved, `${label}: playhead advances`);
-  report.steps.push({ label, state: s, audio });
+  // The playhead's heard time comes from AudioContext.getOutputTimestamp() on the device now in use.
+  const heard = await evaluate(page, () => window.__TEST_HOOKS__.getHeardTime());
+  check(heard?.source === 'output-timestamp' && heard.outputDelayMs > 0 && heard.outputDelayMs < 1000,
+    `${label}: playhead anchored on getOutputTimestamp (${heard?.source}, ${heard?.outputDelayMs?.toFixed(1)} ms)`);
+  report.steps.push({ label, state: s, audio, heard });
   return s;
 }
 
