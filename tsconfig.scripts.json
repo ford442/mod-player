@@ -38,6 +38,7 @@
     "scripts/lib/audio-smoke-config.mjs",
     "scripts/lib/audio-smoke-counters.mjs",
     "scripts/lib/synth-xm.mjs",
+    "scripts/lib/synth-it.mjs",
     "scripts/lib/visual-smoke-config.mjs",
     "cpp/pre.js",
     "cpp/post.js",

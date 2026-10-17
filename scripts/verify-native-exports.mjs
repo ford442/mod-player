@@ -259,10 +259,15 @@ for (const legacy of ['g_metaModule', 'g_moduleData', 'g_cmdLoad', 'patternQuery
 // every typed catch on the main thread (wasm EH keeps its selector in thread-local
 // __wasm_lpad_context). The glue repairs it before any constructor touches TLS (#491).
 {
-  const ctorAt = cpp.indexOf('__attribute__((constructor(101))) static void apply_main_thread_tls_relocations(');
-  const body = ctorAt >= 0 ? functionBody(cpp, 'static void apply_main_thread_tls_relocations(') : null;
+  const tlsPath = join(ROOT, 'cpp/wasm_workers_tls.cpp');
+  const tls = existsSync(tlsPath) ? readFileSync(tlsPath, 'utf8') : '';
+  const ctorAt = tls.indexOf('__attribute__((constructor(101))) static void apply_main_thread_tls_relocations(');
+  const body = ctorAt >= 0 ? functionBody(tls, 'static void apply_main_thread_tls_relocations(') : null;
   if (!body || !/__wasm_init_tls\(base\)/.test(body) || !/__wasm_lpad_context/.test(body)) {
-    errors.push('cpp/worklet_processor.cpp must keep the constructor(101) that applies main-thread TLS relocations (__wasm_init_tls) when __wasm_lpad_context is unrelocated');
+    errors.push('cpp/wasm_workers_tls.cpp must keep the constructor(101) that applies main-thread TLS relocations (__wasm_init_tls) when __wasm_lpad_context is unrelocated');
+  }
+  if (!/for src in [^;]*\bwasm_workers_tls\b[^;]*; do/.test(buildSh)) {
+    errors.push('scripts/build-wasm.sh must compile cpp/wasm_workers_tls.cpp into the native engine');
   }
 }
 

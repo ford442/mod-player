@@ -315,7 +315,7 @@ jobs:
         # differ between shellcheck versions, so gating on them would flap whenever the runner image updates.
         run: |
           command -v shellcheck >/dev/null || { echo "❌ shellcheck is not installed on this runner"; exit 1; }
-          for f in scripts/build-wasm.sh scripts/build-js-libopenmpt.sh scripts/native-host-test.sh scripts/lib/wasm-flags.sh scripts/lib/libopenmpt-source.sh; do
+          for f in scripts/build-wasm.sh scripts/build-js-libopenmpt.sh scripts/native-host-test.sh scripts/build-native-bench.sh scripts/lib/wasm-flags.sh scripts/lib/libopenmpt-source.sh; do
             shellcheck --severity=warning "$f"
             bash -n "$f"
             echo "✅ $f clean"
@@ -429,6 +429,10 @@ jobs:
               - 'scripts/verify-wasm-features.mjs'
               - 'scripts/playhead-acceptance.mjs'
               - 'scripts/native-reload-stress.mjs'
+              - 'scripts/bench-engines.mjs'
+              - 'scripts/bench-engines-browser.mjs'
+              - 'scripts/build-native-bench.sh'
+              - 'scripts/lib/synth-it.mjs'
               - 'package.json'
               - 'audio-worklet/**'
               - 'hooks/useAudioGraph.ts'
@@ -558,6 +562,31 @@ jobs:
           BASE_URL=http://127.0.0.1:4173 ROUNDS=300 \
           OUTPUT_JSON=./artifacts/playhead-acceptance-native/reload-stress.json \
           npm run smoke:native-reload
+
+      # #491 Phase 3: keep-or-retire numbers on a dedicated runner — JS vs native CPU per quantum
+      # (same V8), underruns on the real AudioWorklet (steady + track changes), load time, heap.
+      # Informational: benchmarks never gate a merge.
+      - name: Engine benchmarks (informational)
+        if: steps.filter.outputs.native == 'true'
+        continue-on-error: true
+        timeout-minutes: 15
+        run: |
+          mkdir -p artifacts/engine-bench
+          bash scripts/build-native-bench.sh
+          node scripts/bench-engines.mjs --seconds 20 --rounds 3 \
+            --json artifacts/engine-bench/cpu.json --markdown artifacts/engine-bench/cpu.md > /dev/null
+          BASE_URL=http://127.0.0.1:4173 node scripts/bench-engines-browser.mjs --rounds 3 --steady-ms 20000 \
+            --json artifacts/engine-bench/browser.json --markdown artifacts/engine-bench/browser.md > /dev/null
+          cat artifacts/engine-bench/cpu.md artifacts/engine-bench/browser.md | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload engine benchmark results
+        if: always() && steps.filter.outputs.native == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: engine-bench
+          path: artifacts/engine-bench/
+          if-no-files-found: ignore
+          retention-days: 30
 
       - name: Upload native playhead artifacts on failure
         if: failure() && steps.filter.outputs.native == 'true'

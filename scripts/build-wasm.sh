@@ -570,7 +570,7 @@ trap cleanup_obj_dir EXIT
 echo "🔨 Compiling C++ objects (-fno-exceptions -fno-rtti)..."
 
 OBJECTS=()
-for src in openmpt_wrapper native_engine worklet_processor; do
+for src in openmpt_wrapper native_engine wasm_workers_tls worklet_processor; do
     obj="$OBJ_DIR/${src}.o"
     em++ \
         "${COMPILE_FLAGS[@]}" \
