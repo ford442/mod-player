@@ -1,6 +1,10 @@
 /**
  * Read pattern matrices from the native C++ worklet WASM (KEEPALIVE exports)
  * so module load does not instantiate a second (JS-engine) libopenmpt.
+ *
+ * Every query is answered from the read-only snapshot `load_module()` takes on
+ * the main thread (cpp/native_engine.cpp), never from the module the audio
+ * thread renders, so reading patterns can happen at any time.
  */
 
 import type { PatternCell, PatternMatrix, WorkerParseMetadata, WorkerParseResponse } from '../types';
@@ -25,7 +29,13 @@ export interface NativePatternExports {
   _get_num_patterns?: () => number;
   _get_duration_seconds?: () => number;
   _get_initial_bpm?: () => number;
+  /** Bulk read: HEAPU8 offset of `[row][channel][6]` cell bytes, or 0 (see types.ts). */
+  _get_pattern_cells?: (pattern: number) => number;
+  HEAPU8?: Uint8Array;
 }
+
+/** Bytes per cell in the bulk snapshot: the six OPENMPT_MODULE_COMMAND_* values. */
+const CELL_BYTES = 6;
 
 export function readPatternDataFromNative(
   m: NativePatternExports,
@@ -38,6 +48,33 @@ export function readPatternDataFromNative(
   if (numRows <= 0) return null;
 
   const rows = [];
+  const cellsPtr = typeof m._get_pattern_cells === 'function' && m.HEAPU8
+    ? m._get_pattern_cells(patternIndex)
+    : 0;
+  if (cellsPtr > 0 && m.HEAPU8 && cellsPtr + numRows * numChannels * CELL_BYTES <= m.HEAPU8.length) {
+    // One view over the whole pattern instead of six export calls per cell.
+    const cells = m.HEAPU8.subarray(cellsPtr, cellsPtr + numRows * numChannels * CELL_BYTES);
+    for (let r = 0; r < numRows; r++) {
+      const notes: number[] = [];
+      const instruments: number[] = [];
+      const volCmds: number[] = [];
+      const volVals: number[] = [];
+      const effCmds: number[] = [];
+      const effVals: number[] = [];
+      for (let c = 0; c < numChannels; c++) {
+        const base = (r * numChannels + c) * CELL_BYTES;
+        notes.push(cells[base] ?? 0);
+        instruments.push(cells[base + 1] ?? 0);
+        volCmds.push(cells[base + 2] ?? 0);
+        volVals.push(cells[base + 3] ?? 0);
+        effCmds.push(cells[base + 4] ?? 0);
+        effVals.push(cells[base + 5] ?? 0);
+      }
+      rows.push({ notes, instruments, volCmds, volVals, effCmds, effVals });
+    }
+    return { patternIndex, numRows, numChannels, rows };
+  }
+
   for (let r = 0; r < numRows; r++) {
     const notes: number[] = [];
     const instruments: number[] = [];

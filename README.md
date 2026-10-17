@@ -130,7 +130,7 @@ Project structure (important files)
 
 Notes and configuration
 
-- libopenmpt: Self-hosted real WebAssembly build of libopenmpt **0.8.4** — `public/worklets/libopenmpt-worklet.{js,wasm}` — shared by the AudioWorklet, the main thread (`index.html`, BASE_URL-aware, SRI-pinned) and the parser worker. Rebuild with `npm run build:js-libopenmpt` (emsdk 3.1.51). See `public/worklets/README.md`.
+- libopenmpt: Self-hosted real WebAssembly build of libopenmpt **0.8.9** — `public/worklets/libopenmpt-worklet.{js,wasm}` — shared by the AudioWorklet, the main thread (`index.html`, BASE_URL-aware, SRI-pinned) and the parser worker. Rebuild with `npm run build:js-libopenmpt` (emsdk 3.1.51). See `public/worklets/README.md`.
 - Tailwind: Styles are compiled by PostCSS/Tailwind (`tailwind.config.js`, `postcss.config.js`) in dev and production alike; there is no Tailwind CDN script. The `content` globs are deliberately explicit — see `CLAUDE.md` pitfall 5.
 - **Pattern renderers:** GPU viz requires **WebGPU** (hard-fail on probe/device failure — no auto WebGL2/HTML **shader** session). Explicit `?renderer=html` selects the DOM pattern grid; `?webgl2=1` / the failure-card button opt in to the WebGL2 GLSL session. Probe breadcrumb: `window.__WEBGPU_PROBE__`.
 - **WebGPU → WebGL2 (opt-in viz):** Shared packing lives in `utils/gpuPacking.ts`; WebGL2 GLSL mirrors `hooks/webGLShaders.ts`. Chassis/night mode/bloom approximations are in `src/renderers/webgl2/shaders/`.

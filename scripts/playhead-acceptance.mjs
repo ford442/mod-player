@@ -122,6 +122,27 @@ async function clickPlay(page, engine) {
   });
 }
 
+/**
+ * Start playback and report the engine that actually renders (#491). The
+ * selection (`getAudioEngine`) says native-worklet even while a failed native
+ * start is falling back to the JS worklet — which is how this gate stayed green
+ * for an engine whose AudioWorklet never started.
+ */
+async function readRenderingEngine(page, engine) {
+  await clickPlay(page, engine);
+  let rendering = null;
+  try {
+    await waitForFunction(page, () => window.__TEST_HOOKS__?.getPlaybackEngine?.() != null, { timeout: 20000 });
+    rendering = await evaluate(page, () => window.__TEST_HOOKS__?.getPlaybackEngine?.() ?? null);
+  } catch {
+    /* never started: reported as null */
+  }
+  await evaluate(page, () => {
+    window.__TEST_HOOKS__?.stopPlayback?.();
+  });
+  return rendering;
+}
+
 async function samplePlayheadDuringPlayback(page, engine) {
   await clickPlay(page, engine);
   await new Promise((r) => setTimeout(r, 400));
@@ -208,6 +229,7 @@ async function runScenario(browser, engine, scenario) {
     lag: null,
     paging: null,
     audioEngine: null,
+    playbackEngine: null,
     errors: [],
   };
 
@@ -262,6 +284,17 @@ async function runScenario(browser, engine, scenario) {
         + '(expected "native-worklet"). Soft-fail to JS does not count as parity.',
       );
       return result;
+    }
+    if (audioEngine === 'native') {
+      result.playbackEngine = await readRenderingEngine(page, engine);
+      if (result.playbackEngine !== 'native-worklet') {
+        result.status = 'FAIL';
+        result.errors.push(
+          `native engine selected but the engine that rendered is ${JSON.stringify(result.playbackEngine)} `
+          + '(a failed native start fell back). Parity needs the native engine to actually run.',
+        );
+        return result;
+      }
     }
     if (audioEngine === 'js' && result.audioEngine === 'native-worklet') {
       result.status = 'FAIL';

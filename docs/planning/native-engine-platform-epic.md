@@ -126,7 +126,7 @@ Acceptance: `smoke:playhead:native` asserts active engine `native-worklet` and m
 | `EXPORT_ES6` | **1** | Prefer ESM default; UMD fallbacks remain |
 | `EXPORTED_FUNCTIONS` | init/load/seek/poll/ring/pattern… | Audited by `verify:native-exports` |
 | `EXPORTED_RUNTIME_METHODS` | ccall, cwrap, UTF8ToString, getValue, setValue, emscriptenGetAudioObject, emscriptenRegisterAudioObject | Required for shared-context attach |
-| Release | `-O3 -DNDEBUG -flto=thin -msimd128` + emmalloc | SIMD verified by `verify:native-simd` |
+| Release | `-O3 -DNDEBUG -flto=thin -msimd128` + emmalloc | SIMD (+ exceptions, trunc_sat, bulk memory, atomics) verified by `verify:native-wasm` (#491) |
 | `--debug` | `-O0 -g -sASSERTIONS=2` | Scheduled CI matrix cell |
 | `--grow` | growth=1, MAXIMUM=512mb | Huge ITs / local escape |
 | `--safe-heap` | `SAFE_HEAP=1` | Local only |
@@ -135,7 +135,7 @@ Acceptance: `smoke:playhead:native` asserts active engine `native-worklet` and m
 
 ### 4.7 Benchmarks
 
-- `scripts/benchmark_loadFromURL.cjs` exists for load path, not engine main-thread cost.
+- (`scripts/benchmark_loadFromURL.cjs` was removed in #491 together with the unused `loadFromURL`.)
 - No headless/Playwright harness comparing native vs JS RAF/`updateUI` / GC / message rate on large ITs.
 
 ---
@@ -263,7 +263,7 @@ Fixtures: one large `.it` in `public/` or downloadable test asset (do not bloat 
 | `EXPORT_ES6=1` | Prefer ESM `createOpenMPTModule`; UMD fallbacks remain |
 | EXPORT list | Maintain via `verify:native-exports` |
 | Runtime methods | `emscriptenGetAudioObject` / `emscriptenRegisterAudioObject` exported for shared-context attach |
-| SIMD | `verify:native-simd` after release `build:emcc` |
+| SIMD | `verify:native-wasm` after release `build:emcc` (instruction-level, #491) |
 
 ---
 

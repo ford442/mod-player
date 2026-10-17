@@ -26,23 +26,32 @@ OpenMPTModule::~OpenMPTModule() {
     unload();
 }
 
-bool OpenMPTModule::load(const uint8_t* data, size_t length) {
+bool OpenMPTModule::load(const uint8_t* data, size_t length, char* reason, size_t reasonSize) {
     unload(); // Clean up any previous module
+    if (reason && reasonSize) reason[0] = '\0';
 
     // Ext create so interactive mute is available; ctls stay null (post-load ctl_set_text).
+    int error = OPENMPT_ERROR_OK;
+    const char* errorMessage = nullptr;
     modExt_ = openmpt_module_ext_create_from_memory(
         data, length,
         nullptr, nullptr, // log callback
         nullptr, nullptr, // error callback
-        nullptr,          // error out
-        nullptr,          // error message out
+        &error,
+        &errorMessage,
         nullptr           // ctls
     );
 
     if (!modExt_) {
-        std::fprintf(stderr, "[OpenMPTModule] Failed to create ext module from %zu bytes\n", length);
+        std::fprintf(stderr, "[OpenMPTModule] Failed to create ext module from %zu bytes (error %d: %s)\n",
+                     length, error, errorMessage ? errorMessage : "-");
+        if (reason && reasonSize) {
+            std::snprintf(reason, reasonSize, "libopenmpt error %d: %s", error, errorMessage ? errorMessage : "-");
+        }
+        if (errorMessage) openmpt_free_string(errorMessage);
         return false;
     }
+    if (errorMessage) openmpt_free_string(errorMessage);
 
     mod_ = openmpt_module_ext_get_module(modExt_);
     if (!mod_) {
@@ -62,9 +71,10 @@ bool OpenMPTModule::load(const uint8_t* data, size_t length) {
     if (!interactiveReady_) {
         std::fprintf(stderr, "[OpenMPTModule] interactive interface unavailable (mute will no-op)\n");
     }
+    muteMask_ = 0;
+    ctls_ = openmpt_module_get_ctls(mod_);
 
-    // Default: Sinc+LP (length 8). 0 is the same mixer mode (library default).
-    // JS wasm2js live stays on cubic (4); native SIMD can hold 8.
+    // Default: Sinc+LP (length 8), the same default as the JS engine.
     openmpt_module_set_render_param(mod_, OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH, 8);
 
     // Default: infinite loop
@@ -74,12 +84,17 @@ bool OpenMPTModule::load(const uint8_t* data, size_t length) {
 }
 
 void OpenMPTModule::unload() {
+    if (ctls_) {
+        openmpt_free_string(ctls_);
+        ctls_ = nullptr;
+    }
     if (modExt_) {
         openmpt_module_ext_destroy(modExt_);
         modExt_ = nullptr;
         mod_ = nullptr; // owned by ext
     }
     interactiveReady_ = false;
+    muteMask_ = 0;
     std::memset(&interactive_, 0, sizeof(interactive_));
 }
 
@@ -125,10 +140,11 @@ void OpenMPTModule::setVolume(float vol) {
     volume_ = std::max(0.0f, std::min(1.0f, vol));
 }
 
-// libopenmpt reports bad arguments by throwing, and this binary links
-// libc++abi-noexcept (see scripts/build-wasm.sh) — so a throw is an abort(),
-// not a return code, and an abort inside audio_process_cb takes the whole
-// worklet down. Every setter below therefore validates before it calls in.
+// libopenmpt reports bad arguments by throwing. Every setter below validates
+// before it calls in, so the audio thread never reaches a throw (and therefore
+// never the exception runtime's allocation) — and none of them log, because the
+// audio thread calls them (cpp/native_engine.cpp validates and logs on the
+// control thread instead).
 
 void OpenMPTModule::setChannelMute(int channel, bool muted) {
     if (!interactiveReady_ || !modExt_ || !interactive_.set_channel_mute_status) {
@@ -140,6 +156,21 @@ void OpenMPTModule::setChannelMute(int channel, bool muted) {
         return;
     }
     interactive_.set_channel_mute_status(modExt_, channel, muted ? 1 : 0);
+    if (muted) {
+        muteMask_ |= (1u << channel);
+    } else {
+        muteMask_ &= ~(1u << channel);
+    }
+}
+
+void OpenMPTModule::applyMuteMask(uint32_t mask) {
+    if (!mod_) return;
+    const int channels = std::min(openmpt_module_get_num_channels(mod_), MAX_VU_CHANNELS);
+    for (int c = 0; c < channels; ++c) {
+        const bool want = ((mask >> c) & 1u) != 0;
+        const bool have = ((muteMask_ >> c) & 1u) != 0;
+        if (want != have) setChannelMute(c, want);
+    }
 }
 
 void OpenMPTModule::setRenderParam(int param, int32_t value) {
@@ -153,36 +184,29 @@ void OpenMPTModule::setRenderParam(int param, int32_t value) {
         case OPENMPT_MODULE_RENDER_VOLUMERAMPING_STRENGTH:
             break;
         default:
-            std::fprintf(stderr, "[OpenMPTModule] ignoring unknown render param %d\n", param);
             return;
     }
     openmpt_module_set_render_param(mod_, param, value);
 }
 
 bool OpenMPTModule::supportsCtl(const char* key) const {
-    if (!mod_ || !key || !key[0]) return false;
-    // Semicolon-separated list of the ctls this build actually understands.
-    const char* ctls = openmpt_module_get_ctls(mod_);
-    if (!ctls) return false;
+    if (!mod_ || !ctls_ || !key || !key[0]) return false;
+    // Semicolon-separated list of the ctls this build actually understands
+    // (cached at load — openmpt_module_get_ctls() itself allocates).
     const size_t keyLen = std::strlen(key);
-    bool found = false;
-    for (const char* p = ctls; *p && !found; ) {
+    for (const char* p = ctls_; *p; ) {
         const char* end = std::strchr(p, ';');
         const size_t len = end ? static_cast<size_t>(end - p) : std::strlen(p);
-        if (len == keyLen && std::strncmp(p, key, keyLen) == 0) found = true;
+        if (len == keyLen && std::strncmp(p, key, keyLen) == 0) return true;
         if (!end) break;
         p = end + 1;
     }
-    openmpt_free_string(ctls);
-    return found;
+    return false;
 }
 
 void OpenMPTModule::ctlSetText(const char* key, const char* value) {
     if (!mod_ || !key || !value) return;
-    if (!supportsCtl(key)) {
-        std::fprintf(stderr, "[OpenMPTModule] ignoring unsupported ctl '%s'\n", key);
-        return;
-    }
+    if (!supportsCtl(key)) return; // an unknown key throws inside libopenmpt
     openmpt_module_ctl_set_text(mod_, key, value);
 }
 
@@ -208,8 +232,9 @@ void OpenMPTModule::fillPositionInfo(PositionInfo& out) const {
         out.currentPattern = openmpt_module_get_order_pattern(mod_, out.currentOrder);
     }
 
-    // Integer rowFraction: GetLength/time-at-row is O(song) and must stay off
-    // the audio thread. Main thread extrapolates with BPM.
+    // Integer here: GetLength/time-at-row is O(song) and must stay off the
+    // audio thread. NativeEngine::process() adds the in-row fraction from the
+    // song position at the row's start (cheap, no GetLength).
 
     // Per-channel VU
     getChannelVU(out.channelVU, MAX_VU_CHANNELS);
