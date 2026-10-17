@@ -273,6 +273,14 @@ EngineState           // Worklet engine lifecycle state
     `bezelHdrPipeline`); blur uniforms are one buffer per direction × layer.
     Debug info goes through `useThrottledDebugInfo`, not `useState`: it only
     re-renders PatternDisplay while the debug panel is open.
+    The canvas is `configure()`d once per device and once per output-format
+    change, only in `WebGPURenderer.applyCanvasOutput` (#492) — a resize just
+    sets `canvas.width/height` from `devicePixelContentBoxSize` (the frame
+    loop resizes the bloom targets). HDR output (`rgba16float` +
+    `toneMapping: 'extended'`) is opt-in per shader (`ShaderMeta.hdrOutput`);
+    every pipeline that draws to the canvas (pattern, bezel, bloom composite)
+    is built for the configured format. `tests/webgpuCanvasConfigure.test.ts`
+    counts the calls.
 
 15. **Transport is stopped / playing / paused — and pause is not stop (#461):**
     `isPlaying` and `isPaused` are mutually exclusive (`deriveTransportState`).

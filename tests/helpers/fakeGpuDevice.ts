@@ -72,6 +72,7 @@ export function createFakeDevice(options: FakeDeviceOptions = {}) {
     end: () => ops.push({ op: 'end' }),
   };
 
+  let resolveLost: (info: GPUDeviceLostInfo) => void = () => {};
   const device = {
     queue: {
       writeBuffer: (buffer: FakeBuffer, _offset: number, data: ArrayBufferView | ArrayBuffer) => {
@@ -123,10 +124,22 @@ export function createFakeDevice(options: FakeDeviceOptions = {}) {
     }),
     addEventListener: () => {},
     removeEventListener: () => {},
+    features: new Set<string>(),
+    limits: { maxTextureDimension2D: 8192, maxStorageBufferBindingSize: 128 * 1024 * 1024 },
+    /** Never settles unless a test calls `loseDevice`. */
+    lost: new Promise<GPUDeviceLostInfo>((resolve) => { resolveLost = resolve; }),
+    destroy: () => {},
   };
 
   const swapchain = makeTexture({ size: { width: 1, height: 1 }, format: 'bgra8unorm', usage: 0 });
-  const context = { getCurrentTexture: () => swapchain };
+  /** Every GPUCanvasContext.configure() call, in order. */
+  const configureCalls: GPUCanvasConfiguration[] = [];
+  const context = {
+    getCurrentTexture: () => swapchain,
+    configure: (config: GPUCanvasConfiguration) => { configureCalls.push(config); },
+    unconfigure: () => {},
+    getConfiguration: () => configureCalls.at(-1) ?? null,
+  };
 
   return {
     device: device as unknown as GPUDevice,
@@ -135,5 +148,8 @@ export function createFakeDevice(options: FakeDeviceOptions = {}) {
     ops,
     pipelines,
     syncPipelineCalls,
+    configureCalls,
+    loseDevice: (reason: GPUDeviceLostReason = 'unknown') =>
+      resolveLost({ reason, message: 'fake device lost' } as GPUDeviceLostInfo),
   };
 }

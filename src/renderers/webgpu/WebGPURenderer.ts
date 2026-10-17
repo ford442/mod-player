@@ -13,6 +13,7 @@ import {
   usesGpuSpectrum,
   usesSpectrumBuffer,
   usesVideoPatternTexture,
+  usesHdrOutput,
   getShaderEntryPoints,
   type LayoutType,
 } from '../../../utils/shaderVersion';
@@ -35,7 +36,11 @@ import {
   getWebGPUCanvasContext,
   attachDeviceLostHandler,
   probeWebGPUCanvasPresentation,
+  resolveCanvasOutput,
+  highDynamicRangeQuery,
+  HDR_CANVAS_CONFIG,
   WebGPUInitError,
+  type CanvasOutput,
   type WebGPUDeviceStatus,
 } from '../../../utils/webgpuDevice';
 import { markWebGPUSessionFailed } from '../../../utils/webgpuProbe';
@@ -93,6 +98,14 @@ export interface WebGPURendererCallbacks {
   onDebugInfo?: (updater: (prev: DebugInfo) => DebugInfo) => void;
   onWebgpuAvailable?: (available: boolean) => void;
   onDeviceEpochBump?: () => void;
+  /** After every canvas configure() (once per device and per output change). */
+  onCanvasOutput?: (output: CanvasOutput) => void;
+  /**
+   * The active shader now wants a different canvas output (the display's
+   * dynamic range flipped). The caller re-runs `initShader` for the same
+   * shader: it rebuilds the canvas-format pipelines and reconfigures once.
+   */
+  onCanvasOutputStale?: () => void;
 }
 
 export interface WebGPURendererDeps {
@@ -151,13 +164,18 @@ export class WebGPURenderer {
   private instrumentPaletteTexture: GPUTexture | null = null;
   private instrumentPaletteVersion: Uint8Array | null = null;
   private audioReactiveUniformBuffer: GPUBuffer | null = null;
-  private canvasFormat: GPUTextureFormat = 'bgra8unorm';
-  private configuredCanvasSize: { w: number; h: number } | null = null;
+  private preferredCanvasFormat: GPUTextureFormat = 'bgra8unorm';
+  /** What the canvas is configured with on the current device; null = not yet. */
+  private configuredOutput: CanvasOutput | null = null;
+  /** The browser's canvas implements toneMapping (probe); HDR output is gated on it. */
+  private toneMappingSupported = false;
+  private displayHdr = false;
+  private stopHdrWatch: (() => void) | null = null;
   private channelBufferData: ArrayBuffer | null = null;
   private channelDataView: DataView | null = null;
   private shaderFile = '';
   private liteMode = false;
-  private markLostIntentional: (() => void) | null = null;
+  private detachDeviceLost: (() => void) | null = null;
   private recoveryAttempts = 0;
   /** performance.now() of the device init whose stability we are waiting on; null once the budget was refilled. */
   private deviceStableSince: number | null = null;
@@ -225,6 +243,44 @@ export class WebGPURenderer {
 
   get lifecycleRef(): GpuLifecycle {
     return this.lifecycle;
+  }
+
+  private get canvasFormat(): GPUTextureFormat {
+    return this.configuredOutput?.format ?? this.preferredCanvasFormat;
+  }
+
+  /** The canvas output `shaderFile` should get on this device and display. */
+  private resolveCanvasOutputFor(shaderFile: string): CanvasOutput {
+    return resolveCanvasOutput({
+      preferredFormat: this.preferredCanvasFormat,
+      shaderWantsHdr: usesHdrOutput(shaderFile),
+      displayHdr: this.displayHdr,
+      toneMappingSupported: this.toneMappingSupported,
+      liteMode: this.liteMode,
+    });
+  }
+
+  /** The configured output differs from what the active/next shader wants. */
+  private outputDiffers(output: CanvasOutput): boolean {
+    const current = this.configuredOutput;
+    return !current || current.format !== output.format || current.hdr !== output.hdr;
+  }
+
+  /**
+   * The only configure() of the live canvas: once per device, then only when
+   * the output format changes (HDR on/off). Never for a resize.
+   */
+  private applyCanvasOutput(output: CanvasOutput): void {
+    const { device, context } = this;
+    if (!device || !context || !this.outputDiffers(output)) return;
+    configureCanvasContext({ device, context, format: output.format, ...(output.hdr ? HDR_CANVAS_CONFIG : {}) });
+    this.configuredOutput = output;
+    this.callbacks.onCanvasOutput?.(output);
+  }
+
+  private stopWatchingDisplay(): void {
+    this.stopHdrWatch?.();
+    this.stopHdrWatch = null;
   }
 
   /** True when pipeline, bind group, and oscilloscope texture (if required) are valid. */
@@ -428,7 +484,13 @@ export class WebGPURenderer {
     canvas: HTMLCanvasElement,
     glCanvas: HTMLCanvasElement | null,
     syncCanvasSize: (canvas: HTMLCanvasElement, gl: HTMLCanvasElement | null) => void,
-    options: { liteMode: boolean; isCancelled: () => boolean; deviceEpoch: number },
+    options: {
+      liteMode: boolean;
+      isCancelled: () => boolean;
+      deviceEpoch: number;
+      /** Shader the canvas is first configured for (so its first initShader needs no reconfigure). */
+      shaderFile?: string;
+    },
   ): Promise<void> {
     const { liteMode, isCancelled, deviceEpoch } = options;
     this.liteMode = liteMode;
@@ -443,7 +505,7 @@ export class WebGPURenderer {
       return;
     }
 
-    const presents = await probeWebGPUCanvasPresentation(device, preferredCanvasFormat);
+    const { presents, extendedToneMapping } = await probeWebGPUCanvasPresentation(device, preferredCanvasFormat);
     if (isCancelled()) {
       try { device.destroy(); } catch { /* ignore */ }
       return;
@@ -463,19 +525,14 @@ export class WebGPURenderer {
 
     syncCanvasSize(canvas, glCanvas);
     const context = getWebGPUCanvasContext(canvas);
-    const format = configureCanvasContext({
-      device,
-      context,
-      format: preferredCanvasFormat,
-    });
-    this.canvasFormat = format;
-    this.configuredCanvasSize = { w: canvas.width, h: canvas.height };
 
-    this.markLostIntentional?.();
-    this.markLostIntentional = attachDeviceLostHandler(device, {
+    this.detachDeviceLost?.();
+    this.detachDeviceLost = attachDeviceLostHandler(device, {
       onLost: (info, intentional) => {
         if (isCancelled() || intentional) return;
         console.error(`[WebGPU] device lost (reason=${info.reason}): ${info.message}`);
+        this.stopWatchingDisplay();
+        this.configuredOutput = null;
         this.callbacks.onGpuReady?.(false);
         this.callbacks.onDeviceAcquired?.(false);
         this.lifecycle.bump();
@@ -535,6 +592,24 @@ export class WebGPURenderer {
     // after DEVICE_STABLE_RESET_MS of frames on this device.
     this.deviceStableSince = performance.now();
 
+    // The one configure() per device (#492). Format changes later come from
+    // initShader; resizes never configure.
+    this.preferredCanvasFormat = preferredCanvasFormat;
+    this.toneMappingSupported = extendedToneMapping;
+    const hdrQuery = highDynamicRangeQuery();
+    this.displayHdr = !!hdrQuery?.matches;
+    this.configuredOutput = null;
+    this.applyCanvasOutput(this.resolveCanvasOutputFor(options.shaderFile ?? this.shaderFile));
+    // Window moved to a display with a different dynamic range: a format change
+    // only if the active shader opted in to HDR output.
+    const onDynamicRange = () => {
+      this.displayHdr = !!hdrQuery?.matches;
+      if (this.outputDiffers(this.resolveCanvasOutputFor(this.shaderFile))) this.callbacks.onCanvasOutputStale?.();
+    };
+    this.stopWatchingDisplay();
+    hdrQuery?.addEventListener('change', onDynamicRange);
+    this.stopHdrWatch = () => hdrQuery?.removeEventListener('change', onDynamicRange);
+
     this.detachErrorHandler?.();
     this.detachErrorHandler = attachUncapturedErrorHandler(device, (message) => {
       if (this.device !== device) return;
@@ -590,8 +665,10 @@ export class WebGPURenderer {
   }
 
   disposeDevice(): void {
-    this.markLostIntentional?.();
-    this.markLostIntentional = null;
+    this.detachDeviceLost?.();
+    this.detachDeviceLost = null;
+    this.stopWatchingDisplay();
+    this.configuredOutput = null;
     this.detachErrorHandler?.();
     this.detachErrorHandler = null;
     this.deviceStableSince = null;
@@ -621,6 +698,7 @@ export class WebGPURenderer {
   private async buildShaderPipelines(
     device: GPUDevice,
     shaderFile: string,
+    canvasFormat: GPUTextureFormat,
     isCancelled: () => boolean,
   ): Promise<BuiltShaderPipelines | null> {
     const shaderSource = await fetchShaderSource(shaderFile);
@@ -652,11 +730,13 @@ export class WebGPURenderer {
       primitive: { topology: 'triangle-list' },
     });
     // Bloom renders the scene into an HDR texture, so non-lite sessions also
-    // get a BLOOM_SCENE_FORMAT variant of each scene pipeline.
+    // get a BLOOM_SCENE_FORMAT variant of each scene pipeline — the same one
+    // when the canvas itself is BLOOM_SCENE_FORMAT (HDR output).
     const wantsHdr = !this.liteMode;
+    const sameHdr = canvasFormat === BLOOM_SCENE_FORMAT;
     const [pipeline, hdrPipeline] = await Promise.all([
-      createRenderPipelineChecked(device, mainDescriptor(this.canvasFormat), shaderFile),
-      wantsHdr
+      createRenderPipelineChecked(device, mainDescriptor(canvasFormat), shaderFile),
+      wantsHdr && !sameHdr
         ? createRenderPipelineChecked(device, mainDescriptor(BLOOM_SCENE_FORMAT), `${shaderFile} (hdr)`)
         : Promise.resolve(null),
     ]);
@@ -694,12 +774,16 @@ export class WebGPURenderer {
           primitive: { topology: 'triangle-list' },
         });
         const [bezelPipeline, bezelHdrPipeline] = await Promise.all([
-          createRenderPipelineChecked(device, bezelDescriptor(this.canvasFormat), backgroundShaderFile),
-          wantsHdr
+          createRenderPipelineChecked(device, bezelDescriptor(canvasFormat), backgroundShaderFile),
+          wantsHdr && !sameHdr
             ? createRenderPipelineChecked(device, bezelDescriptor(BLOOM_SCENE_FORMAT), `${backgroundShaderFile} (hdr)`)
             : Promise.resolve(null),
         ]);
-        bezel = { pipeline: bezelPipeline, hdrPipeline: bezelHdrPipeline, bindLayout };
+        bezel = {
+          pipeline: bezelPipeline,
+          hdrPipeline: wantsHdr && sameHdr ? bezelPipeline : bezelHdrPipeline,
+          bindLayout,
+        };
       } catch (e) {
         // The chassis is decorative: draw the pattern without it.
         console.warn('Failed to initialize bezel shader', e);
@@ -708,7 +792,7 @@ export class WebGPURenderer {
     }
     if (isCancelled()) return null;
 
-    return { layoutType, pipeline, hdrPipeline, bezel };
+    return { layoutType, pipeline, hdrPipeline: wantsHdr && sameHdr ? pipeline : hdrPipeline, bezel };
   }
 
   private reportShaderError(error: unknown): void {
@@ -739,8 +823,12 @@ export class WebGPURenderer {
     // validate, this throws with the previous pipeline, bind groups and
     // buffers still live, so the display keeps drawing instead of going black.
     const cancelledOrStale = () => isCancelled() || pool.isDisposed || this.device !== device;
-    const built = await this.buildShaderPipelines(device, activeShaderFile, cancelledOrStale);
+    const output = this.resolveCanvasOutputFor(activeShaderFile);
+    const built = await this.buildShaderPipelines(device, activeShaderFile, output.format, cancelledOrStale);
     if (!built || cancelledOrStale()) return;
+    // A format change (HDR on/off) reconfigures here, once — before the old
+    // pipelines are released; the same format is a no-op.
+    this.applyCanvasOutput(output);
 
     this.textureResources = null;
     this.bezelTextureResources = null;
@@ -1050,7 +1138,7 @@ export class WebGPURenderer {
       instrumentPaletteVersion: this.instrumentPaletteVersion,
       audioReactiveUniformBuffer: this.audioReactiveUniformBuffer,
       canvasFormat: this.canvasFormat,
-      configuredCanvasSize: this.configuredCanvasSize,
+      hdrCanvas: this.configuredOutput?.hdr ?? false,
       videoState: {
         videoTexture: this.videoTexture,
         textureResources: this.textureResources,
@@ -1082,7 +1170,6 @@ export class WebGPURenderer {
     });
 
     this.renderFrameCount = frameState.renderFrameCount;
-    this.configuredCanvasSize = frameState.configuredCanvasSize;
     this.bindGroup = frameState.bindGroup;
     this.instrumentPaletteTexture = frameState.instrumentPaletteTexture;
     this.instrumentPaletteVersion = frameState.instrumentPaletteVersion;
