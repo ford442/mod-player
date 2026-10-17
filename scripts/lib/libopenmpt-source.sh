@@ -10,7 +10,7 @@
 # changelogs (https://lib.openmpt.org/libopenmpt/) regularly carry loader security fixes.
 # ──────────────────────────────────────────────────────────────────────
 
-LIBOPENMPT_VERSION="0.8.4"
+LIBOPENMPT_VERSION="0.8.9"
 
 # sha256 of https://lib.openmpt.org/files/libopenmpt/src/libopenmpt-<ver>+release.makefile.tar.gz
 # Upstream publishes no digest file; each entry was computed from a fresh download.
