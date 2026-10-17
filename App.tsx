@@ -1,7 +1,8 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { MainLayout } from './components/MainLayout';
 import { ProjectMEmbedView } from './components/ProjectMEmbedView';
 import { useLibOpenMPT } from './hooks/useLibOpenMPT';
+import { usePlayerEngine, usePlayerEngineInstance } from './hooks/usePlayerEngine';
 import { usePlaylist } from './hooks/usePlaylist';
 import { useMidiControls } from './hooks/useMidiControls';
 import { useLibrary, useSaveSong, useSyncLibrary } from './hooks/useLibrary';
@@ -43,8 +44,6 @@ function App() {
   const setTheme = usePlayerUiStore((s) => s.setTheme);
   const liteMode = usePlayerUiStore((s) => s.liteMode);
   const setLiteMode = usePlayerUiStore((s) => s.setLiteMode);
-  const debugPanelOpen = usePlayerUiStore((s) => s.debugPanelOpen);
-  const setDebugPanelOpen = usePlayerUiStore((s) => s.setDebugPanelOpen);
   const cheatsheetOpen = usePlayerUiStore((s) => s.cheatsheetOpen);
   const setCheatsheetOpen = usePlayerUiStore((s) => s.setCheatsheetOpen);
   const editMode = usePlayerUiStore((s) => s.editMode);
@@ -70,10 +69,15 @@ function App() {
   const markSkipModuleShaderRestore = useShaderPrefsStore((s) => s.markSkipModuleShaderRestore);
   const setShaderFile = useShaderPrefsStore((s) => s.selectShader);
 
-  const [volume, setVolume] = useState<number>(0.5);
-  const [pan, setPan] = useState<number>(0.0);
-  const [isMuted, setIsMuted] = useState<boolean>(false);
-  const preMuteVolumeRef = useRef<number>(0.5);
+  // Master volume / pan / mute belong to the engine (#492); the commands and the sliders both go there.
+  const engine = usePlayerEngineInstance();
+  const volume = usePlayerEngine((s) => s.volume);
+  const pan = usePlayerEngine((s) => s.pan);
+  const setVolume = useCallback(
+    (v: number | ((prev: number) => number)) => engine.setMasterVolume(v),
+    [engine],
+  );
+  const setPan = useCallback((v: number) => engine.setMasterPan(v), [engine]);
 
   const [is3DMode, setIs3DMode] = useState<boolean>(false);
   const isDarkMode = !LIGHT_THEMES.has(theme);
@@ -120,7 +124,6 @@ function App() {
     loadFile,
     setIsLooping,
     seekToStep,
-    setPanValue: setLibPan,
     applyMasterLevels: applyAudioMasterLevels,
     getMasterGainValue,
     getMasterPanValue,
@@ -143,7 +146,7 @@ function App() {
     oscBufferRef,
     audioReactiveRef,
     requestOscBuffer,
-  } = useLibOpenMPT(volume, liteMode);
+  } = useLibOpenMPT(liteMode);
 
   const { state: offlineExportState, exportWav, isExporting } = useOfflineExport();
   const {
@@ -314,33 +317,7 @@ function App() {
     localLibrary,
   });
 
-  useEffect(() => { setLibPan(pan); }, [pan, setLibPan]);
-  useEffect(() => {
-    applyAudioMasterLevels(volume, pan);
-  }, [volume, pan, applyAudioMasterLevels]);
-
-  useAppKeyboardActions({
-    isPlaying,
-    isPaused,
-    stopMusic,
-    pause,
-    playGuarded,
-    seekToStep,
-    playbackRowFraction,
-    sequencerMatrix,
-    setVolume,
-    setPan,
-    isMuted,
-    setIsMuted,
-    volume,
-    preMuteVolumeRef,
-    setIsLooping,
-    setDebugPanelOpen,
-    debugPanelOpen,
-    setCheatsheetOpen,
-    cheatsheetOpen,
-    setShaderFile,
-  });
+  useAppKeyboardActions();
 
   usePwaRegistration();
 

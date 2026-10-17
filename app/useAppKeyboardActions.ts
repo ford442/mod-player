@@ -1,172 +1,76 @@
-import { useCallback } from 'react';
+import { useEffect } from 'react';
 import { useRegisterPlayerCommands } from '../hooks/useRegisterPlayerCommands';
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
+import { usePlayerEngineInstance } from '../hooks/usePlayerEngine';
 import { AVAILABLE_SHADERS, FX_RACK_ENABLED } from '../appConfig';
+import { registerEngineCommands } from '../audio/engine/engineCommands';
+import { bindMediaSession } from '../audio/engine/mediaSession';
 import { useFxStore } from '../store/fxStore';
-import type { CommandPayloadMap } from '../utils/playerCommands';
-import type { PatternMatrix } from '../types';
+import { playerCommands, type CommandPayloadMap } from '../utils/playerCommands';
+import { preserveWindowScroll } from '../utils/scrollContainer';
 import { usePlayerUiStore } from '../store/playerUiStore';
-import { deriveTransportState } from '../utils/transportClock';
+import { useShaderPrefsStore } from '../store/shaderPrefsStore';
 
-export interface UseAppKeyboardActionsParams {
-  isPlaying: boolean;
-  isPaused: boolean;
-  stopMusic: (ended?: boolean) => void;
-  /** Pause in place (keeps the position); a no-op unless playing. */
-  pause: () => void;
-  /** Play from the start when stopped, resume when paused. */
-  playGuarded: () => void;
-  seekToStep: (step: number) => void;
-  playbackRowFraction: number;
-  sequencerMatrix: PatternMatrix | null;
-  setVolume: React.Dispatch<React.SetStateAction<number>>;
-  setPan: React.Dispatch<React.SetStateAction<number>>;
-  isMuted: boolean;
-  setIsMuted: React.Dispatch<React.SetStateAction<boolean>>;
-  volume: number;
-  preMuteVolumeRef: React.MutableRefObject<number>;
-  setIsLooping: React.Dispatch<React.SetStateAction<boolean>>;
-  setDebugPanelOpen: (open: boolean) => void;
-  debugPanelOpen: boolean;
-  setCheatsheetOpen: (open: boolean) => void;
-  cheatsheetOpen: boolean;
-  setShaderFile: (shader: string) => void;
-}
+const onToggleFullscreen = () => {
+  if (document.fullscreenElement) void document.exitFullscreen();
+  else void document.documentElement.requestFullscreen();
+};
+const onToggleDebugPanel = () => {
+  const ui = usePlayerUiStore.getState();
+  ui.setDebugPanelOpen(!ui.debugPanelOpen);
+};
+const onToggleCheatsheet = () => {
+  const ui = usePlayerUiStore.getState();
+  ui.setCheatsheetOpen(!ui.cheatsheetOpen);
+};
+const onCloseCheatsheet = () => usePlayerUiStore.getState().setCheatsheetOpen(false);
+const onToggleStageMode = () => usePlayerUiStore.getState().toggleStageMode();
+const onExitStageMode = () => {
+  const ui = usePlayerUiStore.getState();
+  if (ui.stageMode) ui.setStageMode(false);
+};
+const onShaderSelectByIndex = (index: number) => {
+  const pick = AVAILABLE_SHADERS[index % AVAILABLE_SHADERS.length];
+  if (pick) useShaderPrefsStore.getState().selectShader(pick.id);
+};
 
-export function useAppKeyboardActions(params: UseAppKeyboardActionsParams) {
-  const {
-    isPlaying,
-    isPaused,
-    stopMusic,
-    pause,
-    playGuarded,
-    seekToStep,
-    playbackRowFraction,
-    sequencerMatrix,
-    setVolume,
-    setPan,
-    isMuted,
-    setIsMuted,
-    volume,
-    preMuteVolumeRef,
-    setIsLooping,
-    setDebugPanelOpen,
-    debugPanelOpen,
-    setCheatsheetOpen,
-    cheatsheetOpen,
-    setShaderFile,
-  } = params;
+// FX rack (#453): commands edit the store; the rack (lazy) follows it.
+const onFxToggle = (p: CommandPayloadMap['fx.toggle']) => {
+  useFxStore.getState().setModuleEnabled(p.module, p.enabled);
+};
+const onFxSetParam = (p: CommandPayloadMap['fx.setParam']) => {
+  useFxStore.getState().setParam(p.module, p.param, p.value, p.normalized ? { normalized: true } : undefined);
+};
+const onFxPreset = (p: CommandPayloadMap['fx.preset']) => {
+  const fx = useFxStore.getState();
+  if (p.presetId !== undefined) fx.applyPreset(p.presetId);
+  else if (p.step !== undefined) fx.stepPreset(p.step);
+  else if (p.index !== undefined) fx.selectPresetByIndex(p.index);
+};
 
-  const seekByOrderDelta = useCallback((delta: number) => {
-    const rowsPerPattern = sequencerMatrix?.numRows ?? 64;
-    const currentOrder = sequencerMatrix?.order ?? 0;
-    const targetStep = (currentOrder + delta) * rowsPerPattern;
-    seekToStep(Math.max(0, targetStep));
-  }, [seekToStep, sequencerMatrix]);
+/**
+ * Keyboard / MIDI / gamepad / media-key commands. The transport, seek, volume, pan, loop and mute
+ * commands go straight to the PlayerEngine (#492); the rest are UI commands that edit the UI stores.
+ */
+export function useAppKeyboardActions(): void {
+  const engine = usePlayerEngineInstance();
 
-  const jumpToOrder = useCallback((orderIndex: number) => {
-    const rowsPerPattern = sequencerMatrix?.numRows ?? 64;
-    const targetStep = orderIndex * rowsPerPattern;
-    seekToStep(Math.max(0, targetStep));
-  }, [seekToStep, sequencerMatrix?.numRows]);
-
-  // playGuarded is "play or resume": the hook's play() resumes when paused, so playing → pause and
-  // anything else → playGuarded covers stopped (start) and paused (resume) without a third branch.
-  const onKbdPlayPause = useCallback(() => {
-    if (isPlaying) { pause(); } else { playGuarded(); }
-  }, [isPlaying, pause, playGuarded]);
-
-  const onKbdPlay = useCallback(() => { playGuarded(); }, [playGuarded]);
-  const onKbdPause = useCallback(() => { pause(); }, [pause]);
-  // transport.stop used to be an alias of pause; it is now a real stop (position resets).
-  const onKbdStop = useCallback(() => { stopMusic(false); }, [stopMusic]);
-
-  const onKbdSeekForward = useCallback(() => seekToStep(Math.floor(playbackRowFraction) + 1),
-    [seekToStep, playbackRowFraction]);
-  const onKbdSeekBackward = useCallback(() => seekToStep(Math.max(0, Math.floor(playbackRowFraction) - 1)),
-    [seekToStep, playbackRowFraction]);
-
-  const onKbdVolumeUp = useCallback(() => setVolume(v => Math.min(1, v + 0.05)), [setVolume]);
-  const onKbdVolumeDown = useCallback(() => setVolume(v => Math.max(0, v - 0.05)), [setVolume]);
-
-  const onKbdToggleMute = useCallback(() => {
-    if (isMuted) {
-      setVolume(preMuteVolumeRef.current > 0 ? preMuteVolumeRef.current : 0.5);
-      setIsMuted(false);
-    } else {
-      preMuteVolumeRef.current = volume;
-      setVolume(0);
-      setIsMuted(true);
-    }
-  }, [isMuted, volume, preMuteVolumeRef, setVolume, setIsMuted]);
-
-  const onKbdToggleLoop = useCallback(() => setIsLooping(l => !l), [setIsLooping]);
-
-  const onKbdToggleFullscreen = useCallback(() => {
-    if (document.fullscreenElement) document.exitFullscreen();
-    else document.documentElement.requestFullscreen();
-  }, []);
-
-  const onKbdSeekNextOrder = useCallback(() => seekByOrderDelta(1), [seekByOrderDelta]);
-  const onKbdSeekPrevOrder = useCallback(() => seekByOrderDelta(-1), [seekByOrderDelta]);
-  const onKbdToggleDebugPanel = useCallback(() => setDebugPanelOpen(!debugPanelOpen), [setDebugPanelOpen, debugPanelOpen]);
-  const onKbdToggleCheatsheet = useCallback(() => setCheatsheetOpen(!cheatsheetOpen), [setCheatsheetOpen, cheatsheetOpen]);
-  const onKbdCloseCheatsheet = useCallback(() => setCheatsheetOpen(false), [setCheatsheetOpen]);
-  const onKbdToggleStageMode = useCallback(() => {
-    usePlayerUiStore.getState().toggleStageMode();
-  }, []);
-  const onKbdExitStageMode = useCallback(() => {
-    if (usePlayerUiStore.getState().stageMode) {
-      usePlayerUiStore.getState().setStageMode(false);
-    }
-  }, []);
-
-  const onKbdVolumeSet = useCallback((value: number) => setVolume(Math.max(0, Math.min(1, value))), [setVolume]);
-  const onKbdPanSet = useCallback((value: number) => setPan(Math.max(-1, Math.min(1, value))), [setPan]);
-  const onKbdShaderSelectByIndex = useCallback((index: number) => {
-    const pick = AVAILABLE_SHADERS[index % AVAILABLE_SHADERS.length];
-    if (pick) setShaderFile(pick.id);
-  }, [setShaderFile]);
-
-  // FX rack (#453): commands edit the store; the rack (lazy) follows it.
-  const onFxToggle = useCallback((p: CommandPayloadMap['fx.toggle']) => {
-    useFxStore.getState().setModuleEnabled(p.module, p.enabled);
-  }, []);
-  const onFxSetParam = useCallback((p: CommandPayloadMap['fx.setParam']) => {
-    useFxStore.getState().setParam(p.module, p.param, p.value, p.normalized ? { normalized: true } : undefined);
-  }, []);
-  const onFxPreset = useCallback((p: CommandPayloadMap['fx.preset']) => {
-    const fx = useFxStore.getState();
-    if (p.presetId !== undefined) fx.applyPreset(p.presetId);
-    else if (p.step !== undefined) fx.stepPreset(p.step);
-    else if (p.index !== undefined) fx.selectPresetByIndex(p.index);
-  }, []);
+  useEffect(
+    () => registerEngineCommands(playerCommands, engine, { aroundTransport: preserveWindowScroll }),
+    [engine],
+  );
+  useEffect(() => bindMediaSession(engine, playerCommands), [engine]);
 
   useRegisterPlayerCommands({
     ...(FX_RACK_ENABLED ? { onFxToggle, onFxSetParam, onFxPreset } : {}),
-    onPlayPause: onKbdPlayPause,
-    onPlay: onKbdPlay,
-    onPause: onKbdPause,
-    onStop: onKbdStop,
-    onSeekForward: onKbdSeekForward,
-    onSeekBackward: onKbdSeekBackward,
-    onSeekNextOrder: onKbdSeekNextOrder,
-    onSeekPrevOrder: onKbdSeekPrevOrder,
-    onJumpToOrder: jumpToOrder,
-    onVolumeUp: onKbdVolumeUp,
-    onVolumeDown: onKbdVolumeDown,
-    onVolumeSet: onKbdVolumeSet,
-    onPanSet: onKbdPanSet,
-    onToggleMute: onKbdToggleMute,
-    onToggleLoop: onKbdToggleLoop,
-    onToggleFullscreen: onKbdToggleFullscreen,
-    onToggleDebugPanel: onKbdToggleDebugPanel,
-    onToggleCheatsheet: onKbdToggleCheatsheet,
-    onCloseCheatsheet: onKbdCloseCheatsheet,
-    onToggleStageMode: onKbdToggleStageMode,
-    onExitStageMode: onKbdExitStageMode,
-    onShaderSelectByIndex: onKbdShaderSelectByIndex,
+    onToggleFullscreen,
+    onToggleDebugPanel,
+    onToggleCheatsheet,
+    onCloseCheatsheet,
+    onToggleStageMode,
+    onExitStageMode,
+    onShaderSelectByIndex,
   });
 
-  useKeyboardShortcuts({ cheatsheetOpen, transportState: deriveTransportState(isPlaying, isPaused) });
+  useKeyboardShortcuts();
 }

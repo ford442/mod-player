@@ -12,7 +12,7 @@ import { useLibOpenMPTRefs } from './libOpenMPT/useLibOpenMPTRefs';
  * exactly as it did when this hook held the state itself. Components that only need a few fields
  * should select them instead.
  */
-export function useLibOpenMPT(initialVolume: number = 0.4, liteMode: boolean = false) {
+export function useLibOpenMPT(liteMode: boolean = false) {
   const engine = usePlayerEngineInstance();
   const s = usePlayerEngine((snapshot) => snapshot);
   const { playbackStateRef, channelStatesRef, oscBufferRef, audioReactiveRef } = useLibOpenMPTRefs();
@@ -25,10 +25,6 @@ export function useLibOpenMPT(initialVolume: number = 0.4, liteMode: boolean = f
   useEffect(() => {
     engine.setLiteMode(liteMode);
   }, [engine, liteMode]);
-
-  useEffect(() => {
-    engine.setMasterVolume(initialVolume);
-  }, [engine, initialVolume]);
 
   // Stable for the engine's lifetime: callers put these in effect / callback deps.
   const actions = useMemo(() => ({

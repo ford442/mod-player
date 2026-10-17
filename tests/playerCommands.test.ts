@@ -1,11 +1,6 @@
 import { describe, expect, it, beforeEach } from 'vitest';
 import { playerCommands } from '../utils/playerCommands';
 import { matchMidiMapping, DEFAULT_MIDI_MAPPINGS } from '../utils/midiMappings';
-import {
-  registerPlayerCommands,
-  stopOrPause,
-  type PlayerCommandHandlers,
-} from '../hooks/useRegisterPlayerCommands';
 
 describe('playerCommands', () => {
   beforeEach(() => {
@@ -87,43 +82,14 @@ describe('midiMappings', () => {
   });
 });
 
-describe('transport commands (pause / stop)', () => {
+describe('transport command gating', () => {
   beforeEach(() => {
     playerCommands.clear();
     playerCommands.setState({ cheatsheetOpen: false, inputFocused: false, midiEnabled: true });
   });
 
-  /** A handler set whose every member records its own name when called. */
-  function recordingHandlers() {
-    const calls: string[] = [];
-    const handlers = new Proxy({} as PlayerCommandHandlers, {
-      get: (_target, prop: string) => () => { calls.push(prop); },
-    });
-    return { handlers, calls };
-  }
-
-  it('transport.stop reaches onStop and transport.pause reaches only onPause', () => {
-    const { handlers, calls } = recordingHandlers();
-    const unregister = registerPlayerCommands(handlers);
-    playerCommands.dispatch('transport.stop', 'midi');
-    playerCommands.dispatch('transport.pause', 'midi');
-    expect(calls).toEqual(['onStop', 'onPause']);
-    unregister();
-  });
-
-  it('stopOrPause calls onStop when the surface has one', () => {
-    const seen: string[] = [];
-    stopOrPause({ onStop: () => seen.push('onStop'), onPause: () => seen.push('onPause') });
-    expect(seen).toEqual(['onStop']);
-  });
-
-  it('stopOrPause falls back to onPause for a surface with no onStop', () => {
-    // The hook always hands registerPlayerCommands an onStop wrapper, so without this fallback inside
-    // the wrapper transport.stop was silently dropped for such a surface.
-    const seen: string[] = [];
-    stopOrPause({ onPause: () => seen.push('onPause') });
-    expect(seen).toEqual(['onPause']);
-  });
+  // Which engine command each transport command reaches (stop vs pause) is pinned in
+  // tests/engineCommands.test.ts since #492 — the bus only routes and gates.
 
   it('keyboard transport commands are a no-op while a text input has focus (existing guard)', () => {
     let toggled = 0;
