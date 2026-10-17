@@ -7,7 +7,8 @@
  * 48 kHz / 'playback' AudioContext, the compiled openmpt-processor with the committed
  * libopenmpt-worklet pair (initLib → setRenderParam → load), or openmpt-native.{js,wasm}
  * (init_audio_with_context → load_module → commit_module → resume_audio). Fresh browser per run,
- * engines interleaved.
+ * engines interleaved. `--latency interactive` uses stage mode's create-time latencyHint instead
+ * (a smaller output buffer, so a stalled audio thread shows up sooner).
  *
  *   steady        AudioContext.playbackStats underruns over STEADY_MS of a synthetic 64-channel
  *                 IT (scripts/lib/synth-it.mjs: up to 128 live voices), per minute of audio
@@ -23,7 +24,8 @@
  * does not attribute an AudioWorklet's memory, so it cannot compare the two engines.)
  *
  *   npm run build:emcc && npm run build && npm run preview -- --port 4391 &
- *   BASE_URL=http://127.0.0.1:4391 node scripts/bench-engines-browser.mjs [--rounds 3] [--json out.json] [--markdown out.md]
+ *   BASE_URL=http://127.0.0.1:4391 node scripts/bench-engines-browser.mjs [--rounds 3] [--latency playback|interactive]
+ *     [--json out.json] [--markdown out.md]
  */
 import { writeFileSync } from 'node:fs';
 import { launchBrowser, openPage, goto, evaluate } from './lib/browser-launch.mjs';
@@ -40,6 +42,8 @@ const STEADY_MS = Number(opt('steady-ms', '30000'));
 const CHANGES = Number(opt('changes', '5'));
 const JSON_OUT = opt('json', '');
 const MARKDOWN_OUT = opt('markdown', '');
+const LATENCY = opt('latency', 'playback');
+if (LATENCY !== 'playback' && LATENCY !== 'interactive') throw new Error('--latency: playback or interactive');
 
 const BIG_FRAMES = Number(opt('big-frames', String(1 << 23))); // 16 MiB of 16-bit sample data
 const BIG_CHANGES = Number(opt('big-changes', '3'));
@@ -58,9 +62,9 @@ async function runOnce(engineName) {
     }
     // Any same-origin document served with COOP/COEP; it must not be the app.
     await goto(page, engine, `${BASE_URL}/worklets/README.md`, 60000);
-    return await evaluate(page, async ({ engineName: which, steadyMs, changes, bigChanges }) => {
+    return await evaluate(page, async ({ engineName: which, steadyMs, changes, bigChanges, latencyHint }) => {
       const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-      const ctx = new AudioContext({ sampleRate: 48000, latencyHint: 'playback' });
+      const ctx = new AudioContext({ sampleRate: 48000, latencyHint });
       await ctx.resume();
       const analyser = ctx.createAnalyser();
       analyser.fftSize = 2048;
@@ -186,8 +190,9 @@ async function runOnce(engineName) {
           mainThreadBlockedMsMedian: med(bigLoads.map((l) => l.blockedMs)),
         },
         stillAudible: rms() > 0.005,
+        outputLatencyMs: (ctx.baseLatency + (ctx.outputLatency || 0)) * 1000,
       };
-    }, { engineName, steadyMs: STEADY_MS, changes: CHANGES, bigChanges: BIG_CHANGES });
+    }, { engineName, steadyMs: STEADY_MS, changes: CHANGES, bigChanges: BIG_CHANGES, latencyHint: LATENCY });
   } finally {
     await close();
   }
@@ -220,10 +225,11 @@ const summary = Object.fromEntries(['js', 'native'].map((name) => {
     bigUploadUnderrunMsPerChange: med(rs.map((r) => (r.bigUpload ? r.bigUpload.underrunMs / r.bigUpload.changes : null))),
     bigUploadReadyMs: med(rs.map((r) => r.bigUpload?.readyMsMedian)),
     bigUploadMainThreadBlockedMs: med(rs.map((r) => r.bigUpload?.mainThreadBlockedMsMedian)),
+    outputLatencyMs: med(rs.map((r) => r.outputLatencyMs)),
   }];
 }));
-console.log(JSON.stringify({ baseUrl: BASE_URL, rounds: ROUNDS, steadyMs: STEADY_MS, changes: CHANGES, summary }, null, 2));
-if (JSON_OUT) writeFileSync(JSON_OUT, JSON.stringify({ summary, results }, null, 2));
+console.log(JSON.stringify({ baseUrl: BASE_URL, latencyHint: LATENCY, rounds: ROUNDS, steadyMs: STEADY_MS, changes: CHANGES, summary }, null, 2));
+if (JSON_OUT) writeFileSync(JSON_OUT, JSON.stringify({ latencyHint: LATENCY, summary, results }, null, 2));
 if (MARKDOWN_OUT) {
   const f = (x, d = 1) => (typeof x === 'number' ? x.toFixed(d) : '—');
   const rows = [
@@ -237,9 +243,11 @@ if (MARKDOWN_OUT) {
     ['big upload: underrun ms per change', 'bigUploadUnderrunMsPerChange'],
     ['big upload: load → module ready, ms', 'bigUploadReadyMs'],
     ['big upload: main thread blocked, ms', 'bigUploadMainThreadBlockedMs'],
+    ['context base + output latency, ms', 'outputLatencyMs'],
   ];
   const lines = [
-    `### Real AudioWorklet, headless Chromium — JS vs native (${ROUNDS} rounds, median; steady ${STEADY_MS / 1000} s, ${CHANGES} track changes)`,
+    `### Real AudioWorklet, headless Chromium — JS vs native ('${LATENCY}' latency, ${ROUNDS} rounds, median; `
+      + `steady ${STEADY_MS / 1000} s, ${CHANGES} track changes)`,
     '',
     '| metric | JS | native |',
     '|---|---|---|',

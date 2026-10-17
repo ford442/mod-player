@@ -569,7 +569,7 @@ jobs:
       - name: Engine benchmarks (informational)
         if: steps.filter.outputs.native == 'true'
         continue-on-error: true
-        timeout-minutes: 15
+        timeout-minutes: 25
         run: |
           mkdir -p artifacts/engine-bench
           bash scripts/build-native-bench.sh
@@ -577,7 +577,11 @@ jobs:
             --json artifacts/engine-bench/cpu.json --markdown artifacts/engine-bench/cpu.md > /dev/null
           BASE_URL=http://127.0.0.1:4173 node scripts/bench-engines-browser.mjs --rounds 3 --steady-ms 20000 \
             --json artifacts/engine-bench/browser.json --markdown artifacts/engine-bench/browser.md > /dev/null
-          cat artifacts/engine-bench/cpu.md artifacts/engine-bench/browser.md | tee -a "$GITHUB_STEP_SUMMARY"
+          # Stage mode's latencyHint: a smaller output buffer, where the JS engine's audio-thread parse shows first.
+          BASE_URL=http://127.0.0.1:4173 node scripts/bench-engines-browser.mjs --rounds 3 --steady-ms 20000 --latency interactive \
+            --json artifacts/engine-bench/browser-interactive.json --markdown artifacts/engine-bench/browser-interactive.md > /dev/null
+          cat artifacts/engine-bench/cpu.md artifacts/engine-bench/browser.md artifacts/engine-bench/browser-interactive.md \
+            | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Upload engine benchmark results
         if: always() && steps.filter.outputs.native == 'true'
