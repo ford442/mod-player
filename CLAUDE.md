@@ -299,6 +299,11 @@ EngineState           // Worklet engine lifecycle state
     duplicate `connect()` is a no-op per spec), so re-asserting it on every
     play / hot reload keeps the performance-capture tap and the rack's edges.
     Don't put a bare `disconnect()` on a master node back.
+    **Volume lives only in the master `GainNode`** (`gainNodeRef`, after the
+    analyser): the native engine stays at unity (`engine.setVolume(1)` in
+    `startNativePlayback`), because the C++ module scales its own output too —
+    the slider value there plays at volume² and shrinks the analyser / GPU
+    spectrum taps (#489; `tests/nativeEngineVolume.test.ts`).
     `tests/audioMasterGraph.test.ts` holds the topology and sample-exact null
     tests (real Web Audio via node-web-audio-api, `tests/helpers/webAudioNode.ts`).
     The rest of the rack (docs/FX_RACK.md): audio never reads React state — the

@@ -271,9 +271,6 @@ export function useLibOpenMPT(initialVolume: number = 0.4, liteMode: boolean = f
       volume,
       panValue,
     );
-    if (refs.nativeEngineRef.current) {
-      refs.nativeEngineRef.current.setVolume(volume);
-    }
   }, [volume, panValue]);
 
   const applyMasterLevelsNow = useCallback((vol: number, pan: number) => {
@@ -282,9 +279,6 @@ export function useLibOpenMPT(initialVolume: number = 0.4, liteMode: boolean = f
       vol,
       pan,
     );
-    if (refs.nativeEngineRef.current) {
-      refs.nativeEngineRef.current.setVolume(vol);
-    }
   }, []);
 
   const replacePatternMatrix = useCallback((matrix: PatternMatrix) => {
