@@ -348,6 +348,8 @@ export function useLibOpenMPT(initialVolume: number = 0.4, liteMode: boolean = f
     getAudioContext: () => refs.audioContextRef.current,
     getAudioTapNode: () => refs.stereoPannerRef.current ?? refs.gainNodeRef.current,
     getMasterGainValue: () => refs.gainNodeRef.current?.gain.value ?? null,
+    /** The engine that is actually rendering (written by the start paths), not the selection. */
+    getPlaybackEngine: () => refs.playbackEngineRef.current,
     getMasterPanValue: () => refs.stereoPannerRef.current?.pan.value ?? null,
     applyMasterLevels: applyMasterLevelsNow,
     playbackStateRef: refs.playbackStateRef,
