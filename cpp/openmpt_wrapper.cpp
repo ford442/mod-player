@@ -26,23 +26,32 @@ OpenMPTModule::~OpenMPTModule() {
     unload();
 }
 
-bool OpenMPTModule::load(const uint8_t* data, size_t length) {
+bool OpenMPTModule::load(const uint8_t* data, size_t length, char* reason, size_t reasonSize) {
     unload(); // Clean up any previous module
+    if (reason && reasonSize) reason[0] = '\0';
 
     // Ext create so interactive mute is available; ctls stay null (post-load ctl_set_text).
+    int error = OPENMPT_ERROR_OK;
+    const char* errorMessage = nullptr;
     modExt_ = openmpt_module_ext_create_from_memory(
         data, length,
         nullptr, nullptr, // log callback
         nullptr, nullptr, // error callback
-        nullptr,          // error out
-        nullptr,          // error message out
+        &error,
+        &errorMessage,
         nullptr           // ctls
     );
 
     if (!modExt_) {
-        std::fprintf(stderr, "[OpenMPTModule] Failed to create ext module from %zu bytes\n", length);
+        std::fprintf(stderr, "[OpenMPTModule] Failed to create ext module from %zu bytes (error %d: %s)\n",
+                     length, error, errorMessage ? errorMessage : "-");
+        if (reason && reasonSize) {
+            std::snprintf(reason, reasonSize, "libopenmpt error %d: %s", error, errorMessage ? errorMessage : "-");
+        }
+        if (errorMessage) openmpt_free_string(errorMessage);
         return false;
     }
+    if (errorMessage) openmpt_free_string(errorMessage);
 
     mod_ = openmpt_module_ext_get_module(modExt_);
     if (!mod_) {

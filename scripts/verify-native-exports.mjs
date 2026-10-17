@@ -255,6 +255,17 @@ for (const legacy of ['g_metaModule', 'g_moduleData', 'g_cmdLoad', 'patternQuery
   }
 }
 
+// emsdk 3.1.51 + WASM_WORKERS leaves the main thread's TLS relocations unapplied, which breaks
+// every typed catch on the main thread (wasm EH keeps its selector in thread-local
+// __wasm_lpad_context). The glue repairs it before any constructor touches TLS (#491).
+{
+  const ctorAt = cpp.indexOf('__attribute__((constructor(101))) static void apply_main_thread_tls_relocations(');
+  const body = ctorAt >= 0 ? functionBody(cpp, 'static void apply_main_thread_tls_relocations(') : null;
+  if (!body || !/__wasm_init_tls\(base\)/.test(body) || !/__wasm_lpad_context/.test(body)) {
+    errors.push('cpp/worklet_processor.cpp must keep the constructor(101) that applies main-thread TLS relocations (__wasm_init_tls) when __wasm_lpad_context is unrelocated');
+  }
+}
+
 // load_module failure has to be pollable: fprintf is invisible to the UI.
 for (const code of ['ERR_BAD_ARGS', 'ERR_OUT_OF_MEMORY', 'ERR_UNSUPPORTED_MODULE', 'ERR_TORN_DOWN']) {
   if (!engineCpp.includes(code)) {
@@ -358,10 +369,40 @@ for (const mode of ['COMPILE_FLAGS', 'LINK_FLAGS']) {
     );
   }
 }
-if (!/-sDISABLE_EXCEPTION_CATCHING=1/.test(buildSh)) {
-  errors.push(
-    'scripts/build-wasm.sh must set -sDISABLE_EXCEPTION_CATCHING=1 explicitly (do not rely on the emcc default)',
-  );
+// #491: libopenmpt is built AND linked with native wasm exceptions. Its C API and its
+// loaders catch their own throws; a no-catch link (DISABLE_EXCEPTION_CATCHING=1, the
+// pre-#491 contract) let a truncated IT sample block escape load_module() into JS — or,
+// on the audio thread, kill the worklet. The flags come from the shared file.
+{
+  const flagsPath = join(ROOT, 'scripts/lib/wasm-flags.sh');
+  const flagsSh = existsSync(flagsPath) ? readFileSync(flagsPath, 'utf8') : '';
+  const code = stripShellComments(buildSh);
+  if (!/source "\$SCRIPT_DIR\/lib\/wasm-flags\.sh"/.test(buildSh)) {
+    errors.push('scripts/build-wasm.sh must source scripts/lib/wasm-flags.sh (one flag set for both WASM builds)');
+  }
+  if (!/^WASM_EH_FLAGS=\(-fwasm-exceptions\)/m.test(flagsSh)) {
+    errors.push('scripts/lib/wasm-flags.sh must define WASM_EH_FLAGS=(-fwasm-exceptions)');
+  }
+  for (const v of ['LIBOPENMPT_RELEASE_CXXFLAGS', 'LIBOPENMPT_RELEASE_CFLAGS', 'LIBOPENMPT_DEBUG_CXXFLAGS', 'LIBOPENMPT_DEBUG_CFLAGS']) {
+    const line = code.match(new RegExp(`^${v}="([^"]*)"`, 'm'))?.[1] ?? '';
+    if (!line.includes('${WASM_EH_FLAGS[*]}') || !line.includes('${WASM_FEATURE_FLAGS[*]}')) {
+      errors.push(`${v} must include \${WASM_EH_FLAGS[*]} and \${WASM_FEATURE_FLAGS[*]} (libopenmpt.a with exceptions + the shared features)`);
+    }
+  }
+  const linkAt = code.indexOf('-o "$OUTPUT_DIR/${OUTPUT_BASENAME}.js"');
+  const linkStart = code.lastIndexOf('em++ \\', linkAt);
+  if (linkAt < 0 || linkStart < 0 || !code.slice(linkStart, linkAt).includes('"${WASM_EH_FLAGS[@]}"')) {
+    errors.push('the native link must pass "${WASM_EH_FLAGS[@]}" (catching is decided at link time)');
+  }
+  if (/-sDISABLE_EXCEPTION_CATCHING=1/.test(code)) {
+    errors.push('scripts/build-wasm.sh must not link with -sDISABLE_EXCEPTION_CATCHING=1 (libopenmpt\'s catch blocks become dead code)');
+  }
+  if (!/require_emsdk_pin build-wasm\.sh/.test(code)) {
+    errors.push('scripts/build-wasm.sh must call require_emsdk_pin (an emsdk mismatch is fatal unless XASM_ALLOW_EMSDK_DRIFT=1)');
+  }
+  if (/\bwget\b|\bcurl\b/.test(code)) {
+    errors.push('scripts/build-wasm.sh must download libopenmpt only via scripts/lib/libopenmpt-source.sh (sha256-checked)');
+  }
 }
 // The link must go through em++: with .o inputs there is no .cpp suffix left for
 // emcc to infer C++ from, so libc++/libc++abi would be skipped and every

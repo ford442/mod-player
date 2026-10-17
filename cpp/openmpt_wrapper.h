@@ -84,9 +84,10 @@ public:
 
     /**
      * Load a tracker module from a memory buffer.
-     * Returns true on success.
+     * Returns true on success. On failure, if `reason` is non-null, libopenmpt's own
+     * error code and message are written to it (empty when it gave none).
      */
-    bool load(const uint8_t* data, size_t length);
+    bool load(const uint8_t* data, size_t length, char* reason = nullptr, size_t reasonSize = 0);
 
     /** Destroy the current module (safe to call if none loaded). */
     void unload();

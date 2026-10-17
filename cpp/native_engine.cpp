@@ -277,11 +277,12 @@ int NativeEngine::loadModule(uint8_t* data, int length) {
     }
     // The one and only parse of these bytes. libopenmpt copies what it keeps,
     // so the file buffer is released as soon as it returns.
-    const bool parsed = m->module.load(data, static_cast<size_t>(length));
+    char reason[160];
+    const bool parsed = m->module.load(data, static_cast<size_t>(length), reason, sizeof(reason));
     std::free(data);
     if (!parsed) {
         delete m; // never counted as created
-        setErrorf("ERR_UNSUPPORTED_MODULE: libopenmpt could not parse %d bytes", length);
+        setErrorf("ERR_UNSUPPORTED_MODULE: libopenmpt could not parse %d bytes (%s)", length, reason);
         return 0;
     }
     ++stats_.modulesCreated;

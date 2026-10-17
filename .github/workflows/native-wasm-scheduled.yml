@@ -55,7 +55,7 @@ jobs:
       - name: Cache libopenmpt static library
         uses: actions/cache@v6
         with:
-          path: vendor/libopenmpt-0.8.4+release-native-release
+          path: vendor/libopenmpt-native-release
           # Exact key only — NO restore-keys. A prefix fallback restored a libopenmpt.a built with
           # other flags, and the build script then trusted whatever archive it found.
           key: libopenmpt-native-${{ runner.os }}-release-${{ steps.libopenmpt_stamp.outputs.stamp }}
@@ -87,8 +87,8 @@ jobs:
           head -c 4 public/worklets/openmpt-native.wasm | od -An -tx1 | grep -q '00 61 73 6d'
           echo "✅ openmpt-native.* artifacts present"
 
-      - name: Verify native SIMD survived the link
-        run: npm run verify:native-simd
+      - name: Verify native wasm features (SIMD, exceptions, trunc_sat, bulk memory, atomics)
+        run: npm run verify:native-wasm
 
       - name: Upload native artifacts
         uses: actions/upload-artifact@v7
@@ -179,7 +179,7 @@ jobs:
       - name: Cache libopenmpt static library
         uses: actions/cache@v6
         with:
-          path: vendor/libopenmpt-0.8.4+release-native-debug
+          path: vendor/libopenmpt-native-debug
           # Exact key only — NO restore-keys. A prefix fallback restored a libopenmpt.a built with
           # other flags, and the build script then trusted whatever archive it found.
           key: libopenmpt-native-${{ runner.os }}-debug-${{ steps.libopenmpt_stamp.outputs.stamp }}
@@ -191,5 +191,6 @@ jobs:
         run: |
           test -f public/worklets/openmpt-native.wasm
           head -c 4 public/worklets/openmpt-native.wasm | od -An -tx1 | grep -q '00 61 73 6d'
+          node scripts/verify-wasm-features.mjs --profile native-debug
           echo "✅ debug openmpt-native.wasm present"
 

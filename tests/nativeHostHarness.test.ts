@@ -43,9 +43,11 @@ describe('native host sanitizer harness (#491)', () => {
     expect(tests).toContain('int negativeControl(');
   });
 
-  it('pins the libopenmpt tarball by sha256', () => {
-    expect(script).toMatch(/LIBOPENMPT_SHA256="[0-9a-f]{64}"/);
-    expect(script).toMatch(/sha256sum "\$archive"/);
+  it('gets libopenmpt from the shared, sha256-pinned source (scripts/lib/libopenmpt-source.sh)', () => {
+    expect(script).toContain('source "$SCRIPT_DIR/lib/libopenmpt-source.sh"');
+    expect(script).toContain('libopenmpt_ensure_pristine "$VENDOR_ROOT"');
+    // The host trees record which version they were built from.
+    expect(script).toContain('.libopenmpt-version');
   });
 
   it('the corrupt-sample fixture is an IT 2.15 compressed sample with a short block', () => {

@@ -46,7 +46,20 @@ npm run build:emcc
 ls -lh public/worklets/openmpt-native.*
 ```
 
-libopenmpt **0.8.4** is downloaded into `vendor/` automatically if missing. Each mode builds in its own tree (`vendor/libopenmpt-0.8.4+release-native-release`, `…-native-debug`). When that tree's `bin/libopenmpt.a` already exists **and its `bin/.native-flags` stamp matches the current flags** (local prior build or CI `actions/cache`), `build-wasm.sh` skips the multi-minute `make` and only re-links thin C++. Editing `LIBOPENMPT_*_FLAGS` changes the stamp, so the archive rebuilds by itself — nothing to delete by hand. `scripts/build-wasm.sh --print-flag-stamp [--debug]` prints the stamp (no emcc needed); CI uses it as the cache key.
+libopenmpt (version + tarball **sha256** in `scripts/lib/libopenmpt-source.sh`, currently **0.8.4**) is downloaded into `vendor/libopenmpt-<ver>+release` automatically if missing, and refused if the hash does not match. Each mode builds in its own version-free tree (`vendor/libopenmpt-native-release`, `…-native-debug`) that records the source version it holds (`.libopenmpt-version`). When that tree's `bin/libopenmpt.a` already exists **and its `bin/.native-flags` stamp matches the current flags and version** (local prior build or CI `actions/cache`), `build-wasm.sh` skips the multi-minute `make` and only re-links thin C++. Editing a flag or bumping libopenmpt changes the stamp, so the archive rebuilds by itself — nothing to delete by hand. `scripts/build-wasm.sh --print-flag-stamp [--debug]` prints the stamp (no emcc needed); CI uses it as the cache key.
+
+### One flag set for both WASM builds (#491)
+
+`scripts/lib/wasm-flags.sh` is sourced by `build-wasm.sh` and `build-js-libopenmpt.sh`:
+
+| Variable | Value | Why |
+|---|---|---|
+| `WASM_EMSDK_PIN` | `3.1.51` | Any other active emcc is a **hard error** unless `XASM_ALLOW_EMSDK_DRIFT=1`. `EMSDK_ENV=/path/to/emsdk_env.sh` picks a toolchain; an emcc already on `PATH` is never overridden. |
+| `WASM_FEATURE_FLAGS` | `-mbulk-memory -mnontrapping-fptoint -msign-ext` | Every AudioWorklet browser has them; LLVM 17 only defaults sign-ext on, so libopenmpt's float→int used trapping `trunc` and its memcpy/memset were byte loops. |
+| `WASM_EH_FLAGS` | `-fwasm-exceptions` (compile **and** link) | libopenmpt's C API and loaders catch their own throws. The native link used `DISABLE_EXCEPTION_CATCHING=1` until #491, which let a truncated IT sample block escape `load_module()` into JS. |
+| `LIBOPENMPT_*_EXTRA_FLAGS` | `-std=…`, `-fvisibility=hidden`, C `-fno-strict-aliasing` | What libopenmpt's own makefiles add and a command-line `CXXFLAGS=`/`CFLAGS=` replaces (the flags must stay on the command line, or `config-emscripten.mk`'s `-Oz`/full LTO would win). |
+
+Both builds' output is gated at the instruction level by `scripts/verify-wasm-features.mjs` (`--profile native` / `js`, decoder in `scripts/lib/wasm-ops.mjs`): SIMD (native only), try/catch, `trunc_sat`, bulk memory, atomics (native only). `npm run verify:native-wasm` runs the native profile.
 
 ### Runtime engine override
 

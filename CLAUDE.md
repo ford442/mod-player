@@ -88,11 +88,12 @@ npm run typecheck    # TypeScript type-check only (no emit): app + vite/vitest c
 npm run preflight    # Run before every commit: CI's `lint-and-build` job *is* this chain (stops at first failure, no network needed after `npm ci`)
 npm run verify:lockfile # package-lock.json metadata guard (lockfileVersion 3, resolved + integrity)
 npm run lint         # ESLint (max 27 warnings budget; hard CI gate)
-npm run build:emcc   # Native C++ worklet → openmpt-native.* (scripts/build-wasm.sh, emsdk 3.1.51)
+npm run build:emcc   # Native C++ worklet → openmpt-native.* (scripts/build-wasm.sh, emsdk 3.1.51; another emcc is fatal unless XASM_ALLOW_EMSDK_DRIFT=1)
+npm run verify:native-wasm # Instruction-level gate on openmpt-native.wasm: SIMD, wasm exceptions, trunc_sat, bulk memory, atomics
 npm run test:native-host # Native engine C++ on the host under TSan / ASan+UBSan + alloc count (no emsdk; needs g++/clang++)
 npm run build:worklet # Alias of build:emcc (never overwrites openmpt-worklet.js)
 npm run build:js-worklet # Compile the typed worklets (openmpt-processor.ts → openmpt-worklet.js, fx-character-processor.ts → fx-character-worklet.js; esbuild)
-npm run build:js-libopenmpt # Real-WASM libopenmpt for the JS engine → public/worklets/libopenmpt-worklet.{js,wasm} (emsdk 3.1.51; committed)
+npm run build:js-libopenmpt # Real-WASM libopenmpt for the JS engine → public/worklets/libopenmpt-worklet.{js,wasm} (emsdk 3.1.51; committed). Both builds share scripts/lib/wasm-flags.sh (flags) + scripts/lib/libopenmpt-source.sh (version, sha256)
 npm run verify:js-libopenmpt # Static + boot/render/corrupt-input checks of that pair (no emsdk needed)
 npm run smoke:fx:ci  # FX rack on headless Chrome (#453): bypass null, crossfade clicks, parity, character CPU (needs a preview on BASE_URL)
 npm run gen:irs      # Synthesize + Opus-encode the room IRs → public/ir/*.opus + manifest (needs ffmpeg/libopus; outputs committed)
@@ -269,8 +270,11 @@ EngineState           // Worklet engine lifecycle state
     under the release build's hard `INITIAL_MEMORY=128mb` (`ALLOW_MEMORY_GROWTH=0`).
     `load_module()` **adopts** the `_malloc`'d pointer (the caller must not
     `_free` it) and returns 0 with a typed `ERR_*` string from
-    `get_last_error()` rather than letting libopenmpt throw — a throw aborts the
-    worklet under `DISABLE_EXCEPTION_CATCHING=1`. Source guards:
+    `get_last_error()` (libopenmpt's own reason appended). libopenmpt is built
+    **and linked** with native wasm exceptions (`scripts/lib/wasm-flags.sh`):
+    its loaders throw and catch internally on ordinary bad input, and the
+    pre-#491 `DISABLE_EXCEPTION_CATCHING=1` link let those throws escape into
+    JS / kill the worklet — never put that flag back. Source guards:
     `scripts/verify-native-exports.mjs`; runtime proof: `npm run test:native-host`
     (host build under TSan / ASan+UBSan + an allocation count, CI job
     `native-host-sanitizers`).

@@ -6,15 +6,15 @@
 #     JS AudioWorklet processor (production path). Native glue is openmpt-native.*.
 #
 # Prerequisites:
-#   1. Emscripten SDK — **pinned to 3.1.51** (libopenmpt 0.8.4 minimum; matches CI):
+#   1. Emscripten SDK — **pinned to 3.1.51** (scripts/lib/wasm-flags.sh; matches CI):
 #        git clone https://github.com/emscripten-core/emsdk.git
 #        cd emsdk && ./emsdk install 3.1.51 && ./emsdk activate 3.1.51
-#        source ./emsdk_env.sh
-#      Newer emsdk often works; CI and docs treat 3.1.51 as the verified pin.
+#        source ./emsdk_env.sh            (or EMSDK_ENV=/path/to/emsdk_env.sh)
+#      Any other active emcc is a hard error unless XASM_ALLOW_EMSDK_DRIFT=1.
 #
-#   2. libopenmpt source (auto-downloaded if missing):
-#        vendor/libopenmpt-0.8.4+release-native-<release|debug>  (one build tree per mode, copied
-#        from an existing source tree or extracted from the lib.openmpt.org tarball)
+#   2. libopenmpt source (version + sha256 in scripts/lib/libopenmpt-source.sh; auto-downloaded
+#        and hash-checked if missing): vendor/libopenmpt-<ver>+release is the pristine tree,
+#        vendor/libopenmpt-native-<release|debug> the per-mode build trees copied from it.
 #        Or override: export LIBOPENMPT_DIR=/path/to/libopenmpt
 #
 #   3. Emscripten builds need STATIC_LIB=1 (handled automatically) to produce
@@ -45,7 +45,10 @@
 #
 # Release opts (Phases 2–3): thin LTO, -msimd128, section GC, emmalloc, fixed heap,
 # wrapper -fno-exceptions/-fno-rtti, STACK_SIZE=128KiB (main thread; matches worklet stack).
-# libopenmpt.a keeps exceptions (C API try/catch in libopenmpt_c.cpp).
+# libopenmpt.a is built with native wasm exceptions and linked with them (#491): its C API
+# and its loaders catch their own throws, which a no-catch link turned into abort().
+# Feature flags, the exception model and libopenmpt's dropped makefile flags come from
+# scripts/lib/wasm-flags.sh, shared with the JS-engine build.
 #
 # The build is TWO emcc phases: -fno-exceptions/-fno-rtti are compile-only, and the
 # link runs through em++. Collapsing them back into one emcc call is what made
@@ -53,9 +56,9 @@
 # comment above the compile/link block before touching COMPILE_FLAGS.
 #
 # libopenmpt.a is rebuilt automatically when the flags that produce it change: each mode
-# builds in its own tree (vendor/libopenmpt-<ver>+release-native-<release|debug>) and records
-# a stamp of {mode, emsdk pin, libopenmpt version, CXXFLAGS/CFLAGS, make flags, emcc version}
-# in bin/.native-flags. A missing or different stamp means `make clean` + rebuild, so there is
+# builds in its own tree (vendor/libopenmpt-native-<release|debug>) and records a stamp of
+# {mode, emsdk pin, libopenmpt version, CXXFLAGS/CFLAGS, make flags, emcc version} in
+# bin/.native-flags (and the source version in .libopenmpt-version). A missing or different stamp means `make clean` + rebuild, so there is
 # nothing to delete by hand after editing LIBOPENMPT_*_FLAGS. Bump LIBOPENMPT_BUILD_REV to force
 # a rebuild for a reason the flags don't capture.
 #   npm run build:emcc                   # preferred package.json entry
@@ -70,6 +73,11 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# shellcheck source=scripts/lib/wasm-flags.sh
+source "$SCRIPT_DIR/lib/wasm-flags.sh"
+# shellcheck source=scripts/lib/libopenmpt-source.sh
+source "$SCRIPT_DIR/lib/libopenmpt-source.sh"
 
 # ── Flags from argv ──────────────────────────────────────────────────
 # Parsed before emsdk is sourced so --print-flag-stamp never needs a toolchain.
@@ -107,23 +115,14 @@ if [[ "$DEBUG_MODE" -eq 1 ]]; then
 fi
 
 # ── Pinned emsdk version (must match CI) ─────────────────────────────
-# libopenmpt 0.8.4 requires Emscripten >= 3.1.51 (see src/mpt/base/detect_os.hpp).
-# Override only for local experiments: EMSDK_PIN=latest ./scripts/build-wasm.sh
-EMSDK_PIN="${EMSDK_PIN:-3.1.51}"
+# libopenmpt requires Emscripten >= 3.1.51 (see src/mpt/base/detect_os.hpp). The pin itself
+# lives in scripts/lib/wasm-flags.sh (WASM_EMSDK_PIN); a mismatch is fatal further down.
+EMSDK_PIN="$WASM_EMSDK_PIN"
 
-# Source Emscripten
-CANDIDATES=(
-    "/opt/emsdk/emsdk_env.sh"
-    "/workspaces/codepit/emsdk/emsdk_env.sh"   # GitHub Codespace
-    "/content/build_space/emsdk/emsdk_env.sh"  # Colab
-    "$PROJECT_ROOT/emsdk/emsdk_env.sh"
-    "$HOME/emsdk/emsdk_env.sh"
-    "/usr/local/emsdk/emsdk_env.sh"
-)
-for f in "${CANDIDATES[@]}"; do
-    # shellcheck source=/dev/null  # emsdk env file: the path is only known at run time
-    if [ -f "$f" ]; then source "$f"; break; fi
-done
+# Activate emsdk unless an emcc is already on PATH (EMSDK_ENV first, then the usual places).
+if [[ "$PRINT_FLAG_STAMP" -ne 1 ]]; then
+    source_emsdk_env "$PROJECT_ROOT"
+fi
 
 CPP_DIR="$PROJECT_ROOT/cpp"
 OUTPUT_DIR="$PROJECT_ROOT/public/worklets"
@@ -131,16 +130,10 @@ OUTPUT_DIR="$PROJECT_ROOT/public/worklets"
 OUTPUT_BASENAME="openmpt-native"
 TRACKED_JS_WORKLET="$OUTPUT_DIR/openmpt-worklet.js"
 VENDOR_ROOT="$PROJECT_ROOT/vendor"
-LIBOPENMPT_VERSION="0.8.4"
-LIBOPENMPT_TARBALL="libopenmpt-${LIBOPENMPT_VERSION}+release.makefile.tar.gz"
-LIBOPENMPT_VENDOR_NAME="libopenmpt-${LIBOPENMPT_VERSION}+release"
-# Pristine sources: the name the tarball extracts to, and where older versions of this script
-# built in place. Only ever a donor now — nothing is built in it.
-LIBOPENMPT_SOURCE_DIR="$VENDOR_ROOT/$LIBOPENMPT_VENDOR_NAME"
 # The build tree for THIS mode. Debug and release get separate trees so they never share (or
-# silently reuse) one bin/libopenmpt.a; this is also the directory CI caches.
-LIBOPENMPT_VENDOR_DIR="$VENDOR_ROOT/${LIBOPENMPT_VENDOR_NAME}-native-${BUILD_MODE}"
-LEGACY_VENDOR_DIR="$VENDOR_ROOT/libopenmpt"
+# silently reuse) one bin/libopenmpt.a; this is also the directory CI caches. Version-free on
+# purpose: the version is part of the flag stamp, and the tree records the sources it holds.
+LIBOPENMPT_VENDOR_DIR="$VENDOR_ROOT/libopenmpt-native-${BUILD_MODE}"
 
 # libopenmpt paths (override with LIBOPENMPT_DIR env var; an override is used as-is, unstamped)
 LIBOPENMPT_DIR="${LIBOPENMPT_DIR:-$LIBOPENMPT_VENDOR_DIR}"
@@ -175,7 +168,7 @@ if [[ "$DEBUG_MODE" -eq 1 ]]; then
     # -mbulk-memory/-matomics are NOT optional here: WASM_WORKERS links with
     # --shared-memory, and wasm-ld rejects objects built without those features.
     # (Debug deliberately keeps -msimd128 and LTO off for readable stack traces.)
-    COMPILE_FLAGS=(-O0 -g -DDEBUG -mbulk-memory -matomics)
+    COMPILE_FLAGS=(-O0 -g -DDEBUG "${WASM_FEATURE_FLAGS[@]}" -matomics)
     CXX_ONLY_FLAGS=(-fno-exceptions -fno-rtti)
     EMSCRIPTEN_FLAGS=(
         -sASSERTIONS=2
@@ -183,7 +176,6 @@ if [[ "$DEBUG_MODE" -eq 1 ]]; then
         -sINITIAL_MEMORY=128mb
         -sMAXIMUM_MEMORY=256mb
         "$STACK_SIZE_FLAG"
-        -sDISABLE_EXCEPTION_CATCHING=1
     )
     echo "🔧 Building in DEBUG mode (ASSERTIONS=2)"
 else
@@ -191,7 +183,7 @@ else
         -O3 -DNDEBUG
         -flto=thin
         -msimd128
-        -mbulk-memory -matomics -mnontrapping-fptoint -msign-ext
+        "${WASM_FEATURE_FLAGS[@]}" -matomics
         -ffunction-sections -fdata-sections
     )
     CXX_ONLY_FLAGS=(-fno-exceptions -fno-rtti)
@@ -203,7 +195,6 @@ else
         -sALLOW_MEMORY_GROWTH=0
         -sINITIAL_MEMORY=128mb
         "$STACK_SIZE_FLAG"
-        -sDISABLE_EXCEPTION_CATCHING=1
     )
     echo "🔧 Building in RELEASE mode (SIMD + LTO + emmalloc + fixed 128mb heap)"
 fi
@@ -216,24 +207,25 @@ if [[ "$GROW_HEAP" -eq 1 ]]; then
     echo "🔧 Heap growth enabled (MAXIMUM_MEMORY=512mb) — for huge ITs"
 fi
 
-# libopenmpt static lib must be built with matching release opts (LTO + SIMD + atomics for WASM_WORKERS).
-# Do NOT add -fno-exceptions here: libopenmpt_c.cpp uses try/catch as the C API error boundary
-# and will not compile. Wrapper/worklet still use -fno-exceptions (C API only, no throw).
+# libopenmpt static lib must be built with matching release opts (LTO + SIMD + atomics for
+# WASM_WORKERS) and with the shared feature set + native wasm exceptions (wasm-flags.sh).
+# Do NOT add -fno-exceptions here: libopenmpt_c.cpp uses try/catch as the C API error boundary,
+# and its loaders throw and catch internally on ordinary malformed input. Up to #491 the link
+# used DISABLE_EXCEPTION_CATCHING=1 (libc++abi-noexcept), which made every one of those catch
+# blocks dead code: a truncated IT sample block aborted the worklet. The link now uses
+# -fwasm-exceptions too, so they run. The wrapper itself stays -fno-exceptions/-fno-rtti: it
+# only calls the C API, and nothing unwinds through it.
 #
-# Note what that boundary is actually worth at runtime: the link resolves
-# -lc++abi-ww-noexcept (DISABLE_EXCEPTION_CATCHING=1), so libopenmpt_c.cpp's catch
-# blocks are dead code and a throw aborts the module instead of returning null.
-# That has been true of every green build here; keeping -fno-exceptions off the
-# libopenmpt CXXFLAGS is about compiling it at all, not about live error recovery.
-LIBOPENMPT_RELEASE_CXXFLAGS='-O3 -DNDEBUG -msimd128 -flto=thin -mbulk-memory -matomics'
-LIBOPENMPT_RELEASE_CFLAGS='-O3 -DNDEBUG -msimd128 -flto=thin -mbulk-memory -matomics'
+# The flags go on the make command line, which REPLACES the makefiles' own CXXFLAGS/CFLAGS
+# (see wasm-flags.sh for why, and for the -std / -fvisibility / -fno-strict-aliasing that
+# replacement used to drop silently).
+LIBOPENMPT_RELEASE_CXXFLAGS="-O3 -DNDEBUG -msimd128 -flto=thin -matomics ${WASM_FEATURE_FLAGS[*]} ${WASM_EH_FLAGS[*]} ${LIBOPENMPT_CXX_EXTRA_FLAGS[*]}"
+LIBOPENMPT_RELEASE_CFLAGS="-O3 -DNDEBUG -msimd128 -flto=thin -matomics ${WASM_FEATURE_FLAGS[*]} ${WASM_EH_FLAGS[*]} ${LIBOPENMPT_C_EXTRA_FLAGS[*]}"
 # Debug: the wrapper links with --shared-memory (WASM_WORKERS), and wasm-ld rejects any object
-# built without -matomics/-mbulk-memory — libopenmpt.a included. Without explicit flags the
-# libopenmpt makefile falls back to its own optimisation defaults and none of that, so these are
-# not optional. -O1, not -O0, so the debug engine can still keep up with real time; no LTO/SIMD to
-# match the wrapper's debug flags.
-LIBOPENMPT_DEBUG_CXXFLAGS='-O1 -mbulk-memory -matomics'
-LIBOPENMPT_DEBUG_CFLAGS='-O1 -mbulk-memory -matomics'
+# built without -matomics/-mbulk-memory — libopenmpt.a included. -O1, not -O0, so the debug
+# engine can still keep up with real time; no LTO/SIMD to match the wrapper's debug flags.
+LIBOPENMPT_DEBUG_CXXFLAGS="-O1 -matomics ${WASM_FEATURE_FLAGS[*]} ${WASM_EH_FLAGS[*]} ${LIBOPENMPT_CXX_EXTRA_FLAGS[*]}"
+LIBOPENMPT_DEBUG_CFLAGS="-O1 -matomics ${WASM_FEATURE_FLAGS[*]} ${WASM_EH_FLAGS[*]} ${LIBOPENMPT_C_EXTRA_FLAGS[*]}"
 # Bump to force every cached libopenmpt.a to rebuild for a reason the flags above don't capture.
 LIBOPENMPT_BUILD_REV=1
 
@@ -282,11 +274,9 @@ if ! command -v emcc &> /dev/null; then
 fi
 
 echo "📦 Emscripten version: $(emcc --version | head -1)"
-echo "📌 Documented pin (CI): emsdk ${EMSDK_PIN}"
+echo "📌 Pin (CI): emsdk ${EMSDK_PIN}"
 EMCC_VERSION_LINE="$(emcc --version 2>/dev/null | head -1 || true)"
-if [[ -n "$EMCC_VERSION_LINE" && "$EMSDK_PIN" != "latest" && ! "$EMCC_VERSION_LINE" == *"$EMSDK_PIN"* ]]; then
-    echo "⚠️  Warning: active emcc does not report ${EMSDK_PIN}. CI uses that pin; mismatch may cause build drift." >&2
-fi
+require_emsdk_pin build-wasm.sh
 
 # ── libopenmpt discovery / build ─────────────────────────────────────
 # Installed layout (post `make CONFIG=emscripten`):  include/libopenmpt/libopenmpt.h
@@ -342,40 +332,14 @@ libopenmpt_has_required_api() {
     grep -q 'openmpt_module_get_time_at_position' "$header" 2>/dev/null
 }
 
-# Download the release tarball and move its sources to $1 (the tarball extracts to
-# $LIBOPENMPT_VENDOR_NAME, which is not where the per-mode trees live).
-download_libopenmpt_tarball() {
-    local dest="$1"
-    local archive="$VENDOR_ROOT/$LIBOPENMPT_TARBALL"
-    local extract_dir
-
-    mkdir -p "$VENDOR_ROOT"
-    echo "📥 Downloading libopenmpt ${LIBOPENMPT_VERSION}…"
-    if ! wget -q "https://lib.openmpt.org/files/libopenmpt/src/${LIBOPENMPT_TARBALL}" -O "$archive"; then
-        echo "❌ Failed to download ${LIBOPENMPT_TARBALL}" >&2
-        exit 1
-    fi
-    extract_dir="$(mktemp -d "$VENDOR_ROOT/.extract.XXXXXX")"
-    if ! tar xzf "$archive" -C "$extract_dir"; then
-        echo "❌ Failed to extract ${LIBOPENMPT_TARBALL}" >&2
-        rm -rf "$extract_dir"
-        exit 1
-    fi
-    rm -f "$archive"
-    if [[ ! -d "$extract_dir/$LIBOPENMPT_VENDOR_NAME" ]]; then
-        echo "❌ Expected directory '$LIBOPENMPT_VENDOR_NAME' after extract." >&2
-        rm -rf "$extract_dir"
-        exit 1
-    fi
-    mv "$extract_dir/$LIBOPENMPT_VENDOR_NAME" "$dest"
-    rmdir "$extract_dir"
-}
-
-# Copy a libopenmpt source tree to $2 without build output, so the copy always compiles from scratch.
-copy_libopenmpt_sources() {
-    local from="$1" to="$2"
-    mkdir -p "$to"
-    tar -C "$from" --exclude='./bin' --exclude='*.o' --exclude='*.d' --exclude='*.a' -cf - . | tar -C "$to" -xf -
+# Copy the verified pristine sources into $1 and record which version they are, so a version
+# bump can never build an old tree under a new stamp.
+copy_pristine_libopenmpt() {
+    local dest="$1" pristine
+    pristine="$(libopenmpt_ensure_pristine "$VENDOR_ROOT")"
+    echo "📂 Copying libopenmpt ${LIBOPENMPT_VERSION} sources from $pristine (objects excluded)…"
+    libopenmpt_copy_sources "$pristine" "$dest"
+    echo "$LIBOPENMPT_VERSION" > "$dest/.libopenmpt-version"
 }
 
 resolve_libopenmpt_paths() {
@@ -431,25 +395,18 @@ libopenmpt_stamp_matches() {
     [[ -f "$stamp_file" && "$(cat "$stamp_file")" == "$(libopenmpt_disk_stamp)" ]]
 }
 
-# Make sure the per-mode tree holds libopenmpt sources: reuse it, else copy from an existing
-# source tree (without its objects), else download.
+# Make sure the per-mode tree holds the pinned libopenmpt version's sources: reuse it only if it
+# records that version, else replace it with a fresh copy of the verified pristine tree.
 prepare_managed_tree() {
-    local donor
-    if is_valid_openmpt_source "$LIBOPENMPT_VENDOR_DIR" && libopenmpt_has_required_api "$LIBOPENMPT_VENDOR_DIR"; then
+    if is_valid_openmpt_source "$LIBOPENMPT_VENDOR_DIR" && libopenmpt_has_required_api "$LIBOPENMPT_VENDOR_DIR" \
+        && [[ "$(cat "$LIBOPENMPT_VENDOR_DIR/.libopenmpt-version" 2>/dev/null)" == "$LIBOPENMPT_VERSION" ]]; then
         return 0
     fi
     if [[ -d "$LIBOPENMPT_VENDOR_DIR" ]]; then
-        echo "⚠️  Removing incomplete or outdated build tree at $LIBOPENMPT_VENDOR_DIR"
+        echo "⚠️  Replacing build tree at $LIBOPENMPT_VENDOR_DIR (incomplete or not libopenmpt ${LIBOPENMPT_VERSION})"
         rm -rf "$LIBOPENMPT_VENDOR_DIR"
     fi
-    for donor in "$LIBOPENMPT_SOURCE_DIR" "$LEGACY_VENDOR_DIR"; do
-        if is_valid_openmpt_source "$donor" && libopenmpt_has_required_api "$donor"; then
-            echo "📂 Copying libopenmpt sources from $donor (objects excluded)…"
-            copy_libopenmpt_sources "$donor" "$LIBOPENMPT_VENDOR_DIR"
-            return 0
-        fi
-    done
-    download_libopenmpt_tarball "$LIBOPENMPT_VENDOR_DIR"
+    copy_pristine_libopenmpt "$LIBOPENMPT_VENDOR_DIR"
 }
 
 report_libopenmpt_failure() {
@@ -492,9 +449,10 @@ ensure_libopenmpt() {
     fi
 
     # Managed per-mode tree. Reuse its libopenmpt.a only if it was built with exactly the current
-    # flags (CI actions/cache hit or an earlier local run); anything else rebuilds, so editing
-    # LIBOPENMPT_*_FLAGS can never leave a stale archive in use.
-    if resolve_libopenmpt_paths && libopenmpt_has_required_api "$LIBOPENMPT_DIR" && libopenmpt_stamp_matches; then
+    # flags and version (CI actions/cache hit or an earlier local run); anything else rebuilds, so
+    # editing LIBOPENMPT_*_FLAGS or bumping libopenmpt can never leave a stale archive in use.
+    if resolve_libopenmpt_paths && libopenmpt_has_required_api "$LIBOPENMPT_DIR" && libopenmpt_stamp_matches \
+        && [[ "$(cat "$LIBOPENMPT_DIR/.libopenmpt-version" 2>/dev/null)" == "$LIBOPENMPT_VERSION" ]]; then
         echo "✅ libopenmpt ready at $LIBOPENMPT_DIR (${BUILD_MODE}, flag stamp $(libopenmpt_flag_stamp) — skipping make)"
         echo "   include=$LIBOPENMPT_INCLUDE  lib=$LIBOPENMPT_LIB"
         return 0
@@ -625,7 +583,7 @@ for src in openmpt_wrapper native_engine worklet_processor; do
     OBJECTS+=("$obj")
 done
 
-echo "🔗 Linking native worklet (em++; exceptions left enabled for libopenmpt.a)..."
+echo "🔗 Linking native worklet (em++; native wasm exceptions for libopenmpt.a)..."
 
 # -sFILESYSTEM=0: nothing here touches Emscripten's FS (the module arrives as a malloc'd buffer via
 # load_module, and printf/fprintf go through the stdio write hook, which stays). Measured on
@@ -634,6 +592,7 @@ echo "🔗 Linking native worklet (em++; exceptions left enabled for libopenmpt.
 
 em++ \
     "${COMPILE_FLAGS[@]}" \
+    "${WASM_EH_FLAGS[@]}" \
     "${LINK_FLAGS[@]+"${LINK_FLAGS[@]}"}" \
     "${EXTRA_SANITIZER_FLAGS[@]+"${EXTRA_SANITIZER_FLAGS[@]}"}" \
     \
@@ -690,8 +649,11 @@ if [[ -f "$OUTPUT_DIR/openmpt-worklet.wasm" ]]; then
     rm -f "$OUTPUT_DIR/openmpt-worklet.wasm" "$OUTPUT_DIR/openmpt-worklet.aw.js"
 fi
 
-if [[ "$DEBUG_MODE" -eq 0 && -f "$OUTPUT_DIR/${OUTPUT_BASENAME}.wasm" ]]; then
-    node "$SCRIPT_DIR/verify-native-simd.mjs" "$OUTPUT_DIR/${OUTPUT_BASENAME}.wasm"
+if [[ -f "$OUTPUT_DIR/${OUTPUT_BASENAME}.wasm" ]]; then
+    # Instruction-level check: SIMD (release), exceptions, saturating float→int, bulk memory, atomics.
+    WASM_PROFILE=native
+    [[ "$DEBUG_MODE" -eq 1 ]] && WASM_PROFILE=native-debug
+    node "$SCRIPT_DIR/verify-wasm-features.mjs" --profile "$WASM_PROFILE" "$OUTPUT_DIR/${OUTPUT_BASENAME}.wasm"
 fi
 
 echo ""

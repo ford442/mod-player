@@ -28,7 +28,9 @@
 #include <cstring>
 #include <string>
 
+#include <dlfcn.h>
 #include <execinfo.h>
+#include <typeinfo>
 
 #include "test_util.h"
 
@@ -64,6 +66,17 @@ inline void countAlloc() {
     }
 }
 } // namespace
+
+// Counts C++ throws, so the corrupt-sample fixture provably exercises libopenmpt's own
+// throw/catch (the path a no-catch or broken-EH wasm link turns into an abort or a reject).
+std::atomic<int> g_throws{0};
+extern "C" void __cxa_throw(void* obj, std::type_info* type, void (*dtor)(void*)) {
+    g_throws.fetch_add(1, std::memory_order_relaxed);
+    using Fn = void (*)(void*, std::type_info*, void (*)(void*));
+    static const Fn real = reinterpret_cast<Fn>(dlsym(RTLD_NEXT, "__cxa_throw"));
+    real(obj, type, dtor);
+    __builtin_unreachable();
+}
 
 extern "C" {
 void* malloc(size_t size) {
@@ -168,6 +181,17 @@ int main(int argc, char** argv) {
     constexpr int kRingCap = 4096;
     auto* ring = static_cast<uint8_t*>(std::malloc(8 + kRingCap * 2 * sizeof(float)));
     e.setPcmRing(ring, kRingCap);
+
+    {
+        // The fixture must make libopenmpt throw (and recover) — otherwise it tests nothing.
+        NativeEngine probe;
+        configure(probe, 48000);
+        const int before = g_throws.load();
+        const int ok = load(probe, fx.corrupt);
+        const int thrown = g_throws.load() - before;
+        std::fprintf(stderr, "corrupt-sample fixture: loaded=%d, libopenmpt threw %d time(s)\n", ok, thrown);
+        if (ok != 1 || thrown < 1) ++failures;
+    }
 
     std::fprintf(stderr, "allocations inside NativeEngine::process():\n");
     if (load(e, fx.xm) != 1 || e.commitModule() != 1) return 3;

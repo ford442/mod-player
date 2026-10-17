@@ -25,8 +25,11 @@ export function corruptIt215Sample() {
   const patPtrOff = smpPtrOff + smpNum * 4;
   const sampleHeaderOff = patPtrOff + patNum * 4;
   const sampleDataOff = sampleHeaderOff + 0x50;
-  // uint16 block size + the block itself: 4 bytes cannot hold 4096 samples.
-  const block = Uint8Array.of(0xff, 0x7f, 0x3f, 0x1f);
+  // uint16 block size + the block itself. Zero bits decode as valid 9-bit samples (mode C,
+  // top bit clear), so the decoder keeps reading until the 4 bytes run out — 3 samples of
+  // 4096 — and BitReader throws eof(). (Non-zero garbage tends to hit the decoder's own
+  // "width > 9 → return" error path first, which throws nothing.)
+  const block = Uint8Array.of(0x00, 0x00, 0x00, 0x00);
   const total = sampleDataOff + 2 + block.length;
 
   const buf = new Uint8Array(total);

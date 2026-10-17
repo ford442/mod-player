@@ -57,10 +57,11 @@ describe('#412 native ctl / mute / one-module parse', () => {
     expect(runInit).toContain('__XASM1_NATIVE__');
   });
 
-  it('emcc contract includes STACK_SIZE, no-exceptions, and new exports', () => {
+  it('emcc contract includes STACK_SIZE, a no-throw wrapper, wasm exceptions, and new exports', () => {
     expect(buildSh).toContain('-sSTACK_SIZE=131072');
     expect(buildSh).toContain('-fno-exceptions');
-    expect(buildSh).toContain('-sDISABLE_EXCEPTION_CATCHING=1');
+    // #491: libopenmpt is linked WITH native wasm exceptions (its own throw/catch must run).
+    expect(buildSh).toContain('"${WASM_EH_FLAGS[@]}"');
     expect(buildSh).toContain('libopenmpt_c.cpp');
     expect(buildSh).toContain("'_set_channel_mute'");
     expect(buildSh).toContain("'_set_render_param'");
@@ -93,7 +94,8 @@ describe('#412 native ctl / mute / one-module parse', () => {
   it('compiles debug objects with the atomics/bulk-memory WASM_WORKERS needs', () => {
     // wasm-ld rejects --shared-memory against objects built without these.
     const debugFlags = buildSh.match(/COMPILE_FLAGS=\(-O0 -g -DDEBUG[^)]*\)/)?.[0] ?? '';
-    expect(debugFlags).toContain('-mbulk-memory');
+    expect(debugFlags).toContain('"${WASM_FEATURE_FLAGS[@]}"'); // -mbulk-memory, from scripts/lib/wasm-flags.sh
+    expect(readFileSync(join(ROOT, 'scripts/lib/wasm-flags.sh'), 'utf8')).toMatch(/^WASM_FEATURE_FLAGS=\([^)]*-mbulk-memory/m);
     expect(debugFlags).toContain('-matomics');
   });
 
@@ -212,9 +214,10 @@ describe('#412 native ctl / mute / one-module parse', () => {
     for (const code of ['ERR_BAD_ARGS', 'ERR_OUT_OF_MEMORY', 'ERR_UNSUPPORTED_MODULE', 'ERR_TORN_DOWN']) {
       expect(nativeEngine).toContain(code);
     }
-    // libopenmpt signals allocation failure by throwing, which is abort() under
-    // DISABLE_EXCEPTION_CATCHING=1 — so the heap has to be probed with malloc
-    // (which returns null) before the parse is attempted.
+    // libopenmpt signals allocation failure by throwing; with wasm exceptions its
+    // C API turns that into a NULL, which would read as "unsupported module". The
+    // heap is probed with malloc (which returns null) first so an upload that
+    // cannot fit is reported as ERR_OUT_OF_MEMORY instead.
     const load = nativeEngine.slice(
       nativeEngine.indexOf('int NativeEngine::loadModule('),
       nativeEngine.indexOf('int NativeEngine::commitModule('),

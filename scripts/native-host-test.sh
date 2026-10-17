@@ -19,25 +19,21 @@
 #   ITERATIONS=1000 ROUNDS=200 scripts/native-host-test.sh
 #   CXX=clang++ CC=clang scripts/native-host-test.sh
 #
-# libopenmpt is built once per flavour (with the same sanitizer, so races inside
-# libopenmpt are visible) in vendor/libopenmpt-<ver>+release-host-<flavour>/,
-# keyed by a flag stamp; CI caches those trees. Needs: a C++17 compiler with
-# -fsanitize support, make, node (fixtures), and wget only if no source tree is
-# vendored yet (the tarball is sha256-checked).
+# libopenmpt (version + sha256: scripts/lib/libopenmpt-source.sh) is built once per
+# flavour, with the same sanitizer so races inside libopenmpt are visible, in
+# vendor/libopenmpt-host-<flavour>/, keyed by a flag stamp; CI caches those trees.
+# Needs: a C++17 compiler with -fsanitize support, make, node (fixtures), and wget
+# only if the pristine sources are not vendored yet (the tarball is sha256-checked).
 # ──────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-LIBOPENMPT_VERSION="0.8.4"
-LIBOPENMPT_NAME="libopenmpt-${LIBOPENMPT_VERSION}+release"
-LIBOPENMPT_TARBALL="${LIBOPENMPT_NAME}.makefile.tar.gz"
-# sha256 of the upstream tarball (no upstream digest file exists; computed from a fresh
-# download 2026-10-17 and checked against the vendored tree CI's reproducible build uses).
-LIBOPENMPT_SHA256="9f610ac26b2656f8edef85ffdac95b6495037108ec6d937fe913c5fe4751c44e"
+# shellcheck source=scripts/lib/libopenmpt-source.sh
+source "$SCRIPT_DIR/lib/libopenmpt-source.sh"
+
 VENDOR_ROOT="$PROJECT_ROOT/vendor"
-PRISTINE_TREE="$VENDOR_ROOT/$LIBOPENMPT_NAME"
 BUILD_ROOT="$VENDOR_ROOT/native-host-test"
 ITERATIONS="${ITERATIONS:-1000}"
 ROUNDS="${ROUNDS:-200}"
@@ -91,45 +87,22 @@ run_no_aslr() {
     fi
 }
 
-# ── libopenmpt sources ───────────────────────────────────────────────
-ensure_pristine_sources() {
-    if [[ -f "$PRISTINE_TREE/Makefile" ]]; then return 0; fi
-    mkdir -p "$VENDOR_ROOT"
-    local archive="$VENDOR_ROOT/$LIBOPENMPT_TARBALL"
-    echo "📥 Downloading libopenmpt ${LIBOPENMPT_VERSION}…"
-    wget -q "https://lib.openmpt.org/files/libopenmpt/src/${LIBOPENMPT_TARBALL}" -O "$archive"
-    local got
-    got="$(sha256sum "$archive" | cut -d' ' -f1)"
-    if [[ "$got" != "$LIBOPENMPT_SHA256" ]]; then
-        echo "❌ ${LIBOPENMPT_TARBALL}: sha256 $got, expected $LIBOPENMPT_SHA256" >&2
-        rm -f "$archive"
-        exit 1
-    fi
-    local tmp
-    tmp="$(mktemp -d "$VENDOR_ROOT/.extract.XXXXXX")"
-    tar xzf "$archive" -C "$tmp"
-    mv "$tmp/$LIBOPENMPT_NAME" "$PRISTINE_TREE"
-    rmdir "$tmp"
-    rm -f "$archive"
-}
-
 build_host_libopenmpt() {
     local flavour="$1" flags tree stamp stamp_file
     flags="$(libopenmpt_flags "$flavour")"
-    tree="$VENDOR_ROOT/${LIBOPENMPT_NAME}-host-${flavour}"
+    tree="$VENDOR_ROOT/libopenmpt-host-${flavour}"
     stamp="$(printf '%s\n' "$LIBOPENMPT_VERSION" "$MAKE_CONFIG" "$("$CXX" --version | head -1)" "$flags" \
         | sha256sum | cut -c1-16)"
     stamp_file="$tree/bin/.host-flags"
-    if [[ -f "$tree/bin/libopenmpt.a" && -f "$stamp_file" && "$(cat "$stamp_file")" == "$stamp" ]]; then
+    if [[ -f "$tree/bin/libopenmpt.a" && -f "$stamp_file" && "$(cat "$stamp_file")" == "$stamp" \
+        && "$(cat "$tree/.libopenmpt-version" 2>/dev/null)" == "$LIBOPENMPT_VERSION" ]]; then
         echo "✅ host libopenmpt.a [$flavour] up to date" >&2
         echo "$tree"
         return 0
     fi
     rm -rf "$tree"
-    mkdir -p "$tree"
-    tar -C "$PRISTINE_TREE" --exclude='./bin' --exclude='*.o' --exclude='*.d' --exclude='*.a' -cf - . \
-        | tar -C "$tree" -xf -
-    mkdir -p "$tree/bin"
+    libopenmpt_copy_sources "$PRISTINE_TREE" "$tree"
+    echo "$LIBOPENMPT_VERSION" > "$tree/.libopenmpt-version"
     echo "🔨 Building host libopenmpt.a [$flavour: $flags] ($MAKE_CONFIG, -j$JOBS)…" >&2
     # Flags go through the ENVIRONMENT: the Makefile captures CXXFLAGS/CFLAGS from it and then
     # appends its own (-std, -fvisibility, warnings). OPTIMIZE=none keeps our -O level.
@@ -174,7 +147,7 @@ compile_test() {
         "$tree/bin/libopenmpt.a" -lm -rdynamic -o "$out"
 }
 
-ensure_pristine_sources
+PRISTINE_TREE="$(libopenmpt_ensure_pristine "$VENDOR_ROOT")"
 mkdir -p "$BUILD_ROOT"
 FIXTURES="$(make_fixtures)"
 FAILED=0

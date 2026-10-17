@@ -6,8 +6,12 @@
  * Chrome: starts the real AudioWorklet thread, then loads + commits modules
  * back to back with 0–4 ms gaps while it renders — the window in which the
  * pre-#491 engine freed the buffer its audio thread was still parsing, and then
- * lost the next file. Interleaves seeks and mutes, and checks at the end that:
+ * lost the next file. Interleaves seeks and mutes, then loads a corrupt-sample IT
+ * (scripts/lib/corrupt-it.mjs: libopenmpt throws and catches inside its IT sample
+ * decompressor — an abort() in a build linked without exception catching), and
+ * checks at the end that:
  *   - the wasm never aborted and no typed load error was reported,
+ *   - the corrupt module loaded without aborting (libopenmpt recovers from it),
  *   - the LAST module loaded is the one actually rendering (channel count from
  *     the position struct) and it is audible,
  *   - cleanup_audio() returns with the audio thread still running.
@@ -23,6 +27,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { launchBrowser, openPage, goto, evaluate } from './lib/browser-launch.mjs';
 import { synthXm } from './lib/synth-xm.mjs';
+import { corruptIt215Sample } from './lib/corrupt-it.mjs';
 
 const BASE_URL = (process.env.BASE_URL || 'http://127.0.0.1:4173').replace(/\/$/, '');
 const GLUE_DIR = process.env.GLUE_DIR || '/worklets/';
@@ -41,7 +46,7 @@ try {
   // Any same-origin document served with COOP/COEP will do; it must not be the app.
   await goto(page, engine, `${BASE_URL}${GLUE_DIR}README.md`, 60000);
 
-  const result = await evaluate(page, async ({ glueDir, rounds, xm }) => {
+  const result = await evaluate(page, async ({ glueDir, rounds, xm, corrupt }) => {
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     if (!globalThis.crossOriginIsolated) return { setupError: 'page is not crossOriginIsolated (COOP/COEP)' };
     const printed = [];
@@ -131,6 +136,22 @@ try {
     }
     for (let c = 0; c < 32; c++) M._set_channel_mute(c, 0);
 
+    // libopenmpt's IT decompressor throws on the truncated block and catches it
+    // itself. With exceptions linked that is an ordinary load.
+    let corruptLoad = null;
+    if (!aborted) {
+      try {
+        corruptLoad = load(new Uint8Array(corrupt)) ? 'loaded' : 'rejected';
+        M._commit_module();
+        await sleep(100);
+      } catch (e) {
+        corruptLoad = `threw: ${e}`;
+      }
+    }
+    if (aborted) {
+      return { aborted, loadErrors, corruptLoad, printed: printed.slice(-20), rounds };
+    }
+
     // The final load must be what plays: the 32-channel XM.
     load(files[2]);
     M._commit_module();
@@ -146,14 +167,23 @@ try {
       rmsBefore,
       rmsAfter,
       finalModuleChannels: channels,
+      corruptLoad,
       parseMsMedian: parseMs.sort((a, b) => a - b)[Math.floor(parseMs.length / 2)] ?? null,
       rounds,
     };
-  }, { glueDir: GLUE_DIR, rounds: ROUNDS, xm: Array.from(synthXm(32)) });
+  }, {
+    glueDir: GLUE_DIR,
+    rounds: ROUNDS,
+    xm: Array.from(synthXm(32)),
+    corrupt: Array.from(corruptIt215Sample()),
+  });
 
   const problems = [];
   if (result.setupError) problems.push(result.setupError);
   if (result.aborted) problems.push(`wasm aborted: ${result.aborted}`);
+  if (!result.setupError && result.corruptLoad !== 'loaded' && result.corruptLoad !== 'rejected') {
+    problems.push(`corrupt-sample IT did not come back as a normal load result (${result.corruptLoad})`);
+  }
   if (result.loadErrors?.length) problems.push(`${result.loadErrors.length} load error(s): ${result.loadErrors[0]}`);
   if (!result.setupError && result.finalModuleChannels !== 32) {
     problems.push(`the last module loaded is not the one playing (channels=${result.finalModuleChannels}, want 32)`);
@@ -170,6 +200,7 @@ try {
     finalModuleChannels: report.finalModuleChannels,
     rmsBefore: report.rmsBefore,
     rmsAfter: report.rmsAfter,
+    corruptLoad: report.corruptLoad,
     parseMsMedian: report.parseMsMedian,
     problems,
   }, null, 2));
