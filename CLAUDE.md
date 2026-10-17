@@ -277,7 +277,9 @@ EngineState           // Worklet engine lifecycle state
     JS / kill the worklet — never put that flag back. Source guards:
     `scripts/verify-native-exports.mjs`; runtime proof: `npm run test:native-host`
     (host build under TSan / ASan+UBSan + an allocation count, CI job
-    `native-host-sanitizers`).
+    `native-host-sanitizers`). **The native audio path is being retired**
+    (`docs/ADR-native-engine.md`: JS is within ~10 % CPU). Don't build new
+    features on it; target the JS worklet.
 
 14. **WebGPU pipelines are async and built before they replace anything (#449):**
     every render/compute pipeline goes through `createRenderPipelineChecked` /

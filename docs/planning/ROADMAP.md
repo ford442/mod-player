@@ -87,7 +87,7 @@ Landed by `8175cc9` (`fix(stage): URL ?stage= preference, toggle/exit commands, 
 | P2 | [#486](https://github.com/ford442/mod-player/issues/486)–[#488](https://github.com/ford442/mod-player/issues/488) | FX rack follow-ups (the rack is on `main` since #495): chunked export for long modules (#486), fallback IRs where Ogg Opus fails, i.e. Safari (#487), enable in public builds after a soak (#488; public builds are gated on `VITE_FX_RACK=1`). #485 moved to Active. Design + limits: `docs/FX_RACK.md`; Faust decision: `docs/ADR-fx-character-dsp.md`. |
 | P2 | [#493](https://github.com/ford442/mod-player/issues/493) | Editable modules: libopenmpt 0.8.4 already contains OpenMPT's soundlib writers behind `MODPLUG_NO_FILESAVE`, which challenges #403's "libopenmpt cannot write" premise. After #491 / #492. |
 | P3 | [#454](https://github.com/ford442/mod-player/issues/454) | Module library v2: metadata DB, full-text search, per-song presets, offline crate. |
-| P2 (leftover) | #411 (closed) | `native-engine-bench-notes.md` native column still empty. Filling it needs an emsdk 3.1.51 host. #439 rewrote the JS baseline notes, so re-baseline both columns together. |
+| P2 | #491 Phase 3 follow-up | `native-engine-bench-notes.md`'s native column is filled (2026-10-17, measured in CI). JS is within ~10 % CPU, so `docs/ADR-native-engine.md` retires the native audio path. A follow-up PR deletes it and keeps `cpp/openmpt_wrapper.*` for #493. |
 
 ## Landed (do not re-open)
 
