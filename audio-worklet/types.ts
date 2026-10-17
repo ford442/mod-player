@@ -163,7 +163,7 @@ export interface EmscriptenOpenMPTModule {
     _set_render_param: (param: number, value: number) => void;
     _ctl_set_text: (keyPtr: number, valuePtr: number) => void;
     _poll_position: () => number; // Returns pointer to PositionInfo or 0
-    /** Seqlock over *PositionInfo (see cpp/worklet_processor.cpp's g_positionSeq). Optional: older builds predate it. */
+    /** Seqlock over *PositionInfo (cpp/native_engine.cpp's positionSeq_). Optional: older builds predate it. */
     _get_position_seq?: () => number;
     _get_audio_context: () => number;
     _get_worklet_node: () => number;
@@ -177,6 +177,12 @@ export interface EmscriptenOpenMPTModule {
     _get_order_pattern: (order: number) => number;
     _get_pattern_num_rows: (pattern: number) => number;
     _get_pattern_row_channel_command: (pattern: number, row: number, channel: number, command: number) => number;
+    /**
+     * Bulk read (#491): HEAPU8 offset of the pattern's cells in the load-time snapshot,
+     * `[row][channel][6]` bytes in OPENMPT_MODULE_COMMAND_* order, or 0. Valid until the
+     * next `_load_module` / `_cleanup_audio`. Optional: older builds predate it.
+     */
+    _get_pattern_cells?: (pattern: number) => number;
 
     // ── Bridge / routing extensions (optional – present after WASM rebuild) ──
 

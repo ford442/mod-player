@@ -260,8 +260,8 @@ describe('audio hook source invariants', () => {
     const cpp = readFileSync(join(ROOT, 'cpp/worklet_processor.cpp'), 'utf8');
     const suspendIdx = cpp.indexOf('void suspend_audio()');
     expect(suspendIdx).toBeGreaterThan(0);
-    const suspendBody = cpp.slice(suspendIdx, suspendIdx + 280);
-    expect(suspendBody).toContain('g_paused');
+    const suspendBody = cpp.slice(suspendIdx, cpp.indexOf('\n}', suspendIdx));
+    expect(suspendBody).toContain('g_engine.setPaused(true)');
     expect(suspendBody).not.toMatch(/ctx\.suspend/);
     const engine = readFileSync(join(ROOT, 'audio-worklet/OpenMPTWorkletEngine.ts'), 'utf8');
     const initMatch = engine.match(/async init\([\s\S]*?async attachAudioContext/);

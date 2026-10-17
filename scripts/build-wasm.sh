@@ -30,14 +30,16 @@
 #                                        # CI uses it as the libopenmpt.a cache key)
 #
 # Heap contract (release, ALLOW_MEMORY_GROWTH=0):
-#   INITIAL_MEMORY=128mb is a HARD CAP covering ONE resident C++ OpenMPTModule,
-#   the file bytes staged for it, the 8192-frame stereo ring, the 128 KiB worklet
-#   stack, and pattern metadata. load_module() parses a transient g_metaModule on
-#   the main thread and commit_module() unloads it *before* the audio thread
-#   creates g_module on the AudioWorklet thread, so the two are never resident at
-#   the same time. load_module() also heap-probes and returns a typed
-#   ERR_OUT_OF_MEMORY (get_last_error) rather than letting libopenmpt throw into
-#   the no-catch ABI.
+#   INITIAL_MEMORY=128mb is a HARD CAP covering ONE resident C++ OpenMPTModule per
+#   song, the file bytes staged for it, its pattern snapshot, the 8192-frame stereo
+#   ring and the 128 KiB worklet stack. load_module() parses each file exactly ONCE,
+#   on the main thread (cpp/native_engine.cpp); commit_module() publishes that module
+#   to the audio thread through one atomic exchange, and the module it replaces comes
+#   back through a "graveyard" slot to be freed on the main thread — the audio thread
+#   never parses, frees or allocates. Peak residency is the playing song + the next
+#   one while it loads (the old design had the same peak, plus a second parse of the
+#   next song). load_module() also heap-probes and returns a typed ERR_OUT_OF_MEMORY
+#   (get_last_error) rather than letting libopenmpt throw into the no-catch ABI.
 #   --grow (MAXIMUM_MEMORY=512mb) is the escape hatch for huge ITs. Do not raise
 #   the default 128mb cap here.
 #
@@ -164,7 +166,7 @@ CXX_ONLY_FLAGS=()
 LINK_FLAGS=()
 EMSCRIPTEN_FLAGS=()
 
-# Main-thread C stack (the transient g_metaModule parse). Worklet stack is a separate
+# Main-thread C stack (the load_module() parse). Worklet stack is a separate
 # memalign(16, 128*1024) buffer in worklet_processor.cpp — not this flag.
 STACK_SIZE_FLAG=-sSTACK_SIZE=131072
 
@@ -575,6 +577,7 @@ EXPORTED_FUNCTIONS=$(cat <<'EOF'
   '_get_order_pattern',
   '_get_pattern_num_rows',
   '_get_pattern_row_channel_command',
+  '_get_pattern_cells',
   '_malloc',
   '_free'
 ]
@@ -609,7 +612,7 @@ trap cleanup_obj_dir EXIT
 echo "🔨 Compiling C++ objects (-fno-exceptions -fno-rtti)..."
 
 OBJECTS=()
-for src in openmpt_wrapper worklet_processor; do
+for src in openmpt_wrapper native_engine worklet_processor; do
     obj="$OBJ_DIR/${src}.o"
     em++ \
         "${COMPILE_FLAGS[@]}" \

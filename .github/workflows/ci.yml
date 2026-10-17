@@ -315,7 +315,7 @@ jobs:
         # differ between shellcheck versions, so gating on them would flap whenever the runner image updates.
         run: |
           command -v shellcheck >/dev/null || { echo "❌ shellcheck is not installed on this runner"; exit 1; }
-          for f in scripts/build-wasm.sh scripts/build-js-libopenmpt.sh; do
+          for f in scripts/build-wasm.sh scripts/build-js-libopenmpt.sh scripts/native-host-test.sh; do
             shellcheck --severity=warning "$f"
             bash -n "$f"
             echo "✅ $f clean"
@@ -549,3 +549,59 @@ jobs:
       - name: Skip full build (no native paths changed)
         if: steps.filter.outputs.native != 'true'
         run: echo "⏭️ Skipping full build:emcc — no cpp/scripts/audio-worklet path changes"
+
+  # The native engine's C++ under host sanitizers (#491): Emscripten has no TSan for wasm, so
+  # cpp/native_engine.cpp + cpp/openmpt_wrapper.cpp are built for the runner against a host
+  # libopenmpt (instrumented the same way) and driven from two std::threads by cpp/host/.
+  # ThreadSanitizer: 1000× "load B while A renders" + teardown race + a negative control that
+  # must be reported; ASan+UBSan on the same paths; and an allocation count inside process().
+  native-host-sanitizers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Detect native C++ path changes
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            cpp:
+              - 'cpp/**'
+              - 'scripts/native-host-test.sh'
+              - 'scripts/lib/corrupt-it.mjs'
+              - 'scripts/lib/synth-xm.mjs'
+              - 'tests/fixtures/minimal.it'
+              - 'public/4-mat_madness.mod'
+              - 'public/libopenmpt-test.mod'
+              - '.github/workflows/ci.yml'
+
+      - name: Setup Node.js
+        if: steps.filter.outputs.cpp == 'true'
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      # One instrumented libopenmpt.a per flavour; the script re-stamps (and rebuilds) a tree
+      # whose flags or compiler changed, so an exact key on the script is enough.
+      - name: Cache host libopenmpt builds
+        if: steps.filter.outputs.cpp == 'true'
+        uses: actions/cache@v6
+        with:
+          path: |
+            vendor/libopenmpt-0.8.4+release
+            vendor/libopenmpt-0.8.4+release-host-tsan
+            vendor/libopenmpt-0.8.4+release-host-asan
+            vendor/libopenmpt-0.8.4+release-host-alloc
+          key: libopenmpt-host-${{ runner.os }}-${{ hashFiles('scripts/native-host-test.sh') }}
+
+      - name: Host sanitizer + allocation tests
+        if: steps.filter.outputs.cpp == 'true'
+        run: npm run test:native-host
+
+      - name: Skip (no native C++ changes)
+        if: steps.filter.outputs.cpp != 'true'
+        run: echo "⏭️ Skipping host sanitizer tests — no cpp/ or harness changes"

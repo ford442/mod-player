@@ -6,9 +6,13 @@
  * rendering helpers used by both the main thread (metadata) and
  * the AudioWorklet thread (real-time audio).
  *
- * Thread-safety: a single OpenMPTModule instance must NOT be shared
- * between threads.  The worklet thread owns its own instance; the
- * main thread may create a second instance for metadata only.
+ * Thread-safety: a single OpenMPTModule instance must NOT be used by two
+ * threads at once. cpp/native_engine.cpp moves each instance between the
+ * control thread (parse, snapshot, destroy) and the audio thread (render)
+ * only through atomic exchanges, so exactly one thread owns it at any time.
+ *
+ * Methods marked [audio-safe] never allocate or log, so the audio thread may
+ * call them; load()/unload() allocate and run on the control thread only.
  */
 
 #include <cstdint>
@@ -113,17 +117,23 @@ public:
     /** Set master volume (0.0 – 1.0 maps to render gain). */
     void setVolume(float vol);
 
-    /** Per-channel mute via openmpt_module_ext interactive (no-op if iface missing). */
+    /** Per-channel mute via openmpt_module_ext interactive (no-op if iface missing). [audio-safe] */
     void setChannelMute(int channel, bool muted);
 
-    /** libopenmpt render param (interpolation length, stereo sep, …). */
+    /** Mute exactly the channels whose bit is set; only changed bits call libopenmpt. [audio-safe] */
+    void applyMuteMask(uint32_t mask);
+
+    /** libopenmpt render param (interpolation length, stereo sep, …). Unknown ids are ignored. [audio-safe] */
     void setRenderParam(int param, int32_t value);
 
-    /** Post-load ctl_set_text (e.g. render.resampler.emulate_amiga). */
+    /** Post-load ctl_set_text (e.g. play.at_end). Unsupported keys are ignored. [audio-safe] */
     void ctlSetText(const char* key, const char* value);
 
-    /** True if this libopenmpt build lists `key` in openmpt_module_get_ctls(). */
+    /** True if this libopenmpt build lists `key` in openmpt_module_get_ctls(). [audio-safe] */
     bool supportsCtl(const char* key) const;
+
+    /** libopenmpt's ';'-separated ctl list, cached at load (null if unloaded). */
+    const char* supportedCtls() const { return ctls_; }
 
     // ── Position / metadata queries ─────────────────────────────────
 
@@ -167,4 +177,8 @@ private:
     openmpt_module_ext_interface_interactive interactive_{};
     bool interactiveReady_ = false;
     float volume_ = 1.0f;
+    uint32_t muteMask_ = 0;
+    // openmpt_module_get_ctls() allocates, so it is read once at load (control
+    // thread) and kept: supportsCtl() on the audio thread then allocates nothing.
+    const char* ctls_ = nullptr;
 };
