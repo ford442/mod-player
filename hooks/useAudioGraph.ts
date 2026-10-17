@@ -218,6 +218,13 @@ export async function startAudioPlayback(
       log.log('AudioContext resumed, new state:', ctx.state);
     }
 
+    // Output device (#492): the engine moves a new context to the chosen device here — after resume,
+    // so the resume stays within the user gesture, and before any engine is connected, so no sample
+    // of the song reaches the old device. Awaited only when there is a switch to make; the audio
+    // clock is anchored below, on the device that will really play.
+    const preparing = callbacks.prepareAudioContext?.(ctx);
+    if (preparing) await preparing;
+
     // TIMING FIX: Initialize audio clock reference
     refs.audioClockStartRef.current = ctx.currentTime;
     refs.workletTimeAtStartRef.current = refs.workletTimeRef.current || 0;

@@ -1,9 +1,10 @@
 import type { ModuleInfo, PlayheadDebugSnapshot, SyncDebugInfo } from '../../types';
 import { computeNoteAges } from '../../utils/patternExtractor';
 import {
-  getAudioHeardTime,
   predictPlayheadFromSample,
+  resolveAudioHeardTime,
   rowsPerSecondFromBpm,
+  type HeardTimeSource,
 } from '../../utils/playheadPrediction';
 import {
   trackPositionReport,
@@ -101,6 +102,9 @@ export function createUpdateUI(params: UpdateUIParams): () => void {
     let playheadDebugPredictedRow: number | undefined;
     let playheadDebugDtSec = 0;
     let playheadDebugRowsPerSec = 0;
+    /** Which clock gave this frame's heard time, and the output delay it implies (worklet path only). */
+    let heardSource: HeardTimeSource | null = null;
+    let outputDelaySec = Number.NaN;
 
     const usingWorkletEngine =
       (activeEngine === 'worklet' || activeEngine === 'native-worklet') &&
@@ -114,9 +118,13 @@ export function createUpdateUI(params: UpdateUIParams): () => void {
       time = workletTimeRef.current;
       currentBpm = workletBpmRef.current;
 
+      // getOutputTimestamp() when sane, else currentTime − (baseLatency + outputLatency) (#492).
+      const heard = resolveAudioHeardTime(audioCtx);
+      heardSource = heard.source;
+      outputDelaySec = audioCtx.currentTime - heard.time;
       // Paused: capped at the instant the engine stopped; just resumed: floored at the resume instant.
       // Both stop the audio clock — which never pauses — from extrapolating over a silent engine.
-      const heardTime = effectiveHeardTime(getAudioHeardTime(audioCtx), pauseClockRef.current);
+      const heardTime = effectiveHeardTime(heard.time, pauseClockRef.current);
 
       if (sample) {
         const rowsPerSec =
@@ -337,6 +345,10 @@ export function createUpdateUI(params: UpdateUIParams): () => void {
         maxAbsLagRows: lagUpdate.tracker.maxAbsLagRows,
         positionReportHz,
       };
+      if (heardSource) {
+        snapshot.heardTimeSource = heardSource;
+        snapshot.outputDelayMs = outputDelaySec * 1000;
+      }
       window.__PLAYHEAD_DEBUG__ = snapshot;
     }
 
@@ -358,9 +370,11 @@ export function createUpdateUI(params: UpdateUIParams): () => void {
           driftMs: Math.round(driftAccumulatorRef.current * 1000),
           row: rowIntUi,
           mode: engineMode,
+          // The output delay the playhead really compensates (output timestamp when in use).
           bufferMs: Math.round(
-            ((audioContextRef.current?.baseLatency ?? 0) +
-              (audioContextRef.current?.outputLatency ?? 0)) *
+            (Number.isFinite(outputDelaySec)
+              ? outputDelaySec
+              : (audioContextRef.current?.baseLatency ?? 0) + (audioContextRef.current?.outputLatency ?? 0)) *
               1000,
           ),
           audioContextState: audioContextRef.current?.state || 'none',
@@ -374,6 +388,8 @@ export function createUpdateUI(params: UpdateUIParams): () => void {
           lastWorkletUpdate: refs.lastWorkletUpdateRef.current,
           seekPending: !!pendingSeekRef.current,
         };
+        if (heardSource) next.heardTimeSource = heardSource;
+        else delete next.heardTimeSource;
         if (isPlayheadDebugEnabled()) {
           if (playheadDebugSampleRow != null) next.sampleRow = playheadDebugSampleRow;
           if (playheadDebugPredictedRow != null) next.predictedRow = playheadDebugPredictedRow;

@@ -55,10 +55,17 @@ import {
   writeStoredAudioEngineOverride,
 } from '../../utils/audioEngineSelection';
 import { applyMasterLevels } from '../../utils/audioMasterGraph';
+import { resetAudioHeardTime } from '../../utils/playheadPrediction';
 import { hasShareModuleIntent } from '../../utils/shareState';
 import { playShouldResume, type TransportState } from '../../utils/transportClock';
 import { createLogger } from '../../utils/log';
 import { createEngineRefs } from './engineRefs';
+import {
+  browserOutputDeviceEnv,
+  OutputDeviceController,
+  type OutputDeviceEnv,
+  type OutputDeviceState,
+} from './outputDevice';
 import { SnapshotStore, type Ref, type SetStateAction } from './store';
 import { TransportMachine, type TransportPhase } from './transport';
 import { isAudioWorkletSupported, verifyWorkletFile } from './workletUrls';
@@ -67,8 +74,11 @@ const log = createLogger('Engine');
 
 export type AudioEngineKind = 'worklet' | 'native-worklet';
 
-/** Everything React (or any other observer) may read. Immutable; replaced on every change. */
-export interface PlayerSnapshot {
+/**
+ * Everything React (or any other observer) may read. Immutable; replaced on every change. The
+ * output-device fields (`outputDeviceId`, `sinkError`, …) come from `OutputDeviceState`.
+ */
+export interface PlayerSnapshot extends OutputDeviceState {
   /** The FSM phase — see transport.ts. */
   readonly phase: TransportPhase;
   /** Coarse transport for the UI, shortcuts and mediaSession; derived from `phase`. */
@@ -142,14 +152,17 @@ export interface PlayerEngineOptions {
   initialVolume?: number;
   /** The engine start path; tests substitute a fake that plays the audio engine's part. */
   startAudioPlayback?: StartAudioPlayback;
+  /** Output-device support, storage and `devicechange` source; tests substitute fakes. */
+  outputDeviceEnv?: OutputDeviceEnv;
 }
 
 const DEFAULT_VOLUME = 0.5;
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
-function createInitialSnapshot(volume: number): PlayerSnapshot {
+function createInitialSnapshot(volume: number, output: OutputDeviceState): PlayerSnapshot {
   return {
+    ...output,
     phase: 'idle',
     transportState: 'stopped',
     isPlaying: false,
@@ -210,6 +223,8 @@ export class PlayerEngine {
   private readonly setters: LibOpenMPTSetters;
   private readonly callbacks: AudioGraphCallbacks;
   private readonly startAudio: StartAudioPlayback;
+  /** Which device the context renders to (setSinkId on the one context — pitfall 12). */
+  private readonly output: OutputDeviceController;
   /** Bumped by dispose(): an init still awaiting when it is disposed stops at its next await. */
   private generation = 0;
   /** Volume to restore on unmute. */
@@ -230,7 +245,14 @@ export class PlayerEngine {
 
   constructor(options: PlayerEngineOptions = {}) {
     this.transport = new TransportMachine({ strict: options.strictTransport ?? false });
-    this.store = new SnapshotStore(createInitialSnapshot(options.initialVolume ?? DEFAULT_VOLUME));
+    this.output = new OutputDeviceController(
+      (state) => this.store.patch(state),
+      (ctx) => this.onSinkMoved(ctx),
+      options.outputDeviceEnv ?? browserOutputDeviceEnv(),
+    );
+    this.store = new SnapshotStore(
+      createInitialSnapshot(options.initialVolume ?? DEFAULT_VOLUME, this.output.idleState()),
+    );
     this.preMuteVolume = this.store.getSnapshot().volume;
     this.startAudio = options.startAudioPlayback ?? startAudioPlayback;
 
@@ -325,6 +347,7 @@ export class PlayerEngine {
       stopMusic: (destroy) => this.stopFn(destroy),
       seekToStepWrapper: (step) => this.seekFn(step),
       updateUI: () => this.updateUIFn(),
+      prepareAudioContext: (ctx) => this.output.attach(ctx),
     };
   }
 
@@ -371,8 +394,9 @@ export class PlayerEngine {
   dispose(): void {
     this.generation += 1;
     this.stopFn(false);
+    this.output.detach();
     cleanupLibOpenMPT(this.refs);
-    this.store.patch({ analyserNode: null });
+    this.store.patch({ analyserNode: null, ...this.output.idleState() });
   }
 
   private async loadDefaultModule(): Promise<void> {
@@ -510,6 +534,32 @@ export class PlayerEngine {
   private applyLevels(): void {
     const { volume, pan } = this.store.getSnapshot();
     applyMasterLevels(this.refs, volume, pan);
+  }
+
+  // ── output device (setSinkId on the one AudioContext — pitfall 12) ────────────────────────────
+
+  /**
+   * Play through `deviceId` (`''` = the system default) and remember the choice for this browser.
+   * Moves the live context with `setSinkId()` — never a new context, never a suspend — or, before
+   * the first play, stores the choice for the context the start path is about to create. Resolves
+   * false when the browser refuses (the previous device keeps playing; `sinkError` says why).
+   */
+  setOutputDevice(deviceId: string, label?: string): Promise<boolean> {
+    return this.output.select(deviceId, label);
+  }
+
+  /**
+   * The output moved (our switch, the browser's, a lost device). Output latency belongs to the device:
+   * drop the heard-time jitter hold (the new device's timestamps may step back legitimately) and
+   * re-anchor the drift detector the way suspend recovery does (hooks/useAudioGraph.ts) — the latter
+   * only while a play has anchored it (stop zeroes the anchor).
+   */
+  private onSinkMoved(ctx: AudioContext): void {
+    resetAudioHeardTime(ctx);
+    if (this.refs.audioClockStartRef.current <= 0) return;
+    this.refs.audioClockStartRef.current = ctx.currentTime;
+    this.refs.workletTimeAtStartRef.current = this.refs.workletTimeRef.current || 0;
+    this.refs.driftAccumulatorRef.current = 0;
   }
 
   // ── engine selection, channels, misc ──────────────────────────────────────────────────────────

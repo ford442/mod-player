@@ -1,5 +1,6 @@
 import { ShaderSelectorPanel } from './ShaderSelectorPanel';
 import { AccessibilityPanel } from './AccessibilityPanel';
+import { OutputDevicePicker } from './OutputDevicePicker';
 import { cn } from '../utils/cn';
 import { setLiteOverride } from '../utils/deviceCapabilities';
 import { usesInstrumentPalette } from '../utils/shaderVersion';
@@ -68,7 +69,7 @@ export function GlobalControlsBar() {
 
   return (
     <div className="mb-4 flex flex-wrap items-center justify-between gap-4">
-      <div className="flex gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         {showDevSurface && (
           <button
             onClick={() => setIs3DMode(true)}
@@ -111,6 +112,9 @@ export function GlobalControlsBar() {
             {activeEngine === 'native-worklet' ? '🚀 Native' : activeEngine === 'worklet' ? '⚡ Worklet' : '🐌 Script'}
           </button>
         )}
+        {/* Output device (#492): a listener setting like the theme, so public builds get it too; it
+            renders nothing where AudioContext.setSinkId is missing. */}
+        <OutputDevicePicker isDarkMode={isDarkMode} />
         <button
           onClick={() => {
             const next = !liteMode;

@@ -132,6 +132,8 @@ export interface PlayerActions {
   setPan: (v: number) => void;
   toggleAudioEngine: () => void;
   toggleChannelMute: (channel: number) => void;
+  /** Route playback to an output device ('' = system default) on the same AudioContext. */
+  setOutputDevice: (deviceId: string, label?: string) => Promise<boolean>;
 }
 
 /** Stable engine actions for buttons, sliders and the canvas hit-test. */
@@ -147,5 +149,6 @@ export function usePlayerActions(): PlayerActions {
     setPan: (v: number) => engine.setMasterPan(v),
     toggleAudioEngine: () => engine.toggleAudioEngine(),
     toggleChannelMute: (channel: number) => engine.toggleChannelMute(channel),
+    setOutputDevice: (deviceId: string, label?: string) => engine.setOutputDevice(deviceId, label),
   }), [engine]);
 }
