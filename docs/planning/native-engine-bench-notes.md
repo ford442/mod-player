@@ -1,8 +1,9 @@
 # Native vs JS worklet — informal main-thread cost notes
 
-**Status:** Methodology + recorded JS rows (main-thread cost baseline; **real-WASM vs wasm2js engine** — see the last subsection under *Recorded runs*). The native column needs
-an emsdk 3.1.51 host (see *Recorded runs*).  
-**Date:** 2026-07-25 (methodology) / 2026-09-18 (recorded rows)  
+**Status:** Methodology + recorded JS rows (main-thread cost baseline; **real-WASM vs wasm2js engine**) + the
+**native column (2026-10-17, #491 Phase 3)** — CPU per quantum, real-AudioWorklet underruns, load latency and heap,
+measured in CI. Decision: [`docs/ADR-native-engine.md`](../ADR-native-engine.md) (retire the native audio path).  
+**Date:** 2026-07-25 (methodology) / 2026-09-18 (JS rows) / 2026-10-17 (native column)  
 **Fixture:** Prefer a large multi-channel IT (e.g. 16+ channels). Do not commit multi‑MB modules; use a local file or downloadable test asset.
 
 ## Goal
@@ -162,12 +163,53 @@ npx vite preview --outDir <dist> --port 4173 --host 127.0.0.1 &                 
 BASE_URL=http://127.0.0.1:4173 RUNS=5 node scripts/bench-initlib-browser.mjs
 ```
 
+### 2026-10-17 — native column: JS vs native engine (#491 Phase 3)
+
+Both engines in their #491 state (libopenmpt 0.8.9, the shared `scripts/lib/wasm-flags.sh` set, Sinc+LP default).
+Measured by CI's `native-full-build` job on every native change (informational step, `engine-bench` artifact), with
+two harnesses that replace the manual method above:
+
+- `npm run bench:engine-cpu` (`scripts/bench-engines.mjs`): the compiled JS processor and `NativeEngine::process()`
+  (built for Node by `npm run build:native-bench`) on the same V8. Reports CPU per quantum, parse time and heap.
+- `npm run bench:engine-glitches` (`scripts/bench-engines-browser.mjs`): both engines on the real AudioWorklet in
+  headless Chromium. Reports `AudioContext.playbackStats` underruns (steady, track change, a 16 MiB upload), time until
+  the module is ready and main-thread time blocked.
+
+CI, commit `3c25b71` (Node 22.23.3), median of 3 interleaved rounds:
+
+| module | interp | JS p50 ms | native p50 ms | native / JS | JS load ms | native load ms | JS heap MiB | native heap MiB |
+|---|---|---|---|---|---|---|---|---|
+| synthetic 64-ch IT | 8 | 0.0635 | 0.0611 | 0.96 | 14.5 | 5.1 | 32 | 128 |
+| synthetic 64-ch IT | 4 | 0.0383 | 0.0372 | 0.97 | 18.8 | 9.0 | 32 | 128 |
+| synthetic 32-ch XM | 8 | 0.0329 | 0.0306 | 0.93 | 12.4 | 3.0 | 32 | 128 |
+| synthetic 32-ch XM | 4 | 0.0207 | 0.0191 | 0.92 | 15.9 | 6.1 | 32 | 128 |
+| 4-mat_madness.mod (4 ch) | 8 | 0.0068 | 0.0047 | 0.69 | 12.2 | 2.5 | 32 | 128 |
+| 4-mat_madness.mod (4 ch) | 4 | 0.0054 | 0.0034 | 0.63 | 15.3 | 5.5 | 32 | 128 |
+
+| real AudioWorklet (headless Chromium) | JS, `'playback'` | native, `'playback'` | JS, `'interactive'` | native, `'interactive'` |
+|---|---|---|---|---|
+| steady underruns / min, 64-ch IT | 0 | 0 | 0 | 0 |
+| underruns per track change | 0 | 0 | 0 | 0 |
+| load → module ready, ms | 10.5 | 5.4 | 18.2 | 5.2 |
+| main thread blocked by the load call, ms | 0.0 | 5.4 | 0.1 | 5.2 |
+| 16.1 MiB IT: underruns per change / ready ms | 0 / 12.7 | 0 / 13.3 | 0 / 30.3 | 0 / 13.3 |
+
+- **Native's real advantage is where the parse runs.** JS parses on the audio thread: 22.2 ms for the 16 MiB IT in
+  CI. Native parses on the main thread, 10.4 ms.
+- **The browser zeros have a floor.** Headless Chromium's fake output device reports 42 ms of latency even at
+  `'interactive'`, so they don't cover a real 10 ms device buffer.
+- **Native's cost is memory.** It reserves a fixed 128 MiB and cannot load a module over about 32 MiB, because
+  `load_module` probes for 4× the file size. The JS heap grows on demand.
+- **On heavy modules the CPU gap is 3–11 % across three CI runs**, at most 0.0025 ms of the 2.667 ms budget. Under
+  #491's ~10 % rule that means **retire native**. The reasoning and the revisit triggers are in
+  [`docs/ADR-native-engine.md`](../ADR-native-engine.md).
+
 ## Acceptance for epic #09
 
 - [x] Methodology documented
 - [x] Harness: `npm run bench:engine` → `artifacts/engine-bench/`
 - [x] At least one recorded row (JS baseline, 2026-09-18 above)
-- [ ] Native column — **won't-measure without emsdk 3.1.51**; operator-filled, not a release gate
+- [x] Native column — 2026-10-17 (#491 Phase 3), measured in CI; decision in `docs/ADR-native-engine.md`
 
 Harness: `npm run bench:engine` compares JS postMessage vs native poll. After a large-IT run, paste median `getPlayheadDebug` / load→audio into a new dated subsection above. Default-module smoke is enough to keep the script green; large-IT numbers remain operator-filled.
 

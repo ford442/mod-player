@@ -12,6 +12,8 @@ import { join } from 'node:path';
 const ROOT = process.cwd();
 const BUILD_SH = join(ROOT, 'scripts/build-wasm.sh');
 const CPP = join(ROOT, 'cpp/worklet_processor.cpp');
+const ENGINE_CPP = join(ROOT, 'cpp/native_engine.cpp');
+const ENGINE_H = join(ROOT, 'cpp/native_engine.h');
 const ENGINE = join(ROOT, 'audio-worklet/OpenMPTWorkletEngine.ts');
 const TYPES = join(ROOT, 'audio-worklet/types.ts');
 
@@ -26,7 +28,7 @@ function mustExist(path) {
   return true;
 }
 
-if (![BUILD_SH, CPP, ENGINE, TYPES].every(mustExist)) {
+if (![BUILD_SH, CPP, ENGINE_CPP, ENGINE_H, ENGINE, TYPES].every(mustExist)) {
   console.error('verify-native-exports FAILED:');
   for (const e of errors) console.error(`  - ${e}`);
   process.exit(1);
@@ -34,6 +36,8 @@ if (![BUILD_SH, CPP, ENGINE, TYPES].every(mustExist)) {
 
 const buildSh = readFileSync(BUILD_SH, 'utf8');
 const cpp = readFileSync(CPP, 'utf8');
+const engineCpp = readFileSync(ENGINE_CPP, 'utf8');
+const engineH = readFileSync(ENGINE_H, 'utf8');
 const engine = readFileSync(ENGINE, 'utf8');
 const types = readFileSync(TYPES, 'utf8');
 
@@ -131,6 +135,7 @@ const optionalButExport = [
   'get_duration_seconds',
   'get_initial_bpm',
   'get_order_pattern',
+  'get_pattern_cells',
 ];
 
 for (const name of requiredByEngine) {
@@ -159,41 +164,125 @@ for (const name of exported) {
   }
 }
 
-// Single resident OpenMPTModule (#412 follow-up). load_module parses a transient
-// g_metaModule on the main thread; commit_module() must unload it BEFORE raising
-// g_cmdLoad so the audio thread never allocates its instance alongside it.
-if (!/int commit_module\(\)/.test(cpp)) {
-  errors.push('cpp/worklet_processor.cpp must export commit_module() (hands the module to the audio thread)');
-} else {
-  const commitBody = cpp.slice(cpp.indexOf('int commit_module()'));
-  const unloadIdx = commitBody.indexOf('g_metaModule.unload()');
-  const cmdIdx = commitBody.indexOf('g_cmdLoad.store(1');
-  if (unloadIdx < 0 || cmdIdx < 0 || unloadIdx > cmdIdx) {
-    errors.push('commit_module() must g_metaModule.unload() before g_cmdLoad.store(1) (two modules resident otherwise)');
+// ── Thread model (#491) ──────────────────────────────────────────────
+// One parse per file, on the main thread; ownership of a module moves between
+// threads only by atomic exchange; the audio thread never parses, frees,
+// allocates or logs; pattern queries never touch the module being rendered.
+// cpp/host/ proves it under TSan/ASan at runtime — these are the source guards.
+
+/** Body of `name(` up to the matching closing brace (brace-counted). */
+function functionBody(src, signature) {
+  const at = src.indexOf(signature);
+  if (at < 0) return null;
+  const open = src.indexOf('{', at);
+  let depth = 0;
+  for (let i = open; i < src.length; i++) {
+    if (src[i] === '{') depth++;
+    else if (src[i] === '}' && --depth === 0) return src.slice(open, i + 1);
   }
+  return null;
 }
 
-// Mute must reach the instance that is actually mixed, not the metadata parse.
+for (const legacy of ['g_metaModule', 'g_moduleData', 'g_cmdLoad', 'patternQueryModule', 'metaOnlyModule']) {
+  if (cpp.includes(legacy) || engineCpp.includes(legacy)) {
+    errors.push(`cpp/: ${legacy} is the pre-#491 double-parse / shared-buffer design — it must not come back`);
+  }
+}
 {
-  const muteIdx = cpp.indexOf('void set_channel_mute(');
-  const muteBody = muteIdx >= 0 ? cpp.slice(muteIdx, cpp.indexOf('\n}', muteIdx)) : '';
-  if (muteIdx < 0) {
-    errors.push('cpp/worklet_processor.cpp missing set_channel_mute');
-  } else if (/g_metaModule/.test(muteBody)) {
-    errors.push('set_channel_mute must not touch g_metaModule (it renders nothing — mute would be inaudible)');
+  const processBody = functionBody(engineCpp, 'void NativeEngine::process(');
+  if (!processBody) {
+    errors.push('cpp/native_engine.cpp: NativeEngine::process() not found');
+  } else {
+    /** @type {Array<[RegExp, string]>} */
+    const forbidden = [
+      [/\bmalloc\(|\bcalloc\(|\brealloc\(|\bfree\(/, 'malloc/free'],
+      [/\bnew\b|\bdelete\b/, 'new/delete'],
+      [/module\.load\(|\.unload\(|loadModule|destroyModule|snapshot_/, 'a parse / destroy / snapshot access'],
+      [/printf\(|std::cout|std::cerr/, 'logging'],
+    ];
+    for (const [pattern, why] of forbidden) {
+      if (pattern.test(processBody)) errors.push(`NativeEngine::process() (audio thread) must not contain ${why}`);
+    }
+    if (!/handoff_\.exchange\(nullptr/.test(processBody)) {
+      errors.push('NativeEngine::process() must take the published module with handoff_.exchange(nullptr, …)');
+    }
+    if (!/graveyard_\.store\(/.test(processBody)) {
+      errors.push('NativeEngine::process() must retire the replaced module into graveyard_ (freed on the main thread)');
+    }
+    if (!/ring_\.drain\(/.test(processBody)) {
+      errors.push('NativeEngine::process() must drain the command ring (seek / mute / render params / ctls)');
+    }
+  }
+  const commitBody = functionBody(engineCpp, 'int NativeEngine::commitModule(');
+  if (!commitBody || !/handoff_\.exchange\(staged_/.test(commitBody)) {
+    errors.push('NativeEngine::commitModule() must publish with handoff_.exchange(staged_, …) and free what it gets back');
+  }
+  const drainBody = functionBody(engineCpp, 'void NativeEngine::drainGraveyard(');
+  if (!drainBody || !/graveyard_\.exchange\(nullptr/.test(drainBody)) {
+    errors.push('NativeEngine::drainGraveyard() must take retired modules with graveyard_.exchange(nullptr, …)');
+  }
+  const teardownBody = functionBody(engineCpp, 'bool NativeEngine::teardown(');
+  if (!teardownBody || !/teardownAck_/.test(teardownBody)) {
+    errors.push('NativeEngine::teardown() must wait for the audio thread\'s teardownAck_ before freeing its module');
+  }
+  const cleanupBody = functionBody(cpp, 'void cleanup_audio(');
+  if (!cleanupBody || !/g_engine\.teardown\(/.test(cleanupBody) || /\.unload\(/.test(cleanupBody)) {
+    errors.push('cleanup_audio() must go through g_engine.teardown() and never unload a module itself');
+  }
+  if (!/SpscRing<Command, kCommandRingCapacity> ring_/.test(engineH)) {
+    errors.push('cpp/native_engine.h: controls must travel through the SPSC command ring (ring_)');
+  }
+  // Pattern / metadata queries read the load-time snapshot, never a live module.
+  for (const fn of [
+    'int get_num_channels(', 'int get_num_orders(', 'int get_num_patterns(', 'double get_duration_seconds(',
+    'double get_initial_bpm(', 'int get_order_pattern(', 'int get_pattern_num_rows(',
+    'int get_pattern_row_channel_command(', 'get_pattern_cells(int pattern)',
+  ]) {
+    const body = functionBody(cpp, fn);
+    if (!body) errors.push(`cpp/worklet_processor.cpp missing ${fn}…)`);
+    else if (!/g_engine\.snapshot\(\)/.test(body)) errors.push(`${fn}…) must answer from g_engine.snapshot()`);
+  }
+  // Every control export is a thin forward to the engine (which uses the ring).
+  for (const [fn, call] of [
+    ['void set_channel_mute(', 'g_engine.setChannelMute('],
+    ['void set_render_param(', 'g_engine.setRenderParam('],
+    ['void ctl_set_text(', 'g_engine.ctlSetText('],
+    ['void seek_order_row(', 'g_engine.seek('],
+  ]) {
+    const body = functionBody(cpp, fn);
+    if (!body) errors.push(`cpp/worklet_processor.cpp missing ${fn}…)`);
+    else if (!body.includes(call)) errors.push(`${fn}…) must forward to ${call}…) (one ring command)`);
   }
 }
 
-// load_module failure has to be pollable: fprintf is invisible to the UI and a
-// libopenmpt throw is an abort() under DISABLE_EXCEPTION_CATCHING=1.
-for (const code of ['ERR_BAD_ARGS', 'ERR_OUT_OF_MEMORY', 'ERR_UNSUPPORTED_MODULE', 'ERR_AUDIO_LOAD']) {
-  if (!cpp.includes(code)) {
-    errors.push(`cpp/worklet_processor.cpp must report a typed ${code} via get_last_error()`);
+// emsdk 3.1.51 + WASM_WORKERS leaves the main thread's TLS relocations unapplied, which breaks
+// every typed catch on the main thread (wasm EH keeps its selector in thread-local
+// __wasm_lpad_context). The glue repairs it before any constructor touches TLS (#491).
+{
+  const tlsPath = join(ROOT, 'cpp/wasm_workers_tls.cpp');
+  const tls = existsSync(tlsPath) ? readFileSync(tlsPath, 'utf8') : '';
+  const ctorAt = tls.indexOf('__attribute__((constructor(101))) static void apply_main_thread_tls_relocations(');
+  const body = ctorAt >= 0 ? functionBody(tls, 'static void apply_main_thread_tls_relocations(') : null;
+  if (!body || !/__wasm_init_tls\(base\)/.test(body) || !/__wasm_lpad_context/.test(body)) {
+    errors.push('cpp/wasm_workers_tls.cpp must keep the constructor(101) that applies main-thread TLS relocations (__wasm_init_tls) when __wasm_lpad_context is unrelocated');
+  }
+  if (!/for src in [^;]*\bwasm_workers_tls\b[^;]*; do/.test(buildSh)) {
+    errors.push('scripts/build-wasm.sh must compile cpp/wasm_workers_tls.cpp into the native engine');
   }
 }
 
-// Sample-rate contract (#runtime-hardening): audio_process_cb's
-// readInterleavedStereo() call renders for g_renderSampleRate, which must
+// load_module failure has to be pollable: fprintf is invisible to the UI.
+for (const code of ['ERR_BAD_ARGS', 'ERR_OUT_OF_MEMORY', 'ERR_UNSUPPORTED_MODULE', 'ERR_TORN_DOWN']) {
+  if (!engineCpp.includes(code)) {
+    errors.push(`cpp/native_engine.cpp must report a typed ${code} via get_last_error()`);
+  }
+}
+if (!/for src in [^;]*\bnative_engine\b[^;]*; do/.test(buildSh)) {
+  errors.push('scripts/build-wasm.sh must compile cpp/native_engine.cpp');
+}
+
+// Sample-rate contract (#runtime-hardening): the engine's
+// readInterleavedStereo() call renders for its render rate, which must
 // track the real AudioContext rate — not a hardcoded 48000 — or a device
 // whose context opened at something other than 48000 (utils/audioContextFactory.ts's
 // own fallback path) gets ~9% pitch/tempo drift.
@@ -207,11 +296,9 @@ for (const code of ['ERR_BAD_ARGS', 'ERR_OUT_OF_MEMORY', 'ERR_UNSUPPORTED_MODULE
       + '(a hardcoded rate mismatches a device whose AudioContext opened at a different rate)',
     );
   } else {
-    const bodyStart = cpp.indexOf('{', cpp.indexOf(sigMatch[0]));
-    const bodyEnd = cpp.indexOf('\n}', bodyStart);
-    const body = cpp.slice(bodyStart, bodyEnd);
-    if (!/g_renderSampleRate\s*=\s*sampleRateHz/.test(body)) {
-      errors.push('init_audio_with_context() must assign g_renderSampleRate from sampleRateHz');
+    const body = functionBody(cpp, sigMatch[0]) ?? '';
+    if (!/setRenderSampleRate\([^;]*sampleRateHz/.test(body)) {
+      errors.push('init_audio_with_context() must set the engine render rate from sampleRateHz');
     }
   }
   if (!/_init_audio_with_context\?\s*:\s*\(ctxHandle:\s*number,\s*sampleRateHz:\s*number\)/.test(types)) {
@@ -287,10 +374,40 @@ for (const mode of ['COMPILE_FLAGS', 'LINK_FLAGS']) {
     );
   }
 }
-if (!/-sDISABLE_EXCEPTION_CATCHING=1/.test(buildSh)) {
-  errors.push(
-    'scripts/build-wasm.sh must set -sDISABLE_EXCEPTION_CATCHING=1 explicitly (do not rely on the emcc default)',
-  );
+// #491: libopenmpt is built AND linked with native wasm exceptions. Its C API and its
+// loaders catch their own throws; a no-catch link (DISABLE_EXCEPTION_CATCHING=1, the
+// pre-#491 contract) let a truncated IT sample block escape load_module() into JS — or,
+// on the audio thread, kill the worklet. The flags come from the shared file.
+{
+  const flagsPath = join(ROOT, 'scripts/lib/wasm-flags.sh');
+  const flagsSh = existsSync(flagsPath) ? readFileSync(flagsPath, 'utf8') : '';
+  const code = stripShellComments(buildSh);
+  if (!/source "\$SCRIPT_DIR\/lib\/wasm-flags\.sh"/.test(buildSh)) {
+    errors.push('scripts/build-wasm.sh must source scripts/lib/wasm-flags.sh (one flag set for both WASM builds)');
+  }
+  if (!/^WASM_EH_FLAGS=\(-fwasm-exceptions\)/m.test(flagsSh)) {
+    errors.push('scripts/lib/wasm-flags.sh must define WASM_EH_FLAGS=(-fwasm-exceptions)');
+  }
+  for (const v of ['LIBOPENMPT_RELEASE_CXXFLAGS', 'LIBOPENMPT_RELEASE_CFLAGS', 'LIBOPENMPT_DEBUG_CXXFLAGS', 'LIBOPENMPT_DEBUG_CFLAGS']) {
+    const line = code.match(new RegExp(`^${v}="([^"]*)"`, 'm'))?.[1] ?? '';
+    if (!line.includes('${WASM_EH_FLAGS[*]}') || !line.includes('${WASM_FEATURE_FLAGS[*]}')) {
+      errors.push(`${v} must include \${WASM_EH_FLAGS[*]} and \${WASM_FEATURE_FLAGS[*]} (libopenmpt.a with exceptions + the shared features)`);
+    }
+  }
+  const linkAt = code.indexOf('-o "$OUTPUT_DIR/${OUTPUT_BASENAME}.js"');
+  const linkStart = code.lastIndexOf('em++ \\', linkAt);
+  if (linkAt < 0 || linkStart < 0 || !code.slice(linkStart, linkAt).includes('"${WASM_EH_FLAGS[@]}"')) {
+    errors.push('the native link must pass "${WASM_EH_FLAGS[@]}" (catching is decided at link time)');
+  }
+  if (/-sDISABLE_EXCEPTION_CATCHING=1/.test(code)) {
+    errors.push('scripts/build-wasm.sh must not link with -sDISABLE_EXCEPTION_CATCHING=1 (libopenmpt\'s catch blocks become dead code)');
+  }
+  if (!/require_emsdk_pin build-wasm\.sh/.test(code)) {
+    errors.push('scripts/build-wasm.sh must call require_emsdk_pin (an emsdk mismatch is fatal unless XASM_ALLOW_EMSDK_DRIFT=1)');
+  }
+  if (/\bwget\b|\bcurl\b/.test(code)) {
+    errors.push('scripts/build-wasm.sh must download libopenmpt only via scripts/lib/libopenmpt-source.sh (sha256-checked)');
+  }
 }
 // The link must go through em++: with .o inputs there is no .cpp suffix left for
 // emcc to infer C++ from, so libc++/libc++abi would be skipped and every

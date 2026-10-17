@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   workletPatternToMatrix,
   extractMatricesFromNative,
+  readPatternDataFromNative,
   type NativePatternExports,
 } from '../audio-worklet/NativePatternReader';
 import type { WorkletPatternData } from '../audio-worklet/types';
@@ -42,5 +43,44 @@ describe('NativePatternReader', () => {
     expect(matrices).toHaveLength(2);
     expect(matrices[1]?.order).toBe(1);
     expect(matrices[0]?.rows[0]?.[0]?.note).toBe(48);
+  });
+
+  // #491: the bulk path (one HEAPU8 view per pattern from _get_pattern_cells)
+  // must decode exactly what six _get_pattern_row_channel_command calls per
+  // cell return — same command order, same fields.
+  it('bulk snapshot reads match the per-cell exports', () => {
+    const rows = 3;
+    const channels = 2;
+    const value = (r: number, c: number, cmd: number) => (r * 31 + c * 7 + cmd * 3 + 1) & 0xff;
+    const heap = new Uint8Array(4096);
+    const base = 1000;
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < channels; c++) {
+        for (let cmd = 0; cmd < 6; cmd++) heap[base + (r * channels + c) * 6 + cmd] = value(r, c, cmd);
+      }
+    }
+    const perCell: NativePatternExports = {
+      _get_num_channels: () => channels,
+      _get_num_orders: () => 1,
+      _get_order_pattern: () => 0,
+      _get_pattern_num_rows: () => rows,
+      _get_pattern_row_channel_command: (_p, r, c, cmd) => value(r, c, cmd),
+    };
+    let perCellCalls = 0;
+    const bulk: NativePatternExports = {
+      ...perCell,
+      _get_pattern_row_channel_command: (...args) => {
+        perCellCalls++;
+        return perCell._get_pattern_row_channel_command(...args);
+      },
+      _get_pattern_cells: () => base,
+      HEAPU8: heap,
+    };
+    expect(readPatternDataFromNative(bulk, 0, channels)).toEqual(readPatternDataFromNative(perCell, 0, channels));
+    expect(perCellCalls).toBe(0);
+    // A null pointer (older build, or no such pattern) falls back to the per-cell exports.
+    const noBulk: NativePatternExports = { ...bulk, _get_pattern_cells: () => 0 };
+    expect(readPatternDataFromNative(noBulk, 0, channels)).toEqual(readPatternDataFromNative(perCell, 0, channels));
+    expect(perCellCalls).toBe(rows * channels * 6);
   });
 });

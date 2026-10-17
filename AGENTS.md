@@ -223,7 +223,7 @@ python3 deploy.py
   2. `visual-smoke` – Build, preview server, Playwright smoke (`smoke:visual:ci`) on the HTML renderer.
      `visual-smoke-webgpu` runs experimental WebGPU coverage in parallel.
   3. `wasm-smoke-test` – Installs Emscripten **3.1.51**, verifies safe native build scripts, `verify:native-exports`, `bash -n`, and that tracked `openmpt-worklet.js` still looks like the JS processor.
-  4. `native-full-build` – Path-filtered full `npm run build:emcc` when `cpp/**`, `scripts/build-wasm.sh`, or `audio-worklet/**` change; caches `vendor/libopenmpt-0.8.4+release-native-release`, keyed on the flag stamp from `scripts/build-wasm.sh --print-flag-stamp` (no prefix fallback).
+  4. `native-full-build` – Path-filtered full `npm run build:emcc` when `cpp/**`, `scripts/build-wasm.sh`, or `audio-worklet/**` change; caches `vendor/libopenmpt-native-release`, keyed on the flag stamp from `scripts/build-wasm.sh --print-flag-stamp` (no prefix fallback).
   5. `native-wasm-scheduled.yml` – Weekly (and manual) full `npm run build:emcc` with the same libopenmpt cache; uploads `openmpt-native.*` artifacts and asserts the JS worklet is unchanged.
 
 ## Security & CORS Considerations

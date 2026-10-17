@@ -8,6 +8,7 @@ const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 describe('#412 native ctl / mute / one-module parse', () => {
   const wrapper = readFileSync(join(ROOT, 'cpp/openmpt_wrapper.cpp'), 'utf8');
   const worklet = readFileSync(join(ROOT, 'cpp/worklet_processor.cpp'), 'utf8');
+  const nativeEngine = readFileSync(join(ROOT, 'cpp/native_engine.cpp'), 'utf8');
   const engine = readFileSync(join(ROOT, 'audio-worklet/OpenMPTWorkletEngine.ts'), 'utf8');
   const nativePlay = readFileSync(join(ROOT, 'hooks/audioGraph/startNativePlayback.ts'), 'utf8');
   const moduleActions = readFileSync(join(ROOT, 'hooks/libOpenMPT/createModuleActions.ts'), 'utf8');
@@ -21,12 +22,14 @@ describe('#412 native ctl / mute / one-module parse', () => {
     expect(wrapper).toContain('OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH, 8');
   });
 
-  it('exports mute / render / ctl KEEPAlives with audio-thread atomics', () => {
+  it('exports mute / render / ctl KEEPALIVEs that persist and replay onto new modules', () => {
     expect(worklet).toContain('void set_channel_mute(');
     expect(worklet).toContain('void set_render_param(');
     expect(worklet).toContain('void ctl_set_text(');
-    expect(worklet).toContain('g_muteBits');
-    expect(worklet).toContain('apply_persisted_controls');
+    // The engine keeps the host's desired state and applies it to every module
+    // before that module is published to the audio thread (#491).
+    expect(nativeEngine).toContain('desired_.muteMask');
+    expect(nativeEngine).toContain('applyDesiredState(staged_->module)');
     expect(worklet).toContain('emscripten_get_heap_size');
     expect(worklet).toContain('mallinfo');
   });
@@ -54,10 +57,11 @@ describe('#412 native ctl / mute / one-module parse', () => {
     expect(runInit).toContain('__XASM1_NATIVE__');
   });
 
-  it('emcc contract includes STACK_SIZE, no-exceptions, and new exports', () => {
+  it('emcc contract includes STACK_SIZE, a no-throw wrapper, wasm exceptions, and new exports', () => {
     expect(buildSh).toContain('-sSTACK_SIZE=131072');
     expect(buildSh).toContain('-fno-exceptions');
-    expect(buildSh).toContain('-sDISABLE_EXCEPTION_CATCHING=1');
+    // #491: libopenmpt is linked WITH native wasm exceptions (its own throw/catch must run).
+    expect(buildSh).toContain('"${WASM_EH_FLAGS[@]}"');
     expect(buildSh).toContain('libopenmpt_c.cpp');
     expect(buildSh).toContain("'_set_channel_mute'");
     expect(buildSh).toContain("'_set_render_param'");
@@ -90,7 +94,8 @@ describe('#412 native ctl / mute / one-module parse', () => {
   it('compiles debug objects with the atomics/bulk-memory WASM_WORKERS needs', () => {
     // wasm-ld rejects --shared-memory against objects built without these.
     const debugFlags = buildSh.match(/COMPILE_FLAGS=\(-O0 -g -DDEBUG[^)]*\)/)?.[0] ?? '';
-    expect(debugFlags).toContain('-mbulk-memory');
+    expect(debugFlags).toContain('"${WASM_FEATURE_FLAGS[@]}"'); // -mbulk-memory, from scripts/lib/wasm-flags.sh
+    expect(readFileSync(join(ROOT, 'scripts/lib/wasm-flags.sh'), 'utf8')).toMatch(/^WASM_FEATURE_FLAGS=\([^)]*-mbulk-memory/m);
     expect(debugFlags).toContain('-matomics');
   });
 
@@ -131,31 +136,46 @@ describe('#412 native ctl / mute / one-module parse', () => {
     expect(ctl).toContain('supportsCtl(key)');
   });
 
-  // ── One resident OpenMPTModule under the 128mb cap ──────────────────
+  // ── One parse per file, one module per song under the 128mb cap (#491) ──
   //
-  // load_module() used to keep g_module (audio thread), g_metaModule (main
-  // thread) and a third malloc'd copy of the file bytes alive at once, so a
-  // large IT hit `malloc failed (heap exhausted)` instead of a UI error.
-  describe('single resident module', () => {
-    it('commit_module unloads the metadata parse before the audio thread loads', () => {
-      expect(worklet).toContain('int commit_module()');
-      const commit = worklet.slice(worklet.indexOf('int commit_module()'));
-      const unloadIdx = commit.indexOf('g_metaModule.unload()');
-      const cmdIdx = commit.indexOf('g_cmdLoad.store(1');
-      expect(unloadIdx).toBeGreaterThan(-1);
-      expect(cmdIdx).toBeGreaterThan(unloadIdx);
-    });
+  // The old engine parsed every file twice (a transient main-thread
+  // g_metaModule, then g_module on the audio thread) and shared the file
+  // buffer between threads. Now load_module() parses once on the main thread,
+  // commit_module() publishes that module through one atomic exchange, and the
+  // replaced module comes back through the graveyard slot to be freed here.
+  describe('single parse, lock-free handoff', () => {
+    const fnBody = (src: string, signature: string) => {
+      const at = src.indexOf(signature);
+      expect(at, signature).toBeGreaterThan(-1);
+      const open = src.indexOf('{', at);
+      let depth = 0;
+      for (let i = open; i < src.length; i++) {
+        if (src[i] === '{') depth++;
+        else if (src[i] === '}' && --depth === 0) return src.slice(open, i + 1);
+      }
+      throw new Error(signature);
+    };
 
-    it('load_module adopts the JS buffer instead of copying it a third time', () => {
-      const load = worklet.slice(
-        worklet.indexOf('int load_module('),
-        worklet.indexOf('int commit_module()'),
-      );
-      expect(load).not.toContain('std::memcpy(g_moduleData');
-      expect(load).toContain('g_moduleData     = data; // adopted');
+    it('loadModule parses exactly once and frees the adopted bytes right after', () => {
+      const load = fnBody(nativeEngine, 'int NativeEngine::loadModule(');
+      expect(load.match(/module\.load\(/g) ?? []).toHaveLength(1);
+      const parseIdx = load.indexOf('m->module.load(data');
+      const freeIdx = load.indexOf('std::free(data);', parseIdx);
+      expect(freeIdx).toBeGreaterThan(parseIdx);
+      // Snapshot taken while the main thread still owns the module.
+      expect(load.indexOf('snapshot_.build(m->module)')).toBeGreaterThan(parseIdx);
       // The engine must not free a pointer C++ now owns.
       const loadTs = engine.slice(engine.indexOf('async load(data: ArrayBuffer)'));
       expect(loadTs.slice(0, loadTs.indexOf('loadedFingerprint'))).not.toContain('_free(ptr)');
+    });
+
+    it('commitModule applies the desired state, then publishes with one exchange', () => {
+      const commit = fnBody(nativeEngine, 'int NativeEngine::commitModule(');
+      const applyIdx = commit.indexOf('applyDesiredState(staged_->module)');
+      const publishIdx = commit.indexOf('handoff_.exchange(staged_');
+      expect(applyIdx).toBeGreaterThan(-1);
+      expect(publishIdx).toBeGreaterThan(applyIdx);
+      expect(commit).toContain('destroyModule(unconsumed)');
     });
 
     it('play() and both host load paths commit the staged module', () => {
@@ -165,24 +185,25 @@ describe('#412 native ctl / mute / one-module parse', () => {
       expect(nativePlay).toContain('engine.commitModule()');
     });
 
-    it('mute / render param / ctl only target the audio-thread module', () => {
-      for (const fn of ['void set_channel_mute(', 'void set_render_param(', 'void ctl_set_text(']) {
-        const idx = worklet.indexOf(fn);
-        expect(idx).toBeGreaterThan(0);
-        const body = worklet.slice(idx, worklet.indexOf('\n}', idx));
-        expect(body).not.toContain('g_metaModule');
+    it('mute / render param / ctl / seek exports forward to the engine (ring commands)', () => {
+      for (const [fn, call] of [
+        ['void set_channel_mute(', 'g_engine.setChannelMute('],
+        ['void set_render_param(', 'g_engine.setRenderParam('],
+        ['void ctl_set_text(', 'g_engine.ctlSetText('],
+        ['void seek_order_row(', 'g_engine.seek('],
+      ] as const) {
+        expect(fnBody(worklet, fn)).toContain(call);
       }
     });
 
-    it('keeps GetLength (duration / bpm) off the audio-thread module', () => {
-      // openmpt_module_get_duration_seconds seeks the module and restores play
-      // state — running it on g_module would corrupt playback mid-render.
-      expect(worklet).toContain('metaOnlyModule()');
+    it('duration / BPM come from the load-time snapshot, never from the rendering module', () => {
+      // openmpt_module_get_duration_seconds can walk the song; it runs once, in
+      // loadModule's snapshot, on the module the main thread still owns.
       for (const fn of ['double get_duration_seconds()', 'double get_initial_bpm()']) {
-        const body = worklet.slice(worklet.indexOf(fn), worklet.indexOf('\n}', worklet.indexOf(fn)));
-        expect(body).toContain('metaOnlyModule()');
-        expect(body).not.toContain('patternQueryModule()');
+        expect(fnBody(worklet, fn)).toContain('g_engine.snapshot()');
       }
+      const process = fnBody(nativeEngine, 'void NativeEngine::process(');
+      expect(process).not.toMatch(/getDurationSeconds|getBPM|snapshot_/);
     });
   });
 
@@ -190,21 +211,21 @@ describe('#412 native ctl / mute / one-module parse', () => {
   it('turns load failures into typed, pollable errors instead of fprintf', () => {
     expect(worklet).toContain('const char* get_last_error()');
     expect(worklet).toContain('void clear_last_error()');
-    for (const code of ['ERR_BAD_ARGS', 'ERR_OUT_OF_MEMORY', 'ERR_UNSUPPORTED_MODULE', 'ERR_AUDIO_LOAD']) {
-      expect(worklet).toContain(code);
+    for (const code of ['ERR_BAD_ARGS', 'ERR_OUT_OF_MEMORY', 'ERR_UNSUPPORTED_MODULE', 'ERR_TORN_DOWN']) {
+      expect(nativeEngine).toContain(code);
     }
-    // libopenmpt signals allocation failure by throwing, which is abort() under
-    // DISABLE_EXCEPTION_CATCHING=1 — so the heap has to be probed with malloc
-    // (which returns null) before the parse is attempted.
-    const load = worklet.slice(
-      worklet.indexOf('int load_module('),
-      worklet.indexOf('int commit_module()'),
+    // libopenmpt signals allocation failure by throwing; with wasm exceptions its
+    // C API turns that into a NULL, which would read as "unsupported module". The
+    // heap is probed with malloc (which returns null) first so an upload that
+    // cannot fit is reported as ERR_OUT_OF_MEMORY instead.
+    const load = nativeEngine.slice(
+      nativeEngine.indexOf('int NativeEngine::loadModule('),
+      nativeEngine.indexOf('int NativeEngine::commitModule('),
     );
-    const probeIdx = load.indexOf('malloc(static_cast<size_t>(length) * 4u)');
-    const parseIdx = load.indexOf('g_metaModule.load(');
+    const probeIdx = load.indexOf('std::malloc(static_cast<size_t>(length) * 4u)');
+    const parseIdx = load.indexOf('m->module.load(');
     expect(probeIdx).toBeGreaterThan(-1);
     expect(parseIdx).toBeGreaterThan(probeIdx);
-    expect(load).not.toContain('-sDISABLE_EXCEPTION_CATCHING=0');
     // and the engine surfaces the code on its error event …
     expect(engine).toContain('takeNativeError()');
     expect(engine).toContain('nativeErrorCode(detail)');
@@ -226,13 +247,13 @@ describe('#412 native ctl / mute / one-module parse', () => {
   });
 
   it('gates fillPositionInfo behind the ~60 Hz / row-change coalesce', () => {
-    const cbIdx = worklet.indexOf('audio_process_cb(');
+    const cbIdx = nativeEngine.indexOf('void NativeEngine::process(');
     expect(cbIdx).toBeGreaterThan(0);
-    const renderIdx = worklet.indexOf('readInterleavedStereo', cbIdx);
-    const fillIdx = worklet.indexOf('g_module.fillPositionInfo', cbIdx);
+    const renderIdx = nativeEngine.indexOf('readInterleavedStereo', cbIdx);
+    const fillIdx = nativeEngine.indexOf('m.fillPositionInfo', cbIdx);
     expect(fillIdx).toBeGreaterThan(cbIdx);
     expect(fillIdx).toBeLessThan(renderIdx);
-    const gate = worklet.slice(cbIdx, fillIdx);
+    const gate = nativeEngine.slice(cbIdx, fillIdx);
     expect(gate).toContain('timeSinceLastReport');
     expect(gate).toContain('1.0 / 60.0');
     // attachAudioContext must not eagerly allocate the PCM ring — writing it

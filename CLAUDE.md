@@ -58,7 +58,7 @@ mod-player/
 ├── utils/                       # Pure helpers: shaderRegistry/shaderVersion, gpuPacking, geometryConstants, playheadPrediction, …
 ├── src/renderers/               # Pattern renderer abstraction (webgpu/webgl2/html selection)
 ├── shaders/                     # WGSL source shaders (+ shaders/lib/ includes); synced to public/shaders/
-├── cpp/                         # Native libopenmpt AudioWorklet engine (C++/emscripten)
+├── cpp/                         # Native libopenmpt AudioWorklet engine (C++/emscripten); cpp/host/ = host TSan/ASan harness
 ├── vite-plugins/                # COOP/COEP headers + chunking, libopenmpt <script> injection
 ├── scripts/                     # Build/verify/smoke scripts (Node + shell)
 ├── tests/                       # Vitest suite (npm test)
@@ -88,10 +88,12 @@ npm run typecheck    # TypeScript type-check only (no emit): app + vite/vitest c
 npm run preflight    # Run before every commit: CI's `lint-and-build` job *is* this chain (stops at first failure, no network needed after `npm ci`)
 npm run verify:lockfile # package-lock.json metadata guard (lockfileVersion 3, resolved + integrity)
 npm run lint         # ESLint (max 27 warnings budget; hard CI gate)
-npm run build:emcc   # Native C++ worklet → openmpt-native.* (scripts/build-wasm.sh, emsdk 3.1.51)
+npm run build:emcc   # Native C++ worklet → openmpt-native.* (scripts/build-wasm.sh, emsdk 3.1.51; another emcc is fatal unless XASM_ALLOW_EMSDK_DRIFT=1)
+npm run verify:native-wasm # Instruction-level gate on openmpt-native.wasm: SIMD, wasm exceptions, trunc_sat, bulk memory, atomics
+npm run test:native-host # Native engine C++ on the host under TSan / ASan+UBSan + alloc count (no emsdk; needs g++/clang++)
 npm run build:worklet # Alias of build:emcc (never overwrites openmpt-worklet.js)
 npm run build:js-worklet # Compile the typed worklets (openmpt-processor.ts → openmpt-worklet.js, fx-character-processor.ts → fx-character-worklet.js; esbuild)
-npm run build:js-libopenmpt # Real-WASM libopenmpt for the JS engine → public/worklets/libopenmpt-worklet.{js,wasm} (emsdk 3.1.51; committed)
+npm run build:js-libopenmpt # Real-WASM libopenmpt for the JS engine → public/worklets/libopenmpt-worklet.{js,wasm} (emsdk 3.1.51; committed). Both builds share scripts/lib/wasm-flags.sh (flags) + scripts/lib/libopenmpt-source.sh (version, sha256)
 npm run verify:js-libopenmpt # Static + boot/render/corrupt-input checks of that pair (no emsdk needed)
 npm run smoke:fx:ci  # FX rack on headless Chrome (#453): bypass null, crossfade clicks, parity, character CPU (needs a preview on BASE_URL)
 npm run gen:irs      # Synthesize + Opus-encode the room IRs → public/ir/*.opus + manifest (needs ffmpeg/libopus; outputs committed)
@@ -247,17 +249,37 @@ EngineState           // Worklet engine lifecycle state
     `init_audio_with_context`; `init_audio()` is a headless-harness export only.
     `tests/audioContextFactory.test.ts` fails the build on a second call site.
 
-13. **Native engine: one resident `OpenMPTModule`:** `cpp/worklet_processor.cpp`
-    parses a **transient** `g_metaModule` in `load_module()` (pattern cells,
-    channel/order counts, duration) and `commit_module()` unloads it *before*
-    the audio thread builds `g_module`. Never leave both resident — the release
-    build's `INITIAL_MEMORY=128mb` is a hard cap with `ALLOW_MEMORY_GROWTH=0`.
+13. **Native engine: parse once, hand off lock-free, never touch the live module (#491):**
+    the thread-safe core is `cpp/native_engine.{h,cpp}` (no Emscripten headers);
+    `cpp/worklet_processor.cpp` is only the KEEPALIVE / AudioWorklet glue.
+    `load_module()` parses each file **once, on the main thread**, and takes a
+    read-only **snapshot** (orders, rows, cells, duration, BPM) that answers
+    every `get_*` pattern query — the main thread never reads a module the audio
+    thread renders. `commit_module()` applies the persisted mute mask / render
+    params / ctls / loop / volume, then publishes the module with one atomic
+    `exchange`; the audio thread swaps it in at a quantum boundary and retires
+    the old one through the `graveyard_` slot, which the main thread drains
+    (`poll_position()` → `service()`) and frees. Controls (seek, mute mask,
+    render params, ctls, loop, volume, PCM ring) go through one SPSC command
+    ring; a full ring is not lossy (latest value per category is retried).
+    `process()` never parses, frees, allocates or logs — only libopenmpt itself
+    allocates there, on a **seek** (`GetLength`) and a **song-loop restart**
+    (`RowVisitor::Initialize`). `cleanup_audio()` is terminal: it waits (bounded)
+    for the audio thread's ack before freeing, and leaks rather than frees
+    without one. Peak heap is the playing song + the next one while it loads,
+    under the release build's hard `INITIAL_MEMORY=128mb` (`ALLOW_MEMORY_GROWTH=0`).
     `load_module()` **adopts** the `_malloc`'d pointer (the caller must not
     `_free` it) and returns 0 with a typed `ERR_*` string from
-    `get_last_error()` rather than letting libopenmpt throw — a throw aborts the
-    worklet under `DISABLE_EXCEPTION_CATCHING=1`. Mute / ctl / render params go
-    to `g_module` via atomics only; poking the metadata parse changes nothing
-    you can hear. `scripts/verify-native-exports.mjs` enforces all of this.
+    `get_last_error()` (libopenmpt's own reason appended). libopenmpt is built
+    **and linked** with native wasm exceptions (`scripts/lib/wasm-flags.sh`):
+    its loaders throw and catch internally on ordinary bad input, and the
+    pre-#491 `DISABLE_EXCEPTION_CATCHING=1` link let those throws escape into
+    JS / kill the worklet — never put that flag back. Source guards:
+    `scripts/verify-native-exports.mjs`; runtime proof: `npm run test:native-host`
+    (host build under TSan / ASan+UBSan + an allocation count, CI job
+    `native-host-sanitizers`). **The native audio path is being retired**
+    (`docs/ADR-native-engine.md`: JS is within ~10 % CPU). Don't build new
+    features on it; target the JS worklet.
 
 14. **WebGPU pipelines are async and built before they replace anything (#449):**
     every render/compute pipeline goes through `createRenderPipelineChecked` /
