@@ -21,6 +21,7 @@ import { CHASSIS_VERTEX, CHASSIS_FRAGMENT } from './shaders/chassis';
 import { buildVertexShader, buildPatternFragmentShader } from './shaders/pattern';
 import { WebGL2Bloom } from './WebGL2Bloom';
 import { debugModeToUniform, createDebugConfig } from './debugModes';
+import { wantsDrawingBufferReadback, watchWebGLContextLoss } from '../../../utils/webglContext';
 
 const DEFAULT_ROWS = 64;
 const DEFAULT_CHANNELS = 4;
@@ -65,6 +66,34 @@ function linkProgram(gl: WebGL2RenderingContext, vs: WebGLShader, fs: WebGLShade
   return p;
 }
 
+export interface WebGL2RendererInitOptions {
+  /**
+   * Keep the drawing buffer after compositing, so a `readPixels()` from a later task sees the
+   * last frame. Costs a full-buffer copy per frame — defaults to `wantsDrawingBufferReadback()`
+   * (automation / `?debug=readback` only).
+   */
+  preserveDrawingBuffer?: boolean;
+  /** The GL context was lost: frames are skipped (no GL calls) until it is restored. */
+  onContextLost?: () => void;
+  /**
+   * The context was restored and every GL resource re-created (`error === null`), or the
+   * re-creation threw (`error` set; the renderer stays idle).
+   */
+  onContextRestored?: (error: string | null) => void;
+}
+
+/** Context-loss bookkeeping (debug panel / tests). */
+export interface WebGL2ContextState {
+  lost: boolean;
+  losses: number;
+  restores: number;
+  /** Frames actually drawn — skipped frames while the context is lost do not count. */
+  frames: number;
+}
+
+/** GL errors drained after a restore, so the first frame does not report a stale one. */
+const MAX_DRAINED_GL_ERRORS = 8;
+
 function collectUniforms(gl: WebGL2RenderingContext, program: WebGLProgram, names: string[]): Record<string, WebGLUniformLocation | null> {
   const out: Record<string, WebGLUniformLocation | null> = {};
   for (const n of names) out[n] = gl.getUniformLocation(program, n);
@@ -74,6 +103,11 @@ function collectUniforms(gl: WebGL2RenderingContext, program: WebGLProgram, name
 /**
  * Full-scene WebGL2 pattern renderer — reference implementation for WebGPU WGSL shaders.
  * Renders chassis background + instanced LED lens caps + optional bloom.
+ *
+ * Survives context loss (#492): on `webglcontextlost` it stops issuing GL calls and forgets
+ * (never deletes) its GL objects; on `webglcontextrestored` it rebuilds programs, VAOs, buffers,
+ * textures and the bloom FBOs on the same context and resumes. Loaded lazily: only the
+ * `?webgl2=1` / failure-card opt-in constructs it (`useWebGL2PatternRender`).
  */
 export class WebGL2PatternRenderer {
   private gl: WebGL2RenderingContext | null = null;
@@ -90,28 +124,89 @@ export class WebGL2PatternRenderer {
   private lastTimeSec = 0;
   /** Last matrix uploaded to the cell texture — repack only when it (or its shape) changes. */
   private uploadedCells: { matrix: PatternMatrix; padTop: boolean; cols: number; rows: number } | null = null;
-  init(canvas: HTMLCanvasElement, shaderFile: string): boolean {
+  private options: WebGL2RendererInitOptions = {};
+  private unwatchContext: (() => void) | null = null;
+  private contextLost = false;
+  private contextStats = { losses: 0, restores: 0, frames: 0 };
+  /** Lens-cap image: loaded once, uploaded into every new cap texture (init and each restore). */
+  private capImage: HTMLImageElement | null = null;
+
+  init(canvas: HTMLCanvasElement, shaderFile: string, options: WebGL2RendererInitOptions = {}): boolean {
     this.destroy();
     const gl = canvas.getContext('webgl2', {
       alpha: false,
       premultipliedAlpha: false,
       antialias: true,
-      // Required for readPixels / Playwright screenshots after the frame ends (#346 smoke guard).
-      preserveDrawingBuffer: true,
+      // Only automation reads pixels after the frame was composited (#346 smoke guard); everyone
+      // else skips the per-frame copy.
+      preserveDrawingBuffer: options.preserveDrawingBuffer ?? wantsDrawingBufferReadback(),
     });
     if (!gl) return false;
 
     this.gl = gl;
     this.canvas = canvas;
     this.shaderFile = shaderFile;
+    this.options = options;
+    this.unwatchContext = watchWebGLContextLoss(canvas, {
+      onLost: () => this.handleContextLost(),
+      onRestored: () => this.handleContextRestored(),
+    });
 
+    if (gl.isContextLost()) {
+      // Every create* call would return null; the resources are built once the context is back.
+      this.contextLost = true;
+      return true;
+    }
+    this.createResources(gl, canvas);
+    return true;
+  }
+
+  /** Build every GL object this renderer owns. Throws on a shader compile/link failure. */
+  private createResources(gl: WebGL2RenderingContext, canvas: HTMLCanvasElement): void {
     this.initChassis(gl);
-    this.initPattern(gl, shaderFile);
+    this.initPattern(gl, this.shaderFile);
     this.bloom = new WebGL2Bloom(gl);
     this.bloom.resize(canvas.width, canvas.height);
-
     gl.enable(gl.BLEND);
-    return true;
+    // The cell texture is new: repack the matrix on the next frame.
+    this.uploadedCells = null;
+  }
+
+  private handleContextLost(): void {
+    if (this.contextLost) return;
+    this.contextLost = true;
+    this.contextStats.losses += 1;
+    // The objects died with the context; deleting them later would only raise GL errors.
+    this.forgetResources();
+    this.options.onContextLost?.();
+  }
+
+  private handleContextRestored(): void {
+    const gl = this.gl;
+    const canvas = this.canvas;
+    if (!gl || !canvas || !this.contextLost) return;
+    this.contextLost = false;
+    for (let i = 0; i < MAX_DRAINED_GL_ERRORS && gl.getError() !== gl.NO_ERROR; i++) {
+      /* drain CONTEXT_LOST_WEBGL & co. */
+    }
+    let error: string | null = null;
+    try {
+      this.createResources(gl, canvas);
+      this.contextStats.restores += 1;
+    } catch (err) {
+      error = err instanceof Error ? err.message : String(err);
+      this.deleteResources(gl);
+      this.forgetResources();
+    }
+    this.options.onContextRestored?.(error);
+  }
+
+  isContextLost(): boolean {
+    return this.contextLost;
+  }
+
+  getContextState(): WebGL2ContextState {
+    return { lost: this.contextLost, ...this.contextStats };
   }
 
   private initChassis(gl: WebGL2RenderingContext): void {
@@ -174,14 +269,6 @@ export class WebGL2PatternRenderer {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
 
-    const capImg = new Image();
-    capImg.onload = () => {
-      if (!this.gl) return;
-      this.gl.bindTexture(this.gl.TEXTURE_2D, capTexture);
-      this.gl.texImage2D(this.gl.TEXTURE_2D, 0, this.gl.RGBA, this.gl.RGBA, this.gl.UNSIGNED_BYTE, capImg);
-    };
-    capImg.src = `${detectRuntimeBase()}unlit-button.png`;
-
     this.pattern = {
       program,
       vao,
@@ -197,6 +284,26 @@ export class WebGL2PatternRenderer {
       ]),
     };
     gl.bindVertexArray(null);
+    this.loadCapImage();
+    this.uploadCapTexture();
+  }
+
+  private loadCapImage(): void {
+    if (this.capImage) return;
+    const img = new Image();
+    img.onload = () => this.uploadCapTexture();
+    img.src = `${detectRuntimeBase()}unlit-button.png`;
+    this.capImage = img;
+  }
+
+  /** Upload the cap image into the *current* cap texture (a restore replaced the old one). */
+  private uploadCapTexture(): void {
+    const gl = this.gl;
+    const img = this.capImage;
+    const texture = this.pattern?.capTexture;
+    if (!gl || this.contextLost || !texture || !img || !img.complete || img.naturalWidth === 0) return;
+    gl.bindTexture(gl.TEXTURE_2D, texture);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
   }
 
   resize(width: number, height: number): void {
@@ -223,7 +330,8 @@ export class WebGL2PatternRenderer {
   ): void {
     const gl = this.gl;
     const canvas = this.canvas;
-    if (!gl || !canvas || !this.chassis || !this.pattern) return;
+    // Lost context: no GL calls at all until `webglcontextrestored` has rebuilt the resources.
+    if (!gl || !canvas || this.contextLost || !this.chassis || !this.pattern) return;
 
     const errors: string[] = [];
     const uniformVals: Record<string, number | string> = {};
@@ -264,6 +372,7 @@ export class WebGL2PatternRenderer {
       this.bloom.compositeToScreen();
     }
 
+    this.contextStats.frames += 1;
     onDebug?.({ layoutMode: layoutModeName, uniforms: uniformVals, errors });
   }
 
@@ -459,10 +568,15 @@ export class WebGL2PatternRenderer {
     return (base + this.scrollOffset) % rows;
   }
 
+  /**
+   * RGBA readback of the default framebuffer (bottom-left origin). From a later task than the
+   * frame (e.g. Playwright `page.evaluate`) this needs `preserveDrawingBuffer`: on under
+   * automation / `?debug=readback`, see `wantsDrawingBufferReadback()`.
+   */
   readPixels(): Uint8Array | null {
     const gl = this.gl;
     const canvas = this.canvas;
-    if (!gl || !canvas) return null;
+    if (!gl || !canvas || this.contextLost) return null;
     const buf = new Uint8Array(canvas.width * canvas.height * 4);
     gl.readPixels(0, 0, canvas.width, canvas.height, gl.RGBA, gl.UNSIGNED_BYTE, buf);
     return buf;
@@ -472,9 +586,9 @@ export class WebGL2PatternRenderer {
     return this.canvas;
   }
 
-  destroy(): void {
-    const gl = this.gl;
-    if (gl && this.pattern) {
+  /** Delete every GL object (live context only). */
+  private deleteResources(gl: WebGL2RenderingContext): void {
+    if (this.pattern) {
       gl.deleteProgram(this.pattern.program);
       gl.deleteVertexArray(this.pattern.vao);
       gl.deleteBuffer(this.pattern.buffer);
@@ -482,17 +596,33 @@ export class WebGL2PatternRenderer {
       gl.deleteTexture(this.pattern.stateTexture);
       gl.deleteTexture(this.pattern.capTexture);
     }
-    if (gl && this.chassis) {
-      gl.deleteProgram(this.chassis.program);
-    }
-    if (gl && this.chassisVao) gl.deleteVertexArray(this.chassisVao);
-    if (gl && this.chassisBuffer) gl.deleteBuffer(this.chassisBuffer);
+    if (this.chassis) gl.deleteProgram(this.chassis.program);
+    if (this.chassisVao) gl.deleteVertexArray(this.chassisVao);
+    if (this.chassisBuffer) gl.deleteBuffer(this.chassisBuffer);
     this.bloom?.destroy();
-    this.gl = null;
-    this.canvas = null;
+  }
+
+  /** Drop every GL object reference without a GL call (lost context, or after deleting). */
+  private forgetResources(): void {
     this.chassis = null;
+    this.chassisVao = null;
+    this.chassisBuffer = null;
     this.pattern = null;
     this.bloom = null;
     this.uploadedCells = null;
+  }
+
+  destroy(): void {
+    this.unwatchContext?.();
+    this.unwatchContext = null;
+    const gl = this.gl;
+    if (gl && !this.contextLost && !gl.isContextLost()) this.deleteResources(gl);
+    this.forgetResources();
+    if (this.capImage) this.capImage.onload = null;
+    this.capImage = null;
+    this.gl = null;
+    this.canvas = null;
+    this.options = {};
+    this.contextLost = false;
   }
 }

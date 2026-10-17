@@ -347,12 +347,9 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     const canvas = canvasRef.current;
     setCurrentPatternRenderer({
       backend: 'webgpu',
-      readPixels: () => {
-        if (!canvas) return null;
-        const gl = canvas.getContext('webgl2');
-        void gl;
-        return null;
-      },
+      // No synchronous WebGPU readback (smokes screenshot instead). Never getContext('webgl2')
+      // here: on a canvas WebGPU has not claimed yet it would lock it to WebGL2 (#492).
+      readPixels: () => null,
       getCanvas: () => canvas,
       setDebugMode: () => {},
       getDebugMode: () => 'normal',
