@@ -51,6 +51,7 @@ const MT = Object.fromEntries(['initLib', 'load', 'setRenderParam'].map((k) => {
   return [k, m[1]];
 }));
 
+const BIG = synthIt(64, { sampleFrames: Number(opt('big-frames', String(1 << 23))) }); // 16 MiB of samples
 const MODULES = [
   { name: 'synthetic 64-ch IT', bytes: synthIt(64) },
   { name: 'synthetic 32-ch XM', bytes: synthXm(32) },
@@ -190,6 +191,16 @@ for (let round = 1; round <= ROUNDS; round++) {
   }
 }
 
+// Parse cost of a big upload (16 MiB of sample data): where it runs matters more than how long.
+const bigLoad = {};
+for (const name of ['js', 'native']) {
+  const ms = [];
+  for (let i = 0; i < Math.max(3, ROUNDS); i++) ms.push(await engines[name].load(BIG, 8));
+  ms.sort((a, b) => a - b);
+  bigLoad[name] = { medianMs: ms[Math.floor(ms.length / 2)], heapMiB: engines[name].heapBytes() / 1048576 };
+  console.error(`big upload ${name}: parse ${bigLoad[name].medianMs.toFixed(1)} ms, heap ${bigLoad[name].heapMiB.toFixed(0)} MiB`);
+}
+
 // Median over rounds, per (module, interp, engine).
 const summary = [];
 for (const mod of MODULES) {
@@ -207,8 +218,11 @@ for (const mod of MODULES) {
     summary.push(row);
   }
 }
-console.log(JSON.stringify({ node: process.version, seconds: SECONDS, rounds: ROUNDS, summary }, null, 2));
-if (JSON_OUT) writeFileSync(JSON_OUT, JSON.stringify({ node: process.version, seconds: SECONDS, rounds: ROUNDS, summary, results }, null, 2));
+const bigBytes = BIG.length;
+console.log(JSON.stringify({ node: process.version, seconds: SECONDS, rounds: ROUNDS, summary, bigLoad: { bytes: bigBytes, ...bigLoad } }, null, 2));
+if (JSON_OUT) {
+  writeFileSync(JSON_OUT, JSON.stringify({ node: process.version, seconds: SECONDS, rounds: ROUNDS, summary, bigLoad: { bytes: bigBytes, ...bigLoad }, results }, null, 2));
+}
 if (MARKDOWN_OUT) {
   const f = (x, d = 4) => (typeof x === 'number' ? x.toFixed(d) : '—');
   const lines = [
@@ -219,6 +233,10 @@ if (MARKDOWN_OUT) {
     ...summary.map((r) => `| ${r.module} | ${r.interp} | ${f(r.js.p50Ms)} | ${f(r.native.p50Ms)} | ${f(r.nativeVsJsP50, 2)} | `
       + `${f(r.js.p99Ms, 3)} | ${f(r.native.p99Ms, 3)} | ${f(r.js.loadMs, 1)} | ${f(r.native.loadMs, 1)} | `
       + `${f(r.js.heapMiB, 0)} | ${f(r.native.heapMiB, 0)} |`),
+    '',
+    `Big upload (${(bigBytes / 1048576).toFixed(1)} MiB 64-ch IT, median parse): JS ${f(bigLoad.js.medianMs, 1)} ms `
+      + `(on the audio thread, heap → ${f(bigLoad.js.heapMiB, 0)} MiB) · native ${f(bigLoad.native.medianMs, 1)} ms `
+      + `(main thread, fixed ${f(bigLoad.native.heapMiB, 0)} MiB)`,
     '',
   ];
   writeFileSync(MARKDOWN_OUT, lines.join('\n'));

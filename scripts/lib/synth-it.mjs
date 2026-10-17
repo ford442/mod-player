@@ -20,13 +20,19 @@ function mulberry32(seed) {
   };
 }
 
-export function synthIt(channels = 64) {
+/**
+ * @param {number} [channels]  1..64 live channels
+ * @param {{ sampleFrames?: number }} [options]  sampleFrames: length of the one looped 16-bit
+ *   sample (default 8192). A long one (e.g. 1 << 24 frames = 32 MiB) makes a module whose parse is
+ *   dominated by sample loading — the "big upload" case for load / track-change measurements.
+ */
+export function synthIt(channels = 64, options = {}) {
   if (!Number.isInteger(channels) || channels < 1 || channels > 64) throw new Error('synthIt: 1..64 channels');
   const rnd = mulberry32(0x17);
   const rows = 64;
   const numPatterns = 4;
   const ordNum = numPatterns + 1;
-  const smpLen = 8192;
+  const smpLen = options.sampleFrames ?? 8192;
 
   // ── patterns (IT packed format) ──
   const patterns = [];
@@ -59,7 +65,7 @@ export function synthIt(channels = 64) {
   // ── sample: looped 16-bit saw + sine ──
   const smp = new Int16Array(smpLen);
   for (let i = 0; i < smpLen; i++) {
-    const ph = i / smpLen;
+    const ph = (i % 8192) / 8192; // one 8192-frame cycle, repeated for long samples
     smp[i] = Math.round(10000 * Math.sin(2 * Math.PI * ph) + 5000 * (2 * ph - 1));
   }
   const smpBytes = new Uint8Array(smp.buffer);

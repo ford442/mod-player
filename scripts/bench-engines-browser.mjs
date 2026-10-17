@@ -11,6 +11,9 @@
  *
  *   steady        AudioContext.playbackStats underruns over STEADY_MS of a synthetic 64-channel
  *                 IT (scripts/lib/synth-it.mjs: up to 128 live voices), per minute of audio
+ *   big upload    the same for a 64-ch IT carrying 16 MiB of sample data (parse dominated by
+ *                 sample loading — what a real large upload costs); the native release engine's
+ *                 fixed 128 MiB heap cannot take much more (load_module probes 4× the file size)
  *   track change  underruns from loading a second 64-ch IT while the first plays until 4 s later —
  *                 the JS engine parses inside its AudioWorklet message handler (the audio thread),
  *                 the native engine in load_module() on the main thread — and the time until the
@@ -38,16 +41,24 @@ const CHANGES = Number(opt('changes', '5'));
 const JSON_OUT = opt('json', '');
 const MARKDOWN_OUT = opt('markdown', '');
 
-const TRACK_A = Array.from(synthIt(64));
-const TRACK_B = Array.from(synthIt(63));
+const BIG_FRAMES = Number(opt('big-frames', String(1 << 23))); // 16 MiB of 16-bit sample data
+const BIG_CHANGES = Number(opt('big-changes', '3'));
+const FIXTURES = {
+  '/__bench/a.it': Buffer.from(synthIt(64)),
+  '/__bench/b.it': Buffer.from(synthIt(63)), // a different heavy module, so nothing can be reused
+  '/__bench/big.it': Buffer.from(synthIt(64, { sampleFrames: BIG_FRAMES })),
+};
 
 async function runOnce(engineName) {
   const { browser, engine, close } = await launchBrowser();
   try {
     const { page } = await openPage(browser, engine);
+    for (const [path, body] of Object.entries(FIXTURES)) {
+      await page.route(`**${path}`, (route) => route.fulfill({ status: 200, contentType: 'application/octet-stream', body }));
+    }
     // Any same-origin document served with COOP/COEP; it must not be the app.
     await goto(page, engine, `${BASE_URL}/worklets/README.md`, 60000);
-    return await evaluate(page, async ({ engineName: which, a, b, steadyMs, changes }) => {
+    return await evaluate(page, async ({ engineName: which, steadyMs, changes, bigChanges }) => {
       const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
       const ctx = new AudioContext({ sampleRate: 48000, latencyHint: 'playback' });
       await ctx.resume();
@@ -128,8 +139,8 @@ async function runOnce(engineName) {
         };
       }
 
-      const A = new Uint8Array(a);
-      const B = new Uint8Array(b);
+      const fetchBytes = async (p) => new Uint8Array(await (await fetch(p)).arrayBuffer());
+      const [A, B, BIG] = await Promise.all(['/__bench/a.it', '/__bench/b.it', '/__bench/big.it'].map(fetchBytes));
       await eng.load(A);
       const ta = performance.now();
       while (rms() < 0.005 && performance.now() - ta < 10000) await sleep(10);
@@ -148,6 +159,16 @@ async function runOnce(engineName) {
       }
       const trackChange = delta(c0, stats());
 
+      const bigLoads = [];
+      const g0 = stats();
+      for (let i = 0; i < bigChanges; i++) {
+        bigLoads.push(await eng.load(BIG));
+        await sleep(3000);
+        await eng.load(A);
+        await sleep(3000);
+      }
+      const bigChange = delta(g0, stats());
+
       const med = (xs) => xs.slice().sort((p, q) => p - q)[Math.floor(xs.length / 2)];
       return {
         steady,
@@ -157,9 +178,16 @@ async function runOnce(engineName) {
           readyMsMedian: med(loads.map((l) => l.readyMs)),
           mainThreadBlockedMsMedian: med(loads.map((l) => l.blockedMs)),
         },
+        bigUpload: {
+          ...bigChange,
+          changes: bigChanges * 2,
+          moduleBytes: BIG.length,
+          readyMsMedian: med(bigLoads.map((l) => l.readyMs)),
+          mainThreadBlockedMsMedian: med(bigLoads.map((l) => l.blockedMs)),
+        },
         stillAudible: rms() > 0.005,
       };
-    }, { engineName, a: TRACK_A, b: TRACK_B, steadyMs: STEADY_MS, changes: CHANGES });
+    }, { engineName, steadyMs: STEADY_MS, changes: CHANGES, bigChanges: BIG_CHANGES });
   } finally {
     await close();
   }
@@ -188,6 +216,10 @@ const summary = Object.fromEntries(['js', 'native'].map((name) => {
     trackChangeUnderrunMsPerChange: med(rs.map((r) => (r.trackChange ? r.trackChange.underrunMs / r.trackChange.changes : null))),
     loadReadyMs: med(rs.map((r) => r.trackChange?.readyMsMedian)),
     mainThreadBlockedMs: med(rs.map((r) => r.trackChange?.mainThreadBlockedMsMedian)),
+    bigUploadUnderrunsPerChange: med(rs.map((r) => (r.bigUpload ? r.bigUpload.underrunEvents / r.bigUpload.changes : null))),
+    bigUploadUnderrunMsPerChange: med(rs.map((r) => (r.bigUpload ? r.bigUpload.underrunMs / r.bigUpload.changes : null))),
+    bigUploadReadyMs: med(rs.map((r) => r.bigUpload?.readyMsMedian)),
+    bigUploadMainThreadBlockedMs: med(rs.map((r) => r.bigUpload?.mainThreadBlockedMsMedian)),
   }];
 }));
 console.log(JSON.stringify({ baseUrl: BASE_URL, rounds: ROUNDS, steadyMs: STEADY_MS, changes: CHANGES, summary }, null, 2));
@@ -201,6 +233,10 @@ if (MARKDOWN_OUT) {
     ['underrun ms per track change', 'trackChangeUnderrunMsPerChange'],
     ['load → module ready, ms', 'loadReadyMs'],
     ['main thread blocked by the load call, ms', 'mainThreadBlockedMs'],
+    [`big upload (${(FIXTURES['/__bench/big.it'].length / 1048576).toFixed(1)} MiB IT): underruns per change`, 'bigUploadUnderrunsPerChange'],
+    ['big upload: underrun ms per change', 'bigUploadUnderrunMsPerChange'],
+    ['big upload: load → module ready, ms', 'bigUploadReadyMs'],
+    ['big upload: main thread blocked, ms', 'bigUploadMainThreadBlockedMs'],
   ];
   const lines = [
     `### Real AudioWorklet, headless Chromium — JS vs native (${ROUNDS} rounds, median; steady ${STEADY_MS / 1000} s, ${CHANGES} track changes)`,
