@@ -8,16 +8,14 @@ import type {
   SyncDebugInfo,
 } from '../../types';
 import type { InstrumentTable } from '../../types/instruments';
-import type { OpenMPTWorkletEngine } from '../../audio-worklet/OpenMPTWorkletEngine';
 import type { WorkletPositionSample } from '../../utils/playheadPrediction';
-import type { NativeClockAnchor } from '../../utils/nativeClockAnchor';
 import type { PauseClock } from '../../utils/transportClock';
 import type {
   PlayheadLagTracker,
   PositionReportTracker,
 } from '../../utils/playheadLagMonitor';
 
-export type PlaybackEngine = 'worklet' | 'native-worklet' | 'scriptprocessor';
+export type PlaybackEngine = 'worklet' | 'scriptprocessor';
 
 /** All mutable refs owned by useLibOpenMPT — passed to extracted action factories. */
 export interface LibOpenMPTRefs {
@@ -79,19 +77,11 @@ export interface LibOpenMPTRefs {
   lastChannelStatePublishMsRef: React.MutableRefObject<number>;
   noteAgesScratchRef: React.MutableRefObject<number[]>;
   userModuleLoadedRef: React.MutableRefObject<boolean>;
-  nativeEngineRef: React.MutableRefObject<OpenMPTWorkletEngine | null>;
-  nativeSharedBufferRef: React.MutableRefObject<SharedArrayBuffer | null>;
-  activeEngineRef: React.MutableRefObject<'worklet' | 'native-worklet'>;
   /**
-   * The engine that actually started the current playback, written by the engine start paths. Unlike
-   * activeEngineRef (selection state, which still says native after a failed native start fell back to
-   * the JS worklet) this is what pause/resume must drive.
+   * The engine that actually started the current playback (the JS worklet, or the ScriptProcessor
+   * fallback), written by the engine start paths. Pause/resume drive this one.
    */
   playbackEngineRef: React.MutableRefObject<PlaybackEngine | null>;
-  /** Maps native frame clock → main heard-time for playhead prediction. */
-  nativeClockAnchorRef: React.MutableRefObject<NativeClockAnchor | null>;
-  /** Bridge latency estimate (ring vs MediaStream) for clock anchor. */
-  nativeBridgeLatencyRef: React.MutableRefObject<number>;
   oscBufferRef: React.MutableRefObject<Float32Array | null>;
   audioReactiveRef: React.MutableRefObject<Float32Array | null>;
   playbackStateRef: React.MutableRefObject<PlaybackState>;
@@ -121,8 +111,6 @@ export interface LibOpenMPTSetters {
   setSyncDebug: React.Dispatch<React.SetStateAction<SyncDebugInfo>>;
   setIsReady: React.Dispatch<React.SetStateAction<boolean>>;
   setIsWorkletSupported: React.Dispatch<React.SetStateAction<boolean>>;
-  setIsNativeWorkletAvailable: React.Dispatch<React.SetStateAction<boolean>>;
-  setActiveEngine: React.Dispatch<React.SetStateAction<'worklet' | 'native-worklet'>>;
   setWorkletLoadError: React.Dispatch<React.SetStateAction<string | null>>;
 }
 
@@ -140,7 +128,6 @@ export interface UpdateUIParams {
     | 'setBeatPhase'
     | 'setSyncDebug'
   >;
-  activeEngine: 'worklet' | 'native-worklet';
   kickTrigger: number;
   grooveAmount: number;
 }

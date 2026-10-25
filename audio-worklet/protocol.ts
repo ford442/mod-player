@@ -133,6 +133,26 @@ const audioDiagMessageSchema = z.object({
   heapBytes: nonNegInt.optional(),
   heapMoves: nonNegInt.optional(),
   playingChannels: nonNegInt.optional(),
+  /** Worst wall-clock gap between two process() calls (ms) — a blocked audio thread shows here. */
+  maxWallGapMs: finiteNumber.optional(),
+  /** Worst audio-thread time spent bringing in a module this window (ms). */
+  loadBlockMs: finiteNumber.optional(),
+  /** Loads are created on the create worker, not this thread (#513). */
+  createThread: z.boolean().optional(),
+});
+
+function isWasmMemory(value: unknown): value is WebAssembly.Memory {
+  return typeof WebAssembly !== 'undefined' && value instanceof WebAssembly.Memory;
+}
+
+/** The worklet runs the shared-memory playback heap: where the create worker's stack lives (#513). */
+const createHeapMessageSchema = z.object({
+  type: z.literal(WORKLET_TO_MAIN.createHeap),
+  memory: z.custom<WebAssembly.Memory>(isWasmMemory, { message: 'memory must be a WebAssembly.Memory' }),
+  /** Stable per heap (per AudioWorkletGlobalScope); the Memory object itself is a new wrapper per message. */
+  heapId: z.number().int().positive(),
+  stackLow: nonNegInt,
+  stackSize: nonNegInt,
 });
 
 export const workletToMainMessageSchema = z.discriminatedUnion('type', [
@@ -146,8 +166,10 @@ export const workletToMainMessageSchema = z.discriminatedUnion('type', [
   starvationMessageSchema,
   projectmPcmMessageSchema,
   audioDiagMessageSchema,
+  createHeapMessageSchema,
 ]);
 
+export type WorkletCreateHeapMessage = z.infer<typeof createHeapMessageSchema>;
 export type WorkletAudioDiagMessage = z.infer<typeof audioDiagMessageSchema>;
 
 export type WorkletToMainMessage = z.infer<typeof workletToMainMessageSchema>;
@@ -264,6 +286,15 @@ const returnPcmBufferMessageSchema = z.object({
   buffer: z.custom<Float32Array>(isFloat32Array, { message: 'buffer must be Float32Array' }),
 });
 
+function isMessagePort(value: unknown): value is MessagePort {
+  return typeof MessagePort !== 'undefined' && value instanceof MessagePort;
+}
+
+const attachCreatePortMessageSchema = z.object({
+  type: z.literal(MAIN_TO_WORKLET.attachCreatePort),
+  port: z.custom<MessagePort>(isMessagePort, { message: 'port must be a MessagePort' }),
+});
+
 /** Legacy no-type load shim used by some callers. */
 const legacyLoadMessageSchema = z.object({
   type: z.undefined().optional(),
@@ -284,6 +315,7 @@ export const mainToWorkletMessageSchema = z.discriminatedUnion('type', [
   setRenderParamMessageSchema,
   ctlSetTextMessageSchema,
   returnPcmBufferMessageSchema,
+  attachCreatePortMessageSchema,
 ]);
 
 export type MainToWorkletMessage = z.infer<typeof mainToWorkletMessageSchema>;
@@ -372,6 +404,11 @@ export function postCtlSetText(key: string, value: string): MainToWorkletMessage
 /** Hand a consumed projectm-pcm buffer back to the worklet's allocation pool (transfer its buffer). */
 export function postReturnPcmBuffer(buffer: Float32Array): MainToWorkletMessage {
   return { type: MAIN_TO_WORKLET.returnPcmBuffer, buffer };
+}
+
+/** Hand the worklet its end of the create-worker channel (transfer the port). */
+export function postAttachCreatePort(port: MessagePort): MainToWorkletMessage {
+  return { type: MAIN_TO_WORKLET.attachCreatePort, port };
 }
 
 /** Runtime check for oscBuffer handler (replaces unchecked `as SharedArrayBuffer`). */

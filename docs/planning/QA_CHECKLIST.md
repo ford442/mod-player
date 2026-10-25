@@ -7,7 +7,7 @@ This checklist ensures the MOD player meets quality standards before each releas
 - [ ] `npm run build` completes without errors
 - [ ] `npm run typecheck` passes with strict settings
 - [ ] No TypeScript `any` types in new code
-- [ ] Native WASM path: `npm run build:emcc` / `scripts/build-wasm.sh` (never clobbers `openmpt-worklet.js`)
+- [ ] `npm run verify:js-libopenmpt` passes (real-WASM libopenmpt pair); rebuild with `npm run build:js-libopenmpt` (emsdk 3.1.51) only when changing libopenmpt
 
 ## ✅ Code Quality
 
@@ -80,10 +80,9 @@ npm run typecheck
 npm run build
 npm run verify:build  # post-build CSS + wasm checks
 
-# Native C++ worklet (requires emsdk 3.1.51)
-source /opt/emsdk/emsdk_env.sh
-npm run build:emcc
-npm run verify:native-exports
+# libopenmpt WASM pair (rebuild only when changing libopenmpt; requires emsdk 3.1.51)
+npm run verify:js-libopenmpt
+# source /opt/emsdk/emsdk_env.sh && npm run build:js-libopenmpt
 
 # Dev server test
 npm run dev

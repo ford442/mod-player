@@ -25,7 +25,6 @@ import { effectiveHeardTime } from '../../utils/transportClock';
 export function createUpdateUI({
   refs,
   setters,
-  activeEngine,
   kickTrigger,
   grooveAmount,
 }: UpdateUIParams): () => void {
@@ -67,7 +66,6 @@ export function createUpdateUI({
     animationFrameHandle,
     lastUpdateTimeRef,
     audioWorkletNodeRef,
-    nativeEngineRef,
   } = refs;
 
   const {
@@ -105,9 +103,7 @@ export function createUpdateUI({
     let playheadDebugDtSec = 0;
     let playheadDebugRowsPerSec = 0;
 
-    const usingWorkletEngine =
-      (activeEngine === 'worklet' || activeEngine === 'native-worklet') &&
-      (audioWorkletNodeRef.current != null || nativeEngineRef.current != null);
+    const usingWorkletEngine = audioWorkletNodeRef.current != null;
 
     if (usingWorkletEngine && audioCtx) {
       rowSmoothing = WORKLET_ROW_SMOOTHING;
@@ -192,7 +188,7 @@ export function createUpdateUI({
     }
     if (smoothedPlayhead < 0) smoothedPlayhead = 0;
 
-    const engineMode = scriptProcessorRef.current ? 'scriptprocessor' : activeEngine;
+    const engineMode = scriptProcessorRef.current ? 'scriptprocessor' : 'worklet';
     const rowIntUi = Math.floor(smoothedPlayhead);
     const orderChanged = order !== lastUiOrderRef.current;
     const rowChanged = rowIntUi !== lastUiRowIntRef.current;
@@ -226,7 +222,7 @@ export function createUpdateUI({
           row: rowIntUi,
           rows: newMatrix?.numRows,
           channels: newMatrix?.numChannels,
-          engine: activeEngine,
+          engine: engineMode,
         });
       }
     } else {
@@ -265,7 +261,9 @@ export function createUpdateUI({
         orderChanged ||
         wallNowMs - lastChannelStatePublishMsRef.current >= 100;
 
-      const spLib = activeEngine !== 'worklet' && activeEngine !== 'native-worklet' ? lib : null;
+      // The ScriptProcessor renders the main-thread module, so its VU is read here; the worklet's
+      // arrives with its position reports.
+      const spLib = scriptProcessorRef.current ? lib : null;
       const spPtr = spLib && modPtr !== 0 ? modPtr : 0;
 
       for (let c = 0; c < numChannels; c++) {

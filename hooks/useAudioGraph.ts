@@ -4,7 +4,7 @@
 import { logWorkletDiagnostics } from '../audio-worklet/diagnostics';
 import { createPlayerAudioContext, setPlaybackActiveQuery } from '../utils/audioContextFactory';
 import { getAudioSuspendState, setAudioSuspended, subscribeAudioSuspend } from '../utils/audioSuspendState';
-import { postLoad, postPause, postPlay } from '../audio-worklet/protocol';
+import { postPause, postPlay } from '../audio-worklet/protocol';
 import {
   canReuseWorkletNode,
   shouldDisconnectWorkletOnPlay,
@@ -16,7 +16,7 @@ import {
   wireMasterOutput,
 } from './audioGraph/masterGraph';
 import { startJsWorkletPlayback } from './audioGraph/startJsWorkletPlayback';
-import { startNativePlayback } from './audioGraph/startNativePlayback';
+import { postModuleLoad } from './audioGraph/createWorkerHost';
 import type {
   AudioGraphCallbacks,
   AudioGraphConfig,
@@ -154,7 +154,7 @@ export async function startAudioPlayback(
       if (moduleBuf) {
         log.log('Hot reload while playing — posting load to worklet:', moduleBuf.byteLength, 'bytes');
         refs.lastWorkletModuleTokenSentRef.current = moduleToken;
-        refs.audioWorkletNodeRef.current.port.postMessage(postLoad(moduleBuf));
+        postModuleLoad(refs.audioWorkletNodeRef.current, moduleBuf);
         callbacks.setStatus('Loading audio engine...');
       }
       return;
@@ -187,7 +187,6 @@ export async function startAudioPlayback(
   }
 
   log.log('Starting playback...', {
-    engine: config.activeEngine,
     isWorkletSupported: config.isWorkletSupported,
     hasFileData: !!refs.fileDataRef.current,
     fileDataLength: refs.fileDataRef.current?.length,
@@ -226,7 +225,6 @@ export async function startAudioPlayback(
     // Disconnect previous source unless we can hot-reload module data into the
     // existing JS worklet node (avoids re-init of shared-scope libopenmpt WASM).
     const reuseWorkletNode = canReuseWorkletNode({
-      activeEngine: config.activeEngine,
       workletLoaded: refs.workletLoadedRef.current,
       hasWorkletNode: refs.audioWorkletNodeRef.current != null,
     });
@@ -240,17 +238,7 @@ export async function startAudioPlayback(
       refs.audioWorkletNodeRef.current = null;
     }
 
-    let currentEngineToTry = config.activeEngine;
-
-    if (currentEngineToTry === 'native-worklet' && config.isNativeWorkletAvailable) {
-      const nativeResult = await startNativePlayback(refs, callbacks, config, ctx);
-      if (nativeResult === 'started') {
-        return;
-      }
-      currentEngineToTry = 'worklet';
-    }
-
-    if (currentEngineToTry === 'worklet' && config.isWorkletSupported) {
+    if (config.isWorkletSupported) {
       await startJsWorkletPlayback(refs, callbacks, config, ctx, reuseWorkletNode);
     } else {
       callbacks.setStatus("Error: AudioWorklet not supported/available.");

@@ -39,10 +39,7 @@ export function useLibOpenMPTState(initialVolume: number) {
   const [isLooping, setIsLooping] = useState<boolean>(true);
   const [panValue, setPanValue] = useState<number>(0);
   const [volume, _setVolume] = useState<number>(initialVolume);
-  const [activeEngine, setActiveEngine] = useState<'worklet' | 'native-worklet'>('worklet');
   const [isWorkletSupported, setIsWorkletSupported] = useState<boolean>(false);
-  const [isNativeWorkletAvailable, setIsNativeWorkletAvailable] = useState<boolean>(false);
-  const [restartPlayback, setRestartPlayback] = useState<boolean>(false);
   const [syncDebug, setSyncDebug] = useState<SyncDebugInfo>({
     mode: 'none',
     bufferMs: 0,
@@ -116,14 +113,8 @@ export function useLibOpenMPTState(initialVolume: number) {
     setPanValue,
     volume,
     _setVolume,
-    activeEngine,
-    setActiveEngine,
     isWorkletSupported,
     setIsWorkletSupported,
-    isNativeWorkletAvailable,
-    setIsNativeWorkletAvailable,
-    restartPlayback,
-    setRestartPlayback,
     syncDebug,
     setSyncDebug,
     workletLoadError,

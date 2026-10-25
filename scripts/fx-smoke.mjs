@@ -39,7 +39,7 @@ async function bundleHarness() {
     entryPoints: [join(ROOT, 'audio/fx/testing/browserHarness.ts')],
     bundle: true,
     format: 'iife',
-    target: 'es2020',
+    target: 'es2022',
     platform: 'browser',
     write: false,
     logLevel: 'warning',

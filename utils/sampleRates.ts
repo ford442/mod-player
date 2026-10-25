@@ -3,7 +3,7 @@
  * AudioContext) so the export worker can import them.
  */
 
-/** Locked render rate. Native (`--grow`) and the JS engine both render here. */
+/** Locked render rate. The JS engine's libopenmpt renders here. */
 export const PLAYER_SAMPLE_RATE = 48000;
 
 export type PlayerSampleRate = 44100 | 48000;

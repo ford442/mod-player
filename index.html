@@ -40,7 +40,7 @@
   -->
   <script>
     // libopenmpt is a real-WASM build (worklets/libopenmpt-worklet.{js,wasm}); it never touches
-    // globalThis.WebAssembly, so the optional native engine needs no snapshot of it.
+    // globalThis.WebAssembly, so nothing needs a snapshot of it.
     window.libopenmptReady = new Promise((resolve, reject) => {
       window.libopenmpt = {
         onRuntimeInitialized: function () {

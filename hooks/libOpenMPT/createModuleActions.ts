@@ -1,5 +1,4 @@
 import type { PatternMatrix } from '../../types';
-import { parseModuleWithNative } from '../../audio-worklet/NativePatternReader';
 import { backfillPatternMatrices } from '../../utils/parseModuleWithLib';
 import { parserLog } from '../../utils/parserDebug';
 import { createParserWorker, PARSER_SLOW_HINT_MS } from '../../utils/parserWorker';
@@ -70,7 +69,6 @@ export function createProcessModuleData(deps: ModuleActionsDeps) {
     workletRowsPerSecRef,
     audioClockStartRef,
     workletTimeAtStartRef,
-    nativeClockAnchorRef,
     driftAccumulatorRef,
     lastCorrectedTimeRef,
     lastWorkletUpdateRef,
@@ -147,11 +145,7 @@ export function createProcessModuleData(deps: ModuleActionsDeps) {
     // path (drop, playlist, default module) comes through here.
     void publishSongBytes(fileDataCopy);
 
-    const nativeEngineEarly = refs.nativeEngineRef.current;
-    const useNativeParse =
-      refs.activeEngineRef.current === 'native-worklet' && nativeEngineEarly != null;
-
-    const useWorkerParse = !useNativeParse && !isLibReadyForParse(lib);
+    const useWorkerParse = !isLibReadyForParse(lib);
     if (useWorkerParse && !workerRef.current && parserWorkerHealthyRef.current) {
       try {
         workerRef.current = createParserWorker((message) => {
@@ -188,43 +182,18 @@ export function createProcessModuleData(deps: ModuleActionsDeps) {
     let loadedInstrumentTable = emptyInstrumentTable();
 
     try {
-      if (useNativeParse && nativeEngineEarly) {
-        onParseProgress?.('patterns');
-        const nativeBuf = new Uint8Array(fileDataCopy.byteLength);
-        nativeBuf.set(fileDataCopy);
-        const nativeLoaded = await nativeEngineEarly.load(nativeBuf.buffer);
-        const nativeMod = nativeEngineEarly.getNativeModule();
-        if (!nativeLoaded || !nativeMod || nativeMod._get_num_orders() <= 0) {
-          // The native build cannot catch exceptions, so load_module predicts
-          // its failures (heap headroom, unparseable bytes) and reports a typed
-          // ERR_* string instead of aborting the worklet. Surface it verbatim.
-          throw new Error(
-            nativeEngineEarly.getLastErrorMessage()
-            ?? 'Native pattern reader: module not ready after load',
-          );
-        }
-        const parsed = parseModuleWithNative(nativeMod, fileDataCopy, fileName);
-        // Pattern/metadata reads are done: release the transient main-thread
-        // parse so the audio thread's render instance is the only libopenmpt
-        // module resident under the native build's 128mb heap cap.
-        nativeEngineEarly.commitModule();
-        patternMatrices = parsed.patternMatrices;
-        metadata = parsed.metadata;
-        loadedInstrumentTable = parsed.instrumentTable ?? emptyInstrumentTable();
-      } else {
-        const parsed = await resolveParsedModule(
-          lib,
-          useWorkerParse && parserWorkerHealthyRef.current ? workerRef.current : null,
-          workerRef,
-          fileData,
-          fileDataCopy,
-          fileName,
-          onParseProgress,
-        );
-        patternMatrices = parsed.patternMatrices;
-        metadata = parsed.metadata;
-        loadedInstrumentTable = parsed.instrumentTable ?? emptyInstrumentTable();
-      }
+      const parsed = await resolveParsedModule(
+        lib,
+        useWorkerParse && parserWorkerHealthyRef.current ? workerRef.current : null,
+        workerRef,
+        fileData,
+        fileDataCopy,
+        fileName,
+        onParseProgress,
+      );
+      patternMatrices = parsed.patternMatrices;
+      metadata = parsed.metadata;
+      loadedInstrumentTable = parsed.instrumentTable ?? emptyInstrumentTable();
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Module parse failed';
       console.error(`[processModuleData] Parse failed (${fileName}):`, err);
@@ -249,7 +218,7 @@ export function createProcessModuleData(deps: ModuleActionsDeps) {
     patternMatricesRef.current = matrices;
 
     const patternsComplete = patternMatrices.length >= metadata.numOrders;
-    if (!patternsComplete && isLibReadyForParse(lib) && refs.activeEngineRef.current !== 'native-worklet') {
+    if (!patternsComplete && isLibReadyForParse(lib)) {
       const backfillAbort = new AbortController();
       patternBackfillAbortRef.current = backfillAbort;
       const backfillFileName = fileName;
@@ -311,7 +280,6 @@ export function createProcessModuleData(deps: ModuleActionsDeps) {
 
     audioClockStartRef.current = 0;
     workletTimeAtStartRef.current = 0;
-    nativeClockAnchorRef.current = null;
     driftAccumulatorRef.current = 0;
     lastCorrectedTimeRef.current = 0;
     lastWorkletUpdateRef.current = 0;

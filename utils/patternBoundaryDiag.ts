@@ -3,7 +3,7 @@
  *
  * Worklet quantum timing already lives on `?audioDiag=1` (`window.__AUDIO_DIAG__`).
  * That cannot see the main-thread/GPU work that also fires at order changes
- * (React matrix swap, DURA compute rebuild, native cell-by-cell pattern read).
+ * (React matrix swap, DURA compute rebuild).
  *
  * Enable with `?patternDiag=1`, `?audioDiag=1`, or localStorage
  * `xasm1_pattern_diag=1`. Results: `window.__PATTERN_DIAG__`.
@@ -17,9 +17,8 @@ export const PATTERN_DIAG_MAX_EVENTS = 32;
 /** GPU rebuilds longer than this are logged as warnings (one quantum ≈ 2.9 ms). */
 export const GPU_MATRIX_WARN_MS = 8;
 export const ORDER_CHANGE_UI_WARN_MS = 4;
-export const NATIVE_PATTERN_READ_WARN_MS = 8;
 
-export type PatternBoundaryKind = 'order-change-ui' | 'gpu-matrix' | 'native-pattern-read';
+export type PatternBoundaryKind = 'order-change-ui' | 'gpu-matrix';
 
 export interface PatternBoundaryEvent {
   kind: PatternBoundaryKind;
@@ -46,8 +45,6 @@ export interface PatternDiagSnapshot {
   maxGpuMatrixMs: number;
   lastOrderChangeUiMs: number;
   maxOrderChangeUiMs: number;
-  lastNativeReadMs: number;
-  maxNativeReadMs: number;
   lastPath?: 'compute' | 'cpu';
   lastShader?: string;
   lastEngine?: string;
@@ -90,8 +87,6 @@ export function emptyPatternDiagSnapshot(): PatternDiagSnapshot {
     maxGpuMatrixMs: 0,
     lastOrderChangeUiMs: 0,
     maxOrderChangeUiMs: 0,
-    lastNativeReadMs: 0,
-    maxNativeReadMs: 0,
     updatedAt: 0,
   };
 }
@@ -115,13 +110,10 @@ export function applyPatternBoundaryEvent(
     next.maxGpuMatrixMs = Math.max(prev.maxGpuMatrixMs, event.ms);
     if (event.path) next.lastPath = event.path;
     if (event.shader) next.lastShader = event.shader;
-  } else if (event.kind === 'order-change-ui') {
+  } else {
     next.lastOrderChangeUiMs = event.ms;
     next.maxOrderChangeUiMs = Math.max(prev.maxOrderChangeUiMs, event.ms);
     if (event.engine) next.lastEngine = event.engine;
-  } else {
-    next.lastNativeReadMs = event.ms;
-    next.maxNativeReadMs = Math.max(prev.maxNativeReadMs, event.ms);
   }
 
   if (event.pcmSubscribers !== undefined) next.pcmSubscribers = event.pcmSubscribers;
@@ -130,9 +122,7 @@ export function applyPatternBoundaryEvent(
 }
 
 function warnThreshold(kind: PatternBoundaryKind): number {
-  if (kind === 'gpu-matrix') return GPU_MATRIX_WARN_MS;
-  if (kind === 'order-change-ui') return ORDER_CHANGE_UI_WARN_MS;
-  return NATIVE_PATTERN_READ_WARN_MS;
+  return kind === 'gpu-matrix' ? GPU_MATRIX_WARN_MS : ORDER_CHANGE_UI_WARN_MS;
 }
 
 function logEvent(event: PatternBoundaryEvent): void {

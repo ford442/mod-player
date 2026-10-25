@@ -17,9 +17,7 @@
  *   The default JS engine ships a REAL WebAssembly build:
  *   worklets/libopenmpt-worklet.wasm (+ libopenmpt-worklet.js glue). Under every scanned
  *   root that has a worklets/ directory it is REQUIRED — a missing or HTML-bodied file there
- *   means no audio at all. Optional native engine outputs (openmpt-native.wasm) are gitignored
- *   until built; when present they are also validated. Presence of the native trio is
- *   classified by scripts/verify-build.mjs (absent OK; partial/invalid fail).
+ *   means no audio at all. Any other .wasm found under a scanned root is validated too.
  */
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';

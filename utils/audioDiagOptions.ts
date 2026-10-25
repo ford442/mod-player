@@ -82,5 +82,11 @@ export function mergeAudioDiag(
   else if (prev?.heapMoves != null) next.heapMoves = prev.heapMoves;
   if (msg.playingChannels != null) next.playingChannels = msg.playingChannels;
   else if (prev?.playingChannels != null) next.playingChannels = prev.playingChannels;
+  const maxWallGapMs = Math.max(prev?.maxWallGapMs ?? 0, msg.maxWallGapMs ?? 0);
+  if (msg.maxWallGapMs != null || prev?.maxWallGapMs != null) next.maxWallGapMs = maxWallGapMs;
+  const loadBlockMs = Math.max(prev?.loadBlockMs ?? 0, msg.loadBlockMs ?? 0);
+  if (msg.loadBlockMs != null || prev?.loadBlockMs != null) next.loadBlockMs = loadBlockMs;
+  if (msg.createThread != null) next.createThread = msg.createThread;
+  else if (prev?.createThread != null) next.createThread = prev.createThread;
   return next;
 }

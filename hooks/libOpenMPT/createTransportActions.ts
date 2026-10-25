@@ -1,6 +1,5 @@
 import type { ModuleInfo } from '../../types';
 import { rowsPerSecondFromBpm } from '../../utils/playheadPrediction';
-import { createNativeClockAnchor } from '../../utils/nativeClockAnchor';
 import { getStopMusicWorkletActions } from '../../utils/workletAudioLifecycle';
 import {
   parseOscBufferMessage,
@@ -34,7 +33,6 @@ export interface TransportActionsDeps {
     | 'setSequencerGlobalRow'
     | 'setPlaybackRowFraction'
   >;
-  activeEngine: 'worklet' | 'native-worklet';
 }
 
 export function createStopMusic(deps: TransportActionsDeps) {
@@ -45,9 +43,7 @@ export function createStopMusic(deps: TransportActionsDeps) {
     pauseClockRef,
     uiLoopActiveRef,
     animationFrameHandle,
-    nativeEngineRef,
     audioWorkletNodeRef,
-    nativeClockAnchorRef,
     scriptProcessorRef,
     spLeftBufPtr,
     spRightBufPtr,
@@ -91,10 +87,6 @@ export function createStopMusic(deps: TransportActionsDeps) {
     uiLoopActiveRef.current = false;
     if (animationFrameHandle.current) cancelAnimationFrame(animationFrameHandle.current);
 
-    if (nativeEngineRef.current) {
-      nativeEngineRef.current.pause();
-    }
-
     const workletStop = getStopMusicWorkletActions(destroy, audioWorkletNodeRef.current != null);
 
     if (audioWorkletNodeRef.current) {
@@ -129,7 +121,6 @@ export function createStopMusic(deps: TransportActionsDeps) {
 
     audioClockStartRef.current = 0;
     workletTimeAtStartRef.current = 0;
-    nativeClockAnchorRef.current = null;
     driftAccumulatorRef.current = 0;
     lastCorrectedTimeRef.current = 0;
     pendingSeekRef.current = null;
@@ -166,9 +157,9 @@ export function createStopMusic(deps: TransportActionsDeps) {
  * Pause: silence the engine but keep everything needed to continue — the engine's own cursor, the
  * clock refs and the last position sample. `stopMusic` is the opposite: it resets all of those.
  *
- * Engine side is the first half of what stop already did (`postPause()` for the JS worklet, the
- * existing `pause()` export for the native engine — neither touches the AudioContext, CLAUDE.md pitfall
- * 10). The ScriptProcessor fallback has no processor flag; its callback reads `isPausedRef`.
+ * Engine side is the first half of what stop already did: `postPause()` to the JS worklet, which does
+ * not touch the AudioContext (CLAUDE.md pitfall 10). The ScriptProcessor fallback has no processor
+ * flag; its callback reads `isPausedRef`.
  *
  * The UI loop keeps running so the playhead can finish following the audio already in flight, then
  * hold (see utils/transportClock.ts).
@@ -181,7 +172,6 @@ export function createPauseMusic(deps: TransportActionsDeps) {
     pauseClockRef,
     audioContextRef,
     playbackEngineRef,
-    nativeEngineRef,
     audioWorkletNodeRef,
     channelStatesRef,
   } = refs;
@@ -198,12 +188,8 @@ export function createPauseMusic(deps: TransportActionsDeps) {
     setIsPlaying(false);
     setIsPaused(true);
 
-    // Drive the engine that actually started this playback. The selection state (activeEngine) is not
-    // reliable here: after a failed native start falls back to the JS worklet it can still say native.
-    const engine = playbackEngineRef.current;
-    if (engine === 'native-worklet' && nativeEngineRef.current) {
-      nativeEngineRef.current.pause();
-    } else if (engine === 'worklet' && audioWorkletNodeRef.current) {
+    // Drive the engine that actually started this playback.
+    if (playbackEngineRef.current === 'worklet' && audioWorkletNodeRef.current) {
       try { audioWorkletNodeRef.current.port.postMessage(postPause()); } catch { /* node torn down */ }
     }
     // 'scriptprocessor' has no processor flag: its callback reads isPausedRef.
@@ -228,9 +214,7 @@ export function createResumeMusic(deps: TransportActionsDeps) {
     pauseClockRef,
     audioContextRef,
     playbackEngineRef,
-    nativeEngineRef,
     audioWorkletNodeRef,
-    nativeClockAnchorRef,
     workletPositionSampleRef,
     workletRowsPerSecRef,
     workletTimeRef,
@@ -271,14 +255,7 @@ export function createResumeMusic(deps: TransportActionsDeps) {
     setIsPaused(false);
     setIsPlaying(true);
 
-    const engine = playbackEngineRef.current;
-    if (engine === 'native-worklet' && nativeEngineRef.current) {
-      // The native frame clock (audioFramesRendered) stops while paused, so the anchor that maps it
-      // onto the audio clock is stale by the pause. Drop it: positions fall back to arrival-time
-      // mapping until the next play/seek re-anchors.
-      nativeClockAnchorRef.current = null;
-      nativeEngineRef.current.play();
-    } else if (engine === 'worklet' && audioWorkletNodeRef.current) {
+    if (playbackEngineRef.current === 'worklet' && audioWorkletNodeRef.current) {
       try { audioWorkletNodeRef.current.port.postMessage(postPlay()); } catch { /* node torn down */ }
     }
 
@@ -295,7 +272,7 @@ export function createResumeMusic(deps: TransportActionsDeps) {
 }
 
 export function createSeekToStep(deps: TransportActionsDeps) {
-  const { refs, setters, activeEngine } = deps;
+  const { refs, setters } = deps;
   const {
     patternMatricesRef,
     audioContextRef,
@@ -317,9 +294,6 @@ export function createSeekToStep(deps: TransportActionsDeps) {
     lastUiOrderRef,
     lastUiRowIntRef,
     audioWorkletNodeRef,
-    nativeEngineRef,
-    nativeClockAnchorRef,
-    nativeBridgeLatencyRef,
   } = refs;
   const {
     setModuleInfo,
@@ -379,17 +353,8 @@ export function createSeekToStep(deps: TransportActionsDeps) {
     audioClockStartRef.current = audioCtx ? audioCtx.currentTime : 0;
     workletTimeAtStartRef.current = workletTimeRef.current;
 
-    if (activeEngine === 'native-worklet' && audioCtx) {
-      nativeClockAnchorRef.current = createNativeClockAnchor(
-        audioCtx,
-        nativeBridgeLatencyRef.current,
-      );
-    }
-
-    if (activeEngine === 'native-worklet' && nativeEngineRef.current) {
-      nativeEngineRef.current.seek(targetOrder, targetRow);
-      seekAcknowledgedRef.current = true;
-    } else if (activeEngine === 'worklet' && audioWorkletNodeRef.current) {
+    // The ScriptProcessor fallback renders the main-thread module positioned above.
+    if (audioWorkletNodeRef.current) {
       audioWorkletNodeRef.current.port.postMessage(
         postSeek(targetOrder, targetRow, audioCtx ? audioCtx.currentTime : 0),
       );

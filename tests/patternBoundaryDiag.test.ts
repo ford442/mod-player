@@ -44,12 +44,11 @@ describe('patternBoundaryDiag', () => {
     expect(isPatternDiagEnabled()).toBe(true);
   });
 
-  it('tracks worst-case GPU / UI / native costs', () => {
+  it('tracks worst-case GPU / UI costs', () => {
     let snap = emptyPatternDiagSnapshot();
     snap = applyPatternBoundaryEvent(snap, event({ kind: 'gpu-matrix', ms: 3, path: 'compute', shader: 'patternv0.30b.wgsl' }));
     snap = applyPatternBoundaryEvent(snap, event({ kind: 'gpu-matrix', ms: 12, path: 'compute', shader: 'patternv0.30b.wgsl' }));
     snap = applyPatternBoundaryEvent(snap, event({ kind: 'order-change-ui', ms: 1.5, engine: 'worklet' }));
-    snap = applyPatternBoundaryEvent(snap, event({ kind: 'native-pattern-read', ms: 20, channels: 32 }));
 
     expect(snap.lastGpuMatrixMs).toBe(12);
     expect(snap.maxGpuMatrixMs).toBe(12);
@@ -57,7 +56,6 @@ describe('patternBoundaryDiag', () => {
     expect(snap.lastPath).toBe('compute');
     expect(snap.lastShader).toBe('patternv0.30b.wgsl');
     expect(snap.maxOrderChangeUiMs).toBe(1.5);
-    expect(snap.maxNativeReadMs).toBe(20);
     expect(snap.lastEngine).toBe('worklet');
   });
 
@@ -192,11 +190,8 @@ describe('pattern-boundary diag is wired into the order-change path', () => {
   it('records GPU matrix rebuild and order-change UI', () => {
     const renderer = readFileSync(join(ROOT, 'src/renderers/webgpu/WebGPURenderer.ts'), 'utf8');
     const updateUi = readFileSync(join(ROOT, 'hooks/libOpenMPT/createUpdateUI.ts'), 'utf8');
-    const native = readFileSync(join(ROOT, 'audio-worklet/OpenMPTWorkletEngine.ts'), 'utf8');
     expect(renderer).toContain("kind: 'gpu-matrix'");
     expect(renderer).toContain('recordPatternBoundaryEvent');
     expect(updateUi).toContain("kind: 'order-change-ui'");
-    // Order-change cell walks were removed (shared-heap stall).
-    expect(native).not.toContain("kind: 'native-pattern-read'");
   });
 });

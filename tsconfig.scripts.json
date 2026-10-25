@@ -1,5 +1,5 @@
 {
-  // Type-checks the Node build/verify scripts and the Emscripten glue snippets.
+  // Type-checks the Node build/verify scripts.
   //
   // Opt-in lives HERE, not in the files: only the scripts listed in "include" (and whatever they
   // import) are checked, with checkJs on. A `// @ts-check` comment in a script would also switch on
@@ -23,24 +23,20 @@
   "include": [
     "scripts/build-js-worklet.mjs",
     "scripts/jsEngineArtifacts.mjs",
-    "scripts/nativeEngineArtifacts.mjs",
-    "scripts/patch-native-glue.mjs",
     "scripts/sync-shaders.mjs",
     "scripts/verify-build.mjs",
     "scripts/verify-bundle-budget.mjs",
     "scripts/verify-js-libopenmpt.mjs",
     "scripts/verify-lockfile.mjs",
-    "scripts/verify-native-exports.mjs",
-    "scripts/verify-native-simd.mjs",
     "scripts/verify-shader-parity.mjs",
     "scripts/verify-wasm-assets.mjs",
+    "scripts/verify-wasm-features.mjs",
     "scripts/lib/audio-smoke-config.mjs",
     "scripts/lib/audio-smoke-counters.mjs",
+    "scripts/lib/corrupt-it.mjs",
     "scripts/lib/synth-xm.mjs",
-    "scripts/lib/visual-smoke-config.mjs",
-    "cpp/pre.js",
-    "cpp/post.js",
-    "cpp/emscripten-globals.d.ts"
+    "scripts/lib/wasm-ops.mjs",
+    "scripts/lib/visual-smoke-config.mjs"
   ],
   "exclude": ["node_modules", "dist"]
 }

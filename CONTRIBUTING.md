@@ -14,7 +14,7 @@
 1. **No orphan components** — Do not add files under `components/` unless something in the app imports them (`App.tsx`, `MainLayout.tsx`, etc.).
 2. **Shader changes** — Edit `utils/shaderRegistry.ts` + `appConfig.ts` + WGSL; run `npm run test:shader-registry` (Vitest, also part of `npm test`).
 3. **Agent output** — Put throwaway experiments in `archive/` or a feature branch, not next to production files.
-4. **libopenmpt source** — Only `vendor/libopenmpt-*` (gitignored, downloaded by `scripts/build-wasm.sh`). Do not commit a second copy at repo root.
+4. **libopenmpt source** — Only `vendor/libopenmpt-*` (gitignored, downloaded by `scripts/build-js-libopenmpt.sh`). Do not commit a second copy at repo root.
 5. **Deploy** — Use `deploy.py` only; `deploy_old.py` was removed.
 
 ## Checks before PR
@@ -34,10 +34,10 @@ chain, so the two cannot drift apart. Add new CI gates to the `preflight` script
 `package.json`, not to the workflow. It needs no network after `npm ci`.
 
 **What preflight does _not_ cover:** `visual-smoke`, `audio-smoke`,
-`playhead-smoke`, `wasm-smoke-test` and `native-full-build`. Those need a
-Playwright browser or emsdk 3.1.51 and still only run in CI (or locally via
-`npm run smoke:visual:ci`, `npm run smoke:audio:ci`, `npm run smoke:playhead`,
-`npm run build:emcc`).
+`playhead-smoke`, `build-scripts` and `js-libopenmpt-rebuild`. Those need a
+Playwright browser, shellcheck or emsdk 3.1.51 and still only run in CI (or
+locally via `npm run smoke:visual:ci`, `npm run smoke:audio:ci`,
+`npm run smoke:playhead`, `npm run build:js-libopenmpt`).
 
 ### Lockfile guards
 

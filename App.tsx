@@ -131,9 +131,8 @@ function App() {
     toggleChannelMute,
     getAudioContext,
     getAudioTapNode,
-    activeEngine,
+    getPlaybackEngine,
     isWorkletSupported,
-    toggleAudioEngine,
     status,
     syncDebug,
     analyserNode,
@@ -198,7 +197,7 @@ function App() {
     loadFile,
     setPlaybackRowFraction,
     playbackStateRef,
-    activeEngine,
+    getPlaybackEngine,
     liteMode,
     getMasterGainValue,
     getMasterPanValue,
@@ -277,7 +276,6 @@ function App() {
     isModuleLoaded,
     sequencerMatrix,
     status,
-    activeEngine,
     totalPatternRows,
     instrumentNames,
     sampleNames,
@@ -422,7 +420,6 @@ function App() {
     volume,
     pan,
     status,
-    activeEngine,
     isWorkletSupported,
     syncDebug,
     workletLoadError,
@@ -451,7 +448,6 @@ function App() {
     setVolume,
     setPan,
     handleFileSelected,
-    toggleAudioEngine,
     toggleChannelMute,
   });
 
@@ -506,7 +502,6 @@ function App() {
     isExporting,
     captureState,
     isRecording,
-    activeEngine,
   });
 
   if (IS_PROJECTM_EMBED) {

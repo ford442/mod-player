@@ -56,10 +56,6 @@ export default defineConfig(({ mode }) => {
     preview: {
       headers: CROSS_ORIGIN_ISOLATION_HEADERS,
     },
-    optimizeDeps: {
-      // Don't pre-bundle the Emscripten-generated glue code
-      exclude: ['openmpt-native'],
-    },
     assetsInclude: ['**/*.wasm'],
     build: {
       // WebGPU is required, so no supported browser needs ES2020 output (class fields,

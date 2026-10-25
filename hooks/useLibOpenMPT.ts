@@ -3,10 +3,6 @@ import type { PatternMatrix } from '../types';
 import { startAudioPlayback, type AudioGraphCallbacks, type AudioGraphConfig, type AudioGraphRefs } from './useAudioGraph';
 import { useWorkletLoader } from './useWorkletLoader';
 import { postSetAudioLite } from '../audio-worklet/protocol';
-import {
-  overrideFromActiveEngine,
-  writeStoredAudioEngineOverride,
-} from '../utils/audioEngineSelection';
 import { hasShareModuleIntent } from '../utils/shareState';
 import { deriveTransportState, playShouldResume } from '../utils/transportClock';
 import { applyMasterLevels } from '../utils/audioMasterGraph';
@@ -27,9 +23,6 @@ import {
   createStopMusic,
 } from './libOpenMPT/createTransportActions';
 import { cleanupLibOpenMPT, runLibOpenMPTInit } from './libOpenMPT/runInit';
-import { createLogger } from '../utils/log';
-
-const log = createLogger('Engine');
 
 export function useLibOpenMPT(initialVolume: number = 0.4, liteMode: boolean = false) {
   const state = useLibOpenMPTState(initialVolume);
@@ -39,17 +32,16 @@ export function useLibOpenMPT(initialVolume: number = 0.4, liteMode: boolean = f
     status, isReady, isPlaying, isPaused, isModuleLoaded, moduleInfo, patternData,
     sequencerMatrix, sequencerCurrentRow, sequencerGlobalRow, totalPatternRows,
     playbackSeconds, playbackRowFraction, channelStates, beatPhase, grooveAmount,
-    kickTrigger, activeChannels, isLooping, panValue, volume, activeEngine,
-    isWorkletSupported, isNativeWorkletAvailable, restartPlayback, syncDebug,
+    kickTrigger, activeChannels, isLooping, panValue, volume,
+    isWorkletSupported, syncDebug,
     workletLoadError, instrumentNames, sampleNames, moduleFormat, instrumentTable, moduleComments,
     moduleDurationSeconds, moduleFileName,
     setStatus, setIsPlaying, setIsPaused, setIsModuleLoaded, setModuleInfo, setSequencerMatrix,
     setInstrumentNames, setSampleNames, setModuleFormat, setInstrumentTable, setModuleComments, setModuleDurationSeconds,
     setModuleFileName, setSequencerCurrentRow, setSequencerGlobalRow, setPlaybackSeconds,
     setPlaybackRowFraction, setTotalPatternRows, setChannelStates, setBeatPhase,
-    setSyncDebug, setIsReady, setIsWorkletSupported, setIsNativeWorkletAvailable,
-    setActiveEngine, setWorkletLoadError, setIsLooping, setPanValue, _setVolume,
-    setRestartPlayback,
+    setSyncDebug, setIsReady, setIsWorkletSupported,
+    setWorkletLoadError, setIsLooping, setPanValue, _setVolume,
   } = state;
 
   const { verifyWorkletFile, isAudioWorkletSupported: checkWorkletSupport } = useWorkletLoader({
@@ -80,14 +72,10 @@ export function useLibOpenMPT(initialVolume: number = 0.4, liteMode: boolean = f
     setSyncDebug,
     setIsReady,
     setIsWorkletSupported,
-    setIsNativeWorkletAvailable,
-    setActiveEngine,
     setWorkletLoadError,
   };
 
-  refs.activeEngineRef.current = activeEngine;
-
-  const transportDeps = { refs, setters, activeEngine };
+  const transportDeps = { refs, setters };
 
   const stopMusic = useCallback(createStopMusic(transportDeps), []);
   // Stable for the component's lifetime, like stopMusic (they only touch refs and React's stable
@@ -95,7 +83,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4, liteMode: boolean = f
   // exhaustive-deps rule flags ("dependencies are unknown") and would add to the warning budget.
   const [pauseMusic] = useState(() => createPauseMusic(transportDeps));
   const [resumeMusic] = useState(() => createResumeMusic(transportDeps));
-  const seekToStepWrapper = useCallback(createSeekToStep(transportDeps), [activeEngine]);
+  const [seekToStepWrapper] = useState(() => createSeekToStep(transportDeps));
   const requestOscBuffer = useCallback(createRequestOscBuffer(refs), []);
 
   const processModuleData = useCallback(
@@ -114,11 +102,10 @@ export function useLibOpenMPT(initialVolume: number = 0.4, liteMode: boolean = f
     createUpdateUI({
       refs,
       setters,
-      activeEngine,
       kickTrigger,
       grooveAmount,
     }),
-    [activeEngine, kickTrigger, grooveAmount],
+    [kickTrigger, grooveAmount],
   );
   refs.updateUIRef.current = updateUI;
 
@@ -140,7 +127,6 @@ export function useLibOpenMPT(initialVolume: number = 0.4, liteMode: boolean = f
       gainNodeRef: refs.gainNodeRef,
       analyserRef: refs.analyserRef,
       audioWorkletNodeRef: refs.audioWorkletNodeRef,
-      nativeEngineRef: refs.nativeEngineRef,
       workletOrderRef: refs.workletOrderRef,
       workletRowRef: refs.workletRowRef,
       workletTimeRef: refs.workletTimeRef,
@@ -167,9 +153,6 @@ export function useLibOpenMPT(initialVolume: number = 0.4, liteMode: boolean = f
       workletTimeAtStartRef: refs.workletTimeAtStartRef,
       driftAccumulatorRef: refs.driftAccumulatorRef,
       updateUIRef: refs.updateUIRef,
-      nativeSharedBuffer: refs.nativeSharedBufferRef,
-      nativeClockAnchorRef: refs.nativeClockAnchorRef,
-      nativeBridgeLatencyRef: refs.nativeBridgeLatencyRef,
       ensureMainThreadModuleRef: refs.ensureMainThreadModuleRef,
       workletModuleTokenRef: refs.workletModuleTokenRef,
       lastWorkletModuleTokenSentRef: refs.lastWorkletModuleTokenSentRef,
@@ -177,7 +160,6 @@ export function useLibOpenMPT(initialVolume: number = 0.4, liteMode: boolean = f
     const audioCbs: AudioGraphCallbacks = {
       setStatus,
       setIsPlaying,
-      setActiveEngine,
       setModuleInfo,
       setSequencerMatrix,
       stopMusic,
@@ -185,9 +167,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4, liteMode: boolean = f
       updateUI,
     };
     const audioConfig: AudioGraphConfig = {
-      activeEngine,
       isWorkletSupported,
-      isNativeWorkletAvailable,
       panValue,
       volume,
       isLooping,
@@ -197,9 +177,9 @@ export function useLibOpenMPT(initialVolume: number = 0.4, liteMode: boolean = f
     await startAudioPlayback(audioRefs, audioCbs, audioConfig);
     requestOscBuffer();
   }, [
-    activeEngine, isWorkletSupported, isNativeWorkletAvailable, panValue, volume, isLooping,
+    isWorkletSupported, panValue, volume, isLooping,
     stopMusic, resumeMusic, seekToStepWrapper, updateUI, requestOscBuffer,
-    setStatus, setIsPlaying, setActiveEngine, setModuleInfo, setSequencerMatrix,
+    setStatus, setIsPlaying, setModuleInfo, setSequencerMatrix,
   ]);
 
   /** Space / MIDI note 60 / the play button: pause while playing, otherwise play-or-resume. */
@@ -210,46 +190,9 @@ export function useLibOpenMPT(initialVolume: number = 0.4, liteMode: boolean = f
 
   refs.playRef.current = play;
 
-  const toggleAudioEngine = useCallback(() => {
-    let newEngine: 'worklet' | 'native-worklet';
-    if (activeEngine === 'native-worklet') {
-      newEngine = 'worklet';
-    } else {
-      newEngine = isNativeWorkletAvailable ? 'native-worklet' : 'worklet';
-    }
-
-    writeStoredAudioEngineOverride(overrideFromActiveEngine(newEngine));
-
-    log.log('toggleEngine', {
-      from: activeEngine,
-      to: newEngine,
-      isNativeAvailable: isNativeWorkletAvailable,
-      isWorkletSupported,
-      willRestart: isPlaying,
-    });
-
-    if (isPlaying) {
-      setRestartPlayback(true);
-      stopMusic(false);
-    } else if (isPaused) {
-      // A pause belongs to the engine that holds the cursor; the other engine cannot continue it.
-      // Stop (position resets) rather than leave a paused UI over an engine that no longer exists.
-      stopMusic(false);
-    }
-    setActiveEngine(newEngine);
-    setWorkletLoadError(null);
-  }, [activeEngine, isPlaying, isPaused, isNativeWorkletAvailable, isWorkletSupported, stopMusic, setActiveEngine, setWorkletLoadError, setRestartPlayback]);
-
   useEffect(() => {
     refs.audioWorkletNodeRef.current?.port.postMessage(postSetAudioLite(liteMode));
   }, [liteMode]);
-
-  useEffect(() => {
-    if (restartPlayback) {
-      setRestartPlayback(false);
-      void play();
-    }
-  }, [restartPlayback, play, setRestartPlayback]);
 
   useEffect(() => {
     void runLibOpenMPTInit({
@@ -338,7 +281,7 @@ export function useLibOpenMPT(initialVolume: number = 0.4, liteMode: boolean = f
     instrumentTable,
     moduleComments,
     isLooping, setIsLooping, seekToStep: seekToStepWrapper, panValue, setPanValue,
-    activeEngine, isWorkletSupported, toggleAudioEngine, syncDebug,
+    isWorkletSupported, syncDebug,
     analyserNode: refs.analyserRef.current,
     replacePatternMatrix,
     moduleDurationSeconds,
@@ -346,6 +289,8 @@ export function useLibOpenMPT(initialVolume: number = 0.4, liteMode: boolean = f
     getModuleFileData,
     toggleChannelMute,
     getAudioContext: () => refs.audioContextRef.current,
+    /** The engine rendering the current playback (null before the first play). */
+    getPlaybackEngine: () => refs.playbackEngineRef.current,
     getAudioTapNode: () => refs.stereoPannerRef.current ?? refs.gainNodeRef.current,
     getMasterGainValue: () => refs.gainNodeRef.current?.gain.value ?? null,
     getMasterPanValue: () => refs.stereoPannerRef.current?.pan.value ?? null,

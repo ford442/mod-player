@@ -1,14 +1,15 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
-    "lib": ["ES2020"],
+    "lib": ["ES2022"],
     "types": [],
     "noEmit": true
   },
   "include": [
     "audio-worklet/js/**/*.ts",
     "audio-worklet/workletProtocolConstants.ts",
-    "audio-worklet/fxCharacterParams.ts"
+    "audio-worklet/fxCharacterParams.ts",
+    "audio-worklet/createThreadProtocol.ts"
   ],
   "exclude": ["node_modules", "dist", "archive", "jules_patch"]
 }
