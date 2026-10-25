@@ -55,7 +55,7 @@ interface WorkletMessagePort {
   postMessage(message: unknown, transfer?: readonly ArrayBuffer[]): void;
 }
 
-/** The slice of WebAssembly the processor touches (ES2020 lib has no WebAssembly typings). */
+/** The slice of WebAssembly the processor touches (the ES lib without DOM has no WebAssembly typings). */
 interface WorkletWasmMemory {
   readonly buffer: ArrayBufferLike;
 }

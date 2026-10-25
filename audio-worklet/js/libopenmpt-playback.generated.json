@@ -1,21 +1,21 @@
 {
   "schema": 1,
-  "libopenmpt": "0.8.4",
+  "libopenmpt": "0.8.9",
   "emsdk": "3.1.51",
   "variant": "eh-wasm-playback",
   "exceptions": "wasm",
   "simd": false,
-  "version": "9f0a9e0906",
+  "version": "b76f675647",
   "sharedMemory": true,
   "glue": {
     "file": "libopenmpt-playback.js",
-    "bytes": 107020,
-    "integrity": "sha384-GN5DjWEZrJHGOEpz1oPLevXcRfZRQmj0Xl6YeHM+Hm/JxJh4SkuVYmofidrosZ2P"
+    "bytes": 51826,
+    "integrity": "sha384-SsithuMvyE8vmBkReLTrcdWEhvrSoVaug2dN2QRNwyWaGW2tepztNs+iB2lOtSAF"
   },
   "wasm": {
     "file": "libopenmpt-playback.wasm",
-    "bytes": 1756650,
-    "integrity": "sha384-4rO3Wm3GBStagkzn1Pr7AsHPaum4N90EnDzBot5hlAohyOoFKDeYDVWXiJPS1i9Q"
+    "bytes": 1377794,
+    "integrity": "sha384-/8fOJg64xpY/D6oPetMHgoiqTr2f43/vREH5CSxIvPNiyRo3y9Ks/Tf3BtQuoSMy"
   },
   "cExportCount": 113
 }

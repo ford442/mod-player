@@ -43,7 +43,7 @@ Managed by `hooks/useLibOpenMPT.ts`. Responsibilities:
 Files: `public/worklets/openmpt-worklet.js` + `libopenmpt-worklet.{js,wasm}` (tracked in git)
 - `openmpt-worklet.js` is **generated** from `audio-worklet/js/openmpt-processor.ts` via `npm run build:js-worklet` (esbuild) — edit the TS source, never the generated file (#435).
 - Processor is an `AudioWorkletProcessor` loaded via `audioWorklet.addModule()` (cache-busted `?v=` — a content hash from `audio-worklet/js/worklet-version.generated.json`, via `useWorkletLoader.ts`).
-- Main thread fetches `libopenmpt-worklet.js` (~100 KB Emscripten glue) **and** `libopenmpt-worklet.wasm` (~1.7 MB, **real WebAssembly**) and posts `{ type: 'initLib', scriptText, wasmBytes }` into the worklet; the worklet evaluates the glue with `new Function` (classic scripts cannot `import()` / `importScripts()`) seeded with `Module.wasmBinary`, then **waits for `onRuntimeInitialized`** (`audio-worklet/libRuntimeReady.ts` — never infer readiness from `_openmpt_*` existing).
+- Main thread fetches `libopenmpt-worklet.js` (~50 KB Emscripten glue, Closure-compiled) **and** `libopenmpt-worklet.wasm` (~1.4 MB at `-Os`, **real WebAssembly**) and posts `{ type: 'initLib', scriptText, wasmBytes }` into the worklet; the worklet evaluates the glue with `new Function` (classic scripts cannot `import()` / `importScripts()`) seeded with `Module.wasmBinary`, then **waits for `onRuntimeInitialized`** (`audio-worklet/libRuntimeReady.ts` — never infer readiness from `_openmpt_*` existing).
 - **The same `libopenmpt-worklet.{js,wasm}` pair also serves the main thread (`<script>`) and the parser worker** — one artifact, built by `npm run build:js-libopenmpt` (emsdk 3.1.51; see `public/worklets/README.md`). It never replaces `globalThis.WebAssembly` (the old wasm2js `libmpt/` glue did; that workaround is gone). There is no wasm2js / JS-only path: `initLib` without `wasmBytes` is rejected. Do not commit an HTML/404 body as the `.wasm`, and do not export a real `stringToUTF8` from the glue (the app's polyfill has a different signature).
 - Interpolation defaults to Sinc+LP (8) on the JS engine; `?interp=4` opts down to cubic.
 - Runs the `libopenmpt` render loop, reports position (~60 Hz) back to the main thread, and handles seek/load messages.
@@ -157,12 +157,15 @@ npm run preview         # Preview the production build locally
 Do **not** add `package-lock.json` to `.gitignore`.
 
 ### libopenmpt WASM build (JS engine)
-Requires Emscripten **emsdk 3.1.51** (CI pin). Only needed when changing libopenmpt itself — the output pair is committed:
+Requires Emscripten **emsdk 3.1.51** (the pin in `scripts/lib/wasm-flags.sh`; another active emcc is an error unless `XASM_ALLOW_EMSDK_DRIFT=1`). Only needed when changing libopenmpt itself — both output pairs are committed:
 
 ```bash
 npm run build:js-libopenmpt   # → public/worklets/libopenmpt-worklet.{js,wasm} (+ audio-worklet/js/libopenmpt-worklet.generated.json)
-npm run verify:js-libopenmpt  # static + boot/render/corrupt-input checks (no emsdk needed)
+npm run build:js-libopenmpt -- --playback   # → libopenmpt-playback.{js,wasm} (+ its manifest)
+npm run verify:js-libopenmpt  # static + instruction-level feature + boot/render/corrupt-input checks (no emsdk needed)
 ```
+
+libopenmpt's version and tarball sha256 live in `scripts/lib/libopenmpt-source.sh`; the wasm feature / exception flags in `scripts/lib/wasm-flags.sh`.
 
 The build never touches the tracked JS processor `public/worklets/openmpt-worklet.js` (that one comes from `npm run build:js-worklet`).
 
@@ -199,8 +202,8 @@ python3 deploy.py
   2. `visual-smoke` – Build, preview server, Playwright smoke (`smoke:visual:ci`) on the HTML renderer.
      `visual-smoke-webgpu` runs experimental WebGPU coverage in parallel.
   3. `audio-smoke` / `playhead-smoke` – Playwright `smoke:audio:ci` + `smoke:fx:ci`, and `smoke:playhead`, on the JS worklet.
-  4. `build-scripts` – `shellcheck --severity=warning` + `bash -n` on `scripts/build-js-libopenmpt.sh`, and a guard that tracked `openmpt-worklet.js` still looks like the JS processor (no emsdk).
-  5. `js-libopenmpt-rebuild` – Path-filtered rebuild of `libopenmpt-worklet.{js,wasm}` with emsdk **3.1.51**; fails if the committed pair drifts from a fresh build.
+  4. `build-scripts` – `shellcheck --severity=warning` + `bash -n` on `scripts/build-js-libopenmpt.sh` and the `scripts/lib/*.sh` it sources, and a guard that tracked `openmpt-worklet.js` still looks like the JS processor (no emsdk).
+  5. `js-libopenmpt-rebuild` – Path-filtered rebuild of both libopenmpt pairs with emsdk **3.1.51**; fails if the committed pairs drift from a fresh build, uploads the release symbol maps, and boots both `--debug` builds in a fake AudioWorkletGlobalScope.
 
 ## Security & CORS Considerations
 - **COOP/COEP headers:** `vite.config.ts` sets:

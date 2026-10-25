@@ -10,6 +10,7 @@ import {
   inspectWasm,
   smokeArtifacts,
   smokePlaybackArtifacts,
+  smokeWorkletBoot,
 } from '../scripts/jsEngineArtifacts.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
@@ -24,6 +25,8 @@ describe('JS engine libopenmpt artifacts (real WASM)', () => {
     expect(manifest?.exceptions).toBe('wasm');
     expect(manifest?.simd).toBe(false);
     expect(manifest?.sharedMemory).toBe(false);
+    // Hash-pinned in scripts/lib/libopenmpt-source.sh; 0.8.5–0.8.9 carry loader security fixes.
+    expect(manifest?.libopenmpt).toBe('0.8.9');
   });
 
   it('the main-thread / parser-worker wasm imports NON-shared memory; the playback heap shared (#513)', () => {
@@ -54,7 +57,7 @@ describe('JS engine libopenmpt artifacts (real WASM)', () => {
     expect(existsSync(join(ROOT, 'public/worklets/libopenmpt-playback.ww.js'))).toBe(false);
   });
 
-  it('playback heap: a worker_threads wasm worker creates a 16 MiB IT while this thread renders, and catches corrupt input', async () => {
+  it('playback heap: a worker_threads wasm worker creates a 16 MiB IT while this thread renders; typed catches work on both threads', async () => {
     const result = await smokePlaybackArtifacts();
     expect(result.errors).toEqual([]);
     expect(result.quantaDuringCreate).toBeGreaterThan(1);
@@ -86,6 +89,19 @@ describe('JS engine libopenmpt artifacts (real WASM)', () => {
       expect(glue.cExports).not.toContain(name);
     }
   });
+
+  it.each(['worklet', 'playback'])(
+    'libopenmpt-%s boots through the compiled processor in a fake AudioWorkletGlobalScope, renders, reports corrupt input and recovers a truncated IT',
+    async (pair) => {
+      const { errors, peak } = await smokeWorkletBoot({
+        glue: join(ROOT, `public/worklets/libopenmpt-${pair}.js`),
+        wasm: join(ROOT, `public/worklets/libopenmpt-${pair}.wasm`),
+      });
+      expect(errors).toEqual([]);
+      expect(peak).toBeGreaterThan(0.01);
+    },
+    60_000,
+  );
 
   it('boots in the worklet manner, renders audio, survives corrupt input and heap growth', async () => {
     const wasmBefore = globalThis.WebAssembly;

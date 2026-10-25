@@ -135,6 +135,146 @@ The smoke **compounds** with `tests/workletAudioLifecycle.test.ts` and
 
 ---
 
+## One toolchain — libopenmpt 0.8.9, audited flags, the emsdk pin (#515, 2026-10)
+
+Follow-up to #520 (native engine retired) and #521 (#513: create off the audio thread). It carries #504's
+JS-relevant parts (#504 itself was native-stack work).
+
+### Problems
+
+- **libopenmpt 0.8.4.** 0.8.5–0.8.9 fix a heap out-of-bounds *write* in the SymMOD loader (WAV IMA ADPCM
+  samples), an out-of-bounds read in MPTM custom tunings and one in reverse playback past a loop. The download
+  wasn't hash-pinned either.
+- **Unaudited flags.** LLVM 17 (emsdk 3.1.51) enables neither `nontrapping-fptoint` nor `bulk-memory`, so
+  libopenmpt shipped **273 trapping float→int conversions**. An out-of-range float there is a wasm trap inside
+  `process()`, not a saturated value. `-ffunction-sections -fdata-sections -Wl,--gc-sections` and `-sSAFE_HEAP=0`
+  did nothing. A different active emcc was only a warning.
+- **Typed C++ catches were broken on the worklet thread of the #513 playback heap.**
+  - *Cause:* with `-sWASM_WORKERS`, the heap main thread's TLS is set up by
+    `emscripten_wasm_worker_main_thread_initialize`, a `constructor(48)` in `libwasm_workers.a`. emsdk 3.1.51 links
+    that archive normally, so the member holding the constructor is only pulled in when something references it,
+    and nothing here does: the JS main thread starts the create worker. The constructor never ran, and TLS
+    accesses through the linker's TLS globals kept their raw offsets.
+  - *Effect:* libunwind keeps the wasm-EH catch selector in one of those (`__wasm_lpad_context`), so every typed
+    catch fell through to `catch (...)`. libopenmpt then rejected *recoverable* files as "unknown internal error".
+    A truncated IT 2.15 sample block is one: libopenmpt normally catches its `BitReader::eof` and loads the file.
+  - *Scope:* every in-worklet create hit this, i.e. the first load of each session on an isolated page and any
+    load after the create worker dies. The create worker (a wasm worker) and the shared pair were fine.
+  - *Confirmed:* in Node, and in Chromium on `main` (that file loads on the main thread, then the worklet
+    reports `create_from_memory returned 0`).
+  - #521's smoke only fed junk to the worker, which `catch (...)` handles either way. (#504 had found the same
+    TLS symptom in the native engine.)
+- **`--debug` could not boot in an AudioWorkletGlobalScope.**
+  - With `-sENVIRONMENT=web`, an ASSERTIONS glue throws "not compiled for this environment" without `window` /
+    `importScripts`.
+  - The processor's `lib.wasmMemory` probe also hit the abort-on-read getter an ASSERTIONS glue installs for every
+    unexported runtime member (the shared pair didn't export it).
+  - No CI job built `--debug`.
+- **No symbol map**, so production wasm stack traces only had function indices.
+- **ES2020 worklet bundle.** `fx-character-worklet.js` carried 66 `__publicField` helper calls (class fields
+  lowered to `defineProperty`).
+
+### Fix
+
+| Change | Detail |
+|--------|--------|
+| `scripts/lib/libopenmpt-source.sh` | libopenmpt **0.8.9** and the sha256 of each tarball; a mismatching download is refused. The pristine tree is shared, each variant builds in a copy. |
+| `scripts/lib/wasm-flags.sh` | The one flag set and the pin. `-mbulk-memory -mnontrapping-fptoint`, `-fwasm-exceptions` (compile + link), `-fvisibility=hidden` and pinned `-std=` (what libopenmpt's makefile would add), `-Os`, Closure on the release glue. `require_emsdk_pin` makes another emcc fatal unless `XASM_ALLOW_EMSDK_DRIFT=1`. |
+| Playback link | `EMCC_FORCE_STDLIBS=libwasm_workers` whole-archives the library, as later emsdk does, so the main-thread TLS constructor runs: `__wasm_call_ctors` now calls it first, and `__tls_base` is an sbrk block. `-Wl,--undefined=emscripten_create_wasm_worker` pulled the member in but the constructor still didn't run in a `-O0` link. A hand-written `__wasm_init_tls` constructor (#504's approach) passed or failed with the TLS layout: its "already relocated?" probe reads raw offset 0 as "symbol absent". |
+| `scripts/verify-wasm-features.mjs` + `scripts/lib/wasm-ops.mjs` | Decodes every instruction. `shared`: try/catch, trunc_sat, `memory.copy`/`fill`, no SIMD, no atomics. `playback`: the same plus atomics. `simd`: for the `--simd` experiment. Runs inside `verify:js-libopenmpt`; tests in `tests/wasmFeatures.test.ts`, including the negatives (a non-SIMD wasm fails the SIMD gate; the pairs can't swap). |
+| Truncated-IT checks | `scripts/lib/corrupt-it.mjs` (from #504) is loaded on the shared pair, on the playback heap's main thread *and* its create worker, and through the compiled processor in a fake AudioWorkletGlobalScope (`smokeWorkletBoot`), for both pairs. Every one of them fails on `main`'s playback pair. |
+| `--debug` | `-sENVIRONMENT=web,worker,shell` (the worklet scope is detected as `shell`; `wasmBinary` is always passed in) and `wasmMemory` exported by both pairs. `node scripts/verify-js-libopenmpt.mjs --boot <glue.js>` boots any build through the compiled processor in that fake worklet scope; `js-libopenmpt-rebuild` builds both debug pairs and boots them. |
+| Symbol maps | `--emit-symbol-map` on release links, moved to `vendor/symbol-maps/<pair>.<cache key>.symbols`. The key is the `?v=` the app loads. CI uploads them as `libopenmpt-symbol-maps`. |
+| Dropped | `-ffunction-sections -fdata-sections -Wl,--gc-sections` (dropping them was byte-identical), `-sSAFE_HEAP=0` (the default). `-msign-ext` was never set (default since LLVM 16). |
+| ES2022 | `scripts/build-js-worklet.mjs` (and the FX smoke / bench harnesses) target es2022; `tsconfig.json` and `tsconfig.worklet.json` use the ES2022 target/lib (`useDefineForClassFields` was already true, so semantics are unchanged). `fx-character-worklet.js`: 66 → 0 helper calls, 25,038 → 23,069 B. `openmpt-worklet.js` is byte-identical. `tests/fxCharacterAlloc.test.ts` passes, and the numeric-initializer rule still applies. |
+| CI `build-scripts` | Shellchecks `scripts/lib/*.sh` too (`-x`). It was red on `main` at `d8279da` (SC2054 on `-sENVIRONMENT=web,worker` inside an array); that line is gone. |
+
+### Measured (emsdk 3.1.51, Node 22 V8, 2026-10-25)
+
+**Size** (bytes, gzip -9 in brackets):
+
+| Pair | `main` (0.8.4, `-O3`) glue / wasm | Shipped (0.8.9, flag set, `-Os`, Closure) glue / wasm |
+|---|---|---|
+| shared | 103,775 [12,289] / 1,736,825 [641,510] | 49,922 [8,564] / 1,376,401 [540,713] |
+| playback | 107,020 [13,072] / 1,756,650 [643,440] | 51,826 [9,226] / 1,377,794 [540,999] |
+
+Both pairs together drop ~211 KB gzipped; an isolated page fetches both. `dist/worklets/` goes from ~3,685 to
+2,854.7 KiB.
+
+Attribution on the shared wasm:
+- `--emit-symbol-map`: +64 B (names are kept through wasm-opt).
+- The feature flags + hidden visibility: −6,937 B.
+- 0.8.9: +4,621 B.
+- `-Os`: −358,172 B.
+
+Closure leaves the wasm alone; with it the glue is 103,736 → 49,922 B.
+
+Instruction counts, shared wasm, `main` → shipped:
+- Trapping float→int: 273 → 14.
+- Saturating float→int: 0 → 193.
+- `memory.copy`: 0 → 210; `memory.fill`: 0 → 276.
+- try blocks: 4,423 → 4,055.
+- SIMD and atomics: none in either. The playback pair has atomics.
+
+**Render cost.**
+
+Method:
+- `npm run bench:js-libopenmpt` through an interleaving driver, 11 runs per cell.
+- Inputs: 4-channel MOD (120 s), `--synth-it 64` and `--synth-xm 32` (20 s each).
+- This host puts whole runs into a slow mode at 1.6–1.8×, so the table shows the per-run p50 **minimum**.
+  Medians agree within ~2 points.
+- PCM sha256 is identical for every variant, on every module and interpolation.
+
+| Module, interpolation | `main` p50 (ms) | Shipped | `-O3`, same flags |
+|---|---|---|---|
+| MOD, cubic | 0.0033 | 0.0031 (−4.0 %) | 0.0033 (+1.5 %) |
+| MOD, sinc-8 | 0.0041 | 0.0041 (−0.8 %) | 0.0041 (−0.4 %) |
+| IT 64 ch, cubic | 0.0304 | 0.0316 (+4.0 %) | 0.0314 (+3.2 %) |
+| IT 64 ch, sinc-8 | 0.0475 | 0.0477 (+0.2 %) | 0.0478 (+0.6 %) |
+| XM 32 ch, cubic | 0.0160 | 0.0167 (+4.2 %) | 0.0167 (+4.4 %) |
+| XM 32 ch, sinc-8 | 0.0239 | 0.0240 (+0.2 %) | 0.0239 (−0.2 %) |
+
+The budget is 2.667 ms per quantum.
+
+- **Sinc-8 (the app's default) is unchanged.**
+- **Cubic** (`?interp=4`, opt-in) costs ~4 % (≈1 µs per quantum) on the 32/64-channel modules. That comes from the
+  flag set, not from `-Os`: the `-O3` build has it too. A build without `-mbulk-memory` recovered about half of it.
+  The flags stay, because the trapping conversions they replace abort the worklet on out-of-range input instead
+  of saturating.
+- **`-Os`** is within 2 % of `-O3` on p50 in every cell (the issue's adoption rule). Create time for a 16 MiB IT
+  (5–11 ms here) and init are unchanged within noise. libopenmpt's own emscripten makefile defaults to `-Oz`.
+- **p99** is noise-dominated here; two runs of one build differ by up to ~20 %. The one repeatable difference is
+  `-Os` at cubic on the 64-channel IT: ~10 % above `-O3`, 0.077 ms, 2.9 % of the budget.
+- **`-O2`** saved 2.3 % of wasm, grew the glue 16 % and bought no speed, so it is not used.
+
+`WASM_OPT_LEVEL="-O3"` in `scripts/lib/wasm-flags.sh` reverts the size change in one line.
+
+**SIMD: measured, not adopted** (also `public/worklets/README.md`):
+- #521, emsdk 3.1.51, 4-channel MOD and 64-channel IT at cubic and sinc-8: median CPU per quantum −1.5 % to
+  +14.5 % (both signs, inside run-to-run spread), zero over-budget quanta, wasm +7.6 %.
+- #515's earlier A/B on emcc 6.0.2: interp-4 mean 0.0358 vs 0.0344 ms per quantum (both under 2 % of the budget),
+  identical PCM sha256, wasm 1.74 → 1.88 MB.
+- #505's CI bench: +7.6 % size, no win.
+
+### The emsdk pin stays at 3.1.51
+
+Tried emsdk **6.0.13** (current) on 2026-10-25:
+
+- **Shared pair:** links and passes every check. emsdk 6 turns on trunc_sat and bulk memory by default, and its
+  glue is 36,004 B without Closure (3.1.51 + Closure: 49,922 B). It isn't threaded, so it would move on its own.
+- **Playback heap with `-sWASM_WORKERS`:** does not link. 6.0.13's `libc++-ww-legacyexcept.a` (`call_once`) and
+  `libc++abi-ww-legacyexcept.a` (`fallback_malloc`) need `pthread_mutex_lock`/`unlock` and `pthread_cond_wait`/
+  `broadcast`, which a wasm-workers-only link does not provide. exnref EH (`-sWASM_LEGACY_EXCEPTIONS=0`) fails the
+  same way in the `-wasmexcept` variants. This is the same wall #504 hit on 6.0.2.
+- **`-sWASM_WORKERS -pthread`:** links, and on its main thread typed catches work. But the create worker's
+  `$ww` boot hangs, because a pthreads runtime expects its own worker protocol. Getting there means porting
+  `workers/openmpt-create.worker.ts` to it, which is #513's design, not a flag.
+- **Decision:** both pairs share one flag set and one pin, so the pin stays. Bump it when upstream's `-ww` C++
+  runtime links again, or when the create worker moves to the pthread protocol. Memory64 and JSPI bring nothing
+  here. Exnref would raise the floor to Chrome 137 / Safari 18.4 and stays off.
+
+---
+
 ## Real-WASM JS engine — 2026-09 (supersedes "Worklet asset path (wasm2js)" below)
 
 ### Problem
@@ -505,8 +645,8 @@ since AudioWorklet globals still cannot `import()` reliably everywhere:
 
 | Layer | Location |
 |-------|----------|
-| Processor source | `audio-worklet/js/openmpt-processor.ts` — typechecked via `npm run typecheck:worklet` (`tsconfig.worklet.json`, `lib: ["ES2020"]` + `audio-worklet/js/audioWorklet.d.ts` ambient globals) |
-| Build | `scripts/build-js-worklet.mjs` — `esbuild --bundle --format=iife --target=es2020`, banner `// generated — do not edit`, output `public/worklets/openmpt-worklet.js` |
+| Processor source | `audio-worklet/js/openmpt-processor.ts` — typechecked via `npm run typecheck:worklet` (`tsconfig.worklet.json`, `lib: ["ES2022"]` + `audio-worklet/js/audioWorklet.d.ts` ambient globals) |
+| Build | `scripts/build-js-worklet.mjs` — `esbuild --bundle --format=iife --target=es2022` (es2020 until #515), banner `// generated — do not edit`, output `public/worklets/openmpt-worklet.js` |
 | Cache-bust | `audio-worklet/js/worklet-version.generated.json` — a content hash of the built file, written by the same script and imported by `hooks/useWorkletLoader.ts`. No more hand-maintained `WORKLET_VERSION` comment list. |
 | Constants | `audio-worklet/workletProtocolConstants.ts` imported directly by the processor source (bundled in) — `public/worklets/worklet-protocol-constants.js` and its separate `audioWorklet.addModule()` call are deleted. |
 
