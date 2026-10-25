@@ -30,9 +30,12 @@
     "scripts/verify-lockfile.mjs",
     "scripts/verify-shader-parity.mjs",
     "scripts/verify-wasm-assets.mjs",
+    "scripts/verify-wasm-features.mjs",
     "scripts/lib/audio-smoke-config.mjs",
     "scripts/lib/audio-smoke-counters.mjs",
+    "scripts/lib/corrupt-it.mjs",
     "scripts/lib/synth-xm.mjs",
+    "scripts/lib/wasm-ops.mjs",
     "scripts/lib/visual-smoke-config.mjs"
   ],
   "exclude": ["node_modules", "dist"]

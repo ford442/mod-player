@@ -274,8 +274,8 @@ jobs:
         run: |
           if [ -f /tmp/preview-playhead.pid ]; then kill $(cat /tmp/preview-playhead.pid) 2>/dev/null || true; fi
 
-  # The libopenmpt build script is only run by js-libopenmpt-rebuild (path-filtered), so lint it on
-  # every PR. Needs no emsdk.
+  # The libopenmpt build script (and the flag/source libs it sources) is only run by
+  # js-libopenmpt-rebuild (path-filtered), so lint it on every PR. Needs no emsdk.
   build-scripts:
     runs-on: ubuntu-latest
 
@@ -289,8 +289,8 @@ jobs:
         # whenever the runner image updates.
         run: |
           command -v shellcheck >/dev/null || { echo "❌ shellcheck is not installed on this runner"; exit 1; }
-          for f in scripts/*.sh; do
-            shellcheck --severity=warning "$f"
+          for f in scripts/*.sh scripts/lib/*.sh; do
+            shellcheck --severity=warning -x --source-path=SCRIPTDIR "$f"
             bash -n "$f"
             echo "✅ $f clean"
           done
@@ -322,8 +322,13 @@ jobs:
           filters: |
             jsengine:
               - 'scripts/build-js-libopenmpt.sh'
+              - 'scripts/lib/wasm-flags.sh'
+              - 'scripts/lib/libopenmpt-source.sh'
               - 'scripts/jsEngineArtifacts.mjs'
               - 'scripts/verify-js-libopenmpt.mjs'
+              - 'scripts/verify-wasm-features.mjs'
+              - 'scripts/lib/wasm-ops.mjs'
+              - 'scripts/lib/corrupt-it.mjs'
               - 'scripts/lib/synth-it.mjs'
               - 'public/worklets/libopenmpt-worklet.js'
               - 'public/worklets/libopenmpt-worklet.wasm'
@@ -345,17 +350,21 @@ jobs:
         with:
           node-version: '22'
 
-      # libopenmpt.a for this variant is keyed by the build script (it owns every flag).
-      # Two variant trees: the shared pair (eh-wasm) and the AudioWorklet's shared-memory heap
-      # (eh-wasm-playback, objects built with -sWASM_WORKERS — #513).
+      # libopenmpt.a for each variant is keyed by the build script and the flag/source libs it sources
+      # (they own every flag and the hash-pinned version). Release trees: the shared pair (eh-wasm) and
+      # the AudioWorklet's shared-memory heap (eh-wasm-playback, objects built with -sWASM_WORKERS —
+      # #513); debug trees for the worklet boot check below. Each records its own flag stamp, so a
+      # stale tree is rebuilt, never reused.
       - name: Cache libopenmpt static libraries (JS engine variants)
         if: steps.filter.outputs.jsengine == 'true'
         uses: actions/cache@v6
         with:
           path: |
-            vendor/libopenmpt-0.8.4+release-jsengine-eh-wasm-emsdk3.1.51
-            vendor/libopenmpt-0.8.4+release-jsengine-eh-wasm-playback-emsdk3.1.51
-          key: libopenmpt-js-engine-${{ runner.os }}-emsdk-3.1.51-v0.8.4-${{ hashFiles('scripts/build-js-libopenmpt.sh') }}
+            vendor/libopenmpt-0.8.9+release-jsengine-eh-wasm-emsdk3.1.51
+            vendor/libopenmpt-0.8.9+release-jsengine-eh-wasm-playback-emsdk3.1.51
+            vendor/libopenmpt-0.8.9+release-jsengine-eh-wasm-debug-emsdk3.1.51
+            vendor/libopenmpt-0.8.9+release-jsengine-eh-wasm-playback-debug-emsdk3.1.51
+          key: libopenmpt-js-engine-${{ runner.os }}-emsdk-3.1.51-v0.8.9-${{ hashFiles('scripts/build-js-libopenmpt.sh', 'scripts/lib/wasm-flags.sh', 'scripts/lib/libopenmpt-source.sh') }}
 
       - name: Rebuild libopenmpt-worklet.{js,wasm} (emsdk 3.1.51)
         if: steps.filter.outputs.jsengine == 'true'
@@ -380,3 +389,25 @@ jobs:
       - name: Verify rebuilt artifacts
         if: steps.filter.outputs.jsengine == 'true'
         run: node scripts/verify-js-libopenmpt.mjs --smoke
+
+      # Function index → name maps of the release wasm, keyed by the pair's cache key (the app's
+      # `?v=`), to decode `wasm-function[N]` frames in production stack traces.
+      - name: Upload wasm symbol maps
+        if: steps.filter.outputs.jsengine == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: libopenmpt-symbol-maps
+          path: vendor/symbol-maps/*.symbols
+          if-no-files-found: error
+          retention-days: 90
+
+      # A --debug (ASSERTIONS) glue checks its environment at load time; it must still boot inside
+      # an AudioWorkletGlobalScope (no window, no importScripts). Boots each debug pair through the
+      # compiled processor in a fake worklet scope (#515).
+      - name: Build --debug pairs and boot them in a worklet scope
+        if: steps.filter.outputs.jsengine == 'true'
+        run: |
+          OUT_DIR="$RUNNER_TEMP/debug" bash scripts/build-js-libopenmpt.sh --debug
+          OUT_DIR="$RUNNER_TEMP/debug" bash scripts/build-js-libopenmpt.sh --debug --playback
+          node scripts/verify-js-libopenmpt.mjs --boot "$RUNNER_TEMP/debug/libopenmpt-worklet.js"
+          node scripts/verify-js-libopenmpt.mjs --boot "$RUNNER_TEMP/debug/libopenmpt-playback.js"

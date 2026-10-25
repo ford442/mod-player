@@ -10,7 +10,9 @@
  *
  * Each manifest records SRI, sizes and a cache key. The shared wasm must import a NON-shared
  * memory (it is what index.html injects; it must never become threaded) and the playback wasm a
- * shared one — read from the binary's import section, not trusted from flags.
+ * shared one — read from the binary's import section, not trusted from flags. Each wasm must also
+ * pass its instruction-level feature profile (scripts/verify-wasm-features.mjs: wasm exceptions,
+ * saturating float→int, bulk memory, no SIMD; atomics only in the playback heap).
  *
  * Built by scripts/build-js-libopenmpt.sh; CLI wrapper is scripts/verify-js-libopenmpt.mjs.
  * Everything here is pure Node (no emsdk needed) so CI and vitest can run it.
@@ -20,7 +22,10 @@ import { Worker } from 'node:worker_threads';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import vm from 'node:vm';
+import { corruptIt215Sample } from './lib/corrupt-it.mjs';
 import { synthIt } from './lib/synth-it.mjs';
+import { checkWasmProfile } from './verify-wasm-features.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 export const REPO_ROOT = resolve(HERE, '..');
@@ -30,13 +35,17 @@ export const JS_ENGINE_WASM = 'libopenmpt-worklet.wasm';
 export const JS_ENGINE_MANIFEST_REL = 'audio-worklet/js/libopenmpt-worklet.generated.json';
 export const JS_ENGINE_MANIFEST_SCHEMA = 1;
 
-/** The two artifact pairs (see the header). `sharedMemory` is what the wasm's memory import must be. */
+/**
+ * The two artifact pairs (see the header). `sharedMemory` is what the wasm's memory import must be;
+ * `featureProfile` names its scripts/verify-wasm-features.mjs profile.
+ */
 export const JS_ENGINE_ARTIFACTS = Object.freeze({
   shared: Object.freeze({
     glue: JS_ENGINE_GLUE,
     wasm: JS_ENGINE_WASM,
     manifestRel: JS_ENGINE_MANIFEST_REL,
     sharedMemory: false,
+    featureProfile: 'shared',
     buildFlag: '',
   }),
   playback: Object.freeze({
@@ -44,6 +53,7 @@ export const JS_ENGINE_ARTIFACTS = Object.freeze({
     wasm: 'libopenmpt-playback.wasm',
     manifestRel: 'audio-worklet/js/libopenmpt-playback.generated.json',
     sharedMemory: true,
+    featureProfile: 'playback',
     buildFlag: ' -- --playback',
   }),
 });
@@ -108,6 +118,8 @@ export const REQUIRED_RUNTIME_MEMBERS = Object.freeze([
   'UTF8ToString',
   'getValue',
   'dynCall',
+  // Read by the processor on both pairs; a --debug glue aborts on reading an unexported member.
+  'wasmMemory',
 ]);
 
 /**
@@ -208,11 +220,15 @@ export function inspectWasm(bytes) {
 /**
  * Release wasm minifies its own export/import names, so the readable C export list and any JS
  * exception trampolines have to be read from the glue: every export is mapped as
- * `Module["_name"] = wasmExports[...]` and JS-based EH defines `function invoke_<sig>(...)`.
+ * `Module["_name"] = wasmExports[...]` (or, after Closure renamed `Module`, `b._name = …`) and
+ * JS-based EH defines `function invoke_<sig>(...)`. Closure renames those functions, so for a
+ * Closure glue the wasm feature gate (try/catch must be present) is what catches a JS-EH build.
  */
 export function inspectGlue(text, wasmFile = JS_ENGINE_WASM) {
   const cExports = new Set();
-  for (const m of text.matchAll(/Module\["(_[A-Za-z0-9_]+)"\]\s*=/g)) cExports.add(m[1]);
+  for (const m of text.matchAll(/(?:Module\["(_[A-Za-z0-9_]+)"\]|\b[A-Za-z_$][\w$]*\.(_[A-Za-z0-9_]+))\s*=(?!=)/g)) {
+    cExports.add(m[1] ?? m[2]);
+  }
   return {
     isWasm2js: /isWasm2js\s*:\s*(!0|true)/.test(text),
     hasEsmExport: /^\s*export\s/m.test(text),
@@ -319,6 +335,14 @@ export function checkArtifacts({ root = REPO_ROOT, artifact = 'shared' } = {}) {
   if (manifest.sharedMemory !== undefined && manifest.sharedMemory !== spec.sharedMemory) {
     errors.push(`manifest says sharedMemory=${manifest.sharedMemory}, expected ${spec.sharedMemory}`);
   }
+  if (wasm.ok) {
+    try {
+      const { failures } = checkWasmProfile(wasmBuf, spec.featureProfile);
+      errors.push(...failures.map((f) => `${WASM} feature gate [${spec.featureProfile}] ${f}`));
+    } catch (e) {
+      errors.push(`${WASM} could not be decoded for the feature gate: ${e instanceof Error ? e.message : e}`);
+    }
+  }
 
   const glue = inspectGlue(glueBuf.toString('utf8'), WASM);
   {
@@ -347,6 +371,11 @@ export function checkArtifacts({ root = REPO_ROOT, artifact = 'shared' } = {}) {
 
   return { errors, manifest, wasm };
 }
+
+const TYPED_CATCH_FAILED =
+  'a truncated IT 2.15 sample block (libopenmpt catches BitReader::eof by type) was rejected — typed C++ catches '
+  + "do not work on this thread (no catching linked, or the thread's TLS never initialised: the catch selector lives "
+  + "in libunwind's thread-local __wasm_lpad_context; the playback link must whole-archive libwasm_workers)";
 
 /**
  * Behavioural checks: evaluates the glue exactly the way the AudioWorklet processor does
@@ -448,6 +477,11 @@ export async function smokeArtifacts({ root = REPO_ROOT, moduleBytes } = {}) {
       errors.push(`corrupt input threw out of the wasm module (${e instanceof Error ? e.message : e}); C++ exceptions are not caught`);
     }
     if (garbageResult !== 0 && garbageResult !== 'unset') errors.push('corrupt input unexpectedly produced a module');
+    // 2b. A RECOVERABLE malformed file must load: libopenmpt throws BitReader::eof inside IT
+    //     sample decompression and catches it by type. NULL here means typed catches are broken.
+    const recoverable = create(corruptIt215Sample());
+    if (!recoverable) errors.push(TYPED_CATCH_FAILED);
+    else lib._openmpt_module_destroy(recoverable);
     const again = create(modBytes);
     if (!again) errors.push('module creation failed after a corrupt-input attempt (runtime is dead)');
     else lib._openmpt_module_destroy(again);
@@ -573,6 +607,17 @@ export async function smokePlaybackArtifacts({ root = REPO_ROOT, largeModuleByte
     const l = lib._malloc(4 * 128);
     const r = lib._malloc(4 * 128);
     if (!modA) errors.push('create_from_memory2 returned 0 for a valid module on the heap main thread');
+    // The worklet creates in-worklet too (the first load of a session, a dead create worker), so
+    // typed catches must work on the heap main thread, not only on the wasm worker.
+    {
+      const bytes = corruptIt215Sample();
+      const p2 = lib._malloc(bytes.length);
+      lib.HEAPU8.set(bytes, p2);
+      const recoverable = lib._openmpt_module_create_from_memory2(p2, bytes.length, 0, 0, 0, 0, 0, 0, 0);
+      lib._free(p2);
+      if (!recoverable) errors.push(`heap main thread: ${TYPED_CATCH_FAILED}`);
+      else lib._openmpt_module_destroy(recoverable);
+    }
 
     const heapBefore = memory.buffer.byteLength;
     const t0 = performance.now();
@@ -612,6 +657,15 @@ export async function smokePlaybackArtifacts({ root = REPO_ROOT, largeModuleByte
     if (bad.threw) errors.push(`corrupt input threw out of wasm on the create worker (${bad.threw}); C++ exceptions are not caught there`);
     if (bad.ptr) errors.push('corrupt input unexpectedly produced a module');
 
+    const truncated = corruptIt215Sample();
+    worker.postMessage({ type: 'create', bytes: truncated.buffer }, [truncated.buffer]);
+    const recovered = await next();
+    if (recovered.threw || !recovered.ptr) errors.push(`create worker: ${TYPED_CATCH_FAILED}`);
+    if (recovered.ptr) {
+      worker.postMessage({ type: 'destroy', ptr: recovered.ptr });
+      await next();
+    }
+
     if (modA) lib._openmpt_module_destroy(modA);
     return { errors, createMs, quantaDuringCreate: quanta, heapMiB: memory.buffer.byteLength / 1048576 };
   } finally {
@@ -619,4 +673,101 @@ export async function smokePlaybackArtifacts({ root = REPO_ROOT, largeModuleByte
     if (previous === undefined) delete globalThis.libopenmpt;
     else globalThis.libopenmpt = previous;
   }
+}
+
+/**
+ * Boots a glue + wasm pair through the COMPILED processor (public/worklets/openmpt-worklet.js) in a
+ * fake AudioWorkletGlobalScope: a node:vm realm with no window, importScripts, document, fetch,
+ * process or require — only what that scope has. Release glue hard-codes its environment, but a
+ * `--debug` build (ASSERTIONS) checks it at load time; with -sENVIRONMENT=web alone that check
+ * threw in a worklet (#515). Then: a module loads and renders, corrupt input is reported without
+ * killing the runtime, and a recoverable malformed file still loads (typed catches work on the
+ * worklet thread — the in-worklet create path of both pairs). The protocol strings mirror
+ * audio-worklet/workletProtocolConstants.ts.
+ *
+ * @param {{ root?: string, glue: string, wasm: string }} opts  paths of the pair to boot
+ */
+export async function smokeWorkletBoot({ root = REPO_ROOT, glue, wasm }) {
+  const errors = [];
+  /** @type {Array<{ type: string, [k: string]: unknown }>} */
+  const posted = [];
+  const logged = [];
+  /** @typedef {new (opts: unknown) => { port: { onmessage: ((e: { data: unknown }) => Promise<void>) | null }, process: (i: unknown, o: Float32Array[][], p: unknown) => boolean }} ProcessorCtor */
+  /** @type {ProcessorCtor | null} */
+  let Processor = null;
+  class AudioWorkletProcessor {
+    constructor() {
+      this.port = { onmessage: null, postMessage: (/** @type {any} */ m) => { posted.push(m); } };
+    }
+  }
+  const sandbox = {
+    AudioWorkletProcessor,
+    registerProcessor: (/** @type {string} */ _name, /** @type {any} */ ctor) => { Processor = ctor; },
+    currentTime: 0,
+    currentFrame: 0,
+    sampleRate: 48000,
+    // The outer realm's: the glue checks `memory.buffer instanceof SharedArrayBuffer` on the memory
+    // WebAssembly creates (an isolated page's worklet scope has SharedArrayBuffer).
+    WebAssembly,
+    SharedArrayBuffer,
+    setTimeout,
+    clearTimeout,
+    console: {
+      log() {},
+      debug() {},
+      info() {},
+      warn: (/** @type {unknown[]} */ ...a) => { logged.push(a.join(' ')); },
+      error: (/** @type {unknown[]} */ ...a) => { logged.push(a.join(' ')); },
+    },
+  };
+  const ctx = vm.createContext(sandbox);
+  vm.runInContext(readFileSync(join(root, 'public', 'worklets', 'openmpt-worklet.js'), 'utf8'), ctx, { filename: 'openmpt-worklet.js' });
+  // Assigned by the registerProcessor call above (TS cannot see through the callback).
+  const Ctor = /** @type {ProcessorCtor | null} */ (Processor);
+  if (!Ctor) return { errors: ['the compiled processor did not call registerProcessor'], peak: 0, logged };
+  // The processor's `instanceof ArrayBuffer` checks are realm-bound.
+  const toRealm = vm.runInContext('(function (a) { var u = new Uint8Array(a.length); u.set(a); return u.buffer; })', ctx);
+  const node = new Ctor({});
+  const send = async (/** @type {unknown} */ data) => { await node.port.onmessage?.({ data }); };
+  const count = (/** @type {string} */ type) => posted.filter((m) => m.type === type).length;
+  const lastError = () => String(posted.filter((m) => m.type === 'error').at(-1)?.message ?? '');
+  const l = new Float32Array(128);
+  const r = new Float32Array(128);
+  const render = (/** @type {number} */ quanta) => {
+    let peak = 0;
+    for (let q = 0; q < quanta; q++) {
+      sandbox.currentTime += 128 / 48000;
+      sandbox.currentFrame += 128;
+      node.process([[]], [[l, r]], {});
+      for (let i = 0; i < 128; i++) peak = Math.max(peak, Math.abs(l[i]), Math.abs(r[i]));
+    }
+    return peak;
+  };
+  const load = async (/** @type {Uint8Array} */ bytes) => {
+    const loaded = count('loaded');
+    const failed = count('error');
+    await send({ type: 'load', moduleData: toRealm(bytes) });
+    return count('loaded') > loaded ? 'loaded' : count('error') > failed ? 'error' : 'none';
+  };
+
+  await send({ type: 'initLib', scriptText: readFileSync(glue, 'utf8'), wasmBytes: toRealm(readFileSync(wasm)) });
+  if (count('error') > 0) {
+    errors.push(`initLib failed in the worklet scope: ${lastError()}`);
+    return { errors, peak: 0, logged };
+  }
+  let peak = 0;
+  const mod = new Uint8Array(readFileSync(join(root, 'public', '4-mat_madness.mod')));
+  if ((await load(mod)) !== 'loaded') errors.push(`a valid MOD did not load in the worklet scope: ${lastError()}`);
+  else {
+    await send({ type: 'play' });
+    peak = render(400);
+    if (!(peak > 0.01)) errors.push(`the worklet rendered silence (peak ${peak})`);
+  }
+  const junk = new Uint8Array(4096);
+  for (let i = 0; i < junk.length; i++) junk[i] = (i * 2654435761) >>> 24;
+  if ((await load(junk)) !== 'error') errors.push('corrupt input was not reported as an error by the worklet');
+  if ((await load(corruptIt215Sample())) !== 'loaded') errors.push(`worklet thread: ${TYPED_CATCH_FAILED} (${lastError()})`);
+  if ((await load(mod)) !== 'loaded') errors.push('the worklet could not load a module after the corrupt inputs (runtime is dead)');
+  else if (!(render(200) > 0.01)) errors.push('the worklet rendered silence after the corrupt inputs');
+  return { errors, peak, logged };
 }
