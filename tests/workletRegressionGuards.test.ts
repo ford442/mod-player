@@ -79,7 +79,6 @@ describe('#354 position postMessage throttle (behavioral)', () => {
 describe('#354 hot-reload node reuse + load token (behavioral)', () => {
   it('reuses the same JS worklet node on a second play (no disconnect)', () => {
     const cold = planJsWorkletHotReloadPlay({
-      activeEngine: 'worklet',
       workletLoaded: false,
       hasWorkletNode: false,
       libJsText: 'glue',
@@ -95,7 +94,6 @@ describe('#354 hot-reload node reuse + load token (behavioral)', () => {
     // Second load after processModuleData bumped the token and stopMusic(false)
     // left the node alive with workletLoaded still true.
     const hot = planJsWorkletHotReloadPlay({
-      activeEngine: 'worklet',
       workletLoaded: true,
       hasWorkletNode: true,
       libJsText: 'glue',
@@ -120,8 +118,7 @@ describe('#354 hot-reload node reuse + load token (behavioral)', () => {
     const runPlay = (moduleToken: number, forceModuleLoad: boolean) => {
       const hasNode = node != null;
       const decision = planJsWorkletHotReloadPlay({
-        activeEngine: 'worklet',
-        workletLoaded: hasNode,
+          workletLoaded: hasNode,
         hasWorkletNode: hasNode,
         libJsText: 'glue',
         moduleToken,
@@ -178,8 +175,7 @@ describe('#354 hot-reload node reuse + load token (behavioral)', () => {
     expect(shouldDisconnectWorkletOnPlay(true, true)).toBe(false);
     expect(
       canReuseWorkletNode({
-        activeEngine: 'worklet',
-        workletLoaded: true,
+          workletLoaded: true,
         hasWorkletNode: true,
       }),
     ).toBe(true);
@@ -302,8 +298,6 @@ describe('#354 production source invariants', () => {
 
   it('lifecycle module exports the #354 helpers used by tests and hooks', () => {
     expect(lifecycle).toContain('shouldReportWorkletPosition');
-    expect(lifecycle).toContain('shouldFillNativePosition');
-    expect(lifecycle).toContain('shouldReloadNativeModule');
     expect(lifecycle).toContain('shouldAcceptWorkletLoadedAck');
     expect(lifecycle).toContain('shouldForceWorkletModuleLoad');
     expect(lifecycle).toContain('planJsWorkletHotReloadPlay');

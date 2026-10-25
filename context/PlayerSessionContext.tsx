@@ -23,7 +23,6 @@ export interface PlayerSessionValue {
   volume: number;
   pan: number;
   status: string;
-  activeEngine: string;
   isWorkletSupported: boolean;
   syncDebug: SyncDebugInfo;
   workletLoadError: string | null | undefined;
@@ -61,7 +60,6 @@ export interface PlayerSessionValue {
   setVolume: (v: number | ((prev: number) => number)) => void;
   setPan: (v: number) => void;
   handleFileSelected: (file: File) => void;
-  toggleAudioEngine: () => void;
   toggleChannelMute: (channel: number) => void;
 }
 

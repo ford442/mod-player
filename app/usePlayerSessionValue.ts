@@ -23,7 +23,6 @@ export interface UsePlayerSessionValueParams {
   volume: number;
   pan: number;
   status: string;
-  activeEngine: string;
   isWorkletSupported: boolean;
   syncDebug: SyncDebugInfo;
   workletLoadError: string | null | undefined;
@@ -52,7 +51,6 @@ export interface UsePlayerSessionValueParams {
   setVolume: (v: number | ((prev: number) => number)) => void;
   setPan: (v: number) => void;
   handleFileSelected: (file: File) => void;
-  toggleAudioEngine: () => void;
   toggleChannelMute: (channel: number) => void;
 }
 
@@ -75,7 +73,6 @@ export function usePlayerSessionValue(params: UsePlayerSessionValueParams): Play
     volume,
     pan,
     status,
-    activeEngine,
     isWorkletSupported,
     syncDebug,
     workletLoadError,
@@ -104,7 +101,6 @@ export function usePlayerSessionValue(params: UsePlayerSessionValueParams): Play
     setVolume,
     setPan,
     handleFileSelected,
-    toggleAudioEngine,
     toggleChannelMute,
   } = params;
 
@@ -126,7 +122,6 @@ export function usePlayerSessionValue(params: UsePlayerSessionValueParams): Play
     volume,
     pan,
     status,
-    activeEngine,
     isWorkletSupported,
     syncDebug,
     workletLoadError,
@@ -155,16 +150,15 @@ export function usePlayerSessionValue(params: UsePlayerSessionValueParams): Play
     setVolume,
     setPan,
     handleFileSelected,
-    toggleAudioEngine,
     toggleChannelMute,
   }), [
     isReady, isModuleLoaded, isPlaying, isPaused, isLooping, playbackSeconds, playbackRowFraction,
     totalPatternRows, sequencerMatrix, channelStates, beatPhase, grooveAmount, kickTrigger,
-    activeChannels, volume, pan, status, activeEngine, isWorkletSupported, syncDebug, workletLoadError,
+    activeChannels, volume, pan, status, isWorkletSupported, syncDebug, workletLoadError,
     analyserNode, channelVU, moduleMetadata, moduleFileName, moduleDurationSeconds,
     instrumentTable, channelMuteMask, displayShaderFile, instrumentPalette, dimFactor, isNightShader,
     isStepsShader, nightConfig, playbackStateRef, channelStatesRef, oscBufferRef,
     audioReactiveRef, playGuarded, pause, stopMusic, seekToStep, setIsLooping, setVolume, setPan,
-    handleFileSelected, toggleAudioEngine, toggleChannelMute,
+    handleFileSelected, toggleChannelMute,
   ]);
 }

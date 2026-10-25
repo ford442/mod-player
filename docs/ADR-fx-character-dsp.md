@@ -91,7 +91,7 @@ work is where the TS version is leaner.
   compiler optimizations matter more than they do for this chain — rerun
   `scripts/bench-fx-character.mjs` against the same rule.
 - The native C++ engine hosting these stages in its wasm (the #450 threading
-  notes) remains a separate follow-up.
+  notes) is moot: that engine was retired (`docs/ADR-native-engine.md`).
 
 ## Reproduce
 

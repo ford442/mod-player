@@ -6,7 +6,7 @@
  *
  * Built by scripts/build-js-libopenmpt.sh into public/worklets/ and described by the generated
  * manifest below (SRI hashes + a content-hash cache key). Nothing here replaces
- * globalThis.WebAssembly, so the native engine can instantiate without any snapshot.
+ * globalThis.WebAssembly, so nothing needs a snapshot of it.
  */
 import manifest from '../audio-worklet/js/libopenmpt-worklet.generated.json';
 

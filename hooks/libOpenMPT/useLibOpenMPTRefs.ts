@@ -1,12 +1,10 @@
 import { useRef } from 'react';
 import type { ChannelShadowState, PlaybackState } from '../../types';
-import type { OpenMPTWorkletEngine } from '../../audio-worklet/OpenMPTWorkletEngine';
 import { rowsPerSecondFromBpm } from '../../utils/playheadPrediction';
 import {
   createPlayheadLagTracker,
   createPositionReportTracker,
 } from '../../utils/playheadLagMonitor';
-import type { NativeClockAnchor } from '../../utils/nativeClockAnchor';
 import { createPauseClock, type PauseClock } from '../../utils/transportClock';
 import type { LibOpenMPTRefs, PlaybackEngine } from './types';
 
@@ -68,12 +66,7 @@ export function useLibOpenMPTRefs(): LibOpenMPTRefs {
   const lastChannelStatePublishMsRef = useRef<number>(0);
   const noteAgesScratchRef = useRef<number[]>([]);
   const userModuleLoadedRef = useRef<boolean>(false);
-  const nativeEngineRef = useRef<OpenMPTWorkletEngine | null>(null);
-  const nativeSharedBufferRef = useRef<SharedArrayBuffer | null>(null);
-  const activeEngineRef = useRef<'worklet' | 'native-worklet'>('worklet');
   const playbackEngineRef = useRef<PlaybackEngine | null>(null);
-  const nativeClockAnchorRef = useRef<NativeClockAnchor | null>(null);
-  const nativeBridgeLatencyRef = useRef<number>(0);
   const oscBufferRef = useRef<Float32Array | null>(null);
   const audioReactiveRef = useRef<Float32Array | null>(null);
   const playbackStateRef = useRef<PlaybackState>({
@@ -143,12 +136,7 @@ export function useLibOpenMPTRefs(): LibOpenMPTRefs {
     lastChannelStatePublishMsRef,
     noteAgesScratchRef,
     userModuleLoadedRef,
-    nativeEngineRef,
-    nativeSharedBufferRef,
-    activeEngineRef,
     playbackEngineRef,
-    nativeClockAnchorRef,
-    nativeBridgeLatencyRef,
     oscBufferRef,
     audioReactiveRef,
     playbackStateRef,

@@ -128,8 +128,6 @@ export interface LibOpenMPT {
   HEAPF32: Float32Array;
 }
 
-export type AudioEngine = 'worklet' | 'native-worklet' | 'scriptprocessor';
-
 // Web Worker parse protocol
 export interface WorkerParseRequest {
   type: 'parse';

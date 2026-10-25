@@ -25,7 +25,8 @@ export interface UseAppTestHooksParams {
   loadFile: (fileData: Uint8Array, fileName: string) => void | Promise<void>;
   setPlaybackRowFraction: (value: number) => void;
   playbackStateRef: MutableRefObject<PlaybackState>;
-  activeEngine: string;
+  /** The engine rendering the current playback (null before the first play). */
+  getPlaybackEngine: () => 'worklet' | 'scriptprocessor' | null;
   liteMode: boolean;
   getMasterGainValue: () => number | null;
   getMasterPanValue: () => number | null;
@@ -49,7 +50,7 @@ export function useAppTestHooks(params: UseAppTestHooksParams): void {
     loadFile,
     setPlaybackRowFraction,
     playbackStateRef,
-    activeEngine,
+    getPlaybackEngine,
     liteMode,
     getMasterGainValue,
     getMasterPanValue,
@@ -75,8 +76,8 @@ export function useAppTestHooks(params: UseAppTestHooksParams): void {
       getIsPlaying: () => isPlaying,
       getTransportState: () => deriveTransportState(isPlaying, isPaused),
       getAudioContextState: () => getAudioContext()?.state ?? 'none',
-      // #411 acceptance: a JS play and an ?engine=native play in the same tab
-      // must report the same state and rate — there is one context per session.
+      // #411 acceptance: every play in a tab reports the same state and rate —
+      // there is one context per session.
       getAudioContextSampleRate: () => getAudioContext()?.sampleRate ?? 0,
       isModuleLoaded: () => isModuleLoaded,
       getPatternRenderer: () => window.currentPatternRenderer,
@@ -166,7 +167,8 @@ export function useAppTestHooks(params: UseAppTestHooksParams): void {
       getPlaybackRow: () => Math.floor(playbackStateRef.current.playheadRow),
       getPlaybackRowFraction: () => playbackStateRef.current.playheadRow,
       getActiveRenderer: () => window.currentPatternRenderer?.backend ?? null,
-      getAudioEngine: () => activeEngine,
+      // The JS worklet is the only engine; report the ScriptProcessor fallback when it took over.
+      getAudioEngine: () => getPlaybackEngine() ?? 'worklet',
       getLiteMode: () => liteMode,
       getShaderFile: () => {
         const raw = localStorage.getItem('xasm1_last_shader');
@@ -241,5 +243,5 @@ export function useAppTestHooks(params: UseAppTestHooksParams): void {
       setMasterPan: (value: number) => applyAudioMasterLevels(volume, Math.max(-1, Math.min(1, value))),
     };
     return () => { delete window.__TEST_HOOKS__; };
-  }, [seekToStep, stopMusic, pause, playGuarded, isPlaying, isPaused, isModuleLoaded, sequencerMatrix, loadFile, setPlaybackRowFraction, playbackStateRef, activeEngine, liteMode, getMasterGainValue, getMasterPanValue, applyAudioMasterLevels, volume, pan]);
+  }, [seekToStep, stopMusic, pause, playGuarded, isPlaying, isPaused, isModuleLoaded, sequencerMatrix, loadFile, setPlaybackRowFraction, playbackStateRef, getPlaybackEngine, liteMode, getMasterGainValue, getMasterPanValue, applyAudioMasterLevels, volume, pan]);
 }

@@ -1,5 +1,7 @@
 # Native vs JS worklet — informal main-thread cost notes
 
+> **Superseded:** the native engine was retired — see `docs/ADR-native-engine.md`. Kept as a historical record; the files, scripts and CI jobs it names are gone from `main`.
+
 **Status:** Methodology + recorded JS rows (main-thread cost baseline; **real-WASM vs wasm2js engine** — see the last subsection under *Recorded runs*). The native column needs
 an emsdk 3.1.51 host (see *Recorded runs*).  
 **Date:** 2026-07-25 (methodology) / 2026-09-18 (recorded rows)  

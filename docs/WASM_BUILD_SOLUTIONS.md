@@ -1,91 +1,21 @@
-# OpenMPT Native WASM Build
+# OpenMPT Native WASM Build — retired
 
-## Single supported path
+The native C++ AudioWorklet engine (`npm run build:emcc` → `public/worklets/openmpt-native.{js,wasm,aw.js}`,
+`scripts/build-wasm.sh`, `verify:native-exports`, `native-wasm-scheduled.yml`) was removed. The decision and its
+benchmarks are in `docs/ADR-native-engine.md`; the last version of this guide is in git history.
 
-| Command | Output | Notes |
-|---------|--------|--------|
-| **`npm run build:emcc`** | `public/worklets/openmpt-native.{js,wasm,aw.js}` | **Canonical** |
-| `npm run build:worklet` | same | Deprecated alias name → same script |
-| `./build-wasm.sh` | same | Deprecated root wrapper → `scripts/build-wasm.sh` |
-
-**Never** writes `public/worklets/openmpt-worklet.js` — that file is the tracked **JS** AudioWorklet processor (production audio path).
-
-## Emscripten pin
-
-CI and docs use **emsdk 3.1.51**:
+The only WASM build left is the JS engine's real-WASM libopenmpt:
 
 ```bash
-git clone https://github.com/emscripten-core/emsdk.git
-cd emsdk
-./emsdk install 3.1.51
-./emsdk activate 3.1.51
-source ./emsdk_env.sh
+# emsdk 3.1.51 (CI pin)
+source /path/to/emsdk/emsdk_env.sh
+npm run build:js-libopenmpt     # scripts/build-js-libopenmpt.sh → public/worklets/libopenmpt-worklet.{js,wasm} (committed)
+npm run verify:js-libopenmpt    # no emsdk needed
 ```
 
-Override for experiments only: `EMSDK_PIN=latest npm run build:emcc`.
-
-## Flags (scripts/build-wasm.sh)
-
-| Mode | Flags |
-|------|--------|
-| Release (default) | `-O3 -DNDEBUG -flto=thin -msimd128`, `MALLOC=emmalloc` |
-| `--debug` | `-O0 -g -DDEBUG -sASSERTIONS=2`, growth on, `INITIAL_MEMORY=128mb`, `MAXIMUM_MEMORY=256mb` |
-| `--safe-heap` | `-sSAFE_HEAP=1` (slow) |
-| `--grow` | `ALLOW_MEMORY_GROWTH=1` + `MAXIMUM_MEMORY=512mb` (huge ITs) |
-| Always | `AUDIO_WORKLET`, `WASM_WORKERS`, `MODULARIZE`, `EXPORT_ES6=1`, `EXPORT_NAME=createOpenMPTModule`, worklet stack 128 KiB |
-| Release heap | `ALLOW_MEMORY_GROWTH=0`, `INITIAL_MEMORY=128mb` (hard cap unless `--grow`) |
-| Runtime methods | ccall, cwrap, UTF8ToString, getValue, setValue, emscriptenGetAudioObject, emscriptenRegisterAudioObject |
-
-## Local build
-
-```bash
-source ~/emsdk/emsdk_env.sh   # or /opt/emsdk/emsdk_env.sh
-cd /path/to/mod-player
-npm run build:emcc
-# optional: npm run build:emcc -- --debug
-ls -lh public/worklets/openmpt-native.*
-```
-
-libopenmpt **0.8.4** is downloaded into `vendor/` automatically if missing. Each mode builds in its own tree (`vendor/libopenmpt-0.8.4+release-native-release`, `…-native-debug`). When that tree's `bin/libopenmpt.a` already exists **and its `bin/.native-flags` stamp matches the current flags** (local prior build or CI `actions/cache`), `build-wasm.sh` skips the multi-minute `make` and only re-links thin C++. Editing `LIBOPENMPT_*_FLAGS` changes the stamp, so the archive rebuilds by itself — nothing to delete by hand. `scripts/build-wasm.sh --print-flag-stamp [--debug]` prints the stamp (no emcc needed); CI uses it as the cache key.
-
-### Runtime engine override
-
-After building artifacts, the app still defaults to the JS worklet (`auto`). To opt into native, use `?engine=native` or the UI toggle. To force JS while a stored native preference exists:
-
-- URL: `?engine=js`
-- Storage: `localStorage.xasm1_audio_engine = 'js'` (or omit / `auto` for prefer-when-present)
-
-See `public/worklets/README.md` for full precedence. CI: scheduled + path-filtered jobs cache the per-mode tree under the exact key `libopenmpt-native-<os>-<mode>-<stamp>` (no `restore-keys`: a prefix fallback used to restore an archive built with other flags).
-
-## Verify exports stay in sync
-
-```bash
-npm run verify:native-exports
-```
-
-Checks `EXPORTED_FUNCTIONS` in `scripts/build-wasm.sh` against:
-
-- `EMSCRIPTEN_KEEPALIVE` in `cpp/worklet_processor.cpp`
-- Required symbols used by `audio-worklet/OpenMPTWorkletEngine.ts`
-
-## Docker (optional)
-
-```dockerfile
-FROM emscripten/emsdk:3.1.51
-WORKDIR /build
-COPY . .
-RUN bash scripts/build-wasm.sh
-```
-
-Copy only `public/worklets/openmpt-native.*` out of the image — never replace `openmpt-worklet.js`.
-
-## CI
-
-| Workflow | When | What |
-|----------|------|------|
-| `ci.yml` → `wasm-smoke-test` | Every PR/push | Script safety, shellcheck (warning+), `verify:native-exports`, emsdk **3.1.51** pin |
-| `native-wasm-scheduled.yml` | Weekly + manual | Full `npm run build:emcc`, artifact upload, JS worklet integrity check |
+Flags, consumers and the load sequence: `public/worklets/README.md`. CI rebuilds the pair in `js-libopenmpt-rebuild`
+(`.github/workflows/ci.yml`) and fails if the committed files drift from a fresh build.
 
 ## Historical footgun (fixed)
 
-The old root `build-wasm.sh` (since deleted) used `-o public/worklets/openmpt-worklet.js` and even `rm -rf public/worklets`, destroying the production JS processor. That path is retired; see `public/worklets/README.md` and `AGENTS.md`.
+The old root `build-wasm.sh` (since deleted) used `-o public/worklets/openmpt-worklet.js` and even `rm -rf public/worklets`, destroying the production JS processor. `public/worklets/openmpt-worklet.js` is now generated by `npm run build:js-worklet`; no build script may write it.

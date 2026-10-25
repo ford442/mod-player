@@ -199,7 +199,7 @@ export function compensateWorkletSampleTime(
   return workletTime;
 }
 
-/** Apply a worklet/native position report and update rolling row-rate estimate. */
+/** Apply a worklet position report and update rolling row-rate estimate. */
 export function applyWorkletPositionSample(
   refs: WorkletPositionRefs,
   data: WorkletPositionInput,

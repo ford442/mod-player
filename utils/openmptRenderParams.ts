@@ -22,7 +22,7 @@ export const OPENMPT_MODULE_RENDER_VOLUMERAMPING_STRENGTH = 4;
 
 /** Cubic. ScriptProcessor fallback, and the JS worklet's opt-down (`?interp=4`) for weak devices. */
 export const INTERPOLATION_CUBIC = 4;
-/** Sinc+LP. Default for native and JS-worklet live playback, and offline HQ export. */
+/** Sinc+LP. Default for JS-worklet live playback and offline HQ export. */
 export const INTERPOLATION_SINC_LP = 8;
 
 export type OpenMPTInterpolationLength = 1 | 2 | 4 | 8;

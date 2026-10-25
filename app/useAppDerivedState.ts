@@ -18,7 +18,6 @@ export interface UseAppDerivedStateParams {
   isModuleLoaded: boolean;
   sequencerMatrix: PatternMatrix | null;
   status: string;
-  activeEngine: string;
   totalPatternRows: number;
   instrumentNames: string[];
   sampleNames: string[];
@@ -54,7 +53,6 @@ export function useAppDerivedState(params: UseAppDerivedStateParams) {
     isModuleLoaded,
     sequencerMatrix,
     status,
-    activeEngine,
     totalPatternRows,
     instrumentNames,
     sampleNames,
@@ -98,7 +96,7 @@ export function useAppDerivedState(params: UseAppDerivedStateParams) {
     return {
       title: status.replace(/^Loaded "/, '').replace(/"$/, '') || 'Unknown',
       artist: '',
-      tracker: activeEngine === 'native-worklet' ? 'Native C++/Wasm' : activeEngine === 'worklet' ? 'JS AudioWorklet' : 'ScriptProcessor',
+      tracker: 'JS AudioWorklet',
       numChannels: sequencerMatrix?.numChannels ?? 0,
       numOrders: totalPatternRows > 0 ? Math.ceil(totalPatternRows / (sequencerMatrix?.numRows || 64)) : 0,
       numPatterns: 0,
@@ -115,7 +113,6 @@ export function useAppDerivedState(params: UseAppDerivedStateParams) {
     isModuleLoaded,
     sequencerMatrix,
     status,
-    activeEngine,
     totalPatternRows,
     instrumentNames,
     sampleNames,

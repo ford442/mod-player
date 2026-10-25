@@ -163,15 +163,3 @@ describe('jsWorkletDispatch onmessage path', () => {
     expect(result.kind).toBe('projectm-pcm');
   });
 });
-
-describe('native path decode (PositionInfo fixture)', () => {
-  it('decodePositionInfo is used by OpenMPTWorkletEngine poll path', async () => {
-    const { readFileSync } = await import('node:fs');
-    const { join, resolve } = await import('node:path');
-    const { fileURLToPath } = await import('node:url');
-    const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
-    const engineSrc = readFileSync(join(ROOT, 'audio-worklet/OpenMPTWorkletEngine.ts'), 'utf8');
-    expect(engineSrc).toContain('decodePositionInfo');
-    expect(engineSrc).not.toContain('POS_OFFSET_POSITION_MS');
-  });
-});

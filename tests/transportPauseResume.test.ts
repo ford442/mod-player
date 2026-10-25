@@ -41,7 +41,6 @@ function makeSample(overrides: Partial<WorkletPositionSample> = {}): WorkletPosi
 function makeRefs() {
   const audioCtx = makeAudioContext();
   const node = makeNode();
-  const nativeEngine = { pause: vi.fn(), play: vi.fn() };
   const updateUI = vi.fn();
   const refs = {
     libopenmptRef: ref(null),
@@ -52,11 +51,7 @@ function makeRefs() {
     spRightBufPtr: ref(0),
     spFallbackTriggered: ref(false),
     audioWorkletNodeRef: ref(node),
-    nativeEngineRef: ref<typeof nativeEngine | null>(null),
-    // Selection state (what the UI/engine toggle says) vs the engine that actually started playback.
-    activeEngineRef: ref<'worklet' | 'native-worklet'>('worklet'),
-    playbackEngineRef: ref<'worklet' | 'native-worklet' | 'scriptprocessor' | null>('worklet'),
-    nativeClockAnchorRef: ref<object | null>(null),
+    playbackEngineRef: ref<'worklet' | 'scriptprocessor' | null>('worklet'),
     animationFrameHandle: ref(0),
     updateUIRef: ref(updateUI),
     uiLoopActiveRef: ref(false),
@@ -92,13 +87,13 @@ function makeRefs() {
     setModuleFormat: vi.fn(),
     setModuleComments: vi.fn(),
   };
-  return { refs, setters, audioCtx, node, nativeEngine, updateUI };
+  return { refs, setters, audioCtx, node, updateUI };
 }
 
 type Fixture = ReturnType<typeof makeRefs>;
 
 function actions(f: Fixture) {
-  const deps = { refs: f.refs as unknown as LibOpenMPTRefs, setters: f.setters as never, activeEngine: 'worklet' as const };
+  const deps = { refs: f.refs as unknown as LibOpenMPTRefs, setters: f.setters as never };
   return {
     stop: createStopMusic(deps),
     pause: createPauseMusic(deps),
@@ -280,36 +275,6 @@ describe('transport state machine (worklet engine)', () => {
   });
 });
 
-describe('transport state machine (native engine)', () => {
-  beforeEach(() => {
-    vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1));
-    vi.stubGlobal('cancelAnimationFrame', vi.fn());
-  });
-  afterEach(() => vi.unstubAllGlobals());
-
-  it('pauses and resumes through the engine exports, not the worklet port, and drops the stale clock anchor', () => {
-    const f = makeRefs();
-    f.refs.activeEngineRef.current = 'native-worklet';
-    f.refs.playbackEngineRef.current = 'native-worklet';
-    f.refs.nativeEngineRef.current = f.nativeEngine;
-    f.refs.nativeClockAnchorRef.current = { frameSecondsAtAnchor: 0, mainHeardTimeAtAnchor: 9, bridgeLatencySec: 0 };
-    startPlaying(f);
-    const { pause, resume } = actions(f);
-
-    pause();
-    expect(f.nativeEngine.pause).toHaveBeenCalledTimes(1);
-    expect(f.node.port.postMessage).not.toHaveBeenCalled();
-    // The native clock anchor survives the pause itself.
-    expect(f.refs.nativeClockAnchorRef.current).not.toBeNull();
-
-    resume();
-    expect(f.nativeEngine.play).toHaveBeenCalledTimes(1);
-    expect(f.node.port.postMessage).not.toHaveBeenCalled();
-    // The frame clock stopped while paused, so the anchor that mapped it is stale.
-    expect(f.refs.nativeClockAnchorRef.current).toBeNull();
-  });
-});
-
 describe('which engine pause/resume drive', () => {
   beforeEach(() => {
     vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1));
@@ -317,29 +282,21 @@ describe('which engine pause/resume drive', () => {
   });
   afterEach(() => vi.unstubAllGlobals());
 
-  it('follows the engine that started playback, not the selection state (failed native start → JS fallback)', () => {
-    // Real-browser finding: after a failed native start the app falls back to the JS worklet but
-    // activeEngine still says native, and a native engine object exists. Pausing the "selected" engine
-    // left the audio playing.
+  it('drives the JS worklet port when the worklet started playback', () => {
     const f = makeRefs();
-    f.refs.activeEngineRef.current = 'native-worklet';
-    f.refs.nativeEngineRef.current = f.nativeEngine;
     f.refs.playbackEngineRef.current = 'worklet';
     startPlaying(f);
     const { pause, resume } = actions(f);
 
     pause();
     expect(messageTypes(f)).toEqual([MAIN_TO_WORKLET.pause]);
-    expect(f.nativeEngine.pause).not.toHaveBeenCalled();
 
     resume();
     expect(messageTypes(f)).toEqual([MAIN_TO_WORKLET.pause, MAIN_TO_WORKLET.play]);
-    expect(f.nativeEngine.play).not.toHaveBeenCalled();
   });
 
   it('the ScriptProcessor fallback is paused by the flag alone — no engine or port is touched', () => {
     const f = makeRefs();
-    f.refs.nativeEngineRef.current = f.nativeEngine;
     f.refs.playbackEngineRef.current = 'scriptprocessor';
     f.refs.audioWorkletNodeRef.current = null as never;
     startPlaying(f);
@@ -347,12 +304,10 @@ describe('which engine pause/resume drive', () => {
 
     pause();
     expect(f.refs.isPausedRef.current).toBe(true);
-    expect(f.nativeEngine.pause).not.toHaveBeenCalled();
     expect(f.node.port.postMessage).not.toHaveBeenCalled();
 
     resume();
     expect(f.refs.isPlayingRef.current).toBe(true);
-    expect(f.nativeEngine.play).not.toHaveBeenCalled();
     expect(f.node.port.postMessage).not.toHaveBeenCalled();
   });
 });
@@ -397,7 +352,6 @@ describe('UI loop playhead across a pause (createUpdateUI)', () => {
     const updateUI = createUpdateUI({
       refs: f.refs as unknown as LibOpenMPTRefs,
       setters: uiSetters as never,
-      activeEngine: 'worklet',
       kickTrigger: 0,
       grooveAmount: 0,
     });

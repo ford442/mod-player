@@ -252,7 +252,7 @@ jobs:
           echo "preview failed to start"; exit 1
 
       - name: Playhead acceptance (JS worklet)
-        run: BASE_URL=http://127.0.0.1:4173 OUTPUT_DIR=./artifacts/playhead-acceptance AUDIO_ENGINE=js npm run smoke:playhead
+        run: BASE_URL=http://127.0.0.1:4173 OUTPUT_DIR=./artifacts/playhead-acceptance npm run smoke:playhead
 
       - name: Upload playhead artifacts on failure
         if: failure()
@@ -267,60 +267,27 @@ jobs:
         run: |
           if [ -f /tmp/preview-playhead.pid ]; then kill $(cat /tmp/preview-playhead.pid) 2>/dev/null || true; fi
 
-  wasm-smoke-test:
+  # The libopenmpt build script is only run by js-libopenmpt-rebuild (path-filtered), so lint it on
+  # every PR. Needs no emsdk.
+  build-scripts:
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: Checkout
         uses: actions/checkout@v7
-      
-      # Pin must match scripts/build-wasm.sh EMSDK_PIN and docs
-      - name: Setup Emscripten
-        uses: mymindstorm/setup-emsdk@v14
-        with:
-          version: '3.1.51'
-      
-      - name: Verify emcc
-        run: emcc --version
-      
-      - name: Check native build script (canonical path)
-        run: |
-          if [ ! -f scripts/build-wasm.sh ]; then echo "❌ scripts/build-wasm.sh missing"; false; fi
-          # Must not clobber tracked JS worklet
-          if grep -E -- '-o[[:space:]]+public/worklets/openmpt-worklet' scripts/build-wasm.sh; then
-            echo "❌ scripts/build-wasm.sh must not write openmpt-worklet.*"; false
-          fi
-          if grep -E 'rm[[:space:]]+-rf[[:space:]]+public/worklets' scripts/build-wasm.sh; then
-            echo "❌ build scripts must not rm -rf public/worklets"; false
-          fi
-          echo "✅ Native build script present and safe"
-      
-      - name: Setup Node.js (for dependencies)
-        uses: actions/setup-node@v7
-        with:
-          node-version: '22'
-          cache: 'npm'
-      
-      - name: Install dependencies
-        run: npm ci
-      
-      - name: Verify native EXPORTED_FUNCTIONS vs TS/C++
-        run: npm run verify:native-exports
-      
-      # Full emcc link runs in native-full-build (path-filtered) + scheduled workflow.
+
       - name: Shellcheck / syntax-check build scripts
-        # Findings fail the job. (This step used to be `shellcheck ... || true` behind a
-        # "tool is installed" check, so it could never fail and silently skipped if shellcheck was absent.)
-        # Gated at warning+: info/style notes (e.g. SC2015 on the deliberate `A && B || true` idiom)
-        # differ between shellcheck versions, so gating on them would flap whenever the runner image updates.
+        # Findings fail the job. Gated at warning+: info/style notes (e.g. SC2015 on the deliberate
+        # `A && B || true` idiom) differ between shellcheck versions, so gating on them would flap
+        # whenever the runner image updates.
         run: |
           command -v shellcheck >/dev/null || { echo "❌ shellcheck is not installed on this runner"; exit 1; }
-          for f in scripts/build-wasm.sh scripts/build-js-libopenmpt.sh; do
+          for f in scripts/*.sh; do
             shellcheck --severity=warning "$f"
             bash -n "$f"
             echo "✅ $f clean"
           done
-      
+
       - name: Guard tracked JS worklet still present
         run: |
           test -f public/worklets/openmpt-worklet.js
@@ -391,161 +358,3 @@ jobs:
       - name: Verify rebuilt artifacts
         if: steps.filter.outputs.jsengine == 'true'
         run: node scripts/verify-js-libopenmpt.mjs --smoke
-
-  # Full native link when C++/build/audio-worklet surfaces change.
-  # Uses cached libopenmpt.a so PR wall time stays reasonable on cache hits.
-  native-full-build:
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    if: |
-      github.event_name == 'push' ||
-      github.event_name == 'pull_request'
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-
-      - name: Detect native-related path changes
-        id: filter
-        uses: dorny/paths-filter@v3
-        with:
-          filters: |
-            native:
-              - 'cpp/**'
-              - 'scripts/build-wasm.sh'
-              - 'scripts/playhead-acceptance.mjs'
-              - 'audio-worklet/**'
-              - 'hooks/useAudioGraph.ts'
-              - 'hooks/audioGraph/**'
-              - 'utils/nativeClockAnchor.ts'
-              - 'utils/nativeParityGate.ts'
-              - 'utils/workletPositionAdapter.ts'
-              - 'utils/audioContextFactory.ts'
-              - '.github/workflows/ci.yml'
-              - '.github/workflows/native-wasm-scheduled.yml'
-
-      - name: Setup Emscripten
-        if: steps.filter.outputs.native == 'true'
-        uses: mymindstorm/setup-emsdk@v14
-        with:
-          version: '3.1.51'
-
-      - name: Setup Node.js
-        if: steps.filter.outputs.native == 'true'
-        uses: actions/setup-node@v7
-        with:
-          node-version: '22'
-          cache: 'npm'
-
-      - name: Install dependencies
-        if: steps.filter.outputs.native == 'true'
-        run: npm ci
-
-      # The stamp covers mode, emsdk pin, libopenmpt version and every flag that shapes libopenmpt.a
-      # (scripts/build-wasm.sh). Printing it needs no toolchain.
-      - name: Compute libopenmpt flag stamp (release)
-        id: libopenmpt_stamp
-        if: steps.filter.outputs.native == 'true'
-        run: |
-          stamp="$(bash scripts/build-wasm.sh --print-flag-stamp)"
-          if [[ ! "$stamp" =~ ^[0-9a-f]{16}$ ]]; then echo "❌ unexpected flag stamp: '$stamp'" >&2; exit 1; fi
-          echo "stamp=$stamp" >> "$GITHUB_OUTPUT"
-
-      - name: Cache libopenmpt static library
-        if: steps.filter.outputs.native == 'true'
-        uses: actions/cache@v6
-        with:
-          path: vendor/libopenmpt-0.8.4+release-native-release
-          # Exact key only — NO restore-keys. A prefix fallback restored a libopenmpt.a built with
-          # other flags, and the build script then trusted whatever archive it found.
-          key: libopenmpt-native-${{ runner.os }}-release-${{ steps.libopenmpt_stamp.outputs.stamp }}
-
-      - name: Snapshot tracked JS worklet
-        if: steps.filter.outputs.native == 'true'
-        run: |
-          test -f public/worklets/openmpt-worklet.js
-          cksum public/worklets/openmpt-worklet.js | tee /tmp/worklet-before.cksum
-          grep -q 'registerProcessor\|AudioWorkletProcessor' public/worklets/openmpt-worklet.js
-
-      - name: Verify native exports
-        if: steps.filter.outputs.native == 'true'
-        run: npm run verify:native-exports
-
-      - name: Build native engine (full emcc link)
-        if: steps.filter.outputs.native == 'true'
-        run: npm run build:emcc
-
-      - name: Assert tracked JS worklet unchanged
-        if: steps.filter.outputs.native == 'true'
-        run: |
-          cksum public/worklets/openmpt-worklet.js | tee /tmp/worklet-after.cksum
-          diff /tmp/worklet-before.cksum /tmp/worklet-after.cksum
-          grep -q 'registerProcessor\|AudioWorkletProcessor' public/worklets/openmpt-worklet.js
-          echo "✅ Tracked JS worklet intact after native build"
-
-      - name: Verify native artifacts
-        if: steps.filter.outputs.native == 'true'
-        run: |
-          for f in public/worklets/openmpt-native.js public/worklets/openmpt-native.wasm public/worklets/openmpt-native.aw.js; do
-            if [ ! -f "$f" ]; then echo "❌ missing $f"; false; fi
-          done
-          head -c 4 public/worklets/openmpt-native.wasm | od -An -tx1 | grep -q '00 61 73 6d'
-          echo "✅ openmpt-native.* artifacts present"
-
-      - name: Verify native SIMD survived the link
-        if: steps.filter.outputs.native == 'true'
-        run: npm run verify:native-simd
-
-      - name: Upload native artifacts
-        if: steps.filter.outputs.native == 'true'
-        uses: actions/upload-artifact@v7
-        with:
-          name: openmpt-native-pr-emsdk-3.1.51
-          path: |
-            public/worklets/openmpt-native.js
-            public/worklets/openmpt-native.wasm
-            public/worklets/openmpt-native.aw.js
-          retention-days: 7
-
-      - name: Install Playwright Chromium
-        if: steps.filter.outputs.native == 'true'
-        run: npx playwright install chromium --with-deps
-
-      - name: Start preview for native playhead parity
-        if: steps.filter.outputs.native == 'true'
-        run: |
-          VITE_APP_BASE_PATH=/ npm run build
-          npm run preview -- --port 4173 --host 127.0.0.1 &
-          echo $! > /tmp/preview-native-playhead.pid
-          for i in $(seq 1 30); do
-            if curl -sf http://127.0.0.1:4173/ >/dev/null; then echo "preview ready"; exit 0; fi
-            sleep 2
-          done
-          echo "preview failed to start"; exit 1
-
-      - name: Playhead acceptance (native engine parity)
-        if: steps.filter.outputs.native == 'true'
-        run: |
-          BASE_URL=http://127.0.0.1:4173 \
-          OUTPUT_DIR=./artifacts/playhead-acceptance-native \
-          AUDIO_ENGINE=native \
-          npm run smoke:playhead
-
-      - name: Upload native playhead artifacts on failure
-        if: failure() && steps.filter.outputs.native == 'true'
-        uses: actions/upload-artifact@v7
-        with:
-          name: playhead-native-smoke-failure
-          path: artifacts/playhead-acceptance-native/
-          retention-days: 7
-
-      - name: Stop native preview server
-        if: always() && steps.filter.outputs.native == 'true'
-        run: |
-          if [ -f /tmp/preview-native-playhead.pid ]; then kill $(cat /tmp/preview-native-playhead.pid) 2>/dev/null || true; fi
-
-      - name: Skip full build (no native paths changed)
-        if: steps.filter.outputs.native != 'true'
-        run: echo "⏭️ Skipping full build:emcc — no cpp/scripts/audio-worklet path changes"

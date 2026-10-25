@@ -1,5 +1,7 @@
 # Native C++ Engine Platform Epic
 
+> **Superseded:** the native engine was retired — see `docs/ADR-native-engine.md`. Kept as a historical record; the files, scripts and CI jobs it names are gone from `main`.
+
 **Status:** Nearly complete (P2) — clock reset + hard parity smoke + scheduled native playhead (2026-08)  
 **Depends on (done):** dual-build hygiene (`openmpt-native.*` vs `openmpt-worklet.js`), playhead prediction foundation, PR #393 clock anchor/gate  
 **Last audited:** 2026-08-15  

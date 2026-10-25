@@ -119,7 +119,7 @@ No golden-image baseline is required to interpret a failure: the coverage map an
 - Module loads via `window.__TEST_HOOKS__.loadModuleFromUrl`
 - Canvas / HTML fallback renders (non-blank screenshot + `readPixels` when available)
 - Console hard-fails on: bounds violations, buffer mismatches, `[DURA-PARITY]` errors (without ✓)
-- Captures: `activeRenderer`, `audioEngine` (worklet / native / ScriptProcessor), `liteMode`
+- Captures: `activeRenderer`, `audioEngine` (worklet / ScriptProcessor), `liteMode`
 - Seeks rows `0, 8, 16` and captures frames
 - **Structural coverage assertions** per layout-aware region (see above)
 

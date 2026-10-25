@@ -56,7 +56,7 @@ describe('JS engine libopenmpt artifacts (real WASM)', () => {
     const result = await smokeArtifacts();
     expect(result.errors).toEqual([]);
     expect(result.peak).toBeGreaterThan(0.01);
-    // Evaluating the glue must leave the real WebAssembly API in place (native engine needs it).
+    // Evaluating the glue must leave the real WebAssembly API in place (CLAUDE.md pitfall 4).
     expect(globalThis.WebAssembly).toBe(wasmBefore);
   }, 60_000);
 });

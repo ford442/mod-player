@@ -74,7 +74,6 @@ export interface UsePlayerFeaturesValueParams {
   isExporting: boolean;
   captureState: PerformanceCaptureState;
   isRecording: boolean;
-  activeEngine: string;
 }
 
 export function usePlayerFeaturesValue(params: UsePlayerFeaturesValueParams): PlayerFeaturesValue {
@@ -129,7 +128,6 @@ export function usePlayerFeaturesValue(params: UsePlayerFeaturesValueParams): Pl
     isExporting,
     captureState,
     isRecording,
-    activeEngine,
   } = params;
 
   return useMemo((): PlayerFeaturesValue => ({
@@ -223,6 +221,6 @@ export function usePlayerFeaturesValue(params: UsePlayerFeaturesValueParams): Pl
     saveSongErrorMessage, patternEdit, handlePatternCellEdit, handlePatternCellPatch,
     handlePatternCellClear, handleSequencerCellEdit, handlePatternRevert, handleExportPatternDump,
     midiControls, handleExportWav, handleStartCapture, stopCapture, offlineExportState,
-    isExporting, captureState, isRecording, activeEngine, setMediaVisible, setMediaItem, setMediaFades,
+    isExporting, captureState, isRecording, setMediaVisible, setMediaItem, setMediaFades,
   ]);
 }

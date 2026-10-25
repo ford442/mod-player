@@ -6,8 +6,8 @@ Run after any audio-path or playhead-prediction change. Use headphones or speake
 
 ```bash
 npm run dev
-# Diagnostic URL (force JS worklet + pin shader):
-open 'http://localhost:5173/?engine=js&webgl2=1&shader=patternv0.30b.wgsl'
+# Diagnostic URL (pin shader):
+open 'http://localhost:5173/?webgl2=1&shader=patternv0.30b.wgsl'
 ```
 
 Optional playhead diagnostics:
@@ -119,7 +119,7 @@ Ignoring stale worklet loaded ack   (occasional once is OK during fast switching
 
 ## Exit criteria (Phase 1)
 
-- [ ] All checklist items pass on Chrome with `?engine=js`
+- [ ] All checklist items pass on Chrome
 - [ ] `npm test -- worklet` — lifecycle guards green
 - [ ] `npm run smoke:playhead` — median |lagRows| &lt; 1.0
 - [ ] No 440 Hz tone, no silent "Playing" on common paths

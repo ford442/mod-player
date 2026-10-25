@@ -10,10 +10,6 @@ import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import {
-  classifyNativeEngine,
-  formatNativeEngineSummary,
-} from './nativeEngineArtifacts.mjs';
 
 const BUILD_DIR = process.env.BUILD_DIR || 'dist';
 const PROJECT_NAME = process.env.PROJECT_NAME || 'xm-player';
@@ -244,35 +240,18 @@ try {
   );
 }
 
-// Optional native C++/Emscripten engine (gitignored until `npm run build:emcc`).
-// Absent is OK (JS worklet remains the default) unless the build opted into
-// native via VITE_NATIVE_PARITY_GATE=1 — then a missing trio means the gate
-// promises an engine the dist doesn't ship. Partial or invalid is always a
-// broken dist and must fail. See scripts/nativeEngineArtifacts.mjs.
+// The native C++ engine is retired (docs/ADR-native-engine.md). Its old outputs
+// are gitignored, so a stale local build can still sit in public/worklets/ and
+// be copied into dist/ — never deploy one.
 {
-  const native = classifyNativeEngine(join(BUILD_DIR, 'worklets'));
-  if (native.status === 'complete') {
-    console.log(formatNativeEngineSummary(native));
-  } else if (native.status === 'absent' && process.env.VITE_NATIVE_PARITY_GATE === '1') {
+  const worklets = join(BUILD_DIR, 'worklets');
+  const stale = existsSync(worklets)
+    ? readdirSync(worklets).filter((f) => f.startsWith('openmpt-native'))
+    : [];
+  if (stale.length > 0) {
     errors.push(
-      'VITE_NATIVE_PARITY_GATE=1 but native engine artifacts (openmpt-native.*) are absent from dist/worklets/ — run `npm run build:emcc` first',
+      `retired native engine files in ${worklets}: ${stale.join(', ')} — delete them from public/worklets/ and rebuild`,
     );
-  } else if (native.status === 'absent') {
-    console.warn('');
-    console.warn('================================================================');
-    console.warn(' WARNING: native audio engine artifacts are NOT in dist/worklets/');
-    console.warn('   missing: openmpt-native.js, openmpt-native.wasm, openmpt-native.aw.js');
-    console.warn('   Run `npm run build:emcc` (emsdk 3.1.51) before this build');
-    console.warn('   if you intend to ship `?engine=native`.');
-    console.warn('   Without them, ?engine=native soft-fails to the JS worklet.');
-    console.warn('   (Unbuilt native is optional; this is not a verify-build failure.)');
-    console.warn('================================================================');
-    console.warn('');
-  } else {
-    errors.push(formatNativeEngineSummary(native));
-    for (const err of native.errors) {
-      errors.push(err);
-    }
   }
 }
 
