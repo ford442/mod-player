@@ -79,6 +79,14 @@ export function useAppTestHooks(params: UseAppTestHooksParams): void {
       // #411 acceptance: every play in a tab reports the same state and rate —
       // there is one context per session.
       getAudioContextSampleRate: () => getAudioContext()?.sampleRate ?? 0,
+      getAudioPlaybackStats: () => {
+        const stats = (getAudioContext() as (AudioContext & {
+          playbackStats?: { underrunEvents: number; underrunDuration: number; totalDuration: number };
+        }) | null)?.playbackStats;
+        return stats
+          ? { underrunEvents: stats.underrunEvents, underrunDuration: stats.underrunDuration, totalDuration: stats.totalDuration }
+          : null;
+      },
       isModuleLoaded: () => isModuleLoaded,
       getPatternRenderer: () => window.currentPatternRenderer,
       loadModuleFromUrl: async (url: string) => {

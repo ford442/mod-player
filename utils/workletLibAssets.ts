@@ -8,12 +8,23 @@
  */
 import {
   LIBOPENMPT_GLUE_FILE,
+  LIBOPENMPT_PLAYBACK_GLUE_FILE,
+  LIBOPENMPT_PLAYBACK_WASM_FILE,
   LIBOPENMPT_WASM_FILE,
   getLibOpenMPTJsUrl,
+  getLibOpenMPTPlaybackJsUrl,
+  getLibOpenMPTPlaybackWasmUrl,
   getLibOpenMPTWasmUrl,
 } from './libopenmptAssets';
 
+/**
+ * Which pair the worklet gets: `playback` (shared-memory heap; loads are created on the create
+ * worker, #513) or `shared` (the main thread's non-threaded pair; loads are created in the worklet).
+ */
+export type WorkletLibArtifact = 'playback' | 'shared';
+
 export interface WorkletLibAssets {
+  artifact: WorkletLibArtifact;
   scriptText: string;
   wasmBytes: ArrayBuffer;
 }
@@ -36,6 +47,8 @@ function previewOf(bytes: ArrayBuffer | Uint8Array): string {
 
 export interface FetchWorkletLibAssetsOptions {
   fetchImpl?: typeof fetch;
+  /** Default `shared`. */
+  artifact?: WorkletLibArtifact;
   jsUrl?: string;
   wasmUrl?: string;
 }
@@ -44,29 +57,33 @@ export async function fetchWorkletLibAssets(
   opts: FetchWorkletLibAssetsOptions = {},
 ): Promise<WorkletLibAssets> {
   const doFetch = opts.fetchImpl ?? fetch;
-  const jsUrl = opts.jsUrl ?? getLibOpenMPTJsUrl();
-  const wasmUrl = opts.wasmUrl ?? getLibOpenMPTWasmUrl();
+  const artifact = opts.artifact ?? 'shared';
+  const playback = artifact === 'playback';
+  const glueFile = playback ? LIBOPENMPT_PLAYBACK_GLUE_FILE : LIBOPENMPT_GLUE_FILE;
+  const wasmFile = playback ? LIBOPENMPT_PLAYBACK_WASM_FILE : LIBOPENMPT_WASM_FILE;
+  const jsUrl = opts.jsUrl ?? (playback ? getLibOpenMPTPlaybackJsUrl() : getLibOpenMPTJsUrl());
+  const wasmUrl = opts.wasmUrl ?? (playback ? getLibOpenMPTPlaybackWasmUrl() : getLibOpenMPTWasmUrl());
 
   const [jsResp, wasmResp] = await Promise.all([doFetch(jsUrl), doFetch(wasmUrl)]);
 
-  if (!jsResp.ok) throw new Error(`HTTP ${jsResp.status} for ${LIBOPENMPT_GLUE_FILE}`);
-  if (!wasmResp.ok) throw new Error(`HTTP ${wasmResp.status} for ${LIBOPENMPT_WASM_FILE}`);
+  if (!jsResp.ok) throw new Error(`HTTP ${jsResp.status} for ${glueFile}`);
+  if (!wasmResp.ok) throw new Error(`HTTP ${wasmResp.status} for ${wasmFile}`);
 
   const [scriptText, wasmBytes] = await Promise.all([jsResp.text(), wasmResp.arrayBuffer()]);
 
-  if (!scriptText.trim()) throw new Error(`${LIBOPENMPT_GLUE_FILE} is empty`);
+  if (!scriptText.trim()) throw new Error(`${glueFile} is empty`);
   if (looksLikeWasm2jsGlue(scriptText)) {
     throw new Error(
-      `${LIBOPENMPT_GLUE_FILE} is a wasm2js build — the JS engine requires real WebAssembly ` +
+      `${glueFile} is a wasm2js build — the JS engine requires real WebAssembly ` +
         `(rebuild with npm run build:js-libopenmpt; stale deploy?)`,
     );
   }
   if (!hasWasmMagic(wasmBytes)) {
     throw new Error(
-      `${LIBOPENMPT_WASM_FILE} is not a valid WebAssembly binary (missing \\0asm magic; ` +
+      `${wasmFile} is not a valid WebAssembly binary (missing \\0asm magic; ` +
         `starts with ${previewOf(wasmBytes)}). Refusing to hand corrupt HTML/text to the worklet.`,
     );
   }
 
-  return { scriptText, wasmBytes };
+  return { artifact, scriptText, wasmBytes };
 }

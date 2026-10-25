@@ -13,7 +13,6 @@ import { OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH } from '../../utils/op
 import {
   parseWorkletToMainMessageOrWarn,
   postInitLib,
-  postLoad,
   postPause,
   postPlay,
   postReturnPcmBuffer,
@@ -36,6 +35,12 @@ import { dispatchWorkletToMainMessage } from '../../audio-worklet/jsWorkletDispa
 import { silenceChannelStates } from '../../utils/transportClock';
 import { moduleBytesFromFileData, wireMasterOutput } from './masterGraph';
 import { runScriptProcessorFallback } from './scriptProcessorFallback';
+import {
+  attachCreateWorker,
+  postModuleLoad,
+  prepareCreateWorker,
+  wantsCreateThread,
+} from './createWorkerHost';
 import type { AudioGraphCallbacks, AudioGraphConfig, AudioGraphRefs } from './types';
 import { createLogger } from '../../utils/log';
 
@@ -247,13 +252,30 @@ export async function startJsWorkletPlayback(
       // AudioWorklet classic scripts cannot use import() or importScripts() and the worklet
       // scope has no fetch(), so both files are downloaded here (in parallel) and validated
       // (\0asm magic, not-wasm2js, not an HTML 404) before anything is posted.
+      // On a crossOriginIsolated page the worklet gets the shared-memory playback heap, so module
+      // creates can run on the create worker (#513); otherwise the main thread's own pair.
       log.log('Fetching libopenmpt assets for worklet...');
       try {
-        const assets = await fetchWorkletLibAssets();
+        let assets;
+        if (wantsCreateThread()) {
+          try {
+            assets = await fetchWorkletLibAssets({ artifact: 'playback' });
+          } catch (playbackErr) {
+            console.warn('[PLAY] libopenmpt playback heap unavailable — creating modules in the worklet:', playbackErr);
+          }
+        }
+        assets ??= await fetchWorkletLibAssets();
         libJsText = assets.scriptText;
         libWasmBuffer = assets.wasmBytes;
+        if (assets.artifact === 'playback') {
+          // compile() copies the bytes synchronously, so transferring the buffer to the worklet below is safe.
+          const wasmModule = WebAssembly.compile(libWasmBuffer);
+          wasmModule.catch(() => { /* reported when the worker host awaits it */ });
+          // The create worker boots from the same pair once the worklet announces its heap.
+          prepareCreateWorker({ scriptText: libJsText, wasmModule });
+        }
         log.log(
-          'libopenmpt assets fetched — JS:',
+          'libopenmpt assets fetched (' + assets.artifact + ') — JS:',
           libJsText.length,
           'chars, WASM:',
           libWasmBuffer.byteLength,
@@ -356,6 +378,10 @@ export async function startJsWorkletPlayback(
           break;
         }
 
+        case 'create-heap':
+          attachCreateWorker(node, result.heap);
+          break;
+
         case 'ignored':
           break;
 
@@ -420,7 +446,7 @@ export async function startJsWorkletPlayback(
       // never touches it), so when we are paused the pause must reach it BEFORE the load — acting on
       // the `loaded` ack instead would leak a few quanta of audio.
       if (refs.isPausedRef.current) node.port.postMessage(postPause());
-      node.port.postMessage(postLoad(moduleBuf));
+      postModuleLoad(node, moduleBuf);
     } else {
       console.error("[PLAY] No buffer to send to worklet!");
     }

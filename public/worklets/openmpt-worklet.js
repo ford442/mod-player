@@ -18,7 +18,9 @@
     setRenderParam: "setRenderParam",
     ctlSetText: "ctlSetText",
     /** Hands a consumed projectm-pcm buffer back to the worklet's allocation pool. */
-    returnPcmBuffer: "returnPcmBuffer"
+    returnPcmBuffer: "returnPcmBuffer",
+    /** MessagePort to the module-create worker (#513, audio-worklet/createThreadProtocol.ts). */
+    attachCreatePort: "attachCreatePort"
   };
   var WORKLET_TO_MAIN = {
     position: "position",
@@ -30,7 +32,9 @@
     needData: "needData",
     starvation: "starvation",
     projectmPcm: "projectm-pcm",
-    audioDiag: "audioDiag"
+    audioDiag: "audioDiag",
+    /** The worklet's libopenmpt is the shared-memory playback heap: memory + a stack for the create worker (#513). */
+    createHeap: "createHeap"
   };
   var ALL_MAIN_TO_WORKLET_TYPES = Object.values(MAIN_TO_WORKLET);
   var ALL_WORKLET_TO_MAIN_TYPES = Object.values(WORKLET_TO_MAIN);
@@ -95,6 +99,27 @@
         reject(new Error(`${what} aborted during init: ${String(reason)}`));
       };
     });
+  }
+
+  // audio-worklet/createThreadProtocol.ts
+  var CREATE_PORT = {
+    /** worker → worklet: a created module; the worklet now owns it. */
+    staged: "staged",
+    /** worker → worklet: create failed; the worklet reports it like an in-worklet load error. */
+    failed: "failed",
+    /** worklet → worker: a module the worklet no longer renders; the worker owns and frees it. */
+    destroy: "destroy"
+  };
+  var CREATE_THREAD_STACK_BYTES = 1 << 20;
+  var CREATE_THREAD_STACK_ALIGN = 16;
+  var CREATE_FAILED_MESSAGE = "openmpt_module_create_from_memory returned 0 (invalid format?)";
+  var STAGED_SWAP_TIMEOUT_MS = 100;
+  function alignCreateThreadStack(rawPtr, size) {
+    const a = CREATE_THREAD_STACK_ALIGN;
+    return {
+      stackLow: Math.ceil(rawPtr / a) * a,
+      stackSize: Math.floor(size / a) * a
+    };
   }
 
   // audio-worklet/js/openmpt-processor.ts
@@ -217,6 +242,13 @@
       }
       return { ok: true, message: data };
     }
+    if (type === MAIN_TO_WORKLET.attachCreatePort) {
+      const port = data.port;
+      if (!isObject(port) || typeof port.postMessage !== "function") {
+        return { ok: false, error: "attachCreatePort requires a MessagePort" };
+      }
+      return { ok: true, message: data };
+    }
     if (type == null && isModulePayload(data.moduleData)) {
       return { ok: true, message: data };
     }
@@ -237,13 +269,34 @@
     for (let i = 0; i < escaped.length; i++) bytes[i] = escaped.charCodeAt(i);
     return bytes;
   }
+  function heapBuffer(lib) {
+    return lib.wasmMemory ? lib.wasmMemory.buffer : lib.HEAPU8.buffer;
+  }
+  function heapU8(lib) {
+    const buf = heapBuffer(lib);
+    return lib.HEAPU8.buffer === buf ? lib.HEAPU8 : new Uint8Array(buf);
+  }
   function allocUtf8CString(lib, str) {
     const bytes = utf8Bytes(str);
     const ptr = lib._malloc(bytes.byteLength + 1);
     if (!ptr) throw new Error("_malloc returned 0 for ctl string");
-    lib.HEAPU8.set(bytes, ptr);
-    lib.HEAPU8[ptr + bytes.byteLength] = 0;
+    const heap = heapU8(lib);
+    heap.set(bytes, ptr);
+    heap[ptr + bytes.byteLength] = 0;
     return ptr;
+  }
+  function isPlaybackHeap(lib) {
+    return typeof SharedArrayBuffer !== "undefined" && lib.wasmMemory != null && lib.wasmMemory.buffer instanceof SharedArrayBuffer && typeof lib._emscripten_wasm_worker_initialize === "function";
+  }
+  function ensureCreateThreadStack(lib) {
+    const existing = globalThis.__openmptCreateThreadStack;
+    if (existing) return existing;
+    const raw = lib._malloc(CREATE_THREAD_STACK_BYTES + CREATE_THREAD_STACK_ALIGN);
+    if (!raw) return null;
+    const heapId = 1 + Math.floor(Math.random() * 2147483646);
+    const stack = { heapId, ...alignCreateThreadStack(raw, CREATE_THREAD_STACK_BYTES) };
+    globalThis.__openmptCreateThreadStack = stack;
+    return stack;
   }
   async function bootstrapLibOpenMPT(scriptText, wasmBytes) {
     log(
@@ -329,6 +382,12 @@
       this.pcmInterleaved = new Float32Array(this.pcmChunkSize * 2);
       this.pcmAccumCount = 0;
       this.pcmBufferPool = [];
+      this._createPort = null;
+      this._stagedPtr = 0;
+      this._stagedTimer = null;
+      this._diagMaxWallGapMs = 0;
+      this._diagLoadBlockMs = 0;
+      this._lastProcessWall = -1;
       log("Constructor called, sampleRate:", sampleRate);
       const sharedLib = globalThis.__openmptWorkletLib;
       if (sharedLib && typeof sharedLib._openmpt_module_create_from_memory2 === "function") {
@@ -373,6 +432,7 @@
           log("Playback started");
         } else if (type === MT.pause) {
           this.isPlaying = false;
+          if (this._stagedPtr) this._adoptStaged();
           log("Playback paused");
         } else if (type === MT.seek) {
           this.hasEnded = false;
@@ -404,6 +464,7 @@
           this._resetAudioDiag();
           this._diagSessionWrapProcessMs = [];
           this._lastProcessTime = -1;
+          this._lastProcessWall = -1;
         } else if (type === MT.setChannelMute) {
           if (WORKLET_DEV) {
             throw new Error("setChannelMute not implemented for JS engine yet (TODO #416)");
@@ -432,6 +493,8 @@
               lib._free(valuePtr);
             }
           }
+        } else if (type === MT.attachCreatePort) {
+          this._attachCreatePort(msg.port);
         } else if (!type) {
           await this.loadModule(msg.moduleData);
         }
@@ -486,6 +549,8 @@
       this._diagSlowOrder = 0;
       this._diagSlowRow = 0;
       this._diagMaxGapMs = 0;
+      this._diagMaxWallGapMs = 0;
+      this._diagLoadBlockMs = 0;
     }
     /** High-resolution clock for diagnostics.
      *  Do NOT use performance.now() here — in AudioWorklet it is often polyfilled
@@ -609,11 +674,120 @@
         this.isLibReady = true;
         this._resolveLib();
         log("libopenmpt ready \u2705");
+        this._announceCreateHeap(lib);
       } catch (err) {
         error("Failed to initialise libopenmpt:", err);
         this._rejectLib(err);
         this.port.postMessage({ type: WT.error, message: "Lib init failed: " + String(err) });
       }
+    }
+    // ── Create worker (#513) ────────────────────────────────────────────
+    /**
+     * On the shared playback heap, tell the main thread how a create worker can join it. The render
+     * buffers are allocated here, once, so swapping a staged module in never mallocs.
+     */
+    _announceCreateHeap(lib) {
+      if (!isPlaybackHeap(lib) || !lib.wasmMemory) return;
+      const stack = ensureCreateThreadStack(lib);
+      if (!stack) return;
+      this._ensureRenderBuffers(lib);
+      this.port.postMessage({
+        type: WT.createHeap,
+        memory: lib.wasmMemory,
+        heapId: stack.heapId,
+        stackLow: stack.stackLow,
+        stackSize: stack.stackSize
+      });
+    }
+    _ensureRenderBuffers(lib) {
+      if (!this.leftBufPtr) this.leftBufPtr = lib._malloc(4 * this.maxFrames);
+      if (!this.rightBufPtr) this.rightBufPtr = lib._malloc(4 * this.maxFrames);
+      this._heapBuffer = null;
+    }
+    _attachCreatePort(port) {
+      if (this._createPort && this._createPort !== port) this._createPort.onmessage = null;
+      this._createPort = port;
+      port.onmessage = (e) => {
+        this._onCreatePortMessage(e.data);
+      };
+    }
+    _onCreatePortMessage(data) {
+      if (!isObject(data)) return;
+      if (data.type === CREATE_PORT.staged && isNonNegInt(data.modulePtr) && data.modulePtr > 0) {
+        if (this._stagedPtr) this._retireModule(this._stagedPtr);
+        this._stagedPtr = data.modulePtr;
+        this.hasEnded = false;
+        if (!this.modulePtr || !this.isPlaying || this.faulted) {
+          this._adoptStaged();
+          return;
+        }
+        this._fadeTarget = 0;
+        if (this._stagedTimer != null) clearTimeout(this._stagedTimer);
+        this._stagedTimer = setTimeout(() => {
+          this._stagedTimer = null;
+          if (this._stagedPtr) this._adoptStaged();
+        }, STAGED_SWAP_TIMEOUT_MS);
+      } else if (data.type === CREATE_PORT.failed) {
+        const message = typeof data.message === "string" ? data.message : CREATE_FAILED_MESSAGE;
+        error("create worker: load failed:", message);
+        this.port.postMessage({ type: WT.error, message });
+      }
+    }
+    /**
+     * Swap the staged module in. Runs on the audio thread (from process() at the end of the fade,
+     * or from a message handler): pointer swap, render-param setup, two postMessages — no create,
+     * no destroy, no malloc. The replaced module goes back to the create worker to be freed.
+     */
+    _adoptStaged() {
+      const lib = this.lib;
+      const next = this._stagedPtr;
+      if (!lib || !next) return;
+      const diagStart = this._audioDiag ? this._diagNow() : 0;
+      this._stagedPtr = 0;
+      if (this._stagedTimer != null) {
+        clearTimeout(this._stagedTimer);
+        this._stagedTimer = null;
+      }
+      const previous = this.modulePtr;
+      this.modulePtr = next;
+      this.faulted = false;
+      this.hasEnded = false;
+      this._fracRowInt = -1;
+      this._rowStartPosSec = 0;
+      this._configureLoadedModule(lib, next);
+      this._fadeTarget = 1;
+      if (previous) this._retireModule(previous);
+      if (this._audioDiag) this._noteLoadBlock(this._diagNow() - diagStart);
+      log("Staged module swapped in \u2705 ptr=", next);
+      this.port.postMessage({ type: WT.loaded });
+    }
+    /** Give a module this node no longer renders back to the create worker (its free runs there). */
+    _retireModule(modulePtr) {
+      if (this._createPort) {
+        this._createPort.postMessage({ type: CREATE_PORT.destroy, modulePtr });
+        return;
+      }
+      try {
+        this.lib?._openmpt_module_destroy(modulePtr);
+      } catch (err) {
+        error("destroy of retired module failed (ignored):", err);
+      }
+    }
+    /** Per-module setup after any create: create resets render params, and heavy modules go lite. */
+    _configureLoadedModule(lib, modulePtr) {
+      lib._openmpt_module_set_render_param(
+        modulePtr,
+        OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH,
+        this._interpolationLength
+      );
+      const numCh = lib._openmpt_module_get_num_channels(modulePtr);
+      if (numCh > 16 && !this._audioLiteExplicit) {
+        this._audioLite = true;
+        log("Auto audio-lite for", numCh, "channels");
+      }
+    }
+    _noteLoadBlock(ms) {
+      if (ms > this._diagLoadBlockMs) this._diagLoadBlockMs = ms;
     }
     // ── Module loading ─────────────────────────────────────────────────
     async loadModule(moduleData) {
@@ -631,10 +805,15 @@
       await new Promise((resolve) => {
         globalThis.setTimeout(resolve, LOAD_FADE_MS);
       });
+      const diagStart = this._audioDiag ? this._diagNow() : 0;
       try {
         const lib = this.lib;
         const bytes = moduleBytesFromPayload(moduleData);
         log("Loading module into libopenmpt:", bytes.byteLength, "bytes");
+        if (this._stagedPtr) {
+          this._retireModule(this._stagedPtr);
+          this._stagedPtr = 0;
+        }
         if (this.modulePtr) {
           try {
             lib._openmpt_module_destroy(this.modulePtr);
@@ -654,7 +833,7 @@
         }
         const filePtr = lib._malloc(bytes.byteLength);
         if (!filePtr) throw new Error("_malloc returned 0 \u2013 out of WASM heap memory");
-        lib.HEAPU8.set(bytes, filePtr);
+        heapU8(lib).set(bytes, filePtr);
         const create = lib._openmpt_module_create_from_memory2 ?? lib._openmpt_module_create_from_memory;
         if (!create) throw new Error("libopenmpt exports neither create_from_memory2 nor create_from_memory");
         this.modulePtr = create(
@@ -679,22 +858,14 @@
         this._rightHeapView = null;
         this._fracRowInt = -1;
         this._rowStartPosSec = 0;
-        lib._openmpt_module_set_render_param(
-          this.modulePtr,
-          OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH,
-          this._interpolationLength
-        );
-        const numCh = lib._openmpt_module_get_num_channels(this.modulePtr);
-        if (numCh > 16 && !this._audioLiteExplicit) {
-          this._audioLite = true;
-          log("Auto audio-lite for", numCh, "channels");
-        }
+        this._configureLoadedModule(lib, this.modulePtr);
         log("Module loaded \u2705 ptr=", this.modulePtr);
         this.port.postMessage({ type: WT.loaded });
       } catch (err) {
         error("loadModule error:", err);
         this.port.postMessage({ type: WT.error, message: String(err) });
       } finally {
+        if (this._audioDiag) this._noteLoadBlock(this._diagNow() - diagStart);
         this._fadeTarget = 1;
       }
     }
@@ -791,6 +962,10 @@
       if (samplesWritten === 0) {
         outL.fill(0);
         outR.fill(0);
+        if (this._stagedPtr) {
+          this._adoptStaged();
+          return;
+        }
         if (!this.hasEnded) {
           this.hasEnded = true;
           this.port.postMessage({ type: WT.ended });
@@ -798,7 +973,7 @@
         return;
       }
       this.hasEnded = false;
-      const heapBuf = lib.HEAPF32.buffer;
+      const heapBuf = heapBuffer(lib);
       if (this._heapBuffer !== heapBuf) {
         this._heapBuffer = heapBuf;
         this._leftHeapView = new Float32Array(heapBuf, this.leftBufPtr, this.maxFrames);
@@ -813,6 +988,9 @@
       }
       if (this._fadeGain !== this._fadeTarget) {
         this._applyLoadFade(outL, outR, samplesWritten);
+      }
+      if (this._stagedPtr && this._fadeGain === 0) {
+        this._adoptStaged();
       }
       if (this.oscView) {
         const framesToCopy = Math.min(128, samplesWritten);
@@ -898,6 +1076,11 @@
           if (gapMs > this._diagMaxGapMs) this._diagMaxGapMs = gapMs;
         }
         this._lastProcessTime = audioTime;
+        if (this._lastProcessWall >= 0) {
+          const wallGapMs = diagStart - this._lastProcessWall;
+          if (wallGapMs > this._diagMaxWallGapMs) this._diagMaxWallGapMs = wallGapMs;
+        }
+        this._lastProcessWall = diagStart;
         this._diagQuanta++;
         this._diagSumMs += elapsedMs;
         if (elapsedMs > this._diagMaxMs) {
@@ -938,7 +1121,10 @@
             wrapProcessMs: this._diagSessionWrapProcessMs.slice(),
             maxCallbackGapMs: this._diagMaxGapMs,
             heapBytes: heapBuf.byteLength,
-            heapMoves: this._heapMoves
+            heapMoves: this._heapMoves,
+            maxWallGapMs: this._diagMaxWallGapMs,
+            loadBlockMs: this._diagLoadBlockMs,
+            createThread: this._createPort != null
           };
           if (playingChannels >= 0) diagMsg.playingChannels = playingChannels;
           this.port.postMessage(diagMsg);

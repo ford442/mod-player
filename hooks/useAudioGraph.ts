@@ -4,7 +4,7 @@
 import { logWorkletDiagnostics } from '../audio-worklet/diagnostics';
 import { createPlayerAudioContext, setPlaybackActiveQuery } from '../utils/audioContextFactory';
 import { getAudioSuspendState, setAudioSuspended, subscribeAudioSuspend } from '../utils/audioSuspendState';
-import { postLoad, postPause, postPlay } from '../audio-worklet/protocol';
+import { postPause, postPlay } from '../audio-worklet/protocol';
 import {
   canReuseWorkletNode,
   shouldDisconnectWorkletOnPlay,
@@ -16,6 +16,7 @@ import {
   wireMasterOutput,
 } from './audioGraph/masterGraph';
 import { startJsWorkletPlayback } from './audioGraph/startJsWorkletPlayback';
+import { postModuleLoad } from './audioGraph/createWorkerHost';
 import type {
   AudioGraphCallbacks,
   AudioGraphConfig,
@@ -153,7 +154,7 @@ export async function startAudioPlayback(
       if (moduleBuf) {
         log.log('Hot reload while playing — posting load to worklet:', moduleBuf.byteLength, 'bytes');
         refs.lastWorkletModuleTokenSentRef.current = moduleToken;
-        refs.audioWorkletNodeRef.current.port.postMessage(postLoad(moduleBuf));
+        postModuleLoad(refs.audioWorkletNodeRef.current, moduleBuf);
         callbacks.setStatus('Loading audio engine...');
       }
       return;

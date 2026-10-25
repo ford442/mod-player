@@ -8,7 +8,8 @@
   "include": [
     "audio-worklet/js/**/*.ts",
     "audio-worklet/workletProtocolConstants.ts",
-    "audio-worklet/fxCharacterParams.ts"
+    "audio-worklet/fxCharacterParams.ts",
+    "audio-worklet/createThreadProtocol.ts"
   ],
   "exclude": ["node_modules", "dist", "archive", "jules_patch"]
 }
