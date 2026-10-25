@@ -27,13 +27,13 @@ What is **production** vs **supporting** vs **ignored/experimental**.
 
 | Path | Role |
 |------|------|
-| `vendor/` | libopenmpt tarball extracted by `scripts/build-js-libopenmpt.sh` |
+| `vendor/` | libopenmpt sources (sha256-verified download) and per-variant build trees from `scripts/build-js-libopenmpt.sh`; `vendor/symbol-maps/` holds the release wasm symbol maps |
 | `node_modules/`, `dist/` | npm / Vite output |
 | `a.out`, `a.out.*` | Emscripten default-name leftovers — **never commit** |
 | `.swarm-state.md`, `weekly_plan.md` | Local agent planning scratch — use issues + `docs/planning/ROADMAP.md` |
 | `_codeql_detected_source_root` | CodeQL self-symlink (scanner may recreate; gitignored) |
 
-**Do not** commit `libopenmpt-0.8.4+release/` at repo root — use `vendor/` only.
+**Do not** commit a `libopenmpt-*+release/` tree at repo root — use `vendor/` only.
 
 ## Agent / planning scratch policy
 
