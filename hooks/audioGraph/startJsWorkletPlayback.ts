@@ -222,8 +222,7 @@ export async function startJsWorkletPlayback(
       // The JS engine's openmpt-processor.ts never reads processorOptions.memory —
       // it manages its own wasm memory internally (see ensureSharedLibOpenMPT).
       // A shared WebAssembly.Memory here was dead weight (16 MB allocated per
-      // node, unused); only the native C++/Wasm engine needs shared memory, and
-      // it manages its own via emscripten's WASM_WORKERS runtime, not this ref.
+      // node, unused).
       const processorOptions: Record<string, unknown> = {};
       // Pass base URL so the worklet can resolve WASM/co-located assets correctly
       processorOptions.baseUrl = detectRuntimeBase();

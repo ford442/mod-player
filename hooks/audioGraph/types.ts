@@ -1,6 +1,5 @@
 import type React from 'react';
 import type { LibOpenMPT, PatternMatrix, ChannelShadowState, ModuleInfo } from '../../types';
-import type { OpenMPTWorkletEngine } from '../../audio-worklet/OpenMPTWorkletEngine';
 
 export interface AudioGraphRefs {
   libopenmptRef:       React.MutableRefObject<LibOpenMPT | null>;
@@ -15,7 +14,6 @@ export interface AudioGraphRefs {
   gainNodeRef:         React.MutableRefObject<GainNode | null>;
   analyserRef:         React.MutableRefObject<AnalyserNode | null>;
   audioWorkletNodeRef: React.MutableRefObject<AudioWorkletNode | null>;
-  nativeEngineRef:     React.MutableRefObject<OpenMPTWorkletEngine | null>;
   workletOrderRef:     React.MutableRefObject<number>;
   workletRowRef:       React.MutableRefObject<number>;
   workletTimeRef:      React.MutableRefObject<number>;
@@ -39,7 +37,7 @@ export interface AudioGraphRefs {
    */
   isPausedRef:         React.MutableRefObject<boolean>;
   /** Written by each engine start path: which engine is really rendering (pause/resume drive this one). */
-  playbackEngineRef:   React.MutableRefObject<'worklet' | 'native-worklet' | 'scriptprocessor' | null>;
+  playbackEngineRef:   React.MutableRefObject<'worklet' | 'scriptprocessor' | null>;
   animationFrameHandle: React.MutableRefObject<number>;
   currentModulePtr:    React.MutableRefObject<number>;
   channelStatesRef:    React.MutableRefObject<ChannelShadowState[]>;
@@ -48,10 +46,6 @@ export interface AudioGraphRefs {
   workletTimeAtStartRef: React.MutableRefObject<number>;
   driftAccumulatorRef: React.MutableRefObject<number>;
   updateUIRef:         React.MutableRefObject<(() => void) | null>;
-  /** SharedArrayBuffer provided to the native engine constructor (may be null in non-isolated contexts). */
-  nativeSharedBuffer:  React.MutableRefObject<SharedArrayBuffer | null>;
-  nativeClockAnchorRef: React.MutableRefObject<import('../../utils/nativeClockAnchor').NativeClockAnchor | null>;
-  nativeBridgeLatencyRef: React.MutableRefObject<number>;
   /** Callback to lazily create a main-thread libopenmpt module for ScriptProcessor fallback. */
   ensureMainThreadModuleRef: React.MutableRefObject<((data: Uint8Array) => Promise<void>) | null>;
   /** Incremented on each processModuleData — guards stale worklet `loaded` acks. */
@@ -62,7 +56,6 @@ export interface AudioGraphRefs {
 export interface AudioGraphCallbacks {
   setStatus:         (s: string) => void;
   setIsPlaying:      (v: boolean) => void;
-  setActiveEngine:   React.Dispatch<React.SetStateAction<'worklet' | 'native-worklet'>>;
   setModuleInfo:     React.Dispatch<React.SetStateAction<ModuleInfo>>;
   setSequencerMatrix: React.Dispatch<React.SetStateAction<PatternMatrix | null>>;
   stopMusic:         (destroy?: boolean) => void;
@@ -71,9 +64,7 @@ export interface AudioGraphCallbacks {
 }
 
 export interface AudioGraphConfig {
-  activeEngine:           'worklet' | 'native-worklet';
   isWorkletSupported:     boolean;
-  isNativeWorkletAvailable: boolean;
   panValue:               number;
   volume:                 number;
   isLooping:              boolean;

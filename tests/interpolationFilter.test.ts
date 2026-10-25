@@ -19,13 +19,6 @@ describe('libopenmpt interpolation filter (Sinc+LP)', () => {
     join(ROOT, 'hooks/audioGraph/scriptProcessorFallback.ts'),
     'utf8',
   );
-  const nativePlay = readFileSync(
-    join(ROOT, 'hooks/audioGraph/startNativePlayback.ts'),
-    'utf8',
-  );
-  const wrapper = readFileSync(join(ROOT, 'cpp/openmpt_wrapper.cpp'), 'utf8');
-  const nativeWorklet = readFileSync(join(ROOT, 'cpp/worklet_processor.cpp'), 'utf8');
-  const engine = readFileSync(join(ROOT, 'audio-worklet/OpenMPTWorkletEngine.ts'), 'utf8');
 
   it('uses official C API indices (param 3 is interpolation, 2 is stereo sep)', () => {
     expect(OPENMPT_MODULE_RENDER_STEREOSEPARATION_PERCENT).toBe(2);
@@ -66,12 +59,5 @@ describe('libopenmpt interpolation filter (Sinc+LP)', () => {
     expect(scriptProcessor).toContain('OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH');
     expect(scriptProcessor).toContain('INTERPOLATION_CUBIC');
     expect(scriptProcessor).not.toMatch(/_openmpt_module_set_render_param\([^)]*,\s*2\s*,/);
-  });
-
-  it('native live playback applies Sinc+LP after load', () => {
-    expect(nativePlay).toContain('setInterpolationLength(INTERPOLATION_SINC_LP)');
-    expect(wrapper).toContain('OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH, 8');
-    expect(nativeWorklet).toMatch(/g_interpLength\s*=\s*8/);
-    expect(engine).toContain('OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH');
   });
 });

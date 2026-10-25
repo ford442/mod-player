@@ -626,8 +626,7 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
         // Module.dynCall('iiii', …) (the real-wasm glue exports getValue/dynCall;
         // utils/libopenmptExt.ts already does this on the main thread for offline
         // render). Land it as its own change (#416) rather than guess at an
-        // untested audio-thread swap of the create path here. Native engine mutes
-        // via cpp/openmpt_wrapper.cpp's KEEPAlives in the meantime.
+        // untested audio-thread swap of the create path here.
         if (WORKLET_DEV) {
           throw new Error('setChannelMute not implemented for JS engine yet (TODO #416)');
         }

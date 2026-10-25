@@ -248,9 +248,9 @@ describe('audioContextFactory is the only construction site', () => {
     expect(offenders).toEqual([]);
   });
 
-  it('the dual-context native path is gone from the tree', () => {
+  it('the retired native engine (and its dual-context path) is gone from the tree', () => {
     const hits = walkSources(ROOT)
-      .filter((f) => /nativeCtx|isNativeLegacyAudioContext|native-bridge-processor/
+      .filter((f) => /OpenMPTWorkletEngine|openmpt-native|native-worklet|engine=native|nativeCtx|isNativeLegacyAudioContext|native-bridge-processor/
         .test(readCode(f)))
       .map((f) => f.slice(ROOT.length));
     expect(hits).toEqual([]);

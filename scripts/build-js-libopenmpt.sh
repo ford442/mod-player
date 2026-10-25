@@ -13,16 +13,16 @@
 #   * parser worker  – new Function(glue) + locateFile → the same .wasm
 # so nothing replaces globalThis.WebAssembly any more (the wasm2js war is over).
 #
-# This is NOT the native engine. No -sAUDIO_WORKLET / WASM_WORKERS, no shared
-# memory, no C++ wrapper: stock openmpt_* C exports only. The native engine stays
-# scripts/build-wasm.sh → openmpt-native.*; the two builds use DIFFERENT
-# libopenmpt.a trees (this script never touches vendor/libopenmpt-0.8.4+release,
-# so the native cache and this build cannot contaminate each other).
+# No -sAUDIO_WORKLET / WASM_WORKERS, no shared memory, no C++ wrapper: stock
+# openmpt_* C exports only. (That was the native C++ engine's build, retired in
+# docs/ADR-native-engine.md.) Each variant × emcc version gets its own
+# libopenmpt.a tree under vendor/, so switching flags or toolchains never mixes
+# objects.
 #
 # ⚠️  NEVER name an output openmpt-worklet.* — that basename is the tracked JS
 #     processor (generated from audio-worklet/js/openmpt-processor.ts).
 #
-# Prerequisites: emsdk (pinned 3.1.51 — same as scripts/build-wasm.sh / CI).
+# Prerequisites: emsdk (pinned 3.1.51 — same as CI).
 #   source /path/to/emsdk/emsdk_env.sh   OR   EMSDK_ENV=/path/to/emsdk_env.sh
 #
 # Usage:
@@ -105,8 +105,8 @@ fi
 
 # Hygiene: openmpt-worklet.* is the tracked JS processor.
 case "$OUT_BASENAME" in
-    openmpt-worklet*|openmpt-native*)
-        echo "❌ Refusing OUT_BASENAME=$OUT_BASENAME — reserved for the JS processor / native engine." >&2
+    openmpt-worklet*)
+        echo "❌ Refusing OUT_BASENAME=$OUT_BASENAME — reserved for the JS processor." >&2
         exit 1 ;;
 esac
 
@@ -138,18 +138,17 @@ esac
 
 VARIANT="eh-${EH_MODE}$([[ "$SIMD" -eq 1 ]] && echo -simd || true)$([[ "$DEBUG_MODE" -eq 1 ]] && echo -debug || true)"
 
-# ── libopenmpt source tree (separate from the native build's tree) ───
+# ── libopenmpt source tree ───────────────────────────────────────────
 LIBOPENMPT_VERSION="0.8.4"
 LIBOPENMPT_NAME="libopenmpt-${LIBOPENMPT_VERSION}+release"
 LIBOPENMPT_TARBALL="${LIBOPENMPT_NAME}.makefile.tar.gz"
 VENDOR_ROOT="$PROJECT_ROOT/vendor"
-NATIVE_TREE="$VENDOR_ROOT/$LIBOPENMPT_NAME"
 # Keyed by variant AND emcc version so switching toolchains never thrashes / mixes objects.
 JS_TREE="$VENDOR_ROOT/${LIBOPENMPT_NAME}-jsengine-${VARIANT}-emsdk${EMCC_VERSION}"
 
 # emscripten make config drives the compiler wrappers; flags are passed on the make
-# command line so they REPLACE (not extend) the config's CXXFLAGS — same approach as
-# scripts/build-wasm.sh, and the only way to control EH/SIMD/LTO exactly.
+# command line so they REPLACE (not extend) the config's CXXFLAGS — the only way to
+# control EH/SIMD/LTO exactly.
 LIBOPENMPT_MAKE_FLAGS=(CONFIG=emscripten STATIC_LIB=1 SHARED_LIB=0 DYNLINK=0 EXAMPLES=0 OPENMPT123=0)
 CFLAGS_C=("${COMPILE_FLAGS[@]/-std=c++17/-std=c11}")
 CFLAGS_C+=(-fno-strict-aliasing)
@@ -159,21 +158,14 @@ FLAG_STAMP="$(printf '%s\n' "$EMCC_VERSION_LINE" "${COMPILE_FLAGS[@]}" "${CFLAGS
 prepare_tree() {
     if [[ -f "$JS_TREE/Makefile" ]]; then return 0; fi
     mkdir -p "$VENDOR_ROOT"
-    if [[ -f "$NATIVE_TREE/Makefile" ]]; then
-        echo "📂 Copying pristine sources from the native tree (excluding objects / bin)…"
-        mkdir -p "$JS_TREE"
-        tar -C "$NATIVE_TREE" --exclude='./bin' --exclude='*.o' --exclude='*.d' --exclude='*.a' -cf - . | tar -C "$JS_TREE" -xf -
-        mkdir -p "$JS_TREE/bin"
-    else
-        local archive="$VENDOR_ROOT/$LIBOPENMPT_TARBALL"
-        echo "📥 Downloading libopenmpt ${LIBOPENMPT_VERSION}…"
-        wget -q "https://lib.openmpt.org/files/libopenmpt/src/${LIBOPENMPT_TARBALL}" -O "$archive"
-        local tmp; tmp="$(mktemp -d "$VENDOR_ROOT/.extract.XXXXXX")"
-        tar xzf "$archive" -C "$tmp"
-        mv "$tmp/$LIBOPENMPT_NAME" "$JS_TREE"
-        rmdir "$tmp"
-        mkdir -p "$JS_TREE/bin"
-    fi
+    local archive="$VENDOR_ROOT/$LIBOPENMPT_TARBALL"
+    echo "📥 Downloading libopenmpt ${LIBOPENMPT_VERSION}…"
+    wget -q "https://lib.openmpt.org/files/libopenmpt/src/${LIBOPENMPT_TARBALL}" -O "$archive"
+    local tmp; tmp="$(mktemp -d "$VENDOR_ROOT/.extract.XXXXXX")"
+    tar xzf "$archive" -C "$tmp"
+    mv "$tmp/$LIBOPENMPT_NAME" "$JS_TREE"
+    rmdir "$tmp"
+    mkdir -p "$JS_TREE/bin"
 }
 
 build_static_lib() {

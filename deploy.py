@@ -10,15 +10,13 @@ Usage:
   python deploy.py --site go       # build go.1ink.us public-lock profile + validate + upload
   python deploy.py --no-build      # upload existing dist/ only (must already match --site profile)
   python deploy.py --dry-run       # validate locally; never upload
-  python deploy.py --require-native  # abort unless dist/worklets/ has a complete native trio
 
 This script contacts https://storage.noahcohn.com to upload the dist/ folder
 as a single zip archive. The server extracts it and pushes files over a
 persistent SFTP connection on the VPS side.
 
-Native engine: optional gitignored artifacts (openmpt-native.js / .wasm / .aw.js)
-from `npm run build:emcc`. Partial sets abort. Absent warns (or aborts with
---require-native / DEPLOY_REQUIRE_NATIVE=1). See docs/DEPLOY.md.
+The native C++ engine is retired (docs/ADR-native-engine.md): a stale local
+openmpt-native.* left in dist/worklets/ aborts the deploy.
 
 Set DEPLOY_CLEAN=1 to request remote asset pruning before extract (when supported).
 See docs/DEPLOY.md for COEP headers, CDN CORP requirements, and manual prune steps.
@@ -241,78 +239,13 @@ def validate_stylesheet_assets(build_path: Path) -> None:
     print(f"  ✓ stylesheet OK ({', '.join(hrefs)})")
 
 
-def classify_native_engine(build_path: Path) -> dict[str, object]:
-    """Classify dist/worklets/openmpt-native.* via scripts/nativeEngineArtifacts.mjs."""
-    repo = Path(__file__).resolve().parent
-    worklets = build_path / "worklets"
-    result = subprocess.run(
-        ["node", str(repo / "scripts" / "nativeEngineArtifacts.mjs"), str(worklets)],
-        cwd=repo,
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    stdout = result.stdout or ""
-    stderr = result.stderr or ""
-    payload: dict[str, object] = {}
-    human_lines: list[str] = []
-    for line in stdout.splitlines():
-        stripped = line.strip()
-        if stripped.startswith("{") and stripped.endswith("}"):
-            try:
-                parsed = json.loads(stripped)
-            except json.JSONDecodeError:
-                parsed = None
-            if isinstance(parsed, dict) and parsed.get("status"):
-                payload = parsed
-                continue
-        human_lines.append(line)
-    for line in human_lines:
-        print(line)
-    if stderr:
-        sys.stderr.write(stderr)
-    status = str(payload.get("status") or "")
-    if not status:
-        print("ERROR: native engine classifier returned no JSON status")
+def reject_retired_native_artifacts(build_path: Path) -> None:
+    """Abort when dist/worklets/ still carries a stale build of the retired native engine."""
+    stale = sorted(p.name for p in (build_path / "worklets").glob("openmpt-native*"))
+    if stale:
+        print(f"ERROR: retired native engine files in {BUILD_DIR}/worklets/: {', '.join(stale)}")
+        print("Delete them from public/worklets/ and rebuild.")
         sys.exit(1)
-    return payload
-
-
-def enforce_native_engine(build_path: Path, *, require_native: bool) -> None:
-    """Abort on a partial/invalid native trio; warn or abort when absent."""
-    print("Classifying native engine artifacts in dist/worklets/ ...")
-    payload = classify_native_engine(build_path)
-    status = str(payload.get("status") or "")
-    sizes = payload.get("sizes") if isinstance(payload.get("sizes"), dict) else {}
-
-    if status == "complete":
-        print("  ✓ SHIPPING native engine (openmpt-native.js / .wasm / .aw.js)")
-        if isinstance(sizes, dict):
-            for name in ("openmpt-native.js", "openmpt-native.wasm", "openmpt-native.aw.js"):
-                sz = sizes.get(name)
-                if sz is not None:
-                    print(f"      {name}: {sz} bytes")
-        return
-
-    if status == "absent":
-        print("")
-        print("################################################################")
-        print("#  NATIVE ENGINE ABSENT — this deploy has no openmpt-native.*")
-        print("#  Run `npm run build:emcc` (emsdk 3.1.51) first to ship native.")
-        print("#  Live `?engine=native` will soft-fail to the JS worklet.")
-        print("################################################################")
-        print("")
-        if require_native:
-            print("ERROR: --require-native / DEPLOY_REQUIRE_NATIVE=1 but native trio is absent")
-            sys.exit(1)
-        return
-
-    print(f"ERROR: native engine set is {status} — refusing to deploy a broken engine")
-    errors = payload.get("errors")
-    if isinstance(errors, list):
-        for err in errors:
-            print(f"  - {err}")
-    sys.exit(1)
 
 
 def build_inventory(build_path: Path) -> dict[str, object]:
@@ -509,12 +442,7 @@ def main() -> None:
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="Validate dist/ and classify native artifacts; do not contact the deploy API",
-    )
-    parser.add_argument(
-        "--require-native",
-        action="store_true",
-        help="Abort unless dist/worklets/ contains a complete openmpt-native.js/.wasm/.aw.js set",
+        help="Validate dist/ only; do not contact the deploy API",
     )
     parser.add_argument(
         "--site",
@@ -561,12 +489,7 @@ def main() -> None:
     print("Validating stylesheet assets...")
     validate_stylesheet_assets(build_path)
 
-    require_native = args.require_native or os.getenv("DEPLOY_REQUIRE_NATIVE", "").strip() in (
-        "1",
-        "true",
-        "yes",
-    ) or os.getenv("VITE_NATIVE_PARITY_GATE", "").strip() == "1"
-    enforce_native_engine(build_path, require_native=require_native)
+    reject_retired_native_artifacts(build_path)
 
     manifest = build_inventory(build_path)
     prune_info = manifest.get("pruneAssets", {})

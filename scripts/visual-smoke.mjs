@@ -90,7 +90,7 @@ async function assertCrossOriginIsolation(appRoot) {
 async function assertBrowserCrossOriginIsolated(page) {
   const isolated = await evaluate(page, () => window.crossOriginIsolated === true);
   if (!isolated) {
-    throw new Error('window.crossOriginIsolated is false — native SAB path not exercisable');
+    throw new Error('window.crossOriginIsolated is false — the worklet oscilloscope SharedArrayBuffer is unavailable');
   }
   console.log('✓ window.crossOriginIsolated === true');
 }
@@ -500,7 +500,7 @@ async function main() {
   const results = [];
 
   try {
-    // Browser-level isolation (SharedArrayBuffer / native ring-buffer path)
+    // Browser-level isolation (the worklet's oscilloscope SharedArrayBuffer)
     const { page: isoPage, context: isoContext } = await openPage(browser, engine);
     try {
       await goto(isoPage, engine, `${appRoot}/?renderer=html`, TIMEOUT);

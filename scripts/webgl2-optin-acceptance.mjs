@@ -90,7 +90,7 @@ async function boot(label, args, query) {
   return { page, messages, close: session.close, engine: session.engine };
 }
 
-/** Vite's dev error overlay (an unrelated dev-only native-engine import) intercepts pointer events. */
+/** Vite's dev error overlay (an unrelated dev-only import error) intercepts pointer events. */
 async function dismissViteOverlay(page) {
   await evaluate(page, () => document.querySelectorAll('vite-error-overlay').forEach((e) => e.remove()));
 }

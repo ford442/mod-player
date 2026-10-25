@@ -9,8 +9,6 @@
     "types/fileSystemAccess.d.ts",
     "scripts/sync-shaders.mjs",
     "scripts/sync-shaders.mjs.d.ts",
-    "scripts/nativeEngineArtifacts.mjs",
-    "scripts/nativeEngineArtifacts.mjs.d.ts",
     "scripts/jsEngineArtifacts.mjs",
     "scripts/jsEngineArtifacts.mjs.d.ts",
     "scripts/lib/synth-xm.mjs",

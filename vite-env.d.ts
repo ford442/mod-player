@@ -40,15 +40,6 @@ interface MIDIMessageEvent extends Event {
   readonly data: Uint8Array;
 }
 
-interface Window {
-  /** Native engine test hook (?engine=native) — mute / interpolation, not mixer UI. */
-  __XASM1_NATIVE__?: {
-    setChannelMute: (channel: number, muted: boolean) => void;
-    setInterpolationLength: (length: 1 | 2 | 4 | 8) => void;
-    ctlSetText: (key: string, value: string) => void;
-  };
-}
-
 interface ImportMetaEnv {
   readonly VITE_STORAGE_API_URL?: string;
   /** Bake minimal public UI into production builds (`build:xm-player`). */

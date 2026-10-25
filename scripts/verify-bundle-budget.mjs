@@ -30,7 +30,7 @@ const LAZY_3D_CHUNK_PREFIX = 'App3DView';
 /** FX rack (#453): the rack graph (FxRack, modules, loaders) loads only once a module is enabled. */
 const LAZY_FX_CHUNK_PREFIX = 'fxRackController';
 /**
- * JS-engine assets under worklets/ (everything except the optional, gitignored openmpt-native.*):
+ * JS-engine assets under worklets/ (everything except README.md):
  * libopenmpt-worklet.{js,wasm} + the generated processor. Was ~5 MB of wasm2js JS (fetched a
  * second time for the main thread as libmpt/libopenmptjs.js); real WASM is ~1.8 MB in total.
  */
@@ -218,7 +218,7 @@ if (!existsSync(htaccessPath)) {
   }
 }
 
-// JS engine assets: budget the shipped worklets/ dir (minus optional native engine files).
+// JS engine assets: budget the shipped worklets/ dir.
 let jsEngineBytes = 0;
 {
   const workletsDir = join(BUILD_DIR, 'worklets');
@@ -226,7 +226,7 @@ let jsEngineBytes = 0;
     errors.push('dist/worklets missing');
   } else {
     for (const f of readdirSync(workletsDir)) {
-      if (f.startsWith('openmpt-native') || f.endsWith('.md')) continue;
+      if (f.endsWith('.md')) continue;
       const size = statSync(join(workletsDir, f)).size;
       jsEngineBytes += size;
       if (f === 'libopenmpt-worklet.js' && size > MAX_LIBOPENMPT_GLUE_BYTES) {

@@ -7,7 +7,6 @@ const AUDIO_GRAPH_SOURCE_FILES = [
   'hooks/audioGraph/types.ts',
   'hooks/audioGraph/masterGraph.ts',
   'hooks/audioGraph/scriptProcessorFallback.ts',
-  'hooks/audioGraph/startNativePlayback.ts',
   'hooks/audioGraph/startJsWorkletPlayback.ts',
 ] as const;
 

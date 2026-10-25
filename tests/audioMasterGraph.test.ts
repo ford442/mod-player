@@ -165,7 +165,8 @@ describe('audioMasterGraph', () => {
   it('engines connect to the master input, never straight to the analyser (#453)', () => {
     const src = readAudioGraphSources();
     expect(src).not.toMatch(/\.connect\(\s*refs\.analyserRef/);
-    expect(src.match(/\.connect\(\s*refs\.masterInputRef\.current!\s*\)/g)?.length).toBe(3);
+    // The JS worklet node and the ScriptProcessor fallback.
+    expect(src.match(/\.connect\(\s*refs\.masterInputRef\.current!\s*\)/g)?.length).toBe(2);
   });
 });
 
