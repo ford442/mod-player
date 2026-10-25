@@ -12,7 +12,7 @@
  * a fake holder and bootstrap, instead of testing a hand-copied mirror of it.
  *
  * It must not touch DOM or worklet globals and must typecheck under both tsconfig.json (DOM lib) and
- * tsconfig.worklet.json (ES2020, no DOM).
+ * tsconfig.worklet.json (ES2022, no DOM).
  */
 
 /**

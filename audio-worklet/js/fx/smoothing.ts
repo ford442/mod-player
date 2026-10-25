@@ -7,9 +7,10 @@
  * free while TurboFan inlines it; when it doesn't, the double is boxed — an
  * allocation on the audio thread. The methods here are for setup and tests.
  *
- * Every numeric field has a numeric initializer. The worklet bundle targets
- * ES2020, so a bare `value: number;` is emitted as a define-to-undefined; V8
- * then stores the field as tagged, and every later double write allocates.
+ * Every numeric field has a numeric initializer. A bare `value: number;` is a
+ * class field defined as undefined (natively since the worklet bundle targets
+ * ES2022, through a defineProperty helper before); V8 then stores the field as
+ * tagged, and every later double write allocates.
  */
 
 /** One-pole glide toward `target`; snaps once within `epsilon`. */

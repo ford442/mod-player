@@ -3,10 +3,6 @@
 // Regenerate with: npm run build:js-worklet
 "use strict";
 (() => {
-  var __defProp = Object.defineProperty;
-  var __defNormalProp = (obj, key, value) => key in obj ? __defProp(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
-  var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "symbol" ? key + "" : key, value);
-
   // audio-worklet/fxCharacterParams.ts
   var CHARACTER_PROCESSOR_NAME = "xasm-fx-character";
   var LED_MODEL_A500 = 0;
@@ -61,15 +57,16 @@
   }
   var Crusher = class {
     constructor(sampleRate2) {
-      __publicField(this, "sampleRate", sampleRate2);
-      __publicField(this, "phase", 0);
-      __publicField(this, "held", 0);
-      __publicField(this, "rate", 48e3);
-      __publicField(this, "step", 1 / 128);
-      /** Next sample starts a fresh hold period (after construction / reset). */
-      __publicField(this, "fresh", true);
+      this.sampleRate = sampleRate2;
       this.rate = sampleRate2;
     }
+    sampleRate;
+    phase = 0;
+    held = 0;
+    rate = 48e3;
+    step = 1 / 128;
+    /** Next sample starts a fresh hold period (after construction / reset). */
+    fresh = true;
     configure(rateHz, bits) {
       const fs = this.sampleRate;
       this.rate = rateHz < 1 ? 1 : rateHz > fs ? fs : rateHz;
@@ -126,15 +123,13 @@
 
   // audio-worklet/js/fx/filters.ts
   var BiquadLowpass = class {
-    constructor() {
-      __publicField(this, "b0", 1);
-      __publicField(this, "b1", 0);
-      __publicField(this, "b2", 0);
-      __publicField(this, "a1", 0);
-      __publicField(this, "a2", 0);
-      __publicField(this, "z1", 0);
-      __publicField(this, "z2", 0);
-    }
+    b0 = 1;
+    b1 = 0;
+    b2 = 0;
+    a1 = 0;
+    a2 = 0;
+    z1 = 0;
+    z2 = 0;
     /** Q = 1/√2 gives a Butterworth response. */
     setLowpass(cutoffHz, q, sampleRate2) {
       const w0 = 2 * Math.PI * Math.min(cutoffHz, sampleRate2 * 0.49) / sampleRate2;
@@ -166,12 +161,10 @@
     }
   };
   var OnePoleLowpass = class {
-    constructor() {
-      __publicField(this, "b", 1);
-      __publicField(this, "a1", 0);
-      __publicField(this, "x1", 0);
-      __publicField(this, "y1", 0);
-    }
+    b = 1;
+    a1 = 0;
+    x1 = 0;
+    y1 = 0;
     setLowpass(cutoffHz, sampleRate2) {
       const k = Math.tan(Math.PI * Math.min(cutoffHz, sampleRate2 * 0.49) / sampleRate2);
       this.b = k / (1 + k);
@@ -246,21 +239,20 @@
   var SHARED_TAPS = halfbandPhaseTaps();
   var MirrorRing = class {
     constructor(size) {
-      __publicField(this, "size", size);
-      __publicField(this, "buf");
-      __publicField(this, "pos", 0);
+      this.size = size;
       this.buf = new Float64Array(size * 2);
     }
+    size;
+    buf;
+    pos = 0;
     clear() {
       this.buf.fill(0);
       this.pos = 0;
     }
   };
   var HalfbandUpsampler = class {
-    constructor() {
-      __publicField(this, "ring", new MirrorRing(HALFBAND_PHASE_TAPS));
-      __publicField(this, "taps", SHARED_TAPS);
-    }
+    ring = new MirrorRing(HALFBAND_PHASE_TAPS);
+    taps = SHARED_TAPS;
     processBlock(src, dst, n) {
       const ring = this.ring;
       const buf = ring.buf;
@@ -284,11 +276,9 @@
     }
   };
   var HalfbandDownsampler = class {
-    constructor() {
-      __publicField(this, "evenRing", new MirrorRing(HALFBAND_PHASE_TAPS));
-      __publicField(this, "oddRing", new MirrorRing(13));
-      __publicField(this, "taps", SHARED_TAPS);
-    }
+    evenRing = new MirrorRing(HALFBAND_PHASE_TAPS);
+    oddRing = new MirrorRing(13);
+    taps = SHARED_TAPS;
     processBlock(src, dst, n) {
       const evenBuf = this.evenRing.buf;
       const evenSize = this.evenRing.size;
@@ -321,11 +311,11 @@
 
   // audio-worklet/js/fx/smoothing.ts
   var OnePoleSmoother = class {
+    value = 0;
+    target = 0;
+    coeff = 0;
+    epsilon = 1e-6;
     constructor(initial, seconds, sampleRate2, epsilon = 1e-6) {
-      __publicField(this, "value", 0);
-      __publicField(this, "target", 0);
-      __publicField(this, "coeff", 0);
-      __publicField(this, "epsilon", 1e-6);
       this.value = initial;
       this.target = initial;
       this.coeff = Math.exp(-1 / (seconds * sampleRate2));
@@ -343,10 +333,10 @@
     }
   };
   var LinearSwitch = class {
+    value = 0;
+    target = 0;
+    step = 0;
     constructor(initial, seconds, sampleRate2) {
-      __publicField(this, "value", 0);
-      __publicField(this, "target", 0);
-      __publicField(this, "step", 0);
       this.value = initial;
       this.target = initial;
       this.step = 1 / Math.max(1, Math.round(seconds * sampleRate2));
@@ -372,13 +362,13 @@
     return K_AT_ZERO_DRIVE * Math.pow(10, DRIVE_RANGE_DB * drive / 20);
   }
   var SaturatorCurve = class {
+    k = 1;
+    b = 0;
+    /** tanh(k·b) */
+    offset = 0;
+    /** 1 / norm */
+    invNorm = 1;
     constructor(k, b) {
-      __publicField(this, "k", 1);
-      __publicField(this, "b", 0);
-      /** tanh(k·b) */
-      __publicField(this, "offset", 0);
-      /** 1 / norm */
-      __publicField(this, "invNorm", 1);
       this.update(k, b);
     }
     /** Recompute the curve constants (on k / b change, not per sample). */
@@ -394,11 +384,9 @@
     }
   };
   var DcBlocker = class {
-    constructor() {
-      __publicField(this, "r", 0.999);
-      __publicField(this, "x1", 0);
-      __publicField(this, "y1", 0);
-    }
+    r = 0.999;
+    x1 = 0;
+    y1 = 0;
     setCutoff(hz, sampleRate2) {
       this.r = Math.exp(-2 * Math.PI * hz / sampleRate2);
     }
@@ -419,28 +407,28 @@
     return Math.pow(10, db / 20);
   }
   var CharacterChannel = class {
+    crusher;
+    rc = new OnePoleLowpass();
+    led = new BiquadLowpass();
+    up = new HalfbandUpsampler();
+    down = new HalfbandDownsampler();
+    dc = new DcBlocker();
+    curve;
+    crushMix;
+    rcMix;
+    ledMix;
+    tapeMix;
+    k;
+    bias;
+    gain;
+    crushRate = Number.NaN;
+    crushBits = Number.NaN;
+    /** Base-rate scratch (input → crush → Amiga → … → downsampled output). */
+    base = new Float64Array(CHARACTER_MAX_BLOCK);
+    /** 2·fs scratch between the resamplers. */
+    over = new Float64Array(2 * CHARACTER_MAX_BLOCK);
     /** `initial` uses the fxCharacterParams index layout (see characterParamArray). */
     constructor(sampleRate2, initial) {
-      __publicField(this, "crusher");
-      __publicField(this, "rc", new OnePoleLowpass());
-      __publicField(this, "led", new BiquadLowpass());
-      __publicField(this, "up", new HalfbandUpsampler());
-      __publicField(this, "down", new HalfbandDownsampler());
-      __publicField(this, "dc", new DcBlocker());
-      __publicField(this, "curve");
-      __publicField(this, "crushMix");
-      __publicField(this, "rcMix");
-      __publicField(this, "ledMix");
-      __publicField(this, "tapeMix");
-      __publicField(this, "k");
-      __publicField(this, "bias");
-      __publicField(this, "gain");
-      __publicField(this, "crushRate", Number.NaN);
-      __publicField(this, "crushBits", Number.NaN);
-      /** Base-rate scratch (input → crush → Amiga → … → downsampled output). */
-      __publicField(this, "base", new Float64Array(CHARACTER_MAX_BLOCK));
-      /** 2·fs scratch between the resamplers. */
-      __publicField(this, "over", new Float64Array(2 * CHARACTER_MAX_BLOCK));
       this.crusher = new Crusher(sampleRate2);
       this.rc.setLowpass(A500_RC_CUTOFF_HZ, sampleRate2);
       this.led.setLowpass(LED_CUTOFF_HZ, BUTTERWORTH_Q, sampleRate2);
@@ -647,16 +635,19 @@
 
   // audio-worklet/js/fx-character-processor.ts
   var FxCharacterProcessor = class extends AudioWorkletProcessor {
+    static get parameterDescriptors() {
+      return CHARACTER_PARAM_DESCRIPTORS;
+    }
+    /** Live param values, fxCharacterParams index layout. */
+    params = characterParamArray();
+    left;
+    right;
+    primed = false;
+    disposed = false;
+    resetRequested = false;
+    expectedTime = 0;
     constructor(options) {
       super(options);
-      /** Live param values, fxCharacterParams index layout. */
-      __publicField(this, "params", characterParamArray());
-      __publicField(this, "left");
-      __publicField(this, "right");
-      __publicField(this, "primed", false);
-      __publicField(this, "disposed", false);
-      __publicField(this, "resetRequested", false);
-      __publicField(this, "expectedTime", 0);
       this.left = new CharacterChannel(sampleRate, this.params);
       this.right = new CharacterChannel(sampleRate, this.params);
       this.port.onmessage = (event) => {
@@ -665,9 +656,6 @@
         if (data.type === CHARACTER_MSG_RESET) this.resetRequested = true;
         else if (data.type === CHARACTER_MSG_DISPOSE) this.disposed = true;
       };
-    }
-    static get parameterDescriptors() {
-      return CHARACTER_PARAM_DESCRIPTORS;
     }
     process(inputs, outputs, parameters) {
       if (this.disposed) return false;

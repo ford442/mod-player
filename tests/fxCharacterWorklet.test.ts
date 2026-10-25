@@ -235,7 +235,7 @@ describe('@noalloc source guard (#453)', () => {
     });
   }
 
-  it('numeric kernel fields have numeric initializers (an ES2020 bare field is tagged in V8)', () => {
+  it('numeric kernel fields have numeric initializers (a bare field starts undefined, so V8 tags it)', () => {
     for (const file of ['smoothing', 'crusher', 'filters', 'saturator', 'halfband', 'characterChannel']) {
       const src = read(`audio-worklet/js/fx/${file}.ts`);
       expect(src, file).not.toMatch(/^\s*(?:(?:private|public|protected|readonly)\s+)*\w+\s*:\s*number\s*;/m);
