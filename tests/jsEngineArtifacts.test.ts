@@ -9,6 +9,7 @@ import {
   inspectGlue,
   inspectWasm,
   smokeArtifacts,
+  smokePlaybackArtifacts,
 } from '../scripts/jsEngineArtifacts.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
@@ -22,7 +23,42 @@ describe('JS engine libopenmpt artifacts (real WASM)', () => {
     // Native wasm exceptions: corrupt uploads must return NULL, not abort the runtime.
     expect(manifest?.exceptions).toBe('wasm');
     expect(manifest?.simd).toBe(false);
+    expect(manifest?.sharedMemory).toBe(false);
   });
+
+  it('the main-thread / parser-worker wasm imports NON-shared memory; the playback heap shared (#513)', () => {
+    const shared = inspectWasm(readFileSync(join(ROOT, 'public/worklets/libopenmpt-worklet.wasm')));
+    const playback = inspectWasm(readFileSync(join(ROOT, 'public/worklets/libopenmpt-playback.wasm')));
+    expect(shared.memory?.shared).toBe(false);
+    expect(playback.memory?.shared).toBe(true);
+    // Same memory limits as the shipped artifact: 32 MiB initial, growth to 1 GiB (64 KiB pages).
+    for (const m of [shared.memory, playback.memory]) {
+      expect(m?.minPages).toBe(512);
+      expect(m?.maxPages).toBe(16384);
+    }
+  });
+
+  it('the playback pair + manifest agree, keep the same exceptions/SIMD choice, and add only the wasm-worker entry', () => {
+    const { errors, manifest } = checkArtifacts({ artifact: 'playback' });
+    expect(errors).toEqual([]);
+    expect(manifest?.glue.file).toBe('libopenmpt-playback.js');
+    expect(manifest?.wasm.file).toBe('libopenmpt-playback.wasm');
+    expect(manifest?.exceptions).toBe('wasm');
+    expect(manifest?.simd).toBe(false);
+    expect(manifest?.sharedMemory).toBe(true);
+    const glue = inspectGlue(readFileSync(join(ROOT, 'public/worklets/libopenmpt-playback.js'), 'utf8'), 'libopenmpt-playback.wasm');
+    expect(glue.usesJsExceptionTrampolines).toBe(false);
+    expect(glue.cExports).toContain('_emscripten_wasm_worker_initialize');
+    for (const name of FORBIDDEN_RUNTIME_MEMBERS) expect(glue.cExports).not.toContain(name);
+    // Emscripten's own worker bootstrap is deleted by the build (the main thread starts the create worker).
+    expect(existsSync(join(ROOT, 'public/worklets/libopenmpt-playback.ww.js'))).toBe(false);
+  });
+
+  it('playback heap: a worker_threads wasm worker creates a 16 MiB IT while this thread renders, and catches corrupt input', async () => {
+    const result = await smokePlaybackArtifacts();
+    expect(result.errors).toEqual([]);
+    expect(result.quantaDuringCreate).toBeGreaterThan(1);
+  }, 60_000);
 
   it('wasm starts with \\0asm and compiles', () => {
     const bytes = readFileSync(join(ROOT, 'public/worklets/libopenmpt-worklet.wasm'));

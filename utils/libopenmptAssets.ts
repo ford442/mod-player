@@ -4,11 +4,16 @@
  *   - main thread  (<script src> injected into index.html by vite-plugins/libopenmptHtml.ts)
  *   - parser worker (workers/openmpt-parser.worker.ts, locateFile → the same .wasm)
  *
+ * The AudioWorklet on a crossOriginIsolated page loads the shared-memory playback pair instead
+ * (libopenmpt-playback.*, #513: its create worker joins that heap). Never inject that one into
+ * index.html or the parser worker.
+ *
  * Built by scripts/build-js-libopenmpt.sh into public/worklets/ and described by the generated
  * manifest below (SRI hashes + a content-hash cache key). Nothing here replaces
  * globalThis.WebAssembly, so nothing needs a snapshot of it.
  */
 import manifest from '../audio-worklet/js/libopenmpt-worklet.generated.json';
+import playbackManifest from '../audio-worklet/js/libopenmpt-playback.generated.json';
 
 /** libopenmpt release the artifact was built from (vendor/libopenmpt-* in build-js-libopenmpt.sh). */
 export const LIBOPENMPT_VERSION = manifest.libopenmpt;
@@ -61,4 +66,20 @@ export function createLibOpenMPTLocateFile(): (path: string) => string {
   const origin = globalThis.location?.href ?? 'http://localhost/';
   const base = new URL(getLibOpenMPTBaseUrl(), origin).href;
   return (path: string) => versioned(new URL(path, base).href);
+}
+
+/** The AudioWorklet's shared-memory heap + its create worker (#513). Same libopenmpt, own cache key. */
+export const LIBOPENMPT_PLAYBACK_GLUE_FILE = playbackManifest.glue.file;
+export const LIBOPENMPT_PLAYBACK_WASM_FILE = playbackManifest.wasm.file;
+
+function versionedPlayback(url: string): string {
+  return `${url}?v=${playbackManifest.version}`;
+}
+
+export function getLibOpenMPTPlaybackJsUrl(): string {
+  return versionedPlayback(`${getLibOpenMPTBaseUrl()}${LIBOPENMPT_PLAYBACK_GLUE_FILE}`);
+}
+
+export function getLibOpenMPTPlaybackWasmUrl(): string {
+  return versionedPlayback(`${getLibOpenMPTBaseUrl()}${LIBOPENMPT_PLAYBACK_WASM_FILE}`);
 }

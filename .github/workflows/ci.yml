@@ -254,12 +254,19 @@ jobs:
       - name: Playhead acceptance (JS worklet)
         run: BASE_URL=http://127.0.0.1:4173 OUTPUT_DIR=./artifacts/playhead-acceptance npm run smoke:playhead
 
+      # #513: a 16 MiB IT loaded while a MOD plays — the create worker must keep the audio thread's
+      # load time under one quantum, and the playhead median lag under 1 row (both modes reported).
+      - name: Module create off the audio thread (JS worklet)
+        run: BASE_URL=http://127.0.0.1:4173 OUTPUT_DIR=./artifacts/create-thread-acceptance npm run smoke:create-thread
+
       - name: Upload playhead artifacts on failure
         if: failure()
         uses: actions/upload-artifact@v7
         with:
           name: playhead-smoke-failure
-          path: artifacts/playhead-acceptance/
+          path: |
+            artifacts/playhead-acceptance/
+            artifacts/create-thread-acceptance/
           retention-days: 5
 
       - name: Stop preview server
@@ -317,9 +324,13 @@ jobs:
               - 'scripts/build-js-libopenmpt.sh'
               - 'scripts/jsEngineArtifacts.mjs'
               - 'scripts/verify-js-libopenmpt.mjs'
+              - 'scripts/lib/synth-it.mjs'
               - 'public/worklets/libopenmpt-worklet.js'
               - 'public/worklets/libopenmpt-worklet.wasm'
               - 'audio-worklet/js/libopenmpt-worklet.generated.json'
+              - 'public/worklets/libopenmpt-playback.js'
+              - 'public/worklets/libopenmpt-playback.wasm'
+              - 'audio-worklet/js/libopenmpt-playback.generated.json'
               - '.github/workflows/ci.yml'
 
       - name: Setup Emscripten
@@ -335,25 +346,36 @@ jobs:
           node-version: '22'
 
       # libopenmpt.a for this variant is keyed by the build script (it owns every flag).
-      - name: Cache libopenmpt static library (JS engine variant)
+      # Two variant trees: the shared pair (eh-wasm) and the AudioWorklet's shared-memory heap
+      # (eh-wasm-playback, objects built with -sWASM_WORKERS — #513).
+      - name: Cache libopenmpt static libraries (JS engine variants)
         if: steps.filter.outputs.jsengine == 'true'
         uses: actions/cache@v6
         with:
-          path: vendor/libopenmpt-0.8.4+release-jsengine-eh-wasm-emsdk3.1.51
+          path: |
+            vendor/libopenmpt-0.8.4+release-jsengine-eh-wasm-emsdk3.1.51
+            vendor/libopenmpt-0.8.4+release-jsengine-eh-wasm-playback-emsdk3.1.51
           key: libopenmpt-js-engine-${{ runner.os }}-emsdk-3.1.51-v0.8.4-${{ hashFiles('scripts/build-js-libopenmpt.sh') }}
 
       - name: Rebuild libopenmpt-worklet.{js,wasm} (emsdk 3.1.51)
         if: steps.filter.outputs.jsengine == 'true'
         run: bash scripts/build-js-libopenmpt.sh
 
+      - name: Rebuild libopenmpt-playback.{js,wasm} (emsdk 3.1.51)
+        if: steps.filter.outputs.jsengine == 'true'
+        run: bash scripts/build-js-libopenmpt.sh --playback
+
       - name: Committed artifacts must equal a fresh build
         if: steps.filter.outputs.jsengine == 'true'
         run: |
-          if ! git diff --exit-code -- public/worklets/libopenmpt-worklet.js public/worklets/libopenmpt-worklet.wasm audio-worklet/js/libopenmpt-worklet.generated.json; then
-            echo "::error::libopenmpt-worklet.{js,wasm} drifted from scripts/build-js-libopenmpt.sh output. Run 'npm run build:js-libopenmpt' with emsdk 3.1.51 and commit the result."
+          if ! git diff --exit-code -- \
+              public/worklets/libopenmpt-worklet.js public/worklets/libopenmpt-worklet.wasm audio-worklet/js/libopenmpt-worklet.generated.json \
+              public/worklets/libopenmpt-playback.js public/worklets/libopenmpt-playback.wasm audio-worklet/js/libopenmpt-playback.generated.json; then
+            echo "::error::libopenmpt-{worklet,playback}.{js,wasm} drifted from scripts/build-js-libopenmpt.sh output. Run 'npm run build:js-libopenmpt' and 'npm run build:js-libopenmpt -- --playback' with emsdk 3.1.51 and commit the result."
             exit 1
           fi
-          echo "✅ committed real-WASM libopenmpt matches a fresh emsdk 3.1.51 build"
+          test ! -e public/worklets/libopenmpt-playback.ww.js
+          echo "✅ committed real-WASM libopenmpt (both pairs) matches a fresh emsdk 3.1.51 build"
 
       - name: Verify rebuilt artifacts
         if: steps.filter.outputs.jsengine == 'true'

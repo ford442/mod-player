@@ -12,10 +12,11 @@
  * Usage:
  *   node scripts/bench-js-libopenmpt.mjs                          # committed glue, 4-mat_madness.mod
  *   node scripts/bench-js-libopenmpt.mjs --synth-xm 32            # 32-channel XM stress module
+ *   node scripts/bench-js-libopenmpt.mjs --synth-it 64            # 64-channel IT stress module
  *   node scripts/bench-js-libopenmpt.mjs --glue old.js --wasm none   # wasm2js baseline
  *   node scripts/bench-js-libopenmpt.mjs --hash --interp 4        # PCM parity fingerprint
  *
- * Options: --glue --wasm --module --synth-xm N --seconds N --interp 4,8 --rate 48000
+ * Options: --glue --wasm --module --synth-xm N --synth-it N --seconds N --interp 4,8 --rate 48000
  *          --hash (print sha256 of the rendered PCM) --json
  */
 import { createHash } from 'node:crypto';
@@ -23,6 +24,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { synthXm } from './lib/synth-xm.mjs';
+import { synthIt } from './lib/synth-it.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const QUANTUM = 128;
@@ -34,6 +36,7 @@ function parseArgs(argv) {
     wasm: undefined,
     module: join(ROOT, 'public/4-mat_madness.mod'),
     synthXm: 0,
+    synthIt: 0,
     seconds: 20,
     interp: [4, 8],
     rate: 48000,
@@ -47,6 +50,7 @@ function parseArgs(argv) {
     else if (a === '--wasm') out.wasm = next();
     else if (a === '--module') out.module = resolve(next());
     else if (a === '--synth-xm') out.synthXm = Number(next());
+    else if (a === '--synth-it') out.synthIt = Number(next());
     else if (a === '--seconds') out.seconds = Number(next());
     else if (a === '--interp') out.interp = next().split(',').map(Number);
     else if (a === '--rate') out.rate = Number(next());
@@ -146,8 +150,12 @@ async function main() {
     wasmBytes = readFileSync(opt.wasm ?? opt.glue.replace(/\.js$/, '.wasm'));
   }
   const { lib, initMs } = await loadGlue(glueText, wasmBytes);
-  const moduleBytes = opt.synthXm ? synthXm(opt.synthXm) : new Uint8Array(readFileSync(opt.module));
-  const label = opt.synthXm ? `synthetic ${opt.synthXm}-ch XM` : opt.module.split('/').pop();
+  const moduleBytes = opt.synthIt
+    ? synthIt(opt.synthIt)
+    : opt.synthXm ? synthXm(opt.synthXm) : new Uint8Array(readFileSync(opt.module));
+  const label = opt.synthIt
+    ? `synthetic ${opt.synthIt}-ch IT`
+    : opt.synthXm ? `synthetic ${opt.synthXm}-ch XM` : opt.module.split('/').pop();
 
   const runs = opt.interp.map((i) => renderRun(lib, moduleBytes, i, opt.seconds, opt.rate, opt.hash));
   const report = {

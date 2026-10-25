@@ -55,6 +55,11 @@ interface WorkletMessagePort {
   postMessage(message: unknown, transfer?: readonly ArrayBuffer[]): void;
 }
 
+/** The slice of WebAssembly the processor touches (ES2020 lib has no WebAssembly typings). */
+interface WorkletWasmMemory {
+  readonly buffer: ArrayBufferLike;
+}
+
 declare class AudioWorkletProcessor {
   constructor(options?: AudioWorkletCtorOptions);
   readonly port: WorkletMessagePort;
@@ -82,6 +87,10 @@ interface LibOpenMPT {
   onAbort?: ((what: unknown) => void) | undefined;
   HEAPU8: Uint8Array;
   HEAPF32: Float32Array;
+  /** Exported by the shared-memory playback build only (libopenmpt-playback.*, #513). */
+  wasmMemory?: WorkletWasmMemory;
+  /** Present in the playback build: a wasm worker (the create worker) can join this heap. */
+  _emscripten_wasm_worker_initialize?: (stackLow: number, stackSize: number) => void;
   _malloc(size: number): number;
   _free(ptr: number): void;
   _openmpt_module_create_from_memory2?: (
@@ -130,3 +139,5 @@ interface LibOpenMPT {
 declare var libopenmpt: { noInitialRun?: boolean; wasmBinary?: ArrayBuffer | Uint8Array } | undefined;
 declare var __openmptWorkletLib: LibOpenMPT | undefined;
 declare var __openmptWorkletLibInitPromise: Promise<LibOpenMPT> | undefined;
+/** Create worker stack + TLS block in the playback heap — one per scope (#513). */
+declare var __openmptCreateThreadStack: { heapId: number; stackLow: number; stackSize: number } | undefined;

@@ -6,6 +6,7 @@
   "exceptions": "wasm",
   "simd": false,
   "version": "10a45149b9",
+  "sharedMemory": false,
   "glue": {
     "file": "libopenmpt-worklet.js",
     "bytes": 103775,

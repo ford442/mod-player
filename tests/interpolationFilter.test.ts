@@ -41,9 +41,12 @@ describe('libopenmpt interpolation filter (Sinc+LP)', () => {
     // wasm2js glue hard-capped this at 4.
     expect(worklet).toMatch(/DEFAULT_INTERPOLATION_LENGTH\s*=\s*8/);
     expect(worklet).toMatch(
-      /_openmpt_module_set_render_param\(\s*this\.modulePtr\s*,\s*OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH\s*,\s*this\._interpolationLength\s*,?\s*\)/,
+      /_openmpt_module_set_render_param\(\s*modulePtr\s*,\s*OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH\s*,\s*this\._interpolationLength\s*,?\s*\)/,
     );
-    expect(worklet).not.toMatch(/_openmpt_module_set_render_param\(\s*this\.modulePtr\s*,\s*2\s*,/);
+    expect(worklet).not.toMatch(/_openmpt_module_set_render_param\(\s*(this\.)?modulePtr\s*,\s*2\s*,/);
+    // Every create path runs the same setup: in-worklet loadModule and a module staged by the create worker (#513).
+    expect(worklet).toMatch(/_configureLoadedModule\(lib, this\.modulePtr\)/);
+    expect(worklet).toMatch(/_configureLoadedModule\(lib, next\)/);
     // A main-thread setRenderParam(3, n) must survive module reloads (create resets render params).
     expect(worklet).toMatch(/this\._interpolationLength\s*=\s*msg\.value/);
   });
@@ -52,7 +55,7 @@ describe('libopenmpt interpolation filter (Sinc+LP)', () => {
     const start = readFileSync(join(ROOT, 'hooks/audioGraph/startJsWorkletPlayback.ts'), 'utf8');
     expect(start).toContain('resolveJsInterpolationLength()');
     expect(start).toMatch(/postSetRenderParam\(\s*OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH/);
-    expect(start.indexOf('postSetRenderParam(')).toBeLessThan(start.indexOf('postLoad('));
+    expect(start.indexOf('postSetRenderParam(')).toBeLessThan(start.indexOf('postModuleLoad(node'));
   });
 
   it('ScriptProcessor fallback stays cubic on param 3 (main-thread callback budget)', () => {

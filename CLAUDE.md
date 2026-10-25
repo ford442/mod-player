@@ -53,7 +53,7 @@ mod-player/
 ├── audio/fx/                    # FX rack (#453) — see docs/FX_RACK.md. Main chunk: types, spec/, fxBootstrap, fxHost,
 │                                #   fxVisualState. Lazy chunk: fxRackController, FxRack, FxSlot, modules/, room/, offline/
 │
-├── workers/                     # Parser and export Web Workers
+├── workers/                     # Parser, export, and module-create (#513) Web Workers
 ├── utils/                       # Pure helpers: shaderRegistry/shaderVersion, gpuPacking, geometryConstants, playheadPrediction, …
 ├── src/renderers/               # Pattern renderer abstraction (webgpu/webgl2/html selection)
 ├── shaders/                     # WGSL source shaders (+ shaders/lib/ includes); synced to public/shaders/
@@ -87,8 +87,9 @@ npm run preflight    # Run before every commit: CI's `lint-and-build` job *is* t
 npm run verify:lockfile # package-lock.json metadata guard (lockfileVersion 3, resolved + integrity)
 npm run lint         # ESLint (max 27 warnings budget; hard CI gate)
 npm run build:js-worklet # Compile the typed worklets (openmpt-processor.ts → openmpt-worklet.js, fx-character-processor.ts → fx-character-worklet.js; esbuild)
-npm run build:js-libopenmpt # Real-WASM libopenmpt for the JS engine → public/worklets/libopenmpt-worklet.{js,wasm} (emsdk 3.1.51; committed)
-npm run verify:js-libopenmpt # Static + boot/render/corrupt-input checks of that pair (no emsdk needed)
+npm run build:js-libopenmpt # Real-WASM libopenmpt for the JS engine → public/worklets/libopenmpt-worklet.{js,wasm} (emsdk 3.1.51; committed); `-- --playback` → the worklet's shared-memory libopenmpt-playback.{js,wasm}
+npm run verify:js-libopenmpt # Static + boot/render/corrupt-input checks of both pairs (no emsdk needed)
+npm run smoke:create-thread # #513: 16 MiB IT loaded while a MOD plays, create worker vs ?audioCreate=worklet (needs a preview on BASE_URL)
 npm run smoke:fx:ci  # FX rack on headless Chrome (#453): bypass null, crossfade clicks, parity, character CPU (needs a preview on BASE_URL)
 npm run gen:irs      # Synthesize + Opus-encode the room IRs → public/ir/*.opus + manifest (needs ffmpeg/libopus; outputs committed)
 npm run verify:irs   # IR files match the manifest and the synth spec (no ffmpeg; tests/irAssets.test.ts runs it)
@@ -209,7 +210,7 @@ LibOpenMPT     // Function bindings for the libopenmpt WASM module
 
 3. **CORS / SharedArrayBuffer:** The Vite dev server sets `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: credentialless`. They keep the page `crossOriginIsolated`, which the JS worklet's oscilloscope / audio-reactive `SharedArrayBuffer` (`utils/audioReactive.ts`) needs. Do not remove them.
 
-4. **libopenmpt is self-hosted real WASM:** `public/worklets/libopenmpt-worklet.{js,wasm}` (built by `npm run build:js-libopenmpt`, emsdk 3.1.51; tracked in git) is loaded in `index.html` (injected by `vite-plugins/libopenmptHtml.ts` with SRI + `?v=`) and is the **same pair** the AudioWorklet and the parser worker use. The app waits on `window.libopenmptReady` before initializing. It never replaces `globalThis.WebAssembly` — do not reintroduce a wasm2js glue or a `__NATIVE_WEBASSEMBLY__` snapshot. Readiness = `onRuntimeInitialized` (`audio-worklet/libRuntimeReady.ts`), never "`_openmpt_*` is defined". Never export a real `stringToUTF8` from the glue (the app polyfills its own with a different signature); `npm run verify:js-libopenmpt` guards this.
+4. **libopenmpt is self-hosted real WASM:** `public/worklets/libopenmpt-worklet.{js,wasm}` (built by `npm run build:js-libopenmpt`, emsdk 3.1.51; tracked in git) is loaded in `index.html` (injected by `vite-plugins/libopenmptHtml.ts` with SRI + `?v=`) and is the **same pair** the parser worker uses (and the AudioWorklet on a page that is not crossOriginIsolated). It stays non-threaded — `verify:js-libopenmpt` reads the memory import from the binary. On an isolated page the AudioWorklet gets `libopenmpt-playback.{js,wasm}` instead (`--playback`: same flags plus `-sWASM_WORKERS`), and module **create runs on `workers/openmpt-create.worker.ts`**, which joins that heap; `process()` only swaps the finished module in (#513, `audio-worklet/createThreadProtocol.ts`, `public/worklets/README.md`). Never inject the playback pair into `index.html` or the parser worker, and never put create/destroy/malloc back on the audio thread's path (`tests/createThread.integration.test.ts`). The app waits on `window.libopenmptReady` before initializing. It never replaces `globalThis.WebAssembly` — do not reintroduce a wasm2js glue or a `__NATIVE_WEBASSEMBLY__` snapshot. Readiness = `onRuntimeInitialized` (`audio-worklet/libRuntimeReady.ts`), never "`_openmpt_*` is defined". Never export a real `stringToUTF8` from the glue (the app polyfills its own with a different signature); `npm run verify:js-libopenmpt` guards this.
 
 5. **Tailwind content paths:** `tailwind.config.js` explicitly scopes content to avoid OOM during builds. Do not add broad glob patterns.
 

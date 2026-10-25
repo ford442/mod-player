@@ -30,11 +30,16 @@ const LAZY_3D_CHUNK_PREFIX = 'App3DView';
 /** FX rack (#453): the rack graph (FxRack, modules, loaders) loads only once a module is enabled. */
 const LAZY_FX_CHUNK_PREFIX = 'fxRackController';
 /**
- * JS-engine assets under worklets/ (everything except README.md):
- * libopenmpt-worklet.{js,wasm} + the generated processor. Was ~5 MB of wasm2js JS (fetched a
- * second time for the main thread as libmpt/libopenmptjs.js); real WASM is ~1.8 MB in total.
+ * JS-engine assets under worklets/ (everything except README.md): two libopenmpt pairs —
+ * libopenmpt-worklet.{js,wasm} (main thread + parser worker) and libopenmpt-playback.{js,wasm} (the
+ * AudioWorklet's shared-memory heap, #513; a crossOriginIsolated page fetches both) — plus the
+ * generated processors. Was ~5 MB of wasm2js JS (fetched a second time for the main thread as
+ * libmpt/libopenmptjs.js); real WASM is ~1.8 MB per pair.
  */
-const MAX_JS_ENGINE_BYTES = Number(process.env.MAX_JS_ENGINE_BYTES || 2.5 * 1024 * 1024);
+const MAX_JS_ENGINE_BYTES = Number(process.env.MAX_JS_ENGINE_BYTES || 4.25 * 1024 * 1024);
+/** One glue + wasm pair: a pair over this means the wasm itself grew (SIMD, a debug build, …). */
+const MAX_LIBOPENMPT_PAIR_BYTES = Number(process.env.MAX_LIBOPENMPT_PAIR_BYTES || 2 * 1024 * 1024);
+const LIBOPENMPT_PAIRS = ['libopenmpt-worklet', 'libopenmpt-playback'];
 const MAX_LIBOPENMPT_GLUE_BYTES = Number(process.env.MAX_LIBOPENMPT_GLUE_BYTES || 256 * 1024);
 
 function resolveAssetHref(href) {
@@ -229,9 +234,21 @@ let jsEngineBytes = 0;
       if (f.endsWith('.md')) continue;
       const size = statSync(join(workletsDir, f)).size;
       jsEngineBytes += size;
-      if (f === 'libopenmpt-worklet.js' && size > MAX_LIBOPENMPT_GLUE_BYTES) {
+      if ((f === 'libopenmpt-worklet.js' || f === 'libopenmpt-playback.js') && size > MAX_LIBOPENMPT_GLUE_BYTES) {
         errors.push(`worklets/${f} is ${size} bytes (budget ${MAX_LIBOPENMPT_GLUE_BYTES}) — wasm2js glue crept back in?`);
       }
+    }
+    for (const pair of LIBOPENMPT_PAIRS) {
+      const files = [`${pair}.js`, `${pair}.wasm`].map((f) => join(workletsDir, f));
+      // Presence is verify-wasm-assets' / verify:js-libopenmpt's job; this one budgets what ships.
+      if (!files.every((f) => existsSync(f))) continue;
+      const pairBytes = files.reduce((n, f) => n + statSync(f).size, 0);
+      if (pairBytes > MAX_LIBOPENMPT_PAIR_BYTES) {
+        errors.push(`worklets/${pair}.{js,wasm} is ${pairBytes} bytes (budget ${MAX_LIBOPENMPT_PAIR_BYTES})`);
+      }
+    }
+    if (existsSync(join(workletsDir, 'libopenmpt-playback.ww.js'))) {
+      errors.push('worklets/libopenmpt-playback.ww.js is shipped — the build deletes Emscripten\'s unused worker bootstrap');
     }
     if (jsEngineBytes > MAX_JS_ENGINE_BYTES) {
       errors.push(`JS engine worklet assets total ${jsEngineBytes} bytes (budget ${MAX_JS_ENGINE_BYTES})`);

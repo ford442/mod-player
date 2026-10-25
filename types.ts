@@ -257,6 +257,12 @@ export interface AudioDiagSnapshot {
   heapBytes?: number;
   heapMoves?: number;
   playingChannels?: number;
+  /** Session-worst wall-clock gap between two process() calls (ms) — a blocked audio thread (#513). */
+  maxWallGapMs?: number;
+  /** Session-worst audio-thread time spent bringing in a module (ms): create + destroy in-worklet, the swap otherwise. */
+  loadBlockMs?: number;
+  /** Latest report: loads are created on the create worker (#513). */
+  createThread?: boolean;
   /** performance.now() of the last report received on the main thread. */
   updatedAt: number;
 }
@@ -333,6 +339,11 @@ declare global {
       getTransportState: () => 'stopped' | 'playing' | 'paused';
       getAudioContextState: () => string;
       getAudioContextSampleRate: () => number;
+      /**
+       * AudioContext.playbackStats where the browser has it (Chrome): underruns of the one context.
+       * Null elsewhere. Used by scripts/create-thread-acceptance.mjs (#513).
+       */
+      getAudioPlaybackStats: () => { underrunEvents: number; underrunDuration: number; totalDuration: number } | null;
       setPlayheadFraction: (value: number) => void;
       isModuleLoaded: () => boolean;
       getPatternRenderer: () => import('./src/renderers/types').CurrentPatternRenderer | null;

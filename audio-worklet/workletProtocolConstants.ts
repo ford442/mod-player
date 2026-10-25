@@ -24,6 +24,8 @@ export const MAIN_TO_WORKLET = {
   ctlSetText: 'ctlSetText',
   /** Hands a consumed projectm-pcm buffer back to the worklet's allocation pool. */
   returnPcmBuffer: 'returnPcmBuffer',
+  /** MessagePort to the module-create worker (#513, audio-worklet/createThreadProtocol.ts). */
+  attachCreatePort: 'attachCreatePort',
 } as const;
 
 /** AudioWorklet processor → main thread */
@@ -38,6 +40,8 @@ export const WORKLET_TO_MAIN = {
   starvation: 'starvation',
   projectmPcm: 'projectm-pcm',
   audioDiag: 'audioDiag',
+  /** The worklet's libopenmpt is the shared-memory playback heap: memory + a stack for the create worker (#513). */
+  createHeap: 'createHeap',
 } as const;
 
 export type MainToWorkletType = (typeof MAIN_TO_WORKLET)[keyof typeof MAIN_TO_WORKLET];

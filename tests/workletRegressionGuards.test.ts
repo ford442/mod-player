@@ -353,9 +353,12 @@ describe('#354 production source invariants', () => {
     expect(workletSource).toMatch(/OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH\s*=\s*3/);
     expect(workletSource).toMatch(/DEFAULT_INTERPOLATION_LENGTH\s*=\s*8/);
     expect(workletSource).toMatch(
-      /_openmpt_module_set_render_param\(\s*this\.modulePtr\s*,\s*OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH\s*,\s*this\._interpolationLength\s*,?\s*\)/,
+      /_openmpt_module_set_render_param\(\s*modulePtr\s*,\s*OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH\s*,\s*this\._interpolationLength\s*,?\s*\)/,
     );
-    expect(workletSource).not.toMatch(/_openmpt_module_set_render_param\(\s*this\.modulePtr\s*,\s*2\s*,/);
+    expect(workletSource).not.toMatch(/_openmpt_module_set_render_param\(\s*(this\.)?modulePtr\s*,\s*2\s*,/);
+    // Both ways a module arrives (in-worklet create, staged from the create worker #513) configure it.
+    expect(workletSource).toMatch(/_configureLoadedModule\(lib, this\.modulePtr\)/);
+    expect(workletSource).toMatch(/_configureLoadedModule\(lib, next\)/);
   });
 });
 

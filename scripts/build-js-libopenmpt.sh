@@ -7,17 +7,24 @@
 #   public/worklets/libopenmpt-worklet.wasm  real \0asm binary
 #   audio-worklet/js/libopenmpt-worklet.generated.json   manifest (sizes, SRI, cache key)
 #
-# One artifact pair serves every JS-engine libopenmpt consumer:
-#   * AudioWorklet   – main thread fetches both files, posts {scriptText, wasmBytes}
+# That pair serves the main thread and the parser worker (and the AudioWorklet when the page is
+# not crossOriginIsolated):
 #   * main thread    – <script src> (index.html, via vite-plugins/libopenmptHtml.ts)
 #   * parser worker  – new Function(glue) + locateFile → the same .wasm
+#   * AudioWorklet   – main thread fetches both files, posts {scriptText, wasmBytes}
 # so nothing replaces globalThis.WebAssembly any more (the wasm2js war is over).
+# It has no WASM_WORKERS, no shared memory, no C++ wrapper: stock openmpt_* C exports only.
 #
-# No -sAUDIO_WORKLET / WASM_WORKERS, no shared memory, no C++ wrapper: stock
-# openmpt_* C exports only. (That was the native C++ engine's build, retired in
-# docs/ADR-native-engine.md.) Each variant × emcc version gets its own
-# libopenmpt.a tree under vendor/, so switching flags or toolchains never mixes
-# objects.
+# --playback links the AudioWorklet's own heap (#513):
+#   public/worklets/libopenmpt-playback.{js,wasm}
+#   audio-worklet/js/libopenmpt-playback.generated.json
+# Same sources, exceptions, exports and memory limits, plus -sWASM_WORKERS (shared memory, a
+# thread-safe malloc and C++ runtime). The worklet instantiates it as the heap's main thread
+# (render); a plain Worker joins the same WebAssembly.Memory as a wasm worker and runs
+# openmpt_module_create_from_memory2 there, so a large module never parses on the audio thread
+# (audio-worklet/js/openmpt-create-worker.ts). Never inject it into index.html or the parser
+# worker. Each variant × emcc version gets its own libopenmpt.a tree under vendor/, so switching
+# flags or toolchains never mixes objects.
 #
 # ⚠️  NEVER name an output openmpt-worklet.* — that basename is the tracked JS
 #     processor (generated from audio-worklet/js/openmpt-processor.ts).
@@ -27,7 +34,8 @@
 #
 # Usage:
 #   scripts/build-js-libopenmpt.sh                 # release: -O3, wasm-EH, no SIMD
-#   scripts/build-js-libopenmpt.sh --simd          # + -msimd128 (measure first; see docs)
+#   scripts/build-js-libopenmpt.sh --simd          # + -msimd128 (measured, not shipped: public/worklets/README.md)
+#   scripts/build-js-libopenmpt.sh --playback      # the AudioWorklet's shared-memory heap (see above)
 #   scripts/build-js-libopenmpt.sh --eh=js         # JS-based exceptions (-fexceptions)
 #   scripts/build-js-libopenmpt.sh --debug         # -O0 -g -sASSERTIONS=2
 #   OUT_DIR=/tmp/x OUT_BASENAME=variant scripts/build-js-libopenmpt.sh   # A/B builds
@@ -84,22 +92,25 @@ fi
 # ── Options ──────────────────────────────────────────────────────────
 DEBUG_MODE=0
 SIMD=0
+PLAYBACK=0
 EH_MODE="${EH_MODE:-wasm}"
 for arg in "$@"; do
     case "$arg" in
         --debug) DEBUG_MODE=1 ;;
         --simd) SIMD=1 ;;
+        --playback) PLAYBACK=1 ;;
         --eh=wasm) EH_MODE=wasm ;;
         --eh=js) EH_MODE=js ;;
-        -h|--help) sed -n '2,42p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h|--help) sed -n '2,52p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "Unknown option: $arg" >&2; exit 1 ;;
     esac
 done
 
+DEFAULT_BASENAME="$([[ "$PLAYBACK" -eq 1 ]] && echo libopenmpt-playback || echo libopenmpt-worklet)"
 OUT_DIR="${OUT_DIR:-$PROJECT_ROOT/public/worklets}"
-OUT_BASENAME="${OUT_BASENAME:-libopenmpt-worklet}"
+OUT_BASENAME="${OUT_BASENAME:-$DEFAULT_BASENAME}"
 WRITE_MANIFEST=1
-if [[ "$OUT_DIR" != "$PROJECT_ROOT/public/worklets" || "$OUT_BASENAME" != "libopenmpt-worklet" ]]; then
+if [[ "$OUT_DIR" != "$PROJECT_ROOT/public/worklets" || "$OUT_BASENAME" != "$DEFAULT_BASENAME" ]]; then
     WRITE_MANIFEST=0
 fi
 
@@ -124,6 +135,11 @@ fi
 if [[ "$SIMD" -eq 1 ]]; then
     COMPILE_FLAGS+=(-msimd128)
 fi
+# Shared memory needs every object built with atomics + bulk-memory; -sWASM_WORKERS at compile time
+# sets both, and at link time selects the -ww system libs (locked malloc, threaded libc++abi/libunwind).
+if [[ "$PLAYBACK" -eq 1 ]]; then
+    COMPILE_FLAGS+=(-sWASM_WORKERS)
+fi
 case "$EH_MODE" in
     wasm)
         COMPILE_FLAGS+=(-fwasm-exceptions)
@@ -136,7 +152,7 @@ case "$EH_MODE" in
     *) echo "Bad --eh mode: $EH_MODE" >&2; exit 1 ;;
 esac
 
-VARIANT="eh-${EH_MODE}$([[ "$SIMD" -eq 1 ]] && echo -simd || true)$([[ "$DEBUG_MODE" -eq 1 ]] && echo -debug || true)"
+VARIANT="eh-${EH_MODE}$([[ "$SIMD" -eq 1 ]] && echo -simd || true)$([[ "$PLAYBACK" -eq 1 ]] && echo -playback || true)$([[ "$DEBUG_MODE" -eq 1 ]] && echo -debug || true)"
 
 # ── libopenmpt source tree ───────────────────────────────────────────
 LIBOPENMPT_VERSION="0.8.4"
@@ -225,6 +241,18 @@ fi
 # engine). Spelled out so every emsdk version behaves the same; --smoke covers it.
 INCOMING_MODULE_JS_API="['locateFile','noInitialRun','onRuntimeInitialized','wasmBinary','instantiateWasm','onAbort','print','printErr','preRun','postRun']"
 
+# The playback heap: the create worker hands the glue the worklet's shared WebAssembly.Memory
+# (incoming wasmMemory), and the worklet reads it back (exported wasmMemory) to give it out.
+# ENVIRONMENT gains `worker` because the same glue boots inside that Worker. Emscripten also writes
+# a <name>.ww.js bootstrap for workers it spawns itself; nothing spawns them (the main thread
+# starts the create worker), so it is deleted after the link.
+THREAD_LINK_FLAGS=(-sENVIRONMENT=web)
+if [[ "$PLAYBACK" -eq 1 ]]; then
+    INCOMING_MODULE_JS_API="${INCOMING_MODULE_JS_API%]},'wasmMemory']"
+    EXPORTED_RUNTIME_METHODS="${EXPORTED_RUNTIME_METHODS%]},'wasmMemory']"
+    THREAD_LINK_FLAGS=(-sENVIRONMENT=web,worker -sWASM_WORKERS)
+fi
+
 # ── Link ─────────────────────────────────────────────────────────────
 mkdir -p "$OUT_DIR"
 GLUE="$OUT_DIR/${OUT_BASENAME}.js"
@@ -240,7 +268,7 @@ em++ \
     "${EH_LINK_FLAGS[@]}" \
     -L"$LIB_DIR" -lopenmpt \
     --no-entry \
-    -sENVIRONMENT=web \
+    "${THREAD_LINK_FLAGS[@]}" \
     -sMODULARIZE=0 \
     -sEXPORT_ES6=0 \
     -sEXPORT_NAME=libopenmpt \
@@ -259,6 +287,7 @@ em++ \
     -o "$GLUE"
 
 [[ -f "$GLUE" && -f "$WASM" ]] || { echo "❌ link did not produce ${OUT_BASENAME}.{js,wasm}" >&2; exit 1; }
+rm -f "$OUT_DIR/${OUT_BASENAME}.ww.js"
 
 echo ""
 echo "✅ Built ${OUT_BASENAME}.{js,wasm}"
@@ -267,7 +296,7 @@ ls -l "$GLUE" "$WASM"
 if [[ "$WRITE_MANIFEST" -eq 1 ]]; then
     node "$SCRIPT_DIR/verify-js-libopenmpt.mjs" --write \
         --emcc "$EMCC_VERSION" --eh "$EH_MODE" --simd "$SIMD" --libopenmpt "$LIBOPENMPT_VERSION" \
-        --variant "$VARIANT"
+        --variant "$VARIANT" --artifact "$([[ "$PLAYBACK" -eq 1 ]] && echo playback || echo shared)"
 else
     echo "ℹ️  Custom OUT_DIR/OUT_BASENAME — manifest not written (A/B build)."
 fi
