@@ -3,6 +3,8 @@
 > **Status:** Fixed (2026-05-09)  
 > **Affected:** All deployments between 2026-05-08 and 2026-05-09  
 > **Symptom:** UI showed "Playing" and pattern display animated, but audio output was either a 440Hz test tone or silence.
+>
+> **Note (native engine retired):** the native C++ engine that some sections below mention was removed — see `docs/ADR-native-engine.md`. Those passages are kept as history; the JS AudioWorklet (+ ScriptProcessor fallback) is the only engine.
 
 ---
 
@@ -67,13 +69,12 @@ Before modifying the worklet or AudioWorklet-related code:
 - [ ] **`WORKLET_VERSION` is derived automatically** — `hooks/useWorkletLoader.ts` imports the content hash written to `audio-worklet/js/worklet-version.generated.json` by the build script. No manual bump needed; just run `npm run build:js-worklet` after editing the processor.
 - [ ] **Extend `audio-worklet/protocol.ts`** (not ad-hoc string literals) when adding worklet message types, and add the same message type to `audio-worklet/workletProtocolConstants.ts` — the single source of truth imported by both `protocol.ts` (main thread) and `audio-worklet/js/openmpt-processor.ts` (bundled into the worklet).
 - [ ] **Validate at the receive boundary** via `parseWorkletToMainMessage` / `parseMainToWorkletMessage` — never destructure `e.data` blindly.
-- [ ] **Native `PositionInfo` changes** must update `audio-worklet/positionInfoLayout.ts` and `tests/positionInfoLayout.test.ts`.
 - [ ] **Never re-init libopenmpt** on module reload — reuse `AudioWorkletNode` + shared-scope singleton (`#329`).
 - [ ] **Never suspend `AudioContext`** on normal `stopMusic(false)` / module reload (`#330`).
 - [ ] **Throttle worklet `position` postMessage** to ~60 Hz; main thread extrapolates fractional playhead (`playheadPrediction`).
 - [ ] **Skip `node.disconnect()`** when hot-reloading module data into an existing worklet node.
 - [ ] **Never add a `setTimeout` polyfill** that ignores the `delay` argument. Chrome 116+ has native `setTimeout` in AudioWorklet; for older browsers, use `currentTime`-based timing in `process()` instead.
-- [ ] **Never `import()` an AudioWorklet processor file on the main thread.** Use `audioContext.audioWorklet.addModule()` for JS processors, or Emscripten's native API for `AUDIO_WORKLET` builds.
+- [ ] **Never `import()` an AudioWorklet processor file on the main thread.** Use `audioContext.audioWorklet.addModule()`.
 - [ ] **Verify line numbers in browser console.** After deploy, a hard refresh (`Ctrl+Shift+R` / `Cmd+Shift+R`) should show line numbers matching the current source (e.g., ~250), not the old stub (~130).
 - [ ] **Never commit HTML/404 bodies as `*.wasm`.** The JS engine is real WebAssembly (`libopenmpt-worklet.wasm`) — a corrupt file there means no audio at all, and `initLib` refuses it. Run `npm run verify:wasm` and `npm run verify:js-libopenmpt` before commit/deploy.
 - [ ] **Never infer libopenmpt readiness from `_openmpt_*` being defined.** With real wasm, newer emsdk defines lazy export stubs at glue-eval time (`typeof lib._openmpt_module_create_from_memory2 === 'function'` is true long before instantiate finishes, and `_malloc` may still be missing). Wait on `calledRun` / `onRuntimeInitialized` — `audio-worklet/libRuntimeReady.ts` (regression: `tests/jsWorkletProcessor.integration.test.ts`).
@@ -106,7 +107,7 @@ Headless CI cannot assert speaker output. After audio-path changes, verify **wit
 
 `npm run smoke:audio` / `npm run smoke:audio:ci` (`scripts/audio-smoke.mjs`) exercises a **live**
 `AudioWorkletNode` + libopenmpt session against `npm run preview` with
-`?renderer=html&engine=js&audioDiag=1` (audio-only; no GPU needed). CI job: `audio-smoke` in `.github/workflows/ci.yml`
+`?renderer=html&audioDiag=1` (audio-only; no GPU needed). CI job: `audio-smoke` in `.github/workflows/ci.yml`
 (uses preinstalled Chromium via `PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers`).
 
 Shared waits go through `scripts/lib/browser-launch.mjs` `waitForFunction`, which passes
@@ -123,11 +124,10 @@ init used to take seconds (the ~5 MB wasm2js glue) and is now ~0.2 s with real w
 | Worklet/protocol console errors | ✅ | `page.on('console')` tripwires (`[PLAY] Worklet error`, rejected protocol messages) |
 | Runaway `ended → seek 0` loop | ✅ | >2 `[PLAY] Worklet reported module ended` logs per phase fails |
 | Pattern-boundary quantum overruns | ✅ | `wrapOverruns` must not **increase** during each ≥2 s steady-playback window (`?audioDiag=1`; module-switch boundary may log once without failing steady-play phases) |
-| JS engine forced (no native artifacts) | ✅ | `?engine=js` + engine probe |
+| Engine is the JS worklet | ✅ | `__TEST_HOOKS__.getAudioEngine()` probe |
 | **Speakers actually output sound** | ❌ manual | Headless has no PCM/loudness assertion — use PHASE1 audible checklist |
 | File picker UX | ❌ manual | Smoke uses programmatic `loadModuleFromUrl` |
 | Storage playlist / share URL deep links | ❌ manual | Not covered by smoke URL matrix |
-| Native C++ engine path | ❌ out of scope | Smoke forces JS worklet (`?engine=js`) |
 
 Vitest helpers in `tests/audioSmokeCounters.test.ts` lock counter/diag parsing logic.
 The smoke **compounds** with `tests/workletAudioLifecycle.test.ts` and
@@ -362,7 +362,7 @@ That flag now times **both** sides of a pattern-boundary hitch:
 | Object | What it measures |
 |--------|------------------|
 | `window.__AUDIO_DIAG__` | Worklet `process()` vs the ~2.9 ms quantum. `wrapOverruns` / `wrapMaxProcessMs` are only the quanta where the row counter went backwards. |
-| `window.__PATTERN_DIAG__` | Main-thread cost at the same boundary: React `setSequencerMatrix`, WebGPU cells rebuild (DURA compute + bind group), native cell-by-cell pattern read. |
+| `window.__PATTERN_DIAG__` | Main-thread cost at the same boundary: React `setSequencerMatrix`, WebGPU cells rebuild (DURA compute + bind group). |
 
 `?patternDiag=1` enables only the main-thread/GPU half (no per-quantum `performance.now` on the audio thread). Console lines are `[AudioDiag]` and `[PatternDiag]`.
 
@@ -371,7 +371,6 @@ Isolation (reload after each change, play until several order changes):
 | Test | If hitch **vanishes** | Hypothesis |
 |------|------------------------|------------|
 | `?renderer=html` | Main-thread/GPU cells rebuild, not DSP | GPU `updateMatrix` / DURA |
-| `?engine=js` (vs native) | Native `readPatternDataFromNative` on order change | Native pattern extract |
 | shader **not** v0.55 / v0.58 | GPU spectrum re-enabled `projectm-pcm` | Worklet PCM stream |
 | production build (not `npm run dev`) | DEV DURA parity GPU readback | Dev-only stall |
 | lite mode | DURA compute + analysis | GPU duration pass |
@@ -380,7 +379,6 @@ Interpretation:
 
 - `wrapOverruns` climbs, `__PATTERN_DIAG__.maxGpuMatrixMs` stays small → worklet/libopenmpt over budget (hypothesis A).
 - `wrapOverruns` stays 0, `maxGpuMatrixMs` > ~8 ms → GPU/React starving the audio callback (hypothesis B). Default v0.30b still rebuilds the cells buffer + DURA compute on **every** order change.
-- Native `maxNativeReadMs` > ~8 ms → main-thread WASM walk (`rows × channels × 6` command reads) at the boundary.
 - Both wrap overruns **and** GPU rebuild large → stacked hitch; the GPU work is scheduled on the same order-change frame the worklet is already heaviest.
 
 ---

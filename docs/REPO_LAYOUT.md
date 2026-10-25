@@ -10,8 +10,7 @@ What is **production** vs **supporting** vs **ignored/experimental**.
 | `utils/shaderRegistry.ts`, `appConfig.ts` | Shader capabilities + picker |
 | `shaders/`, `public/shaders/` | WGSL sources (keep in sync via `npm run sync:shaders`) |
 | `src/renderers/` | WebGPU / WebGL2 / HTML renderer chain |
-| `public/worklets/` | Tracked JS AudioWorklet (`openmpt-worklet.js`); native `openmpt-native.*` is build output |
-| `cpp/` | Optional Emscripten native engine |
+| `public/worklets/` | Tracked JS AudioWorklet (`openmpt-worklet.js`, `fx-character-worklet.js`) + real-WASM libopenmpt (`libopenmpt-worklet.{js,wasm}`) |
 | `deploy.py` | Production deploy (storage API → VPS) |
 
 ## Supporting (in repo, not app runtime)
@@ -28,16 +27,13 @@ What is **production** vs **supporting** vs **ignored/experimental**.
 
 | Path | Role |
 |------|------|
-| `vendor/` | libopenmpt tarball extracted by `scripts/build-wasm.sh` |
+| `vendor/` | libopenmpt tarball extracted by `scripts/build-js-libopenmpt.sh` |
 | `node_modules/`, `dist/` | npm / Vite output |
-| `public/worklets/openmpt-native.*` | Emscripten build artifacts (from `npm run build:emcc`) |
 | `a.out`, `a.out.*` | Emscripten default-name leftovers — **never commit** |
 | `.swarm-state.md`, `weekly_plan.md` | Local agent planning scratch — use issues + `docs/planning/ROADMAP.md` |
 | `_codeql_detected_source_root` | CodeQL self-symlink (scanner may recreate; gitignored) |
 
 **Do not** commit `libopenmpt-0.8.4+release/` at repo root — use `vendor/` only.
-
-**Native engine naming:** production build outputs are only `public/worklets/openmpt-native.{js,wasm,aw.js}` from `npm run build:emcc`. Never rename those to `a.out.*` or commit Emscripten defaults.
 
 ## Agent / planning scratch policy
 
@@ -71,6 +67,12 @@ These were deleted or archived to reduce agent confusion:
 - `scripts/apply-tier-a-includes.mjs`, `migrate-tier-a.mjs`, `tier_a_strip.py` (+ `.shader-baselines/`) — the tier-A shader-include migration is finished; `scripts/verify-packing.mts`, `scripts/make_bezel_transparent.py`
 - `grok.md` (a third assistant guide), `metadata.json`, root `build-wasm.sh` (deprecated alias of `scripts/build-wasm.sh`)
 
+## Removed (native engine retirement)
+
+- `cpp/` (native AudioWorklet engine + `openmpt_wrapper.*`), `audio-worklet/OpenMPTWorkletEngine.ts` / `NativePatternReader.ts` / `positionInfoLayout.ts` / `resolveNativeFactory.ts` / `types.ts`, `hooks/audioGraph/startNativePlayback.ts`, `utils/audioEngineSelection.ts` / `nativeParityGate.ts` / `nativeClockAnchor.ts`
+- `scripts/build-wasm.sh`, `nativeEngineArtifacts.mjs`, `patch-native-glue.mjs`, `verify-native-exports.mjs`, `verify-native-simd.mjs`, `benchmark-engine-mainthread.mjs`; `.github/workflows/native-wasm-scheduled.yml`; the `tests/native*.test.ts` suites
+- Decision record: `docs/ADR-native-engine.md`
+
 ## Sparse checkout hint
 
 Minimal clone for app work (no vendor, no archive):
@@ -79,4 +81,4 @@ Minimal clone for app work (no vendor, no archive):
 git sparse-checkout set App.tsx components hooks utils src shaders public scripts package.json package-lock.json
 ```
 
-Vendor libopenmpt is fetched on first `npm run build:emcc` if missing.
+Vendor libopenmpt is fetched on first `npm run build:js-libopenmpt` if missing.

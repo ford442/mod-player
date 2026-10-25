@@ -46,8 +46,7 @@ Flags worth knowing (see the header of `scripts/build-js-libopenmpt.sh`): **wasm
 a corrupt upload must return `NULL`, not abort the shared worklet runtime), **no SIMD** (measured no win — see
 `docs/planning/native-engine-bench-notes.md`), `INITIAL_MEMORY=32 MiB` with growth (the wasm2js glue reserved
 ~512 MiB), the whole libopenmpt C API exported, and `stringToUTF8` deliberately **not** exported (the app's
-polyfill has a different signature). The build uses its own libopenmpt tree under `vendor/…-jsengine-<variant>-emsdk<ver>`
-and never touches the native engine's `libopenmpt.a`.
+polyfill has a different signature). The build uses its own libopenmpt tree under `vendor/…-jsengine-<variant>-emsdk<ver>`.
 
 ### Interpolation
 
@@ -55,77 +54,26 @@ The JS worklet defaults to **Sinc+LP (8)**: with real wasm it costs a few percen
 at 64 channels (the wasm2js glue could only afford cubic). Opt down with `?interp=4` (or
 `localStorage.xasm1_js_interp=4`) on weak devices; valid values are 1, 2, 4, 8. The choice is kept across module reloads.
 
-## Optional native C++ worklet
+## Engine
 
-**Single supported build path** (never overwrites this directory’s JS processor):
-
-```bash
-# emsdk 3.1.51 (CI pin)
-source /path/to/emsdk/emsdk_env.sh
-npm run build:emcc
-# → openmpt-native.js / .wasm / .aw.js (gitignored until built)
-```
-
-| Do | Don’t |
-|----|--------|
-| `npm run build:emcc` → `openmpt-native.*` | Write Emscripten glue as `openmpt-worklet.js` |
-| Keep tracked `openmpt-worklet.js` as JS processor | `rm -rf public/worklets` before build |
-
-Probed at runtime by `OpenMPTWorkletEngine` / `useWorkletLoader`. Root `./build-wasm.sh` only forwards to `scripts/build-wasm.sh`.
-
-### Engine selection precedence
-
-Production **default is the JS worklet**. Native is explicit opt-in (`?engine=native`) or auto-promoted only when the parity gate is open **and** glue is present. Never flip deploy defaults without a green native playhead report.
-
-| Priority | Source | Values |
-|----------|--------|--------|
-| 1 (highest) | URL `?engine=` | `js` \| `native` \| `auto` |
-| 2 | Public builds (`VITE_PUBLIC_MODE=1`) | Always **force-JS** (ignores sticky localStorage; only URL `native` opts in) |
-| 3 | `localStorage.xasm1_audio_engine` | `js` \| `native` \| `auto` (unset = `auto`) |
-| 4 | Auto + parity gate | `VITE_NATIVE_PARITY_GATE=1` or `localStorage.xasm1_native_parity_passed=1` — promotes when glue present |
-| 5 | Fallback | JS worklet → ScriptProcessor on WASM init failure |
-
-**Parity gate:** `auto` stays on JS until deploy sets `VITE_NATIVE_PARITY_GATE=1` (or local smoke marks `xasm1_native_parity_passed`). Run:
-
-```bash
-npm run build:emcc   # emsdk 3.1.51
-npm run preview -- --port 4173 &
-npm run smoke:playhead:native
-# → artifacts/playhead-acceptance/report-native.json + native-parity.ok when green
-```
-
-Only then set `VITE_NATIVE_PARITY_GATE=1` **and** ship matching `openmpt-native.*`. Explicit `?engine=native` is never blocked by the gate. Force JS with `?engine=js` / `localStorage.xasm1_audio_engine=js`.
-
-**Opt into native** (when artifacts are built):
-
-```
-http://localhost:5173/?engine=native
-# or
-localStorage.setItem('xasm1_audio_engine', 'native')
-```
-
-`?engine=native` without artifacts soft-fails to JS (console warning). The debug panel engine toggle persists `js` / `native` into localStorage.
+The JS worklet is the only engine; when AudioWorklet or its WASM init fails, the app falls back to a main-thread
+`ScriptProcessorNode`. The optional native C++ worklet (`openmpt-native.*`, `?engine=native`) was retired — see
+`docs/ADR-native-engine.md`.
 
 **No WebAssembly snapshot:** the main-thread libopenmpt is the same real-WASM build as the worklet's, so it never replaces `globalThis.WebAssembly`. (`index.html` used to snapshot the real API as `window.__NATIVE_WEBASSEMBLY__` because the old wasm2js `libmpt/libopenmptjs.js` swapped in a stub whose `Memory()` was never shared — that whole workaround is gone.)
 
-**Emscripten 3.1.51 AudioWorklet bootstrap:** `addModule('openmpt-native.aw.js')` is resolved against the **page URL**, not `locateFile`. The engine rewrites that path to `worklets/openmpt-native.aw.js`. C++ must pass a 16-byte-aligned worklet stack into `emscripten_start_wasm_audio_worklet_thread_async` (null stack fails).
+**projectM PCM chunks** are posted by the JS worklet (`projectm-pcm`) → `broadcastPcmBlock`.
 
-**projectM PCM chunks** are posted from both engines: JS `projectm-pcm` and native ring copy → `broadcastPcmBlock`.
-
-**Performance capture (MediaRecorder)** uses the one shared `AudioContext` (`utils/audioContextFactory.ts`) on both engines, so `?engine=native` records like JS. The dual-context `?nativeCtx=legacy` path and its `native-bridge-processor.js` are removed. See `docs/EXPORT.md`.
-
-**Heap:** release native WASM is a **fixed 128mb** heap. Use `npm run build:emcc -- --grow` for huge ITs (`MAXIMUM_MEMORY=512mb`).
+**Performance capture (MediaRecorder)** taps the one shared `AudioContext` (`utils/audioContextFactory.ts`). See `docs/EXPORT.md`.
 
 ## CI / hygiene
 
 ```bash
 npm run verify:wasm          # every *.wasm under public/ and dist/ must have \0asm magic (and libopenmpt-worklet.wasm must exist)
 npm run verify:js-libopenmpt # the real-WASM JS engine pair: files, exports, manifest, boots + renders + survives corrupt input
-npm run verify:native-exports
 ```
 
-- **Every PR:** script clobber greps + export audit (`ci.yml` → `wasm-smoke-test`); JS `playhead-smoke`.
-- **Path-filtered PR / push:** full `build:emcc` when `cpp/**`, `scripts/build-wasm.sh`, `audio-worklet/**`, or `hooks/audioGraph/**` change — caches `vendor/libopenmpt-0.8.4+release-native-release` (`libopenmpt.a`, keyed on `scripts/build-wasm.sh --print-flag-stamp`) — then **`smoke:playhead` with `AUDIO_ENGINE=native`** (requires active engine `native-worklet`, lag median &lt; 1 row).
-- **Weekly schedule:** `native-wasm-scheduled.yml` full build + artifact upload + **native playhead parity** (same cache).
+- **Every PR:** `npm run preflight` (`lint-and-build`), shellcheck of the build script + JS-processor guard (`ci.yml` → `build-scripts`), JS `playhead-smoke`.
+- **Path-filtered PR / push:** `js-libopenmpt-rebuild` rebuilds the pair with emsdk 3.1.51 when its inputs change and fails if the committed files drift from a fresh build.
 
-Never commit failed download bodies (404 HTML) as `.wasm`. Never commit `openmpt-native.*` into git.
+Never commit failed download bodies (404 HTML) as `.wasm`.

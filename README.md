@@ -63,11 +63,11 @@ Lint (ESLint, hard CI gate; max 27 warnings budget)
 npm run lint
 ```
 
-### Native C++ audio engine (optional)
+### Audio engine (libopenmpt WASM)
 
-Production audio uses the tracked **JS** AudioWorklet at `public/worklets/openmpt-worklet.js`. Do not overwrite it.
+Audio plays through the JS AudioWorklet (`public/worklets/openmpt-worklet.js`, generated from `audio-worklet/js/openmpt-processor.ts` by `npm run build:js-worklet`) on top of a self-hosted real-WASM libopenmpt (`public/worklets/libopenmpt-worklet.{js,wasm}`). Both are committed; the native C++ engine was retired (`docs/ADR-native-engine.md`).
 
-The optional native engine is built with a **single** supported path:
+Rebuilding libopenmpt is only needed when changing it:
 
 ```bash
 # Prerequisites: emsdk 3.1.51 (matches CI)
@@ -76,25 +76,11 @@ git clone https://github.com/emscripten-core/emsdk.git && cd emsdk
 source ./emsdk_env.sh
 
 cd /path/to/mod-player
-npm run build:emcc              # release (-O3)
-# npm run build:emcc -- --debug # -O0 -g -sASSERTIONS=2
+npm run build:js-libopenmpt     # → public/worklets/libopenmpt-worklet.{js,wasm}
+npm run verify:js-libopenmpt    # static + boot/render checks (no emsdk needed)
 ```
 
-Outputs (gitignored until built): `public/worklets/openmpt-native.{js,wasm,aw.js}`.
-
-| Command | Notes |
-|---------|--------|
-| `npm run build:emcc` | **Canonical** — runs `scripts/build-wasm.sh` |
-| `npm run build:worklet` | Deprecated alias → same script |
-| `./build-wasm.sh` | Deprecated root wrapper → same script |
-
-Verify exported symbols stay in sync with TypeScript/C++:
-
-```bash
-npm run verify:native-exports
-```
-
-See also: `docs/WASM_BUILD_SOLUTIONS.md`, `public/worklets/README.md`, `AGENTS.md`.
+See also: `public/worklets/README.md`, `AGENTS.md`.
 
 ### Visual smoke (browser verification)
 
