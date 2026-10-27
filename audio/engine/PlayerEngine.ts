@@ -642,6 +642,15 @@ export class PlayerEngine {
     this.requestOscBufferFn();
   }
 
+  /** How position reports reach the main thread now (#492: the shared ring when isolated), and counts. */
+  getPositionPathStats(): { transport: 'ring' | 'message'; samples: number; dropped: number } {
+    const ring = this.refs.positionRingRef.current;
+    if (ring && ring.node === this.refs.audioWorkletNodeRef.current) {
+      return { transport: 'ring', ...ring.stats() };
+    }
+    return { transport: 'message', samples: 0, dropped: 0 };
+  }
+
   /** Test hook: force the fractional playhead the renderers read (does not move the audio). */
   setPlayheadForTest(row: number): void {
     this.refs.playbackStateRef.current = {

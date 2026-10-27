@@ -330,7 +330,20 @@ export function applyWorkletPositionSample(
     bpm: (data.bpm != null && data.bpm > 0) ? data.bpm : refs.workletBpmRef.current,
     speed: (data.speed != null && data.speed > 0) ? data.speed : refs.workletSpeedRef.current,
   };
+  commitWorkletPositionSample(refs, sample);
+  return sample;
+}
 
+/**
+ * Make `sample` the current position: update the rolling row-rate estimate against the previous
+ * sample, then the position refs. Shared by the message path (a fresh sample per report) and the
+ * shared-ring path, which reuses two preallocated samples alternately so it allocates nothing
+ * (utils/positionRingConsumer.ts) — `sample` must therefore not be the current sample object.
+ */
+export function commitWorkletPositionSample(
+  refs: WorkletPositionRefs,
+  sample: WorkletPositionSample,
+): void {
   const numRows = refs.patternMatricesRef.current[sample.order]?.numRows ?? 64;
   const tempoRps = rowsPerSecondFromTempo(sample.bpm, sample.speed);
   // Seed estimate from tempo when empty/stale
@@ -353,6 +366,4 @@ export function applyWorkletPositionSample(
   refs.lastWorkletUpdateRef.current = sample.workletTime;
   if (sample.bpm > 0) refs.workletBpmRef.current = sample.bpm;
   if (sample.speed > 0) refs.workletSpeedRef.current = sample.speed;
-
-  return sample;
 }

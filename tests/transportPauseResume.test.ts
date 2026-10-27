@@ -70,6 +70,7 @@ function makeRefs() {
       { volume: 0.4, trigger: 0, noteAge: 3 },
     ]),
     workletPositionSampleRef: ref<WorkletPositionSample | null>(makeSample()),
+    positionRingRef: ref(null),
     workletOrderRef: ref(0),
     workletRowRef: ref(4),
     workletTimeRef: ref(1),

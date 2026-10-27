@@ -2,6 +2,7 @@ import type { LibOpenMPT, PatternMatrix, ChannelShadowState, ModuleInfo } from '
 import type { OpenMPTWorkletEngine } from '../../audio-worklet/OpenMPTWorkletEngine';
 import type { Ref, StateSetter } from '../../audio/engine/store';
 import type { WorkletPositionSample } from '../../utils/playheadPrediction';
+import type { PositionRingConsumer } from '../../utils/positionRingConsumer';
 import type { NativeClockAnchor } from '../../utils/nativeClockAnchor';
 
 /**
@@ -31,6 +32,11 @@ export interface AudioGraphRefs {
   workletSpeedRef:     Ref<number>;
   workletRowsPerSecRef: Ref<number>;
   workletPositionSampleRef: Ref<WorkletPositionSample | null>;
+  /**
+   * The JS worklet node's shared position ring, when the page is crossOriginIsolated (#492): the
+   * worklet writes its position reports there instead of posting them; the UI loop drains it.
+   */
+  positionRingRef: Ref<PositionRingConsumer | null>;
   pendingSeekRef:      Ref<{ order: number; row: number; timestamp: number } | null>;
   seekAcknowledgedRef: Ref<boolean>;
   spFallbackTriggered: Ref<boolean>;

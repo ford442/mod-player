@@ -41,6 +41,7 @@ export function createUpdateUI(params: UpdateUIParams): () => void {
     workletBpmRef,
     workletRowsPerSecRef,
     workletPositionSampleRef,
+    positionRingRef,
     workletTimestampRef,
     audioClockStartRef,
     workletTimeAtStartRef,
@@ -85,6 +86,10 @@ export function createUpdateUI(params: UpdateUIParams): () => void {
     // The loop also runs while paused: the playhead finishes following the audio already in flight,
     // then holds (effectiveHeardTime below), and the loop is already alive for resume.
     if (!isPlayingRef.current && !isPausedRef.current) return;
+
+    // Shared-ring mode (#492): apply the reports the worklet wrote since the last frame, before
+    // anything below reads the position refs.
+    positionRingRef.current?.drain();
 
     const { activeEngine, kickTrigger, grooveAmount } = params;
     const wallNowMs = performance.now();

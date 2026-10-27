@@ -18,9 +18,12 @@ import {
   postPlay,
   postReturnPcmBuffer,
   postSetAudioDiag,
+  postSetPositionRing,
   postSetProjectmPcm,
   postSetRenderParam,
 } from '../../audio-worklet/protocol';
+import { canUsePositionRing, createPositionRingBuffer } from '../../audio-worklet/positionRing';
+import { createPositionRingConsumer } from '../../utils/positionRingConsumer';
 import {
   clearAudioFault,
   noteAudioRestartAttempt,
@@ -412,6 +415,20 @@ export async function startJsWorkletPlayback(
     });
     node.port.postMessage(postSetAudioDiag(isAudioDiagEnabled()));
     seedPatternDiag();
+
+    // Position + VU through shared memory when the page is crossOriginIsolated (#492): no message,
+    // clone or zod parse per report. A node keeps its ring for life; a reused node's buffered
+    // reports describe the previous playback, so they are dropped. Otherwise: `position` messages.
+    const ring = refs.positionRingRef.current;
+    if (reuseWorkletNode && ring?.node === node) {
+      ring.resync();
+    } else if (canUsePositionRing()) {
+      const buffer = createPositionRingBuffer();
+      node.port.postMessage(postSetPositionRing(buffer));
+      refs.positionRingRef.current = createPositionRingConsumer(buffer, node, refs, clearAudioFault);
+    } else {
+      refs.positionRingRef.current = null;
+    }
 
     const moduleBuf = moduleBytesFromFileData(refs.fileDataRef.current);
     if (moduleBuf) {
