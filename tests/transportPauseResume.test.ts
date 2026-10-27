@@ -433,6 +433,20 @@ describe('UI loop playhead across a pause (createUpdateUI)', () => {
     expect(playbackStateRef.current.timeSec).toBeCloseTo(1.5);
   });
 
+  it('follows getOutputTimestamp when the context has it (#492), and the pause cap still holds', () => {
+    const { f, tickAt, pause } = makeLoop();
+    // The browser says the frame at the output now is 50 ms behind currentTime (vs 20 ms by the
+    // latency attributes): the playhead follows the browser.
+    Object.assign(f.audioCtx, {
+      getOutputTimestamp: () => ({ contextTime: f.audioCtx.currentTime - 0.05, performanceTime: performance.now() }),
+    });
+    expect(tickAt(10.5).playheadRow).toBeCloseTo(4 + 0.45 * RPS); // 7.6
+    pause(); // pausedAt = 10.5
+    expect(tickAt(10.51).playheadRow).toBeCloseTo(4 + 0.46 * RPS);
+    expect(tickAt(10.6).playheadRow).toBeCloseTo(8);
+    expect(tickAt(90).playheadRow).toBeCloseTo(8);
+  });
+
   it('does not measure drift while paused', () => {
     const { f, tickAt, pause } = makeLoop();
     tickAt(10.5);

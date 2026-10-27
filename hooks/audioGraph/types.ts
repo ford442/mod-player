@@ -88,6 +88,13 @@ export interface AudioGraphCallbacks {
   stopMusic:         (destroy?: boolean) => void;
   seekToStepWrapper: (step: number) => void;
   updateUI:          () => void;
+  /**
+   * The start path acquired the context — after resume, before any engine is connected. PlayerEngine
+   * moves a new context to the chosen output device here (#492: setSinkId, never a second context)
+   * and follows its `sinkchange`. Idempotent per context; returns a promise only when there is a
+   * device switch to wait for.
+   */
+  prepareAudioContext?: (ctx: AudioContext) => Promise<void> | undefined;
 }
 
 /**

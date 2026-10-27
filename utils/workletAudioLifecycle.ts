@@ -3,6 +3,7 @@
  * Guards #329 (singleton / hot reload), #330 (AudioContext keep-alive),
  * and #354 (position postMessage throttle + hot-reload load token).
  */
+import { PLAYER_SAMPLE_RATE } from './sampleRates';
 
 export type WorkletEngine = 'worklet' | 'native-worklet';
 
@@ -115,17 +116,22 @@ export function shouldReloadNativeModule(
   return loaded.byteLength !== next.byteLength || loaded.sig !== next.sig;
 }
 
+/** Frames per AudioWorklet `process()` call (the Web Audio render quantum). */
+export const RENDER_QUANTUM_FRAMES = 128;
+
 /**
  * Simulate N audio quanta and count how many position reports the throttle allows.
- * Uses a fake audio clock (no real sleep) — quantumSec defaults to 128/44100 ≈ 350 Hz.
+ * Uses a fake audio clock (no real sleep). One quantum is RENDER_QUANTUM_FRAMES at `sampleRate` —
+ * by default the locked playback rate, 48 kHz (375 quanta/s); pass `quantumSec` to override.
  */
 export function countThrottledPositionReports(options: {
   durationSec: number;
   quantumSec?: number;
+  sampleRate?: number;
   intervalSec?: number;
   startTime?: number;
 }): number {
-  const quantumSec = options.quantumSec ?? 128 / 44100;
+  const quantumSec = options.quantumSec ?? RENDER_QUANTUM_FRAMES / (options.sampleRate ?? PLAYER_SAMPLE_RATE);
   const intervalSec = options.intervalSec ?? WORKLET_POSITION_REPORT_INTERVAL_SEC;
   let t = options.startTime ?? 0;
   let lastReport = Number.NEGATIVE_INFINITY;

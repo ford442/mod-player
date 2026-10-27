@@ -249,6 +249,12 @@ EngineState           // Worklet engine lifecycle state
     The native C++ engine attaches to the same context via
     `init_audio_with_context`; `init_audio()` is a headless-harness export only.
     `tests/audioContextFactory.test.ts` fails the build on a second call site.
+    The **output device** moves under the live context (#492): `PlayerEngine.setOutputDevice`
+    → `switchPlayerAudioSink` (`setSinkId`) — never a new context, a suspend or a close to switch.
+    The context is constructed on the default output (not with the constructor's `sinkId`, which
+    takes a stale id silently) and the engine moves it before any engine node connects
+    (`callbacks.prepareAudioContext`, `audio/engine/outputDevice.ts`); `npm run smoke:output-device`
+    switches between Chromium's fake outputs mid-song and checks the context object is unchanged.
 
 13. **Native engine: one resident `OpenMPTModule`:** `cpp/worklet_processor.cpp`
     parses a **transient** `g_metaModule` in `load_module()` (pattern cells,

@@ -6,10 +6,37 @@ import {
   isTriggerFromPackedB,
 } from '../utils/gpuPacking';
 import { usesCircularRowPaging } from '../utils/shaderVersion';
-import { circularPageStart, overlayActualRow } from '../utils/playheadPrediction';
+import { circularPageStart, overlayActualRow, resolveAudioHeardTime } from '../utils/playheadPrediction';
+import { getPlayerAudioContextConstructionCount } from '../utils/audioContextFactory';
+import { listAudioOutputDevices } from '../utils/audioOutputDevices';
 import { useFxStore } from '../store/fxStore';
 import { usePlayerUiStore } from '../store/playerUiStore';
 import { usePlayerEngineInstance } from '../hooks/usePlayerEngine';
+
+const contextSerials = new WeakMap<AudioContext, number>();
+let nextContextSerial = 1;
+
+/** A stable number per context object, so a smoke can prove a device switch kept the same context. */
+function audioContextSerial(ctx: AudioContext | null): number {
+  if (!ctx) return 0;
+  let serial = contextSerials.get(ctx);
+  if (serial === undefined) {
+    serial = nextContextSerial++;
+    contextSerials.set(ctx, serial);
+  }
+  return serial;
+}
+
+let rmsScratch: Float32Array<ArrayBuffer> | null = null;
+
+function analyserRms(analyser: AnalyserNode | null): number | null {
+  if (!analyser) return null;
+  if (rmsScratch?.length !== analyser.fftSize) rmsScratch = new Float32Array(analyser.fftSize);
+  analyser.getFloatTimeDomainData(rmsScratch);
+  let sum = 0;
+  for (const v of rmsScratch) sum += v * v;
+  return Math.sqrt(sum / rmsScratch.length);
+}
 
 /**
  * Headless Chrome / Playwright automation hooks (dev server + CI captures). They read the PlayerEngine
@@ -195,6 +222,26 @@ export function useAppTestHooks(): void {
       getMasterPanValue: () => engine.getMasterPanValue(),
       setMasterVolume: (value: number) => engine.setMasterVolume(value),
       setMasterPan: (value: number) => engine.setMasterPan(value),
+      getOutputDevice: () => {
+        const s = engine.getSnapshot();
+        return {
+          supported: s.outputDeviceSupported,
+          deviceId: s.outputDeviceId,
+          label: s.outputDeviceLabel,
+          switching: s.outputDeviceSwitching,
+          error: s.sinkError,
+        };
+      },
+      setOutputDevice: (deviceId: string, label?: string) => engine.setOutputDevice(deviceId, label),
+      listOutputDevices: () => listAudioOutputDevices(),
+      getAudioContextSerial: () => audioContextSerial(engine.getAudioContext()),
+      getAudioContextConstructions: () => getPlayerAudioContextConstructionCount(),
+      getMasterRms: () => analyserRms(engine.getSnapshot().analyserNode),
+      getHeardTime: () => {
+        const ctx = engine.getAudioContext();
+        if (!ctx) return null;
+        const heard = resolveAudioHeardTime(ctx);
+        return { source: heard.source, outputDelayMs: (ctx.currentTime - heard.time) * 1000 };
       getPositionPathStats: () => engine.getPositionPathStats(),
       // #492 allocation check: run a position path N times in a tight loop (measured by the caller,
       // e.g. CDP heap sampling in scripts/audio-smoke.mjs). The bench module is a lazy chunk.

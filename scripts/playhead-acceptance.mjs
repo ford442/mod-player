@@ -165,7 +165,16 @@ function analyzeLagSamples(samples) {
     medianAbsLagRows: median,
     maxAbsLagRows: Math.max(...absLags),
     engineModes: [...new Set(withLag.map((s) => s.mode))],
+    // #492: which clock the heard time came from (output-timestamp | latency), and the output delay.
+    heardTimeSources: [...new Set(withLag.map((s) => s.heardTimeSource).filter(Boolean))],
+    medianOutputDelayMs: median_(withLag.map((s) => s.outputDelayMs).filter((v) => Number.isFinite(v))),
   };
+}
+
+function median_(values) {
+  if (!values.length) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  return sorted[Math.floor(sorted.length / 2)];
 }
 
 async function checkCircularPaging(page, _engine) {
@@ -348,7 +357,10 @@ async function main() {
       const result = await runScenario(browser, engine, scenario);
       results.push(result);
       console.log(
-        `  status=${result.status} engine=${result.audioEngine} lag median=${result.lag?.medianAbsLagRows?.toFixed(3) ?? 'n/a'} max=${result.lag?.maxAbsLagRows?.toFixed(3) ?? 'n/a'}`,
+        `  status=${result.status} engine=${result.audioEngine} lag median=${result.lag?.medianAbsLagRows?.toFixed(3) ?? 'n/a'} max=${result.lag?.maxAbsLagRows?.toFixed(3) ?? 'n/a'}`
+        + (result.lag?.heardTimeSources?.length
+          ? ` heard=${result.lag.heardTimeSources.join('+')} outputDelay≈${result.lag.medianOutputDelayMs?.toFixed(1) ?? 'n/a'} ms`
+          : ''),
       );
       if (result.paging) {
         console.log(`  paging ok=${result.paging.pagingOk} mismatches=${result.paging.mismatchCount}`);
