@@ -55,7 +55,6 @@ function App() {
   const shaderRecents = useShaderPrefsStore((s) => s.shaderRecents);
   const shaderThumbnails = useShaderPrefsStore((s) => s.shaderThumbnails);
   const setShaderThumbnails = useShaderPrefsStore((s) => s.setShaderThumbnails);
-  const setModuleHash = useShaderPrefsStore((s) => s.setModuleHash);
   const bloomPreset = useShaderPrefsStore((s) => s.bloomPreset);
   const setBloomPreset = useShaderPrefsStore((s) => s.setBloomPreset);
   const colorScheme = useShaderPrefsStore((s) => s.colorScheme);
@@ -246,7 +245,6 @@ function App() {
     activeModuleForSave,
   } = useAppModuleLoading({
     loadFile,
-    setModuleHash,
     patternEditDirtyRef,
     isModuleLoaded,
     status,

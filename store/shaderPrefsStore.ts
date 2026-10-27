@@ -18,6 +18,38 @@ import {
   type NightPreset,
 } from '../types/bloomPresets';
 import { readLocalStorage, writeLocalStorage } from '../utils/localStorageIO';
+import { getLegacyModuleKey, getSongFingerprint, subscribeSongFingerprint } from '../utils/songIdentity';
+import { readSongSession, updateSongSession, type SongSession } from '../utils/songSession';
+
+const LEGACY_MODULE_SHADER_PREFIX = 'xasm1_module_shader_';
+
+/**
+ * One-time migration (#511) of the pre-fingerprint per-module shader memory,
+ * `localStorage['xasm1_module_shader_' + first16BytesHex]`, into the song's
+ * SongSession record. Copied only when the record has no shader yet, and the
+ * record is marked migrated either way, so a later load never clobbers a
+ * shader picked under the fingerprint. The legacy entry is left in place:
+ * other songs with the same prefix may still need to migrate from it.
+ *
+ * What this cannot recover: every XM starts with "Extended Module: ", and
+ * many MODs/S3Ms share their first 16 bytes too, so all of those shared one
+ * legacy entry. Each such song inherits whatever shader was picked last for
+ * any of them, until the user picks a new one for it. Those historical
+ * collisions cannot be unpicked.
+ */
+async function migrateLegacyShader(fingerprint: string, legacyKey: string | null, session: SongSession | null) {
+  if (session?.legacyShaderMigrated) return session;
+  let legacy: string | null = null;
+  if (legacyKey) {
+    try {
+      legacy = window.localStorage.getItem(LEGACY_MODULE_SHADER_PREFIX + legacyKey);
+    } catch {
+      /* storage unavailable */
+    }
+  }
+  const copy = session?.shader == null && legacy !== null && ALL_SHADER_IDS.has(legacy);
+  return updateSongSession(fingerprint, copy ? { shader: legacy, legacyShaderMigrated: true } : { legacyShaderMigrated: true });
+}
 
 function validateShader(shader: string): string {
   if (IS_PUBLIC_MODE && !IS_SHADER_DEBUG) {
@@ -41,7 +73,8 @@ export interface ShaderPrefsState {
   shaderFavorites: string[];
   shaderRecents: string[];
   shaderThumbnails: Record<string, string>;
-  moduleHash: string | null;
+  /** Fingerprint of the loaded song (utils/songIdentity.ts); null while hashing / unloaded. */
+  songFingerprint: string | null;
   skipNextModuleShaderRestore: boolean;
   bloomPreset: BloomPreset;
   colorScheme: ColorScheme;
@@ -57,8 +90,8 @@ export interface ShaderPrefsState {
   highContrast: boolean;
   /** CVD-safe palette id (0=default, 1=deutan/protan, 2=tritan, 3=mono). */
   cvdPalette: number;
-  setModuleHash: (hash: string | null, options?: { skipShaderRestore?: boolean }) => void;
-  restoreModuleShader: () => void;
+  /** Fed by subscribeSongFingerprint; restores the song's shader from its SongSession. */
+  setSongFingerprint: (fingerprint: string | null) => Promise<void>;
   selectShader: (shader: string) => void;
   toggleShaderFavorite: (shader: string) => void;
   randomizeShader: () => void;
@@ -77,12 +110,17 @@ export interface ShaderPrefsState {
   markSkipModuleShaderRestore: () => void;
 }
 
+/** Bumped by every pick and song change: a restore that finishes late must not undo either. */
+let shaderEpoch = 0;
+/** A shader picked while the new song was still hashing; saved to it once the fingerprint lands. */
+let pickedWhileHashing: string | null = null;
+
 export const useShaderPrefsStore = create<ShaderPrefsState>((set, get) => ({
   storedShader: initialStoredShader(),
   shaderFavorites: readLocalStorage<string[]>('xasm1-shader-favorites', []),
   shaderRecents: readLocalStorage<string[]>('xasm1-shader-recents', []),
   shaderThumbnails: readLocalStorage<Record<string, string>>('xasm1-shader-thumbnails', {}),
-  moduleHash: null,
+  songFingerprint: getSongFingerprint(),
   skipNextModuleShaderRestore: false,
   bloomPreset: DEFAULT_BLOOM_PRESET,
   colorScheme: DEFAULT_COLOR_SCHEME,
@@ -99,35 +137,33 @@ export const useShaderPrefsStore = create<ShaderPrefsState>((set, get) => ({
   ),
   highContrast: readLocalStorage<boolean>('xasm1-high-contrast', false),
   cvdPalette: readLocalStorage<number>('xasm1-cvd-palette', 0),
-  setModuleHash: (moduleHash, options) => {
-    set({
-      moduleHash,
-      skipNextModuleShaderRestore: options?.skipShaderRestore === true,
-    });
-    if (!options?.skipShaderRestore) {
-      get().restoreModuleShader();
-    } else {
-      set({ skipNextModuleShaderRestore: false });
-    }
-  },
-  restoreModuleShader: () => {
-    if (IS_PUBLIC_MODE && !IS_SHADER_DEBUG) {
-      set({ storedShader: PUBLIC_DEFAULT_SHADER });
+  setSongFingerprint: async (songFingerprint) => {
+    if (songFingerprint === get().songFingerprint) return;
+    const epoch = ++shaderEpoch;
+    set({ songFingerprint });
+    if (songFingerprint === null) {
+      pickedWhileHashing = null;
       return;
     }
-    const { moduleHash, skipNextModuleShaderRestore } = get();
-    if (!moduleHash || skipNextModuleShaderRestore) {
-      set({ skipNextModuleShaderRestore: false });
-      return;
-    }
+    const picked = pickedWhileHashing;
+    pickedWhileHashing = null;
+    const skip = get().skipNextModuleShaderRestore || (IS_PUBLIC_MODE && !IS_SHADER_DEBUG);
+    if (skip) set({ skipNextModuleShaderRestore: false });
+    const legacyKey = getLegacyModuleKey();
     try {
-      const saved = window.localStorage.getItem(`xasm1_module_shader_${moduleHash}`);
-      if (saved !== null && ALL_SHADER_IDS.has(saved)) {
+      const session = await migrateLegacyShader(songFingerprint, legacyKey, await readSongSession(songFingerprint));
+      if (picked !== null) {
+        await updateSongSession(songFingerprint, { shader: picked });
+        return;
+      }
+      if (skip || epoch !== shaderEpoch) return;
+      const saved = session.shader;
+      if (saved !== null && ALL_SHADER_IDS.has(saved) && saved !== get().storedShader) {
         writeLocalStorage('xasm1_last_shader', saved);
         set({ storedShader: saved });
       }
     } catch (e) {
-      console.warn('[xasm1] Failed to read per-module shader from localStorage', e);
+      console.warn('[xasm1] Failed to read the song session', e);
     }
   },
   selectShader: (shader) => {
@@ -140,13 +176,14 @@ export const useShaderPrefsStore = create<ShaderPrefsState>((set, get) => ({
       if (paletteMode !== state.paletteMode) {
         writeLocalStorage('xasm1_paletteMode', paletteMode);
       }
-      const { moduleHash } = state;
-      if (moduleHash) {
-        try {
-          window.localStorage.setItem(`xasm1_module_shader_${moduleHash}`, validated);
-        } catch {
-          // ignore quota
-        }
+      shaderEpoch++;
+      const { songFingerprint } = state;
+      if (songFingerprint) {
+        updateSongSession(songFingerprint, { shader: validated }).catch((e: unknown) => {
+          console.warn('[xasm1] Failed to save the song shader', e);
+        });
+      } else {
+        pickedWhileHashing = validated;
       }
       return { storedShader: validated, shaderRecents, paletteMode };
     });
@@ -214,3 +251,7 @@ export const useShaderPrefsStore = create<ShaderPrefsState>((set, get) => ({
   },
   markSkipModuleShaderRestore: () => set({ skipNextModuleShaderRestore: true }),
 }));
+
+subscribeSongFingerprint((fingerprint) => {
+  void useShaderPrefsStore.getState().setSongFingerprint(fingerprint);
+});

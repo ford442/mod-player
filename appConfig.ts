@@ -127,8 +127,10 @@ export const THEME_OPTIONS: { value: AppTheme; label: string }[] = [
   { value: 'beige-classic', label: '🤍 Classic' },
 ];
 
-// Compute a fast, dependency-free hash from the first 16 bytes of a module buffer.
-// Used as a stable per-module key for localStorage shader memory.
+// Hex of the first 16 bytes of a module buffer: the pre-#511 per-module shader
+// key. It collides for every XM ("Extended Module: "), so nothing in the app calls
+// it any more — songs are keyed on utils/songFingerprint.ts. Kept only so
+// tests/songFingerprint.test.ts can document the collision.
 export function computeModuleHash(data: Uint8Array): string {
   return Array.from(data.slice(0, 16))
     .map(b => b.toString(16).padStart(2, '0'))

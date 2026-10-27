@@ -1,12 +1,10 @@
 import { useState, useCallback, useMemo } from 'react';
 import type { MutableRefObject } from 'react';
-import { computeModuleHash } from '../appConfig';
 import type { SongSaveRequest } from '../utils/storageApi';
 import type { PatternMatrix } from '../types';
 
 export interface UseAppModuleLoadingParams {
   loadFile: (fileData: Uint8Array, fileName: string) => void | Promise<void>;
-  setModuleHash: (hash: string) => void;
   patternEditDirtyRef: MutableRefObject<boolean>;
   isModuleLoaded: boolean;
   status: string;
@@ -27,7 +25,6 @@ export interface UseAppModuleLoadingResult {
 export function useAppModuleLoading(params: UseAppModuleLoadingParams): UseAppModuleLoadingResult {
   const {
     loadFile,
-    setModuleHash,
     patternEditDirtyRef,
     isModuleLoaded,
     status,
@@ -46,10 +43,9 @@ export function useAppModuleLoading(params: UseAppModuleLoadingParams): UseAppMo
       );
       if (!ok) return;
     }
-    setModuleHash(computeModuleHash(fileData));
     setCurrentModuleFileName(fileName);
     loadFile(fileData, fileName);
-  }, [loadFile, setModuleHash, patternEditDirtyRef]);
+  }, [loadFile, patternEditDirtyRef]);
 
   const handleFileSelected = useCallback(async (file: File) => {
     const arrayBuffer = await file.arrayBuffer();
