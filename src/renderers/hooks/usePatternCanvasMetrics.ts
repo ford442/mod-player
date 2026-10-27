@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
-import type { BloomPostProcessor } from '../../../utils/bloomPostProcessor';
-import { configureCanvasContext } from '../../../utils/webgpuDevice';
 import {
+  containerBoxFromEntry,
+  resolveCanvasBufferSize,
   resolvePatternCanvasMetrics,
-  resolvePatternDevicePixelRatio,
+  type ContainerBox,
 } from './resolvePatternCanvasMetrics';
 
 export interface UsePatternCanvasMetricsParams {
@@ -14,10 +14,12 @@ export interface UsePatternCanvasMetricsParams {
   numChannels: number;
   cellWidth: number;
   liteMode: boolean;
-  bloomRef: React.MutableRefObject<BloomPostProcessor | null>;
+  /** Read for `limits.maxTextureDimension2D` (the canvas size cap). */
   gpuDeviceRef: React.MutableRefObject<GPUDevice | null>;
-  gpuContextRef: React.MutableRefObject<GPUCanvasContext | null>;
 }
+
+/** Resize bursts (window drag) settle for this long before the canvas is resized once. */
+const RESIZE_SETTLE_MS = 100;
 
 /**
  * Call `onChange` whenever `window.devicePixelRatio` changes. A
@@ -44,6 +46,14 @@ export function watchDevicePixelRatio(onChange: () => void): () => void {
   };
 }
 
+/**
+ * Sizes the pattern canvas backing store (#492). One trigger: a ResizeObserver
+ * on the container's `device-pixel-content-box`, which fires for layout
+ * resizes *and* DPR-only changes (zoom, another monitor). Browsers without that
+ * box fall back to `content-box` + a DPR watch. Resizing never reconfigures the
+ * WebGPU context — the next `getCurrentTexture()` follows the new size, and the
+ * frame loop resizes the bloom targets to match.
+ */
 export function usePatternCanvasMetrics(params: UsePatternCanvasMetricsParams) {
   const {
     containerRef,
@@ -53,74 +63,57 @@ export function usePatternCanvasMetrics(params: UsePatternCanvasMetricsParams) {
     numChannels,
     cellWidth,
     liteMode,
-    bloomRef,
     gpuDeviceRef,
-    gpuContextRef,
   } = params;
 
-  const canvasSizeRef = useRef({ width: 0, height: 0, dpr: 1 });
+  /** Latest ResizeObserver measurement; null until the first callback. */
+  const containerBoxRef = useRef<ContainerBox | null>(null);
   const resizeTimeoutRef = useRef<number | null>(null);
 
+  const { width: metricsWidth, height: metricsHeight } =
+    resolvePatternCanvasMetrics(shaderFile, numChannels, cellWidth, liteMode);
+  // Keyed on the numbers, not the inputs: a shader switch or a module with a
+  // different channel count keeps the same object (and so the same
+  // `syncCanvasSize`) whenever the size itself is unchanged.
   const canvasMetrics = useMemo(
-    () => resolvePatternCanvasMetrics(shaderFile, numChannels, cellWidth, liteMode),
-    [shaderFile, numChannels, cellWidth, liteMode],
+    () => ({ width: metricsWidth, height: metricsHeight }),
+    [metricsWidth, metricsHeight],
   );
 
   const syncCanvasSize = useCallback((canvas: HTMLCanvasElement, glCanvas: HTMLCanvasElement | null) => {
-    const dpr = resolvePatternDevicePixelRatio(liteMode);
-    const container = containerRef.current;
-    if (!container) return;
-    const containerRect = container.getBoundingClientRect();
-    const containerWidth = containerRect.width;
-    const containerHeight = containerRect.height;
-    if (containerWidth <= 0 || containerHeight <= 0) return;
-    const aspectRatio = canvasMetrics.width / canvasMetrics.height;
-    let displayWidth = containerWidth;
-    let displayHeight = containerHeight;
-    const containerAspect = containerWidth / containerHeight;
-    if (containerAspect > aspectRatio) {
-      displayWidth = containerHeight * aspectRatio;
-    } else {
-      displayHeight = containerWidth / aspectRatio;
+    let box = containerBoxRef.current;
+    if (!box) {
+      // Before the observer's first callback (which lands before anything is
+      // drawn and replaces this estimate): the container's layout box.
+      const rect = containerRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      box = { cssWidth: rect.width, cssHeight: rect.height };
     }
-    displayWidth = Math.floor(displayWidth);
-    displayHeight = Math.floor(displayHeight);
-    const bufferWidth = Math.max(1, Math.floor(displayWidth * dpr));
-    const bufferHeight = Math.max(1, Math.floor(displayHeight * dpr));
-    if (canvas.width !== bufferWidth || canvas.height !== bufferHeight) {
-      canvas.width = bufferWidth;
-      canvas.height = bufferHeight;
-      canvasSizeRef.current = { width: bufferWidth, height: bufferHeight, dpr };
-    }
-    if (glCanvas) {
-      if (glCanvas.width !== bufferWidth || glCanvas.height !== bufferHeight) {
-        glCanvas.width = bufferWidth;
-        glCanvas.height = bufferHeight;
+    const size = resolveCanvasBufferSize({
+      box,
+      aspect: canvasMetrics.width / canvasMetrics.height,
+      devicePixelRatio: window.devicePixelRatio || 1,
+      liteMode,
+      maxTextureDimension2D: gpuDeviceRef.current?.limits.maxTextureDimension2D,
+    });
+    if (!size) return;
+    for (const target of [canvas, glCanvas]) {
+      if (target && (target.width !== size.width || target.height !== size.height)) {
+        target.width = size.width;
+        target.height = size.height;
       }
     }
-  }, [canvasMetrics, liteMode, containerRef]);
+  }, [canvasMetrics, liteMode, containerRef, gpuDeviceRef]);
 
+  /** Re-size after the burst settles (also the renderer registry's `resize()`). */
   const handleResize = useCallback(() => {
-    const canvas = canvasRef.current;
-    const glCanvas = glCanvasRef.current;
-    if (!canvas) return;
     if (resizeTimeoutRef.current !== null) window.clearTimeout(resizeTimeoutRef.current);
     resizeTimeoutRef.current = window.setTimeout(() => {
-      syncCanvasSize(canvas, glCanvas);
-      if (gpuContextRef.current && gpuDeviceRef.current) {
-        try {
-          configureCanvasContext({
-            device: gpuDeviceRef.current,
-            context: gpuContextRef.current,
-          });
-        } catch (e) {
-          console.error('❌ WebGPU context reconfiguration failed:', e);
-        }
-      }
-      bloomRef.current?.resize(canvas.width, canvas.height);
       resizeTimeoutRef.current = null;
-    }, 100);
-  }, [syncCanvasSize, canvasRef, glCanvasRef, bloomRef, gpuContextRef, gpuDeviceRef]);
+      const canvas = canvasRef.current;
+      if (canvas) syncCanvasSize(canvas, glCanvasRef.current);
+    }, RESIZE_SETTLE_MS);
+  }, [syncCanvasSize, canvasRef, glCanvasRef]);
 
   useLayoutEffect(() => {
     const canvas = canvasRef.current;
@@ -130,32 +123,34 @@ export function usePatternCanvasMetrics(params: UsePatternCanvasMetricsParams) {
 
   useEffect(() => {
     const container = containerRef.current;
-    const canvas = canvasRef.current;
-    if (!container || !canvas) return;
-    const resizeObserver = new ResizeObserver(() => {
-      requestAnimationFrame(() => handleResize());
+    if (!container) return;
+    const resizeObserver = new ResizeObserver((entries) => {
+      const entry = entries[entries.length - 1];
+      if (!entry) return;
+      const first = containerBoxRef.current === null;
+      containerBoxRef.current = containerBoxFromEntry(entry);
+      const canvas = canvasRef.current;
+      // The initial observation lands before anything is drawn: apply it now.
+      if (first && canvas) syncCanvasSize(canvas, glCanvasRef.current);
+      else handleResize();
     });
-    // device-pixel-content-box also fires when only the DPR changes (window
-    // moved to another monitor, browser zoom), which content-box misses.
+    let stopDprWatch = () => {};
     try {
       resizeObserver.observe(container, { box: 'device-pixel-content-box' });
     } catch {
+      // No device-pixel-content-box: content-box misses DPR-only changes.
       resizeObserver.observe(container);
+      stopDprWatch = watchDevicePixelRatio(handleResize);
     }
-    const handleWindowResize = () => handleResize();
-    window.addEventListener('resize', handleWindowResize);
-    const stopDprWatch = watchDevicePixelRatio(handleResize);
     return () => {
       resizeObserver.disconnect();
-      window.removeEventListener('resize', handleWindowResize);
       stopDprWatch();
       if (resizeTimeoutRef.current !== null) window.clearTimeout(resizeTimeoutRef.current);
     };
-  }, [handleResize, containerRef, canvasRef]);
+  }, [handleResize, syncCanvasSize, containerRef, canvasRef, glCanvasRef]);
 
   return {
     canvasMetrics,
-    canvasSizeRef,
     syncCanvasSize,
     handleResize,
   };

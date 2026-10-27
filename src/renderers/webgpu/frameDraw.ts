@@ -30,7 +30,6 @@ import { FX_BEZEL_UNIFORM_BYTES, FX_UNIFORM_SLOTS, readFxVisual } from '../../..
 import { GRID_RECT, getPolarRadii } from '../../../utils/geometryConstants';
 import { resolveWebGpuVisibleRows } from '../../../utils/overlayLayout';
 import { isV030bTimingDebugEnabled } from '../../../utils/timingDebug';
-import { configureCanvasContext } from '../../../utils/webgpuDevice';
 import {
   AUDIO_REACTIVE_UNIFORM_BYTES,
   OSC_SAMPLE_COUNT,
@@ -90,8 +89,10 @@ export interface FrameDrawState {
   instrumentPaletteTexture: GPUTexture | null;
   instrumentPaletteVersion: Uint8Array | null;
   audioReactiveUniformBuffer: GPUBuffer | null;
+  /** The configured canvas format — `pipeline` / `bezelPipeline` target it. */
   canvasFormat: GPUTextureFormat;
-  configuredCanvasSize: { w: number; h: number } | null;
+  /** Canvas is the extended-range HDR configuration (debug readout only). */
+  hdrCanvas: boolean;
   videoState: VideoTextureState;
   renderFrameCount: number;
 }
@@ -160,21 +161,10 @@ export function renderWebGPUFrame(ctx: FrameDrawContext): void {
   }
   if (!pool.isAlive(state.uniformBuffer) || !pool.isAlive(state.cellsBuffer)) return;
 
-  const configured = state.configuredCanvasSize;
-  if (!configured || configured.w !== canvas.width || configured.h !== canvas.height) {
-    try {
-      configureCanvasContext({
-        device,
-        context,
-        format: state.canvasFormat ?? undefined,
-      });
-      state.configuredCanvasSize = { w: canvas.width, h: canvas.height };
-      bloomProcessor?.resize(canvas.width, canvas.height);
-    } catch (e) {
-      console.error('[WebGPU] mid-frame configure failed:', e);
-      return;
-    }
-  }
+  // A canvas resize needs no configure() — getCurrentTexture() below already
+  // follows canvas.width/height. Only the bloom targets are sized by hand
+  // (a no-op unless the size changed).
+  bloomProcessor?.resize(canvas.width, canvas.height);
 
   // One encoder for the whole frame: the analysis compute pass has to be
   // recorded before the pattern pass that samples its output.
@@ -377,8 +367,11 @@ export function renderWebGPUFrame(ctx: FrameDrawContext): void {
   const needsBackground = !isSinglePassCompositeShader(shaderFile);
   const drawsBezel = !!(state.bezelPipeline && state.bezelBindGroup && needsBackground && state.bezelUniformBuffer);
   // Bloom renders the scene into its HDR texture, which only the HDR pipeline
-  // variants can target; without them, draw straight to the swapchain.
+  // variants can target; without them, draw straight to the swapchain. Its
+  // composite pass is built for one canvas format: after a format change it is
+  // skipped until the rebuilt processor arrives.
   const useBloom = !!bloomProcessor?.isReady
+    && bloomProcessor.outputFormat === state.canvasFormat
     && !!state.hdrPipeline
     && (!drawsBezel || !!state.bezelHdrPipeline);
   const pipeline = useBloom ? state.hdrPipeline! : state.pipeline;
@@ -527,6 +520,7 @@ export function renderWebGPUFrame(ctx: FrameDrawContext): void {
     ...(gpuTimings ? { gpuTimings } : {}),
     uniforms: {
       shader: shaderFile,
+      canvas: state.hdrCanvas ? `${state.canvasFormat} HDR` : state.canvasFormat,
       overlay: isOverlayActive ? 'ACTIVE' : 'NONE',
       numRows: p.matrix?.numRows ?? DEFAULT_ROWS,
       numChannels,

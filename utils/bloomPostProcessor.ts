@@ -9,6 +9,12 @@ export interface BloomOptions {
   shaderBlur?: string;
   shaderComposite?: string;
   finalFormat?: GPUTextureFormat; // default 'bgra8unorm'
+  /**
+   * Composite peak relative to SDR white (the WGSL `hdrHeadroom` override).
+   * Leave unset (1.0) for an SDR canvas; HDR_OUTPUT_HEADROOM for an
+   * rgba16float + toneMapping 'extended' canvas (#492).
+   */
+  outputHeadroom?: number;
 }
 
 export interface BloomLayer {
@@ -36,6 +42,14 @@ export const DEFAULT_LAYERS: BloomLayer[] = [
  * Pattern / bezel pipelines drawn inside `render()`'s scene pass must target it.
  */
 export const BLOOM_SCENE_FORMAT: GPUTextureFormat = 'rgba16float';
+
+/**
+ * Composite peak on an HDR canvas, in the canvas's sRGB-encoded units: 1.5
+ * encoded ≈ 2.5× SDR white in linear light. Conservative on purpose — within
+ * the headroom of common HDR400-class panels at typical SDR-white settings; a
+ * brighter request would only be clipped by the compositor anyway.
+ */
+export const HDR_OUTPUT_HEADROOM = 1.5;
 
 /** Blur uniform: [dirX, dirY, width, height] — 16 bytes. */
 const BLUR_UNIFORM_BYTES = 16;
@@ -104,6 +118,7 @@ export class BloomPostProcessor {
   private compositeShaderCode?: string | undefined;
 
   private finalFormat: GPUTextureFormat;
+  private outputHeadroom: number;
   private disposed = false;
 
   constructor(device: GPUDevice, canvas: HTMLCanvasElement, context: GPUCanvasContext, options: LayeredBloomOptions = {}) {
@@ -116,12 +131,18 @@ export class BloomPostProcessor {
     this.compositeShaderCode = options.shaderComposite;
 
     this.finalFormat = options.finalFormat ?? ('bgra8unorm' as GPUTextureFormat);
+    this.outputHeadroom = options.outputHeadroom ?? 1;
     this.layers = options.layers ?? null;
   }
 
   /** Color format pipelines drawn inside the scene pass must target. */
   get sceneFormat(): GPUTextureFormat {
     return BLOOM_SCENE_FORMAT;
+  }
+
+  /** Canvas format the composite pass was built for; must match the configured canvas. */
+  get outputFormat(): GPUTextureFormat {
+    return this.finalFormat;
   }
 
   // Base URL for fetching shaders (set this for subpath deployments)
@@ -293,17 +314,23 @@ export class BloomPostProcessor {
       createCheckedShaderModule(device, this.compositeShaderCode, 'bloom_composite'),
     ]);
 
-    const fullscreen = (fragment: GPUShaderModule, format: GPUTextureFormat): GPURenderPipelineDescriptor => ({
+    const fullscreen = (
+      fragment: GPUShaderModule,
+      format: GPUTextureFormat,
+      constants?: Record<string, number>,
+    ): GPURenderPipelineDescriptor => ({
       layout: 'auto',
       vertex: { module: vsModule, entryPoint: 'vs' },
-      fragment: { module: fragment, entryPoint: 'fs', targets: [{ format }] },
+      fragment: { module: fragment, entryPoint: 'fs', targets: [{ format }], ...(constants ? { constants } : {}) },
       primitive: { topology: 'triangle-list' },
     });
+    // SDR keeps the shader's default (1.0): the exact pre-#492 pipeline.
+    const compositeConstants = this.outputHeadroom !== 1 ? { hdrHeadroom: this.outputHeadroom } : undefined;
 
     [this.thresholdPipeline, this.blurPipeline, this.compositePipeline] = await Promise.all([
       createRenderPipelineChecked(device, fullscreen(thresholdModule, 'rgba16float'), 'bloom_threshold'),
       createRenderPipelineChecked(device, fullscreen(blurModule, 'rgba16float'), 'bloom_blur'),
-      createRenderPipelineChecked(device, fullscreen(compositeModule, this.finalFormat), 'bloom_composite'),
+      createRenderPipelineChecked(device, fullscreen(compositeModule, this.finalFormat, compositeConstants), 'bloom_composite'),
     ]);
   }
 

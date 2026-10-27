@@ -10,8 +10,7 @@ export type { WebGPURenderParams, DebugInfo } from '../src/renderers/params';
 export { resolveLiveChannels } from '../src/renderers/params';
 
 import type { BloomPostProcessor } from '../utils/bloomPostProcessor';
-import { getLayoutType } from '../utils/shaderVersion';
-import { WebGPUInitError, type WebGPUDeviceStatus } from '../utils/webgpuDevice';
+import { WebGPUInitError, type CanvasOutput, type WebGPUDeviceStatus } from '../utils/webgpuDevice';
 import {
   detectBrowserBrand,
   markWebGPUSessionFailed,
@@ -42,9 +41,11 @@ export function useWebGPURender(
   const [deviceAcquired, setDeviceAcquired] = useState(false);
   const [deviceEpoch, setDeviceEpoch] = useState(0);
   const [deviceStatus, setDeviceStatus] = useState<WebGPUDeviceStatus>('initializing');
+  const [canvasOutput, setCanvasOutput] = useState<CanvasOutput | null>(null);
+  /** Bumped when the display's dynamic range flips the active shader's canvas output. */
+  const [outputEpoch, setOutputEpoch] = useState(0);
 
   const rendererRef = useRef<WebGPURenderer | null>(null);
-  const layoutTypeRef = useRef(getLayoutType(shaderFile));
 
   if (!rendererRef.current) {
     rendererRef.current = new WebGPURenderer(
@@ -56,12 +57,21 @@ export function useWebGPURender(
         onWebgpuAvailable: setWebgpuAvailable,
         onDeviceEpochBump: () => setDeviceEpoch((n) => n + 1),
         onDebugInfo: setDebugInfo,
+        onCanvasOutput: (next) => setCanvasOutput((prev) => (
+          prev && prev.format === next.format && prev.hdr === next.hdr ? prev : next
+        )),
+        onCanvasOutputStale: () => setOutputEpoch((n) => n + 1),
       },
     );
   }
 
   const deviceRef = useRef<GPUDevice | null>(null);
-  const contextRef = useRef<GPUCanvasContext | null>(null);
+  // Read through refs so the device effect doesn't depend on them: a new
+  // sizing callback (canvas metrics) or shader must never tear down the device.
+  const syncCanvasSizeRef = useRef(syncCanvasSize);
+  syncCanvasSizeRef.current = syncCanvasSize;
+  const shaderFileRef = useRef(shaderFile);
+  shaderFileRef.current = shaderFile;
 
   // Acquire GPUDevice + canvas context (once per mount / device-lost recovery).
   useEffect(() => {
@@ -102,14 +112,14 @@ export function useWebGPURender(
     const initDevice = async () => {
       publishWebGPUProbeReport({ ok: false, stage: 'api' });
       try {
-        await renderer.initDevice(canvas, glCanvasRef.current, syncCanvasSize, {
+        await renderer.initDevice(canvas, glCanvasRef.current, (c, gl) => syncCanvasSizeRef.current(c, gl), {
           liteMode: !!liteMode,
           isCancelled: () => cancelled,
           deviceEpoch,
+          shaderFile: shaderFileRef.current,
         });
         if (cancelled) return;
         deviceRef.current = renderer.device;
-        contextRef.current = renderer.context;
       } catch (error) {
         if (cancelled) return;
         if (error instanceof WebGPUInitError && error.message.includes('cancelled')) {
@@ -156,9 +166,8 @@ export function useWebGPURender(
       setDeviceAcquired(false);
       renderer.disposeDevice();
       deviceRef.current = null;
-      contextRef.current = null;
     };
-  }, [syncCanvasSize, enabled, deviceEpoch, liteMode]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [enabled, deviceEpoch, liteMode]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Shader pipelines + initial pattern buffers (rebuilt on shader switch).
   useEffect(() => {
@@ -168,7 +177,6 @@ export function useWebGPURender(
     let cancelled = false;
     setGpuReady(false);
     setVizOffline(false);
-    layoutTypeRef.current = getLayoutType(shaderFile);
     setDebugInfo((prev) => ({
       ...prev,
       errors: prev.errors.filter((e) => !e.startsWith('SHADER-INIT')),
@@ -179,7 +187,6 @@ export function useWebGPURender(
         await renderer.initShader(shaderFile, renderParamsRef.current, () => cancelled);
         if (cancelled) return;
         deviceRef.current = renderer.device;
-        contextRef.current = renderer.context;
         if (!renderer.isShaderReady()) {
           setGpuReady(false);
           setVizOffline(true);
@@ -223,7 +230,7 @@ export function useWebGPURender(
       // current shader only once its replacement has built successfully, and
       // disposeDevice() handles unmount / device teardown.
     };
-  }, [shaderFile, deviceAcquired, enabled, liteMode]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [shaderFile, deviceAcquired, enabled, liteMode, outputEpoch]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Update cells buffer when matrix changes.
   useEffect(() => {
@@ -231,7 +238,6 @@ export function useWebGPURender(
     if (!renderer || !gpuReady) return;
     renderer.updateMatrix(matrix, padTopChannel, renderParamsRef.current);
     deviceRef.current = renderer.device;
-    contextRef.current = renderer.context;
   }, [matrix, padTopChannel, gpuReady, shaderFile, liteMode]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Update channel states buffer
@@ -247,8 +253,7 @@ export function useWebGPURender(
     if (!renderer || !canvas) return;
     renderer.renderFrame(canvas, renderParamsRef.current);
     deviceRef.current = renderer.device;
-    contextRef.current = renderer.context;
   }, [shaderFile]); // reads renderParamsRef; shaderFile is stable per init cycle
 
-  return { gpuReady, vizOffline, render, deviceRef, deviceStatus, contextRef };
+  return { gpuReady, vizOffline, render, deviceRef, deviceStatus, canvasOutput };
 }
