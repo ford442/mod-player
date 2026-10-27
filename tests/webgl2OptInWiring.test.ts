@@ -89,11 +89,30 @@ describe('opt-in WebGL2 fallback wiring (#462)', () => {
   });
 
   it('WebGL2 keeps the readPixels() contract and bloom passes replace (not add to) their targets', () => {
-    expect(glRenderer).toMatch(/preserveDrawingBuffer:\s*true/);
+    // #492: the per-frame preserve copy is only paid under automation / ?debug=readback.
+    expect(glRenderer).toMatch(/preserveDrawingBuffer:\s*options\.preserveDrawingBuffer \?\? wantsDrawingBufferReadback\(\)/);
+    expect(glRenderer).not.toMatch(/preserveDrawingBuffer:\s*true/);
     const composite = bloom.slice(bloom.indexOf('compositeToScreen()'), bloom.indexOf('private runBlur'));
     expect(composite.indexOf('gl.disable(gl.BLEND)')).toBeGreaterThan(-1);
     expect(composite.indexOf('gl.disable(gl.BLEND)')).toBeLessThan(composite.indexOf('this.runBlur('));
     expect(composite.lastIndexOf('gl.enable(gl.BLEND)')).toBeGreaterThan(composite.indexOf('gl.drawArrays'));
+  });
+
+  it('PatternDisplay never acquires a GL context on the shared pattern canvas (#492)', () => {
+    // A getContext('webgl2') that ran before WebGPU configured the canvas would lock it to WebGL2.
+    expect(stripComments(patternDisplay)).not.toMatch(/getContext\(/);
+  });
+
+  it('the WebGL2 renderer is lazy: the hook imports it as a type plus one dynamic import() (#492)', () => {
+    const hook = stripComments(read('src/renderers/webgl2/useWebGL2PatternRender.ts'));
+    expect(hook).toMatch(/import type \{ WebGL2PatternRenderer \} from '\.\/WebGL2PatternRenderer'/);
+    expect(hook).not.toMatch(/^import \{[^}]*\} from '\.\/WebGL2PatternRenderer'/m);
+    expect(hook.match(/import\('\.\/WebGL2PatternRenderer'\)/g)).toHaveLength(1);
+    // Stale-session guard: a backend switch / unmount during the import must not construct one.
+    expect(hook).toMatch(/if \(cancelled \|\| !canvas\) return;/);
+    for (const rel of ['components/PatternDisplay.tsx', 'hooks/useWebGLOverlay.ts', 'src/renderers/rendererSelection.ts']) {
+      expect(stripComments(read(rel))).not.toMatch(/from '[^']*WebGL2PatternRenderer'/);
+    }
   });
 
   it('WebGL2 only repacks the cell texture when the matrix changes', () => {

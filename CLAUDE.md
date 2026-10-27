@@ -103,7 +103,7 @@ python3 deploy.py    # Build + SFTP upload to production server
 | Backend | Entry | Use case |
 |---------|-------|----------|
 | `webgpu` | default | Production visuals (WGSL + bloom) — **required** for GPU viz this phase |
-| `webgl2` | `?webgl2=1` (alias `?renderer=webgl2`), or the **Use WebGL2 visualizer** button on the WebGPU failure card | **Opt-in only, never automatic, never persisted** (per page load). Simplified GLSL pattern + playhead with a persistent `WebGL2 fallback — WebGPU not in use` badge and one `console.warn`; `readPixels()` works. A stored / `DEBUG_RENDERER` `'webgl2'` is ignored |
+| `webgl2` | `?webgl2=1` (alias `?renderer=webgl2`), or the **Use WebGL2 visualizer** button on the WebGPU failure card | **Opt-in only, never automatic, never persisted** (per page load). Simplified GLSL pattern + playhead with a persistent `WebGL2 fallback — WebGPU not in use` badge and one `console.warn`; `readPixels()` works from a later task under automation (`navigator.webdriver`) or `?debug=readback` — the only cases that pay for `preserveDrawingBuffer` (`utils/webglContext.ts`). Survives `webglcontextlost` → restored, like the hybrid overlay; lazy chunk (`WebGL2PatternRenderer-*.js`). A stored / `DEBUG_RENDERER` `'webgl2'` is ignored |
 | `html` | `?renderer=html` | DOM pattern grid (tracker UI), not a GLSL shader session |
 
 Toggle `webgpu`/`html` via debug panel (🔍), `localStorage.xasm1_pattern_renderer`, or `window.DEBUG_RENDERER`; the debug panel lists the resolved backend + reason (`backend`, `backendReason`). Opt-in state lives in `src/renderers/webgl2/optIn.ts`. WebGL2 debug: **Alt+D** cycles wireframe/UV/playhead modes (dev only). Smoke-script renderer policy: `docs/VISUAL_SMOKE.md`.

@@ -3,7 +3,7 @@
 // Uses instanced rendering — one quad per (channel × step) pair.
 // Three-emitter system: Top=Blue note-on, Mid=Pitch-colored note, Bot=Amber expression.
 
-import { useRef, useEffect, useCallback } from 'react';
+import { useRef, useEffect, useCallback, useState } from 'react';
 import type React from 'react';
 import { buildVertexShader, buildFragmentShader } from './webGLShaders';
 import { ChannelShadowState, PatternMatrix, PlaybackState } from '../types';
@@ -24,8 +24,12 @@ import {
 import { resolveOverlayLayout, horizontalPadRowRemapEnabled } from '../utils/overlayLayout';
 import { detectRuntimeBase } from '../src/lib/paths';
 import { createLogger } from '../utils/log';
+import { watchWebGLContextLoss } from '../utils/webglContext';
 
 const glLog = createLogger('WebGL');
+
+/** DebugInfo.errors entry while the overlay's context is lost (#492). */
+const OVERLAY_CONTEXT_LOST = 'WEBGL-OVERLAY-CONTEXT: lost — overlay paused until the browser restores it';
 
 const DEFAULT_ROWS = 64;
 const DEFAULT_CHANNELS = 4;
@@ -73,12 +77,18 @@ export function useWebGLOverlay(
   const glContextRef = useRef<WebGL2RenderingContext | null>(null);
   const glResourcesRef = useRef<GLResources | null>(null);
   const stateDataRef = useRef<Float32Array | null>(null);
+  // Context loss (#492): every loss bumps `lossCountRef`, so a cleanup from an earlier context
+  // generation knows its GL objects are dead and must not be deleted; every restore bumps
+  // `contextGeneration`, which re-runs the init + matrix-upload effects on the restored context.
+  const lossCountRef = useRef(0);
+  const [contextGeneration, setContextGeneration] = useState(0);
 
   // Mutable ref so draw/upload functions always read fresh values without recreating
   const paramsRef = useRef(params);
   paramsRef.current = params;
 
   const initWebGL = useCallback(() => {
+    const generation = lossCountRef.current;
     const shaderFile = paramsRef.current.shaderFile;
     if (!paramsRef.current.isOverlayActive) {
       glLog.log('🔧 Overlay inactive, skipping WebGL init');
@@ -127,6 +137,12 @@ export function useWebGLOverlay(
       glLog.log('✅ Got WebGL2 context');
     } catch (e) {
       console.error('❌ WebGL2 context error:', e);
+      glLog.groupEnd();
+      return;
+    }
+    if (gl.isContextLost()) {
+      // Every create* would return null; `webglcontextrestored` re-runs this init.
+      glLog.log('Context is lost — waiting for webglcontextrestored');
       glLog.groupEnd();
       return;
     }
@@ -238,7 +254,9 @@ export function useWebGLOverlay(
     capImg.onload = () => {
       if (!glCanvasRef.current) return;
       const currentGl = glContextRef.current;
-      if (currentGl) {
+      // A loss/restore or re-init since this load started replaced capTex: uploading into the
+      // stale texture would only raise INVALID_OPERATION.
+      if (currentGl && glResourcesRef.current?.capTexture === capTex) {
         currentGl.bindTexture(currentGl.TEXTURE_2D, capTex);
         currentGl.texImage2D(currentGl.TEXTURE_2D, 0, currentGl.RGBA, currentGl.RGBA, currentGl.UNSIGNED_BYTE, capImg);
         glLog.log('✅ Cap texture loaded');
@@ -298,6 +316,11 @@ export function useWebGLOverlay(
     glLog.groupEnd();
 
     return () => {
+      if (lossCountRef.current !== generation || gl.isContextLost()) {
+        // These objects died with a lost context — deleting them would only raise GL errors.
+        glResourcesRef.current = null;
+        return;
+      }
       try {
         gl.deleteProgram(prog);
         gl.deleteVertexArray(vao);
@@ -314,9 +337,35 @@ export function useWebGLOverlay(
     };
   }, []); // stable — reads from paramsRef
 
+  // `webglcontextlost` → stop drawing (drawWebGL bails without resources) and forget the dead GL
+  // objects; `webglcontextrestored` → bump the generation so init + the matrix upload run again.
+  // Listens while inactive too: a loss nobody preventDefault()s is never restored, and the overlay
+  // would stay dark once re-activated. `isOverlayActive` re-runs this when the canvas (re)mounts.
+  useEffect(() => {
+    const canvas = glCanvasRef.current;
+    if (!canvas) return;
+    return watchWebGLContextLoss(canvas, {
+      onLost: () => {
+        lossCountRef.current += 1;
+        glResourcesRef.current = null;
+        glLog.warn('WebGL overlay context lost — overlay paused until the browser restores it');
+        setDebugInfo((prev: DebugInfo) => ({
+          ...prev,
+          errors: [...prev.errors.filter((e) => e !== OVERLAY_CONTEXT_LOST), OVERLAY_CONTEXT_LOST],
+        }));
+      },
+      onRestored: () => {
+        glLog.log('WebGL overlay context restored — re-creating GL resources');
+        setDebugInfo((prev: DebugInfo) => ({ ...prev, errors: prev.errors.filter((e) => e !== OVERLAY_CONTEXT_LOST) }));
+        setContextGeneration((g) => g + 1);
+      },
+    });
+  }, [glCanvasRef, params.isOverlayActive, setDebugInfo]);
+
   useEffect(() => {
     return initWebGL();
-  }, [params.shaderFile, params.isOverlayActive, initWebGL]); // re-init when hybrid overlay activates or shader changes
+    // re-init when hybrid overlay activates, the shader changes, or the context was restored
+  }, [params.shaderFile, params.isOverlayActive, initWebGL, contextGeneration]);
 
   // Upload matrix data to the WebGL cell-data texture (RG32UI)
   useEffect(() => {
@@ -338,7 +387,7 @@ export function useWebGLOverlay(
     gl.bindTexture(gl.TEXTURE_2D, res.cellTexture);
     gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG32UI, cols, rows, 0, gl.RG_INTEGER, gl.UNSIGNED_INT, packedData);
-  }, [params.matrix, params.padTopChannel, params.shaderFile, params.isOverlayActive]);
+  }, [params.matrix, params.padTopChannel, params.shaderFile, params.isOverlayActive, contextGeneration]);
 
   const drawWebGL = useCallback(() => {
     const p = paramsRef.current;

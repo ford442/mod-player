@@ -29,6 +29,8 @@ const REACT_VENDOR_CHUNK_PREFIX = 'react-vendor';
 const LAZY_3D_CHUNK_PREFIX = 'App3DView';
 /** FX rack (#453): the rack graph (FxRack, modules, loaders) loads only once a module is enabled. */
 const LAZY_FX_CHUNK_PREFIX = 'fxRackController';
+/** Opt-in WebGL2 pattern renderer (#492): only `?webgl2=1` / the failure-card button load it. */
+const LAZY_WEBGL2_CHUNK_PREFIX = 'WebGL2PatternRenderer';
 /**
  * JS-engine assets under worklets/ (everything except README.md): two libopenmpt pairs —
  * libopenmpt-worklet.{js,wasm} (main thread + parser worker) and libopenmpt-playback.{js,wasm} (the
@@ -136,6 +138,11 @@ const fxChunks = jsChunks(LAZY_FX_CHUNK_PREFIX);
 if (fxChunks.length === 0) {
   errors.push(`no ${LAZY_FX_CHUNK_PREFIX}-*.js lazy chunk found (FX rack not code-split?)`);
 }
+// A static import of the WebGL2 renderer folds it into the entry, and this chunk disappears.
+const webgl2Chunks = jsChunks(LAZY_WEBGL2_CHUNK_PREFIX);
+if (webgl2Chunks.length === 0) {
+  errors.push(`no ${LAZY_WEBGL2_CHUNK_PREFIX}-*.js lazy chunk found (opt-in WebGL2 renderer not code-split?)`);
+}
 // Room IRs are fetched on demand from dist/ir/, never bundled.
 {
   const irDir = join(BUILD_DIR, 'ir');
@@ -192,6 +199,9 @@ for (const [rel, { via, code }] of eagerChunks) {
   }
   if (name.startsWith(`${LAZY_FX_CHUNK_PREFIX}-`)) {
     errors.push(`initial load statically imports ${name}${via ? ` (via ${via})` : ''} — FX rack is not lazy`);
+  }
+  if (name.startsWith(`${LAZY_WEBGL2_CHUNK_PREFIX}-`)) {
+    errors.push(`initial load statically imports ${name}${via ? ` (via ${via})` : ''} — the opt-in WebGL2 renderer is not lazy`);
   }
   // Node factory names survive minification, and only the FX rack's modules call them.
   const text = code.toString('utf8');
@@ -273,5 +283,6 @@ console.log(
     `react-vendor=${kib(reactVendorChunks).toFixed(1)} KiB, ` +
     `three-r3f=${kib(threeChunks).toFixed(1)} KiB lazy (${threeChunks.length} file(s)), ` +
     `App3DView lazy chunk present, FX rack lazy chunk present, ` +
+    `WebGL2 renderer=${kib(webgl2Chunks).toFixed(1)} KiB lazy, ` +
     `js-engine worklets/=${(jsEngineBytes / 1024).toFixed(1)} KiB`,
 );

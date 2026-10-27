@@ -1,6 +1,7 @@
 import type { PatternRendererBackend } from './types';
 import { isWebGPUApiAvailable, peekInFlightWebGPUDeviceRequest } from '../../utils/webgpuDevice';
 import { getWebGL2OptIn, requestWebGL2OptIn } from './webgl2/optIn';
+import { releaseWebGLContext } from '../../utils/webglContext';
 
 const STORAGE_KEY = 'xasm1_pattern_renderer';
 const WEBGPU_PROBE_CACHE_KEY = 'xasm1_webgpu_adapter_ok';
@@ -92,10 +93,18 @@ export function isWebGPUAvailable(): boolean {
   return typeof navigator !== 'undefined' && 'gpu' in navigator;
 }
 
+/**
+ * Probe WebGL2 support on a throwaway canvas. The probe context is released right away
+ * (`WEBGL_lose_context`) rather than left for GC: every live context counts against the
+ * browser's per-page cap (~16), past which Chromium force-loses the oldest one.
+ */
 export function isWebGL2Available(): boolean {
   if (typeof document === 'undefined') return false;
   const canvas = document.createElement('canvas');
-  return !!canvas.getContext('webgl2');
+  const gl = canvas.getContext('webgl2');
+  const ok = gl != null;
+  releaseWebGLContext(gl);
+  return ok;
 }
 
 /**

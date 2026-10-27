@@ -180,6 +180,20 @@ Scenario 1 `?webgl2=1` in Chromium *without* WebGPU · scenario 2 no param → f
 scenario 3 no param *with* `--enable-unsafe-webgpu` → no badge, no warn (`EXPECTED_SKIP` for "WebGPU ready" on hosts whose WebGPU cannot present).
 The WebGL2 look is the shared GLSL lens-cap approximation (not a per-shader port); use it for structure/playhead checks, not WGSL parity.
 
+**WebGL2 readback and context hygiene (#492).** The WebGL2 renderer requests `preserveDrawingBuffer: true` only under automation
+(`navigator.webdriver`, i.e. every Playwright/puppeteer script) or with `?debug=readback` — real users skip the per-frame copy. So
+`window.currentPatternRenderer.readPixels()` from a script works unchanged; from a manual DevTools session add `?debug=readback`.
+The renderer is a lazy chunk (`WebGL2PatternRenderer-*.js`, checked by `verify:bundle-budget`), fetched only on the opt-in. Both
+WebGL2 surfaces — the opt-in pattern renderer and the hybrid overlay (`hooks/useWebGLOverlay.ts`) — survive context loss:
+
+```bash
+BASE_URL=http://localhost:4395 npm run smoke:webgl2-context
+```
+
+Scenario 1 `?webgl2=1` (pattern renderer) · scenario 2 hybrid overlay (v0.40, `?lite=0`; runs without the WebGPU flags — the overlay is
+its own canvas). Each does two `WEBGL_lose_context.loseContext()` → `restoreContext()` cycles and asserts one warn per loss, zero draw
+calls while lost, draws + real pixels after the restore, and no WebGL `INVALID_*` errors. Local/manual for now (not in CI).
+
 ---
 
 ## Manual WebGPU desktop checklist

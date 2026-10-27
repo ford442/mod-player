@@ -27,7 +27,11 @@ export const DEFAULT_WEBGL2_DEBUG: WebGL2DebugConfig = {
 /** Agent/CI-facing handle exposed on `window.currentPatternRenderer`. */
 export interface CurrentPatternRenderer {
   backend: PatternRendererBackend;
-  /** Read back RGBA pixels from the active canvas (bottom-left origin). */
+  /**
+   * Read back RGBA pixels from the active canvas (bottom-left origin). WebGL2 only (WebGPU / HTML
+   * return null); from a later task it needs `preserveDrawingBuffer`, which the WebGL2 renderer
+   * requests under automation or `?debug=readback` (`utils/webglContext.ts`).
+   */
   readPixels(): Uint8Array | null;
   getCanvas(): HTMLCanvasElement | null;
   setDebugMode(mode: WebGL2DebugMode): void;
