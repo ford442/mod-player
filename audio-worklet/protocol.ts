@@ -1,158 +1,98 @@
 /**
- * Typed, validated postMessage contract for the JS AudioWorklet boundary.
+ * Typed, validated postMessage contract for the JS AudioWorklet boundary (main-thread side).
  *
- * Both directions share message-type constants from workletProtocolConstants.ts.
- * Runtime validation rejects malformed or version-skewed messages at the
- * receive boundary instead of destructuring e.data blindly.
+ * The messages and their fields are declared once, in workletProtocolConstants.ts (#492). The zod
+ * schemas below are generated from that table, as is the worklet's own allocation-free guard
+ * (workletProtocolGuard.ts) — tests/workletProtocolParity.test.ts runs every message type through
+ * both. Runtime validation rejects malformed or version-skewed messages at the receive boundary
+ * instead of destructuring e.data blindly.
  */
 
 import { z } from 'zod';
-import { AUDIO_SAB_BYTES } from '../utils/audioReactive';
 import {
+  LEGACY_LOAD_SPEC,
   MAIN_TO_WORKLET,
+  MAIN_TO_WORKLET_SPEC,
   WORKLET_TO_MAIN,
+  WORKLET_TO_MAIN_SPEC,
+  type FieldSpec,
+  type LegacyLoadMessage,
+  type MainToWorkletMessage,
   type MainToWorkletType,
+  type MessageSpec,
+  type WorkletToMainMessage,
   type WorkletToMainType,
 } from './workletProtocolConstants';
 
 export { MAIN_TO_WORKLET, WORKLET_TO_MAIN };
-export type { MainToWorkletType, WorkletToMainType };
+export type { MainToWorkletMessage, MainToWorkletType, WorkletToMainMessage, WorkletToMainType };
 
-// ── Shared helpers ───────────────────────────────────────────────────
+// ── zod, generated from the table ────────────────────────────────────
 
-const finiteNumber = z.number().finite();
-const nonNegInt = z.number().int().nonnegative();
-
-function isSharedArrayBuffer(value: unknown): value is SharedArrayBuffer {
-  return typeof SharedArrayBuffer !== 'undefined' && value instanceof SharedArrayBuffer;
+function zodForKind(spec: FieldSpec): z.ZodType {
+  switch (spec.kind) {
+    case 'nonNegInt':
+      return z.number().int().nonnegative();
+    case 'finite':
+      return z.number();
+    case 'boolean':
+      return z.boolean();
+    case 'string':
+      return z.string();
+    case 'nonEmptyString':
+      return z.string().min(1);
+    case 'arrayBuffer':
+      return z.custom<ArrayBuffer>((v) => v instanceof ArrayBuffer, { message: 'expected ArrayBuffer' });
+    case 'modulePayload':
+      return z.custom<ArrayBuffer | Uint8Array>((v) => v instanceof ArrayBuffer || v instanceof Uint8Array, {
+        message: 'moduleData must be ArrayBuffer or Uint8Array',
+      });
+    case 'float32Array':
+      return z.custom<Float32Array>((v) => v instanceof Float32Array, { message: 'expected Float32Array' });
+    case 'sharedArrayBuffer': {
+      const { minBytes } = spec;
+      return z.custom<SharedArrayBuffer>(
+        (v) => typeof SharedArrayBuffer !== 'undefined' && v instanceof SharedArrayBuffer
+          && (minBytes === undefined || v.byteLength >= minBytes),
+        { message: minBytes === undefined ? 'expected SharedArrayBuffer' : `expected SharedArrayBuffer of at least ${minBytes} bytes` },
+      );
+    }
+    case 'finiteArray': {
+      const array = z.array(z.number());
+      return spec.maxLength === undefined ? array : array.max(spec.maxLength);
+    }
+    case 'pcmChannels':
+      return z.union([z.literal(1), z.literal(2)]);
+    default: {
+      const exhaustive: never = spec.kind;
+      return exhaustive;
+    }
+  }
 }
 
-function isArrayBuffer(value: unknown): value is ArrayBuffer {
-  return value instanceof ArrayBuffer;
+function zodMessage(type: string | undefined, spec: MessageSpec): z.ZodObject {
+  const shape: Record<string, z.ZodType> = {
+    type: type === undefined ? z.undefined().optional() : z.literal(type),
+  };
+  for (const [name, field] of Object.entries(spec.fields)) {
+    const schema = zodForKind(field);
+    shape[name] = field.optional ? schema.optional() : schema;
+  }
+  return spec.passthrough ? z.looseObject(shape) : z.object(shape);
 }
 
-function isModulePayload(value: unknown): value is ArrayBuffer | Uint8Array {
-  return isArrayBuffer(value) || value instanceof Uint8Array;
+function zodUnion(table: { readonly [type: string]: MessageSpec }) {
+  const members = Object.entries(table).map(([type, spec]) => zodMessage(type, spec));
+  return z.discriminatedUnion('type', members as [z.ZodObject, ...z.ZodObject[]]);
 }
-
-function isFloat32Array(value: unknown): value is Float32Array {
-  return value instanceof Float32Array;
-}
-
-const moduleDataSchema = z.custom<ArrayBuffer | Uint8Array>(isModulePayload, {
-  message: 'moduleData must be ArrayBuffer or Uint8Array',
-});
-
-const channelVUSchema = z.array(finiteNumber).max(32);
 
 // ── Worklet → main (incoming on node.port.onmessage) ─────────────────
 
-const positionMessageSchema = z.object({
-  type: z.literal(WORKLET_TO_MAIN.position),
-  order: nonNegInt,
-  row: nonNegInt,
-  rowFraction: finiteNumber.optional(),
-  positionSeconds: finiteNumber,
-  bpm: finiteNumber,
-  speed: finiteNumber.optional(),
-  audioTime: finiteNumber.optional(),
-  workletTime: finiteNumber.optional(),
-  samplesWritten: nonNegInt.optional(),
-  sampleRate: finiteNumber.optional(),
-  channelVU: channelVUSchema.optional(),
-});
+export const workletToMainMessageSchema = zodUnion(WORKLET_TO_MAIN_SPEC) as unknown as z.ZodType<WorkletToMainMessage>;
 
-const loadedMessageSchema = z.object({
-  type: z.literal(WORKLET_TO_MAIN.loaded),
-});
-
-const endedMessageSchema = z.object({
-  type: z.literal(WORKLET_TO_MAIN.ended),
-});
-
-const seekAckMessageSchema = z.object({
-  type: z.literal(WORKLET_TO_MAIN.seekAck),
-});
-
-const errorMessageSchema = z.object({
-  type: z.literal(WORKLET_TO_MAIN.error),
-  message: z.string(),
-  /** Set when the worklet caught a wasm trap inside process() and silenced
-   *  output — the node needs a restart, not just a status message. */
-  fatal: z.boolean().optional(),
-});
-
-const oscBufferMessageSchema = z.object({
-  type: z.literal(WORKLET_TO_MAIN.oscBuffer),
-  buffer: z.custom<SharedArrayBuffer>(isSharedArrayBuffer, {
-    message: 'buffer must be SharedArrayBuffer',
-  }).refine((buf) => buf.byteLength >= AUDIO_SAB_BYTES, {
-    message: `buffer must be at least ${AUDIO_SAB_BYTES} bytes`,
-  }),
-});
-
-const needDataMessageSchema = z.object({
-  type: z.literal(WORKLET_TO_MAIN.needData),
-}).passthrough();
-
-const starvationMessageSchema = z.object({
-  type: z.literal(WORKLET_TO_MAIN.starvation),
-}).passthrough();
-
-const projectmPcmMessageSchema = z.object({
-  type: z.literal(WORKLET_TO_MAIN.projectmPcm),
-  buffer: z.instanceof(Float32Array),
-  channels: z.union([z.literal(1), z.literal(2)]),
-  sampleRate: finiteNumber.optional(),
-  samplesPerChannel: nonNegInt.optional(),
-});
-
-const audioDiagMessageSchema = z.object({
-  type: z.literal(WORKLET_TO_MAIN.audioDiag),
-  budgetMs: finiteNumber,
-  quanta: nonNegInt,
-  avgProcessMs: finiteNumber,
-  maxProcessMs: finiteNumber,
-  overruns: nonNegInt,
-  wraps: nonNegInt,
-  wrapMaxProcessMs: finiteNumber,
-  wrapOverruns: nonNegInt,
-  order: nonNegInt,
-  row: nonNegInt,
-  audioTime: finiteNumber.optional(),
-  /** Quantum that set maxProcessMs in this window (not necessarily the wrap). */
-  slowMs: finiteNumber.optional(),
-  slowOrder: nonNegInt.optional(),
-  slowRow: nonNegInt.optional(),
-  pcmEnabled: z.boolean().optional(),
-  audioLite: z.boolean().optional(),
-  /** First wrap windows' maxProcessMs (session; wrap-0 vs wrap-N). */
-  wrapProcessMs: z.array(finiteNumber).optional(),
-  /** Worst scheduling gap in this window (late callback), ms. */
-  maxCallbackGapMs: finiteNumber.optional(),
-  heapBytes: nonNegInt.optional(),
-  heapMoves: nonNegInt.optional(),
-  playingChannels: nonNegInt.optional(),
-});
-
-export const workletToMainMessageSchema = z.discriminatedUnion('type', [
-  positionMessageSchema,
-  loadedMessageSchema,
-  endedMessageSchema,
-  seekAckMessageSchema,
-  errorMessageSchema,
-  oscBufferMessageSchema,
-  needDataMessageSchema,
-  starvationMessageSchema,
-  projectmPcmMessageSchema,
-  audioDiagMessageSchema,
-]);
-
-export type WorkletAudioDiagMessage = z.infer<typeof audioDiagMessageSchema>;
-
-export type WorkletToMainMessage = z.infer<typeof workletToMainMessageSchema>;
-export type WorkletPositionMessage = z.infer<typeof positionMessageSchema>;
-export type WorkletOscBufferMessage = z.infer<typeof oscBufferMessageSchema>;
+export type WorkletAudioDiagMessage = Extract<WorkletToMainMessage, { type: typeof WORKLET_TO_MAIN.audioDiag }>;
+export type WorkletPositionMessage = Extract<WorkletToMainMessage, { type: typeof WORKLET_TO_MAIN.position }>;
+export type WorkletOscBufferMessage = Extract<WorkletToMainMessage, { type: typeof WORKLET_TO_MAIN.oscBuffer }>;
 
 export interface WorkletProtocolParseResult<T> {
   ok: true;
@@ -196,101 +136,14 @@ export function parseWorkletToMainMessageOrWarn(
 
 // ── Main → worklet (outgoing + worklet receive validation) ───────────
 
-const initLibMessageSchema = z.object({
-  type: z.literal(MAIN_TO_WORKLET.initLib),
-  scriptText: z.string().min(1),
-  wasmBytes: z.custom<ArrayBuffer>(isArrayBuffer).optional(),
-});
-
-const loadMessageSchema = z.object({
-  type: z.literal(MAIN_TO_WORKLET.load),
-  moduleData: moduleDataSchema,
-});
-
-const playMessageSchema = z.object({
-  type: z.literal(MAIN_TO_WORKLET.play),
-});
-
-const pauseMessageSchema = z.object({
-  type: z.literal(MAIN_TO_WORKLET.pause),
-});
-
-const seekMessageSchema = z.object({
-  type: z.literal(MAIN_TO_WORKLET.seek),
-  order: nonNegInt,
-  row: nonNegInt,
-  timestamp: finiteNumber.optional(),
-});
-
-const getOscBufferMessageSchema = z.object({
-  type: z.literal(MAIN_TO_WORKLET.getOscBuffer),
-});
-
-const setAudioLiteMessageSchema = z.object({
-  type: z.literal(MAIN_TO_WORKLET.setAudioLite),
-  lite: z.boolean(),
-});
-
-const setProjectmPcmMessageSchema = z.object({
-  type: z.literal(MAIN_TO_WORKLET.setProjectmPcm),
-  enabled: z.boolean(),
-});
-
-const setAudioDiagMessageSchema = z.object({
-  type: z.literal(MAIN_TO_WORKLET.setAudioDiag),
-  enabled: z.boolean(),
-});
-
-const setChannelMuteMessageSchema = z.object({
-  type: z.literal(MAIN_TO_WORKLET.setChannelMute),
-  channel: nonNegInt,
-  muted: z.boolean(),
-});
-
-const setRenderParamMessageSchema = z.object({
-  type: z.literal(MAIN_TO_WORKLET.setRenderParam),
-  param: finiteNumber,
-  value: finiteNumber,
-});
-
-const ctlSetTextMessageSchema = z.object({
-  type: z.literal(MAIN_TO_WORKLET.ctlSetText),
-  key: z.string(),
-  value: z.string(),
-});
-
-const returnPcmBufferMessageSchema = z.object({
-  type: z.literal(MAIN_TO_WORKLET.returnPcmBuffer),
-  buffer: z.custom<Float32Array>(isFloat32Array, { message: 'buffer must be Float32Array' }),
-});
+export const mainToWorkletMessageSchema = zodUnion(MAIN_TO_WORKLET_SPEC) as unknown as z.ZodType<MainToWorkletMessage>;
 
 /** Legacy no-type load shim used by some callers. */
-const legacyLoadMessageSchema = z.object({
-  type: z.undefined().optional(),
-  moduleData: moduleDataSchema,
-}).refine((v) => v.moduleData != null, { message: 'moduleData required' });
-
-export const mainToWorkletMessageSchema = z.discriminatedUnion('type', [
-  initLibMessageSchema,
-  loadMessageSchema,
-  playMessageSchema,
-  pauseMessageSchema,
-  seekMessageSchema,
-  getOscBufferMessageSchema,
-  setAudioLiteMessageSchema,
-  setProjectmPcmMessageSchema,
-  setAudioDiagMessageSchema,
-  setChannelMuteMessageSchema,
-  setRenderParamMessageSchema,
-  ctlSetTextMessageSchema,
-  returnPcmBufferMessageSchema,
-]);
-
-export type MainToWorkletMessage = z.infer<typeof mainToWorkletMessageSchema>;
+const legacyLoadMessageSchema = zodMessage(undefined, LEGACY_LOAD_SPEC) as unknown as z.ZodType<LegacyLoadMessage>;
 
 export type ParseMainToWorkletResult =
   | WorkletProtocolParseResult<MainToWorkletMessage>
-  | WorkletProtocolParseResult<z.infer<typeof legacyLoadMessageSchema>>
+  | WorkletProtocolParseResult<LegacyLoadMessage>
   | WorkletProtocolParseError;
 
 /** Validate main→worklet postMessage payload (worklet receive boundary). */
@@ -299,14 +152,15 @@ export function parseMainToWorkletMessage(data: unknown): ParseMainToWorkletResu
     return { ok: false, error: 'message is not an object' };
   }
 
+  // The legacy shim has no `type`; anything with a type is a typed message (as in the worklet guard).
+  if ((data as { type?: unknown }).type === undefined) {
+    const legacy = legacyLoadMessageSchema.safeParse(data);
+    if (legacy.success) return { ok: true, message: legacy.data };
+  }
+
   const typed = mainToWorkletMessageSchema.safeParse(data);
   if (typed.success) {
     return { ok: true, message: typed.data };
-  }
-
-  const legacy = legacyLoadMessageSchema.safeParse(data);
-  if (legacy.success) {
-    return { ok: true, message: legacy.data };
   }
 
   const detail = typed.error.issues.map((i) => i.message).join('; ');
@@ -370,8 +224,13 @@ export function postCtlSetText(key: string, value: string): MainToWorkletMessage
 }
 
 /** Hand a consumed projectm-pcm buffer back to the worklet's allocation pool (transfer its buffer). */
-export function postReturnPcmBuffer(buffer: Float32Array): MainToWorkletMessage {
+export function postReturnPcmBuffer(buffer: Float32Array<ArrayBuffer>): MainToWorkletMessage {
   return { type: MAIN_TO_WORKLET.returnPcmBuffer, buffer };
+}
+
+/** Hand the worklet the shared position/VU ring (audio-worklet/positionRing.ts). */
+export function postSetPositionRing(buffer: SharedArrayBuffer): MainToWorkletMessage {
+  return { type: MAIN_TO_WORKLET.setPositionRing, buffer };
 }
 
 /** Runtime check for oscBuffer handler (replaces unchecked `as SharedArrayBuffer`). */

@@ -195,6 +195,15 @@ export function useAppTestHooks(): void {
       getMasterPanValue: () => engine.getMasterPanValue(),
       setMasterVolume: (value: number) => engine.setMasterVolume(value),
       setMasterPan: (value: number) => engine.setMasterPan(value),
+      getPositionPathStats: () => engine.getPositionPathStats(),
+      // #492 allocation check: run a position path N times in a tight loop (measured by the caller,
+      // e.g. CDP heap sampling in scripts/audio-smoke.mjs). The bench module is a lazy chunk.
+      runPositionPathBenchmark: async (path: 'ring' | 'message', iterations: number) => {
+        const { createMessageBench, createRingBench } = await import('../utils/positionRingBenchmark');
+        const bench = path === 'ring' ? createRingBench() : createMessageBench();
+        bench.run(Math.min(iterations, 2000)); // warm up (JIT) outside whatever the caller measures
+        return { applied: bench.applied(), run: (n: number) => { bench.run(n); return bench.applied(); } };
+      },
     };
     return () => { delete window.__TEST_HOOKS__; };
   }, [engine]);
