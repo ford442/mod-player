@@ -4,6 +4,7 @@
 
 import { ChannelShadowState, PatternMatrix } from '../types';
 import { GRID_RECT } from './geometryConstants';
+import { isNoteCutEffect, isVolumeColumnOff } from './openmptCommands';
 import type { LayoutType } from './shaderVersion';
 
 export const DEFAULT_ROWS = 64;
@@ -280,24 +281,12 @@ export const calculateNoteDurations = (
       const note = cell.note || 0;
       const hasNote = note >= NOTE_MIN && note <= NOTE_MAX;
       const isNoteOff = note >= NOTE_OFF_MIN;
-      // libopenmpt's VolumeCommand enum: VOLCMD_VOLUME = 1 (modcommand.h). A
-      // "Set Volume 0" in the volume column silences the note without a real
-      // note-off/cut event — volCmd is never the byte value 0xC0 in practice.
-      const VOLCMD_VOLUME = 1;
-      const isVolumeOff = cell.volCmd === VOLCMD_VOLUME && cell.volVal === 0;
+      // "Set volume 0" in the volume column silences the note without a real note-off/cut event.
+      const isVolumeOff = isVolumeColumnOff(cell.volCmd ?? 0, cell.volVal ?? 0);
 
-      // Detect ECx (note cut after x ticks) — MOD/XM effect 'E' (cmd 14 or ASCII 69/'E')
-      // with parameter upper nibble 0xC (values 0xC0–0xCF).
-      // Effect 'e' (cmd 101, lowercase) is also accepted for safety.
-      // ECx immediately silences the note after x ticks, so the visual sustain
-      // should not extend past the ECx row.
-      const EFFECT_E_DECIMAL = 14;  // libopenmpt numeric code for MOD/XM 'E' effect
-      const EFFECT_E_ASCII   = 69;  // ASCII 'E' (used by some text-based formats)
-      const EFFECT_E_LOWER   = 101; // ASCII 'e' (lowercase variant)
-      const effCmd = cell.effCmd ?? 0;
-      const effVal = cell.effVal ?? 0;
-      const effCmdIsE = effCmd === EFFECT_E_DECIMAL || effCmd === EFFECT_E_ASCII || effCmd === EFFECT_E_LOWER;
-      const isEffectCut = effCmdIsE && (effVal & 0xF0) === 0xC0;
+      // ECx / SCx (CMD_MODCMDEX / CMD_S3MCMDEX with parameter 0xCx) cut the note after x ticks,
+      // so the visual sustain should not extend past the cut row.
+      const isEffectCut = isNoteCutEffect(cell.effCmd ?? 0, cell.effVal ?? 0);
 
       if (hasNote) {
         // New note starts → end previous note if any
@@ -528,10 +517,10 @@ export const packPatternMatrixHighPrecision = (matrix: PatternMatrix | null, pad
       const hasNoteOff    = note >= NOTE_OFF_MIN;
       const hasNote       = hasValidNote || hasNoteOff;
 
-      // Volume effect present when column cmd 2 > 0.
-      // Effect present when cmd 4 > 0, or arpeggio exception: cmd 4 == 0 with non-zero param.
+      // Volume effect present when the volume column command is not VOLCMD_NONE; effect present
+      // when the effect command is not CMD_NONE (arpeggio is CMD_ARPEGGIO — see patternExtractor).
       const hasVolEffect  = volCmd > 0;
-      const hasEffect     = effCmd > 0 || (effCmd === 0 && effVal > 0);
+      const hasEffect     = effCmd > 0;
       const hasExpression = hasVolEffect || hasEffect;
 
       // Belt-and-suspenders: zero out expression fields that didn't pass strict check.

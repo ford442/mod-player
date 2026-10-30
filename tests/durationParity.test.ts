@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { packPatternMatrixHighPrecision } from '../utils/gpuPacking';
+import { EffectCommand, VolumeCommand } from '../utils/openmptCommands';
 import { getCell, makeMatrix } from './helpers/patternMatrix';
 
 vi.stubEnv('DEV', true);
@@ -78,7 +79,7 @@ describe('duration parity (DURA-001 CPU path)', () => {
   });
 
   it('T4: ECx terminates note', () => {
-    const ECx = { effCmd: 14, effVal: 0xc3 };
+    const ECx = { effCmd: EffectCommand.CMD_MODCMDEX, effVal: 0xc3 };
     const mat = makeMatrix(8, [[
       { note: 60 },
       {}, {},
@@ -101,9 +102,26 @@ describe('duration parity (DURA-001 CPU path)', () => {
     expect(c.rowOffset).toBe(0);
   });
 
+  it('T4b: SCx (CMD_S3MCMDEX) cuts the note; a pattern break with an 0xCx parameter does not', () => {
+    const run = (cut: { effCmd: number; effVal: number }) => {
+      const mat = makeMatrix(8, [[{ note: 60 }, {}, { ...cut }, {}, {}, {}, {}, {}]]);
+      return getCell(packPatternMatrixHighPrecision(mat).packedData, 2, 0, 1);
+    };
+    expect(run({ effCmd: EffectCommand.CMD_S3MCMDEX, effVal: 0xc3 })).toMatchObject({ duration: 3, isNoteOff: 1 });
+    // 14 is what the old code took for "E"; in libopenmpt it is CMD_PATTERNBREAK
+    expect(run({ effCmd: EffectCommand.CMD_PATTERNBREAK, effVal: 0xc3 })).toMatchObject({ duration: 8, isNoteOff: 0 });
+  });
+
+  it('T4c: v00 in the volume column ends the note; a set-volume effect of 0 does not', () => {
+    const volOff = makeMatrix(8, [[{ note: 60 }, {}, { volCmd: VolumeCommand.VOLCMD_VOLUME, volVal: 0 }, {}, {}, {}, {}, {}]]);
+    expect(getCell(packPatternMatrixHighPrecision(volOff).packedData, 2, 0, 1)).toMatchObject({ duration: 3, isNoteOff: 1 });
+    const panZero = makeMatrix(8, [[{ note: 60 }, {}, { volCmd: VolumeCommand.VOLCMD_PANNING, volVal: 0 }, {}, {}, {}, {}, {}]]);
+    expect(getCell(packPatternMatrixHighPrecision(panZero).packedData, 2, 0, 1)).toMatchObject({ duration: 8, isNoteOff: 0 });
+  });
+
   it('T5: ECx on note-on row = no tail', () => {
     const mat = makeMatrix(8, [[
-      { note: 60, effCmd: 14, effVal: 0xc2 },
+      { note: 60, effCmd: EffectCommand.CMD_MODCMDEX, effVal: 0xc2 },
       {}, {}, {}, {}, {}, {}, {},
     ]]);
 
@@ -230,7 +248,7 @@ describe('duration parity (DURA-001 CPU path)', () => {
 
   it('T12: expression-only flag', () => {
     const mat = makeMatrix(4, [[
-      { effCmd: 4, effVal: 0x50 },
+      { effCmd: EffectCommand.CMD_TONEPORTAMENTO, effVal: 0x50 },
       {}, {}, {},
     ]]);
 
