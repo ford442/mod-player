@@ -4,6 +4,7 @@ import {
   packPatternMatrixHighPrecision,
 } from '../utils/gpuPacking';
 import type { PatternCell, PatternMatrix } from '../types';
+import { EffectCommand, VolumeCommand } from '../utils/openmptCommands';
 import { getCell, makeMatrix, unpackCell } from './helpers/patternMatrix';
 
 vi.stubEnv('DEV', true);
@@ -42,7 +43,7 @@ describe('gpuPacking', () => {
 
   it('round-trips high-precision packed cells byte-exactly', () => {
     const mat = makeMatrix(4, [[
-      { note: 60, inst: 5, volCmd: 0x34, volVal: 0x56, effCmd: 4, effVal: 0x12 },
+      { note: 60, inst: 5, volCmd: VolumeCommand.VOLCMD_VOLSLIDEUP, volVal: 0x0a, effCmd: EffectCommand.CMD_TONEPORTAMENTO, effVal: 0x12 },
       { note: 0, inst: 0, volCmd: 0, volVal: 0, effCmd: 0, effVal: 0 },
       { note: 0, inst: 0, volCmd: 0, volVal: 0, effCmd: 0, effVal: 0 },
       { note: 120, inst: 0, volCmd: 0, volVal: 0, effCmd: 0, effVal: 0 },
@@ -57,13 +58,11 @@ describe('gpuPacking', () => {
     expect(row0.duration).toBe(4);
     expect(row0.rowOffset).toBe(0);
     expect(row0.isNoteOff).toBe(0);
-    expect(row0.effCmd).toBe(4);
+    expect(row0.effCmd).toBe(EffectCommand.CMD_TONEPORTAMENTO);
     expect(row0.effVal).toBe(0x12);
-    expect(row0.volCmd).toBe(0x34);
-
-    const volCmdNibble = (0x34 >> 4) & 0x0f;
-    const volValNibble = (0x56 >> 4) & 0x0f;
-    expect(row0.volPacked).toBe((volCmdNibble << 4) | volValNibble);
+    expect(row0.volCmd).toBe(VolumeCommand.VOLCMD_VOLSLIDEUP);
+    // exact VolumeCommand in the high nibble, 0..15 intensity in the low nibble
+    expect(row0.volPacked).toBe((VolumeCommand.VOLCMD_VOLSLIDEUP << 4) | 0x0a);
 
     const row1 = getCell(packedData, 1, 0, 1);
     expect(row1.note).toBe(60);

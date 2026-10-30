@@ -435,7 +435,7 @@ export function buildFragmentShader(useNoteSustainTailMode: boolean, isV021: boo
         uint volCmdFull = packedB & 255u;
 
         bool isExpressionOnly = (instRaw & 128u) != 0u;
-        uint volCmd = (volPacked >> 4u) << 4u;
+        uint volCmd = volPacked >> 4u; // exact VolumeCommand (high nibble of volPacked)
 
         // Note state detection
         bool hasNote = (note >= NOTE_MIN && note <= NOTE_MAX);

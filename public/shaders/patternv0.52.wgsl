@@ -173,7 +173,9 @@ fn calculateSustainBrightness(info: NoteDurationInfo, baseIntensity: f32) -> f32
 }
 
 // Raw fields extracted from high-precision GPU packing
-//   PackedA: [Note(8) | Instr(8) | Duration(8) | VolNibble(8)]
+//   PackedA: [Note(8) | Instr(8) | Duration(8) | volPacked(8)]
+//     volPacked = VolumeCommand(4, exact, high nibble) | intensity(4, 0..15, low nibble)
+//     (utils/openmptCommands.ts packVolNibbles; set-volume/panning 0..64 are scaled to 0..15)
 //   PackedB: [EffCmd(8) | EffVal(8) | DurFlags(7)+pad | VolCmdFull(8)]  (+ trigger bit)
 struct PackedCellFields {
   note: u32,
@@ -186,8 +188,8 @@ struct PackedCellFields {
   volCmdFull: u32,
   isExpressionOnly: bool,
   inst: u32,
-  volCmd: u32,
-  volVal: u32,
+  volCmd: u32,   // exact VolumeCommand, 0..15
+  volVal: f32,   // intensity 0..1
 }
 
 fn unpackCellFields(packedA: u32, packedB: u32) -> PackedCellFields {
@@ -202,8 +204,8 @@ fn unpackCellFields(packedA: u32, packedB: u32) -> PackedCellFields {
   f.volCmdFull = packedB & 255u;
   f.isExpressionOnly = (f.instRaw & 128u) != 0u;
   f.inst = f.instRaw & 127u;
-  f.volCmd = (f.volPacked >> 4u) << 4u;
-  f.volVal = (f.volPacked & 0x0Fu) << 4u;
+  f.volCmd = f.volPacked >> 4u;
+  f.volVal = f32(f.volPacked & 0x0Fu) / 15.0;
   return f;
 }
 

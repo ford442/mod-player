@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import { packPatternMatrixHighPrecision } from '../utils/gpuPacking';
+import { EffectCommand, VolumeCommand, isNoteCutEffect, isVolumeColumnOff, packVolNibbles } from '../utils/openmptCommands';
 import { getCell, makeMatrix } from './helpers/patternMatrix';
+import { readShaderSource, wgslFnToJs, wgslU32Consts } from './helpers/wgslSubset';
 
 vi.stubEnv('DEV', true);
 
@@ -78,7 +80,7 @@ describe('duration parity (DURA-001 CPU path)', () => {
   });
 
   it('T4: ECx terminates note', () => {
-    const ECx = { effCmd: 14, effVal: 0xc3 };
+    const ECx = { effCmd: EffectCommand.CMD_MODCMDEX, effVal: 0xc3 };
     const mat = makeMatrix(8, [[
       { note: 60 },
       {}, {},
@@ -101,9 +103,26 @@ describe('duration parity (DURA-001 CPU path)', () => {
     expect(c.rowOffset).toBe(0);
   });
 
+  it('T4b: SCx (CMD_S3MCMDEX) cuts the note; a pattern break with an 0xCx parameter does not', () => {
+    const run = (cut: { effCmd: number; effVal: number }) => {
+      const mat = makeMatrix(8, [[{ note: 60 }, {}, { ...cut }, {}, {}, {}, {}, {}]]);
+      return getCell(packPatternMatrixHighPrecision(mat).packedData, 2, 0, 1);
+    };
+    expect(run({ effCmd: EffectCommand.CMD_S3MCMDEX, effVal: 0xc3 })).toMatchObject({ duration: 3, isNoteOff: 1 });
+    // 14 is what the old code took for "E"; in libopenmpt it is CMD_PATTERNBREAK
+    expect(run({ effCmd: EffectCommand.CMD_PATTERNBREAK, effVal: 0xc3 })).toMatchObject({ duration: 8, isNoteOff: 0 });
+  });
+
+  it('T4c: v00 in the volume column ends the note; a set-volume effect of 0 does not', () => {
+    const volOff = makeMatrix(8, [[{ note: 60 }, {}, { volCmd: VolumeCommand.VOLCMD_VOLUME, volVal: 0 }, {}, {}, {}, {}, {}]]);
+    expect(getCell(packPatternMatrixHighPrecision(volOff).packedData, 2, 0, 1)).toMatchObject({ duration: 3, isNoteOff: 1 });
+    const panZero = makeMatrix(8, [[{ note: 60 }, {}, { volCmd: VolumeCommand.VOLCMD_PANNING, volVal: 0 }, {}, {}, {}, {}, {}]]);
+    expect(getCell(packPatternMatrixHighPrecision(panZero).packedData, 2, 0, 1)).toMatchObject({ duration: 8, isNoteOff: 0 });
+  });
+
   it('T5: ECx on note-on row = no tail', () => {
     const mat = makeMatrix(8, [[
-      { note: 60, effCmd: 14, effVal: 0xc2 },
+      { note: 60, effCmd: EffectCommand.CMD_MODCMDEX, effVal: 0xc2 },
       {}, {}, {}, {}, {}, {}, {},
     ]]);
 
@@ -230,7 +249,7 @@ describe('duration parity (DURA-001 CPU path)', () => {
 
   it('T12: expression-only flag', () => {
     const mat = makeMatrix(4, [[
-      { effCmd: 4, effVal: 0x50 },
+      { effCmd: EffectCommand.CMD_TONEPORTAMENTO, effVal: 0x50 },
       {}, {}, {},
     ]]);
 
@@ -261,5 +280,56 @@ describe('duration parity (DURA-001 CPU path)', () => {
       expect(padded[paddedIdx]).toBe(unpadded[unpaddedIdx]);
       expect(padded[paddedIdx + 1]).toBe(unpadded[unpaddedIdx + 1]);
     }
+  });
+});
+
+describe('duration parity (DURA-001 compute shader vs CPU packer, #523 volume/effect helpers)', () => {
+  const lib = readShaderSource('lib/openmpt_commands.wgsl');
+  const compute = readShaderSource('compute_note_duration.wgsl');
+  const consts = wgslU32Consts(lib);
+  const wgslPackVol = wgslFnToJs(lib, 'packVolNibbles', consts) as (c: number, v: number) => number;
+  const wgslCut = wgslFnToJs(lib, 'isEffectCut', consts) as (c: number, v: number) => boolean;
+  const wgslVolOff = wgslFnToJs(lib, 'isVolumeOff', consts) as (c: number, v: number) => boolean;
+
+  it('the compute shader packs volPacked and detects cuts through exactly these helpers', () => {
+    expect(compute).toContain('//#include "lib/openmpt_commands.wgsl"');
+    expect(compute).toContain('let volPacked = packVolNibbles(outVolCmd, outVolVal);');
+    expect(compute).toContain('isVolumeOff(volCmd, volVal)');
+    expect(compute).toContain('isEffectCut(effCmd, effVal)');
+    expect(compute).not.toMatch(/EFFECT_E_|>> 4u\) & 0x0Fu/);
+  });
+
+  it('volPacked: WGSL packVolNibbles === TS packVolNibbles for every command/value byte pair', () => {
+    for (let cmd = 0; cmd < 256; cmd++) {
+      for (let val = 0; val < 256; val++) {
+        const expected = packVolNibbles(cmd, val);
+        if (wgslPackVol(cmd, val) !== expected) {
+          throw new Error(`volCmd=${cmd} volVal=${val}: WGSL ${wgslPackVol(cmd, val)} vs TS ${expected}`);
+        }
+      }
+    }
+  });
+
+  it('note cut and v00: WGSL isEffectCut / isVolumeOff === TS for every command/value byte pair', () => {
+    for (let cmd = 0; cmd < 256; cmd++) {
+      for (let val = 0; val < 256; val++) {
+        if (wgslCut(cmd, val) !== isNoteCutEffect(cmd, val)) throw new Error(`isEffectCut(${cmd}, ${val}) differs`);
+        if (wgslVolOff(cmd, val) !== isVolumeColumnOff(cmd, val)) throw new Error(`isVolumeOff(${cmd}, ${val}) differs`);
+      }
+    }
+  });
+
+  it('the translated helpers really compute (guards the translator itself)', () => {
+    expect(wgslPackVol(VolumeCommand.VOLCMD_VOLUME, 64)).toBe(0x1f);
+    expect(wgslPackVol(VolumeCommand.VOLCMD_PANNING, 32)).toBe(0x28);
+    expect(wgslPackVol(VolumeCommand.VOLCMD_VOLSLIDEUP, 5)).toBe(0x35);
+    expect(wgslCut(EffectCommand.CMD_MODCMDEX, 0xc2)).toBe(true);
+    expect(wgslCut(14, 0xc2)).toBe(false);
+    expect(wgslVolOff(VolumeCommand.VOLCMD_VOLUME, 0)).toBe(true);
+  });
+
+  it('the CPU packer emits the same volPacked the helpers describe', () => {
+    const mat = makeMatrix(2, [[{ note: 60, volCmd: VolumeCommand.VOLCMD_VOLUME, volVal: 64 }, {}]]);
+    expect(getCell(packPatternMatrixHighPrecision(mat).packedData, 0, 0, 1).volPacked).toBe(wgslPackVol(VolumeCommand.VOLCMD_VOLUME, 64));
   });
 });

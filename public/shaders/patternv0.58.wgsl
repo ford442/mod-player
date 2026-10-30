@@ -139,12 +139,44 @@ fn selectPalette(id: u32, t: f32) -> vec3<f32> {
   return a + b * cos(6.28318 * (c * t + vec3<f32>(0.0, 0.33, 0.67)));
 }
 // velocity_led.wgsl — VEL-001 per-step volume/velocity from packed cell layout
+// lib/openmpt_commands.wgsl
+// libopenmpt command values the GPU packers need. Mirrors utils/openmptCommands.ts (values from
+// soundlib/modcommand.h, libopenmpt 0.8.9); tests/patternCommandMapping.test.ts pins every value
+// here to the TS module and to what the committed wasm returns.
+
+const VOLCMD_VOLUME: u32    = 1u;
+const VOLCMD_PANNING: u32   = 2u;
+const CMD_MODCMDEX: u32     = 19u;
+const CMD_S3MCMDEX: u32     = 20u;
+
+// MOD/XM ECx and S3M/IT SCx: note cut after x ticks (utils/openmptCommands.ts isNoteCutEffect).
+fn isEffectCut(effCmd: u32, effVal: u32) -> bool {
+    return (effCmd == CMD_MODCMDEX || effCmd == CMD_S3MCMDEX) && (effVal & 0xF0u) == 0xC0u;
+}
+
+// Volume column "set volume 0" (utils/openmptCommands.ts isVolumeColumnOff).
+fn isVolumeOff(volCmd: u32, volVal: u32) -> bool {
+    return volCmd == VOLCMD_VOLUME && volVal == 0u;
+}
+
+// volPacked of the high-precision layout: exact VolumeCommand in the high nibble, 0..15 intensity
+// in the low nibble (utils/openmptCommands.ts packVolNibbles — same integer math).
+fn packVolNibbles(volCmd: u32, volVal: u32) -> u32 {
+    let cmd = volCmd & 0x0Fu;
+    var intensity = min(volVal, 15u);
+    if (cmd == VOLCMD_VOLUME || cmd == VOLCMD_PANNING) {
+        intensity = (min(volVal, 64u) * 15u + 32u) >> 6u;
+    }
+    return (cmd << 4u) | intensity;
+}
+
+// volPacked = VolumeCommand (high nibble) | intensity 0..15 (low nibble). Only a set-volume column
+// ("v40") is a velocity; panning, slides and the other volume commands carry a different quantity.
 fn normalizedCellVolume(packedA: u32, packedB: u32) -> f32 {
   let volPacked = packedA & 0xFFu;
-  let coarseVol = volPacked & 0x0Fu;
-  let fullVolCmd = packedB & 0xFFu;
-  if (coarseVol == 0u && fullVolCmd == 0u) { return 1.0; }
-  return clamp(f32(coarseVol) / 4.0, 0.0, 1.0);
+  let isSetVolume = (volPacked >> 4u) == VOLCMD_VOLUME;
+  if (!isSetVolume) { return 1.0; }
+  return clamp(f32(volPacked & 0x0Fu) / 15.0, 0.0, 1.0);
 }
 // audio_reactive.wgsl — shared multi-band uniform block (binding 8 on pattern shaders)
 
@@ -559,8 +591,8 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     let isExpressionOnly = (instRaw & 128u) != 0u;
     let inst = instRaw & 127u;
 
-    let volCmd = (volPacked >> 4) << 4;
-    let volVal = (volPacked & 0x0Fu) << 4;
+    let volCmd = volPacked >> 4u;               // exact VolumeCommand (utils/openmptCommands.ts)
+    let volVal = f32(volPacked & 0x0Fu) / 15.0; // intensity 0..1
 
     let dInfo = unpackDurationInfo(in.packedA, in.packedB);
 

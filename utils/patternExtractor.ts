@@ -2,6 +2,7 @@
 // Separated from useLibOpenMPT to keep the hook under 777 lines.
 
 import { LibOpenMPT, PatternCell, PatternMatrix } from '../types';
+import { PatternCommand } from './openmptCommands';
 
 export const DEFAULT_ROWS = 64;
 export const DEFAULT_CHANNELS = 4;
@@ -26,22 +27,25 @@ export function getPatternMatrix(
   for (let r = 0; r < numRows; r++) {
     const rowData: PatternCell[] = [];
     for (let c = 0; c < numChannels; c++) {
-      const rawNote   = lib._openmpt_module_get_pattern_row_channel_command(modPtr, patternIndex, r, c, 0);
-      const rawInst   = lib._openmpt_module_get_pattern_row_channel_command(modPtr, patternIndex, r, c, 1);
-      const rawVolCmd = lib._openmpt_module_get_pattern_row_channel_command(modPtr, patternIndex, r, c, 2);
-      const rawVolVal = lib._openmpt_module_get_pattern_row_channel_command(modPtr, patternIndex, r, c, 3);
-      const rawEffCmd = lib._openmpt_module_get_pattern_row_channel_command(modPtr, patternIndex, r, c, 4);
-      const rawEffVal = lib._openmpt_module_get_pattern_row_channel_command(modPtr, patternIndex, r, c, 5);
+      const rawNote   = lib._openmpt_module_get_pattern_row_channel_command(modPtr, patternIndex, r, c, PatternCommand.NOTE);
+      const rawInst   = lib._openmpt_module_get_pattern_row_channel_command(modPtr, patternIndex, r, c, PatternCommand.INSTRUMENT);
+      const rawVolCmd = lib._openmpt_module_get_pattern_row_channel_command(modPtr, patternIndex, r, c, PatternCommand.VOLUMEEFFECT);
+      const rawVolVal = lib._openmpt_module_get_pattern_row_channel_command(modPtr, patternIndex, r, c, PatternCommand.VOLUME);
+      const rawEffCmd = lib._openmpt_module_get_pattern_row_channel_command(modPtr, patternIndex, r, c, PatternCommand.EFFECT);
+      const rawEffVal = lib._openmpt_module_get_pattern_row_channel_command(modPtr, patternIndex, r, c, PatternCommand.PARAMETER);
 
       // Strict note classification
       const isNoteOn  = rawNote >= NOTE_VALID_MIN && rawNote <= NOTE_VALID_MAX;
       const isNoteOff = rawNote >= NOTE_OFF_MIN;   // note-cut (254), note-off (255), etc.
       const hasNote   = isNoteOn || isNoteOff;
 
-      // Strict expression: volume effect column (cmd 2 > 0), effect column (cmd 4 > 0),
-      // or arpeggio exception: cmd 4 == 0 with a non-zero parameter (cmd 5 > 0).
+      // Strict expression: a volume-column command (VolumeCommand > VOLCMD_NONE) or an effect
+      // (EffectCommand > CMD_NONE). Arpeggio is CMD_ARPEGGIO, so a parameter without a command is
+      // not an effect: libopenmpt keeps the parameter byte of a command it dropped (an XM effect
+      // with no mapping reads back as CMD_NONE + param), and that must not light an effect LED
+      // or reach a writer as "arpeggio".
       const hasVolEffect  = rawVolCmd > 0;
-      const hasEffect     = rawEffCmd > 0 || (rawEffCmd === 0 && rawEffVal > 0);
+      const hasEffect     = rawEffCmd > 0;
       const hasExpression = hasVolEffect || hasEffect;
 
       const type = (isNoteOn || isNoteOff) ? 'note'
