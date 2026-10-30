@@ -1,9 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { PatternCell, PatternMatrix } from '../types';
 import { scrollContainerToCenter } from '../utils/scrollContainer';
+import { formatEffect, formatInstrument, formatNote, formatVolume } from '../utils/patternCellFormat';
 import {
   FIELD_ORDER,
-  NOTE_NAMES,
   applyHexDigit,
   nextEditField,
   noteFromKeyboard,
@@ -30,37 +30,6 @@ interface PatternEditorProps {
 
 const VISIBLE_ROWS = 32;
 const MAX_INLINE_CHANNELS = 16;
-
-function formatNote(cell: PatternCell): string {
-  const n = cell.note;
-  if (n === undefined || n === 0) return '...';
-  const noteIndex = (n - 1) % 12;
-  const octave = Math.floor((n - 1) / 12);
-  return `${NOTE_NAMES[noteIndex]}${octave}`;
-}
-
-function formatInstrument(cell: PatternCell): string {
-  const i = cell.inst;
-  if (i === undefined || i === 0) return '..';
-  return i.toString(16).toUpperCase().padStart(2, '0');
-}
-
-function formatVolume(cell: PatternCell): string {
-  if (cell.volCmd === undefined || (cell.volCmd === 0 && (cell.volVal === undefined || cell.volVal === 0))) {
-    return '..';
-  }
-  const val = cell.volVal ?? 0;
-  return val.toString(16).toUpperCase().padStart(2, '0');
-}
-
-function formatEffect(cell: PatternCell): string {
-  if (cell.effCmd === undefined || (cell.effCmd === 0 && (cell.effVal === undefined || cell.effVal === 0))) {
-    return '...';
-  }
-  const cmd = cell.effCmd.toString(16).toUpperCase();
-  const val = (cell.effVal ?? 0).toString(16).toUpperCase().padStart(2, '0');
-  return `${cmd}${val}`;
-}
 
 function formatRowNumber(row: number): string {
   return row.toString(16).toUpperCase().padStart(2, '0');
