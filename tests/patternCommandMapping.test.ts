@@ -172,7 +172,8 @@ describe('exact packed u32s for the fixture (channel 0, 2 channels)', () => {
     expect(hex(at(packedData, 1, 0))).toEqual(['0x3d010228', '0x01370202']);
     expect(hex(at(packedData, 2, 0))).toEqual(['0x41020200', '0x0d208000']);
     expect(hex(at(packedData, 3, 0))).toEqual(['0x00800200', '0x13c20300']);
-    expect(hex(at(packedData, 4, 0))).toEqual(['0x00800110', '0x00000001']);
+    // v00 with no sounding note is a standalone cut, flagged isNoteOff (durFlags bit 0) like a note-off
+    expect(hex(at(packedData, 4, 0))).toEqual(['0x00800110', '0x00000101']);
     expect(hex(at(packedData, 5, 0))).toEqual(['0x00800135', '0x00000003']);
   });
 });

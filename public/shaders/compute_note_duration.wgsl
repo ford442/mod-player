@@ -7,7 +7,7 @@
 //   packedB: [unused:16][effCmd:8][effVal:8]
 //
 // Output layout (per cell, 2 × u32) — identical to packPatternMatrixHighPrecision:
-//   packedA: [note:8][inst:8][duration:8][volPacked:8]
+//   packedA: [note:8][inst:8][duration:8][volPacked:8]   volPacked = volCmd:4 (exact) | intensity:4
 //   packedB: [effCmd:8][effVal:8][durationFlags:7][reserved:1][volCmd:8]
 
 struct ComputeParams {
@@ -245,10 +245,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         let isNoteOffFlag  = noff;
         let durationFlags  = (rowOffset << 1u) | isNoteOffFlag;
 
-        // Compress volume to nibbles
-        let volCmdNibble = (outVolCmd >> 4u) & 0x0Fu;
-        let volValNibble = (outVolVal >> 4u) & 0x0Fu;
-        let volPacked    = (volCmdNibble << 4u) | volValNibble;
+        // Compress volume to one byte: exact VolumeCommand + 0..15 intensity (lib/openmpt_commands.wgsl)
+        let volPacked = packVolNibbles(outVolCmd, outVolVal);
 
         let outA = ((note & 0xFFu) << 24u) |
                    ((outInst & 0xFFu) << 16u) |

@@ -4,7 +4,7 @@
 
 import { ChannelShadowState, PatternMatrix } from '../types';
 import { GRID_RECT } from './geometryConstants';
-import { isNoteCutEffect, isVolumeColumnOff } from './openmptCommands';
+import { isNoteCutEffect, isVolumeColumnOff, packVolNibbles } from './openmptCommands';
 import type { LayoutType } from './shaderVersion';
 
 export const DEFAULT_ROWS = 64;
@@ -544,7 +544,7 @@ export const packPatternMatrixHighPrecision = (matrix: PatternMatrix | null, pad
       //   - note: 8 bits (0-255, where 97=note-off)
       //   - inst: 8 bits (bit 7 is expression-only flag)
       //   - duration: 8 bits (1-255 rows)
-      //   - volPacked: 4 bits volCmd + 4 bits volVal (upper nibbles)
+      //   - volPacked: VolumeCommand (high nibble, exact) | 0..15 intensity (low nibble)
       // packedB: [effCmd:8][effVal:8][durationFlags:7][trigger:1][volCmd:8]
       //   - effCmd: 8 bits (effect command)
       //   - effVal: 8 bits (effect value)
@@ -557,10 +557,8 @@ export const packPatternMatrixHighPrecision = (matrix: PatternMatrix | null, pad
       const isNoteOffFlag = dInfo.isNoteOff ? 1 : 0;
       const durationFlags = (rowOffset << 1) | isNoteOffFlag;
       
-      // Compress volume to fit in one byte
-      const volCmdNibble = (volCmd >> 4) & 0x0F;
-      const volValNibble = (volVal >> 4) & 0x0F;
-      const volPacked = (volCmdNibble << 4) | volValNibble;
+      // Compress volume to fit in one byte: exact VolumeCommand + 0..15 intensity (see packVolNibbles)
+      const volPacked = packVolNibbles(volCmd, volVal);
 
       packedData[offset] = ((note & 0xFF) << 24) | 
                            ((inst & 0xFF) << 16) | 

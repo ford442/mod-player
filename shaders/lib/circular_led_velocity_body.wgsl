@@ -185,8 +185,8 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     let isExpressionOnly = (instRaw & 128u) != 0u;
     let inst = instRaw & 127u;
 
-    let volCmd = (volPacked >> 4) << 4;
-    let volVal = (volPacked & 0x0Fu) << 4;
+    let volCmd = volPacked >> 4u;               // exact VolumeCommand (utils/openmptCommands.ts)
+    let volVal = f32(volPacked & 0x0Fu) / 15.0; // intensity 0..1
 
     let dInfo = unpackDurationInfo(in.packedA, in.packedB);
 
