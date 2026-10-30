@@ -8,14 +8,25 @@
  *   - every PatternCell field the reader produces for them,
  *   - the exact u32s from all three GPU packers.
  */
+import { readFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { LibOpenMPT, PatternMatrix } from '../types';
 import { synthCommandTestS3m, synthCommandTestXm } from '../scripts/lib/synth-xm.mjs';
 import { calculateNoteDurations, packPatternMatrix, packPatternMatrixComputeInput, packPatternMatrixHighPrecision } from '../utils/gpuPacking';
+import {
+  EffectCommand as CMD,
+  PatternCommand,
+  VolumeCommand as VOL,
+  isNoteCutEffect,
+  isVolumeColumnOff,
+  packVolNibbles,
+} from '../utils/openmptCommands';
 import { parseModuleWithLib } from '../utils/parseModuleWithLib';
 import { loadLibOpenMPTNode } from './helpers/libopenmptNode';
 
-const IDX = { NOTE: 0, INSTRUMENT: 1, VOLUMEEFFECT: 2, EFFECT: 3, VOLUME: 4, PARAMETER: 5 } as const;
+const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 
 let lib: LibOpenMPT;
 let restore = () => {};
@@ -29,7 +40,8 @@ function rawCell(bytes: Uint8Array, row: number, ch: number): number[] {
   const mod = lib._openmpt_module_create_from_memory2(ptr, bytes.length, 0, 0, 0, 0, 0, 0, 0);
   lib._free(ptr);
   try {
-    return [IDX.NOTE, IDX.INSTRUMENT, IDX.VOLUMEEFFECT, IDX.EFFECT, IDX.VOLUME, IDX.PARAMETER].map(
+    const { NOTE, INSTRUMENT, VOLUMEEFFECT, EFFECT, VOLUME, PARAMETER } = PatternCommand;
+    return [NOTE, INSTRUMENT, VOLUMEEFFECT, EFFECT, VOLUME, PARAMETER].map(
       (i) => lib._openmpt_module_get_pattern_row_channel_command(mod, 0, row, ch, i),
     );
   } finally {
@@ -48,16 +60,20 @@ afterAll(() => restore());
 describe('what libopenmpt returns for the synthesized fixtures (no app code involved)', () => {
   const XM = synthCommandTestXm();
 
-  // [row, channel, [note, instrument, volumeEffect, effect, volume, parameter]]
+  // [label, row, channel, [note, instrument, volumeEffect, effect, volume, parameter]] — the
+  // commands are named, so these also pin utils/openmptCommands.ts to what the wasm returns.
   it.each<[string, number, number, number[]]>([
-    ['C-4 01 v40 A0F: set volume 64 + volume slide', 0, 0, [61, 1, 1, 11, 64, 0x0f]],
-    ['--- -- p?? 037: panning + arpeggio', 1, 0, [0, 0, 2, 1, 32, 0x37]],
-    ['E-4 02 --- C20: set volume effect', 2, 0, [65, 2, 0, 13, 0, 0x20]],
-    ['--- -- --- EC2: note cut', 3, 0, [0, 0, 0, 19, 0, 0xc2]],
-    ['--- -- v00 ---: set volume 0', 4, 0, [0, 0, 1, 0, 0, 0]],
-    ['--- -- volslide-up 5', 5, 0, [0, 0, 3, 0, 5, 0]],
-    ['=== key off', 6, 0, [255, 0, 0, 0, 0, 0]],
-    ['--- -- --- ?37: effect byte with no XM meaning', 7, 0, [0, 0, 0, 0, 0, 0x37]],
+    ['C-4 01 v40 A0F: set volume 64 + volume slide', 0, 0, [61, 1, VOL.VOLCMD_VOLUME, CMD.CMD_VOLUMESLIDE, 64, 0x0f]],
+    ['--- -- p?? 037: panning + arpeggio', 1, 0, [0, 0, VOL.VOLCMD_PANNING, CMD.CMD_ARPEGGIO, 32, 0x37]],
+    ['E-4 02 --- C20: set volume effect', 2, 0, [65, 2, VOL.VOLCMD_NONE, CMD.CMD_VOLUME, 0, 0x20]],
+    ['--- -- --- EC2: note cut', 3, 0, [0, 0, VOL.VOLCMD_NONE, CMD.CMD_MODCMDEX, 0, 0xc2]],
+    ['--- -- v00 ---: set volume 0', 4, 0, [0, 0, VOL.VOLCMD_VOLUME, CMD.CMD_NONE, 0, 0]],
+    ['--- -- volslide-up 5', 5, 0, [0, 0, VOL.VOLCMD_VOLSLIDEUP, CMD.CMD_NONE, 5, 0]],
+    ['=== key off', 6, 0, [255, 0, VOL.VOLCMD_NONE, CMD.CMD_NONE, 0, 0]],
+    // Open question of #523: libopenmpt CAN hand back CMD_NONE together with a non-zero parameter
+    // (a command it has no mapping for keeps its parameter byte). The reader must not treat that
+    // as an effect — see the reader tests below.
+    ['--- -- --- ?37: effect byte with no XM meaning keeps its parameter', 7, 0, [0, 0, VOL.VOLCMD_NONE, CMD.CMD_NONE, 0, 0x37]],
     ['empty channel 1 row 3', 3, 1, [0, 0, 0, 0, 0, 0]],
   ])('%s', (_label, row, ch, expected) => {
     expect(rawCell(XM, row, ch)).toEqual(expected);
@@ -65,8 +81,8 @@ describe('what libopenmpt returns for the synthesized fixtures (no app code invo
 
   it('S3M: A07 is CMD_SPEED and SC3 is CMD_S3MCMDEX with parameter 0xC3', () => {
     const S3M = synthCommandTestS3m();
-    expect(rawCell(S3M, 0, 0)).toEqual([61, 1, 1, 16, 32, 0x07]);
-    expect(rawCell(S3M, 1, 0)).toEqual([0, 0, 0, 20, 0, 0xc3]);
+    expect(rawCell(S3M, 0, 0)).toEqual([61, 1, VOL.VOLCMD_VOLUME, CMD.CMD_SPEED, 32, 0x07]);
+    expect(rawCell(S3M, 1, 0)).toEqual([0, 0, VOL.VOLCMD_NONE, CMD.CMD_S3MCMDEX, 0, 0xc3]);
   });
 });
 
@@ -158,5 +174,74 @@ describe('exact packed u32s for the fixture (channel 0, 2 channels)', () => {
     expect(hex(at(packedData, 3, 0))).toEqual(['0x00800200', '0x13c20300']);
     expect(hex(at(packedData, 4, 0))).toEqual(['0x00800110', '0x00000001']);
     expect(hex(at(packedData, 5, 0))).toEqual(['0x00800135', '0x00000003']);
+  });
+});
+
+describe('utils/openmptCommands', () => {
+  it('PatternCommand indices are libopenmpt\'s (volume column = 4, effect command = 3)', () => {
+    expect(PatternCommand).toEqual({ NOTE: 0, INSTRUMENT: 1, VOLUMEEFFECT: 2, EFFECT: 3, VOLUME: 4, PARAMETER: 5 });
+  });
+
+  it('keeps the values the packers and shaders rely on (modcommand.h 0.8.9)', () => {
+    expect(VOL).toMatchObject({ VOLCMD_NONE: 0, VOLCMD_VOLUME: 1, VOLCMD_PANNING: 2, VOLCMD_OFFSET: 15 });
+    expect(CMD).toMatchObject({ CMD_NONE: 0, CMD_ARPEGGIO: 1, CMD_VOLUME: 13, CMD_MODCMDEX: 19, CMD_S3MCMDEX: 20, CMD_VOLUMEDOWN_ETX: 57 });
+    // no two commands share a value, and every value is a byte
+    for (const table of [VOL, CMD]) {
+      const values = Object.values(table);
+      expect(new Set(values).size).toBe(values.length);
+      expect(values.every((v) => v >= 0 && v < 256)).toBe(true);
+    }
+  });
+
+  it('isNoteCutEffect: ECx and SCx only', () => {
+    expect(isNoteCutEffect(CMD.CMD_MODCMDEX, 0xc0)).toBe(true);
+    expect(isNoteCutEffect(CMD.CMD_MODCMDEX, 0xc2)).toBe(true);
+    expect(isNoteCutEffect(CMD.CMD_S3MCMDEX, 0xc3)).toBe(true);
+    expect(isNoteCutEffect(CMD.CMD_MODCMDEX, 0xd2)).toBe(false); // EDx note delay
+    expect(isNoteCutEffect(CMD.CMD_PATTERNBREAK, 0xc2)).toBe(false);
+    expect(isNoteCutEffect(14, 0xc2)).toBe(false); // the old "E = 14" guess is CMD_PATTERNBREAK
+    expect(isNoteCutEffect(CMD.CMD_NONE, 0xc2)).toBe(false);
+  });
+
+  it('isVolumeColumnOff: only "set volume 0"', () => {
+    expect(isVolumeColumnOff(VOL.VOLCMD_VOLUME, 0)).toBe(true);
+    expect(isVolumeColumnOff(VOL.VOLCMD_VOLUME, 1)).toBe(false);
+    expect(isVolumeColumnOff(VOL.VOLCMD_PANNING, 0)).toBe(false);
+    expect(isVolumeColumnOff(VOL.VOLCMD_NONE, 0)).toBe(false);
+  });
+
+  it('packVolNibbles: exact command high nibble, 0..15 intensity low nibble', () => {
+    expect(packVolNibbles(VOL.VOLCMD_VOLUME, 64)).toBe(0x1f);
+    expect(packVolNibbles(VOL.VOLCMD_VOLUME, 32)).toBe(0x18);
+    expect(packVolNibbles(VOL.VOLCMD_VOLUME, 0)).toBe(0x10);
+    expect(packVolNibbles(VOL.VOLCMD_PANNING, 64)).toBe(0x2f);
+    expect(packVolNibbles(VOL.VOLCMD_VOLSLIDEUP, 5)).toBe(0x35);
+    expect(packVolNibbles(VOL.VOLCMD_VIBRATODEPTH, 200)).toBe(0x8f); // saturates
+    expect(packVolNibbles(VOL.VOLCMD_NONE, 0)).toBe(0x00);
+    // monotonic over the whole 0..64 volume range, and 0 / 64 hit the ends
+    let prev = -1;
+    for (let v = 0; v <= 64; v++) {
+      const low = packVolNibbles(VOL.VOLCMD_VOLUME, v) & 0x0f;
+      expect(low).toBeGreaterThanOrEqual(prev);
+      prev = low;
+    }
+  });
+});
+
+describe('shaders/lib/openmpt_commands.wgsl mirrors utils/openmptCommands.ts', () => {
+  const wgsl = readFileSync(join(ROOT, 'shaders/lib/openmpt_commands.wgsl'), 'utf8');
+  const wgslConst = (name: string) => {
+    const m = wgsl.match(new RegExp(`const\\s+${name}\\s*:\\s*u32\\s*=\\s*(\\d+)u`));
+    if (!m?.[1]) throw new Error(`WGSL const ${name} not found`);
+    return Number(m[1]);
+  };
+
+  it.each([
+    ['VOLCMD_VOLUME', VOL.VOLCMD_VOLUME],
+    ['VOLCMD_PANNING', VOL.VOLCMD_PANNING],
+    ['CMD_MODCMDEX', CMD.CMD_MODCMDEX],
+    ['CMD_S3MCMDEX', CMD.CMD_S3MCMDEX],
+  ])('%s', (name, value) => {
+    expect(wgslConst(name)).toBe(value);
   });
 });
