@@ -1,6 +1,7 @@
 import type { MediaItem } from '../types';
 import { withBase } from '../src/lib/paths';
 import { assertAllowedModuleUrl } from './remoteModuleSecurity';
+import { emitToast } from './toastBus';
 
 // Adjust this path to match where you drop your files on the FTP
 const REMOTE_MEDIA_BASE_URL = withBase('media/');
@@ -114,6 +115,36 @@ export function inferMediaKind(url: string): MediaItem['kind'] {
   if (/\.(mp4|webm|mkv|mov)(?:[?#].*)?$/.test(lower)) return 'video';
   if (/\.gif(?:[?#].*)?$/.test(lower)) return 'gif';
   return 'image';
+}
+
+function currentPageHref(): string {
+  return typeof window !== 'undefined' ? window.location.href : 'http://localhost/';
+}
+
+/**
+ * `crossOrigin` for an <img>/<video> showing `url`. The page is COEP require-corp (#516), so a
+ * cross-origin http(s) resource only loads as a CORS request (or with CORP cross-origin):
+ * 'anonymous' for those, undefined for blob:, data: and same-origin URLs (relative paths included).
+ */
+export function mediaCrossOrigin(url: string, pageHref: string = currentPageHref()): 'anonymous' | undefined {
+  try {
+    const page = new URL(pageHref);
+    const target = new URL(url, page);
+    if (target.protocol !== 'http:' && target.protocol !== 'https:') return undefined;
+    return target.origin === page.origin ? undefined : 'anonymous';
+  } catch {
+    return undefined;
+  }
+}
+
+export const MEDIA_EMBED_BLOCKED_MESSAGE = "This host doesn't allow embedding (needs CORS or CORP)";
+const reportedBlockedMedia = new Set<string>();
+
+/** onError for a media element: one warning toast per cross-origin URL the browser refused. */
+export function reportMediaLoadError(url: string): void {
+  if (mediaCrossOrigin(url) !== 'anonymous' || reportedBlockedMedia.has(url)) return;
+  reportedBlockedMedia.add(url);
+  emitToast(MEDIA_EMBED_BLOCKED_MESSAGE, 'warning');
 }
 
 export function createRemoteMediaItem(url: string): MediaItem {

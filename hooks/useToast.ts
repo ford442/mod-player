@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { subscribeToasts } from '../utils/toastBus';
 
 export type ToastKind = 'info' | 'success' | 'warning' | 'error';
 
@@ -31,6 +32,8 @@ export function useToast() {
     const timer = setTimeout(() => dismissToast(id), TOAST_DURATION_MS);
     timersRef.current.set(id, timer);
   }, [dismissToast]);
+
+  useEffect(() => subscribeToasts(showToast), [showToast]);
 
   useEffect(() => {
     const timers = timersRef.current;
