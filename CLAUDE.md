@@ -144,12 +144,16 @@ This is the central visualization file (578 lines; `audio-worklet/js/openmpt-pro
 5. Handles canvas mouse events via polar hit-testing when `hitTestProfile` is set
 
 ### Data Packing for GPU
-Tracker cell data is bit-packed into `Uint32Array` buffers before upload:
+Tracker cell data is bit-packed into `Uint32Array` buffers (2 × `u32` per cell: PackedA, PackedB) before upload. Three packers exist in `utils/gpuPacking.ts` and the compute shader; the layout is per shader (`ShaderMeta.highPrecisionPacking`):
 
-- **Standard packing:** `[Note(8) | Instr(8) | VolCmd(8) | VolVal(8)]` in one `u32`
-- **High-precision (v0.36+) — `PackedA/PackedB` split:**
-  - `PackedA`: `[Note(8) | Instr(8) | VolCmd(8) | VolVal(8)]`
-  - `PackedB`: `[Unused(16) | EffCmd(8) | EffVal(8)]`
+| Packer | PackedA | PackedB | WGSL readers |
+|---|---|---|---|
+| `packPatternMatrix` and `packPatternMatrixComputeInput` (standard) | `[note:8 \| inst:8 \| volCmd:8 \| volVal:8]` | `[unused:16 \| effCmd:8 \| effVal:8]` | `patternv0.37`, `patternv0.48` (`(packedB >> 8) & 255`), `compute_note_duration.wgsl` input side |
+| `packPatternMatrixHighPrecision` (v0.36+), and the output side of `compute_note_duration.wgsl` | `[note:8 \| inst(bit7=exprOnly):8 \| duration:8 \| volPacked:8]` | `[effCmd:8 \| effVal:8 \| durFlags:7 + trigger(0x8000) \| volCmdFull:8]` | `lib/packing.wgsl`, `lib/circular_led_*_body.wgsl`, `lib/velocity_led.wgsl`, the inline readers in `patternv0.50b/0.51/0.55–0.61`, `hooks/webGLShaders.ts` (GLSL overlay) |
+
+**`volPacked` nibble rule** (`packVolNibbles` in `utils/openmptCommands.ts`, mirrored by `shaders/lib/openmpt_commands.wgsl`; the same integer math on both sides): high nibble = the exact libopenmpt `VolumeCommand` (0..15), low nibble = a 0..15 intensity — `(min(volVal, 64) * 15 + 32) >> 6` for set-volume / panning (0..64), `min(volVal, 15)` for the slide / vibrato / offset commands. Shaders read `volCmd = volPacked >> 4`, `volVal = f32(volPacked & 15) / 15.0`. `volCmdFull` (low byte of PackedB) is the unscaled command.
+
+**Command values are libopenmpt's internal enums, not XM/MOD letters.** `openmpt_module_get_pattern_row_channel_command` indices are `0 NOTE, 1 INSTRUMENT, 2 VOLUMEEFFECT, 3 EFFECT, 4 VOLUME, 5 PARAMETER` (`PatternCommand`), and the values of 2 / 3 are `VolumeCommand` / `EffectCommand` from `soundlib/modcommand.h` (libopenmpt 0.8.9): ECx is `CMD_MODCMDEX` + `0xCx`, arpeggio is `CMD_ARPEGGIO`. All of them live in `utils/openmptCommands.ts` (no hand-typed effect constants elsewhere); `tests/patternCommandMapping.test.ts` pins them against the committed wasm.
 
 **If you change data packing in TypeScript, you MUST update the bit-shifting logic in the corresponding WGSL shader(s).**
 
