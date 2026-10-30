@@ -50,7 +50,7 @@ function makeDist({ preloads = [], chunks = {}, irs = true }: Fixture = {}): str
   );
   writeFileSync(
     join(dir, '.htaccess'),
-    'Header set Cross-Origin-Opener-Policy "same-origin"\nHeader set Cross-Origin-Embedder-Policy "credentialless"\n',
+    'Header set Cross-Origin-Opener-Policy "same-origin"\nHeader set Cross-Origin-Embedder-Policy "require-corp"\n',
   );
   for (const [name, code] of Object.entries(files)) {
     if (typeof code !== 'string') continue; // null = deliberately omitted chunk

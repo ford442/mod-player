@@ -242,6 +242,21 @@ function auditConsole(phaseLines) {
   }
 }
 
+/** #516: the SAB paths (oscilloscope buffer, shared playback heap, off-thread create) need isolation. */
+async function assertCrossOriginIsolated(page) {
+  const state = await evaluate(page, () => ({
+    isolated: window.crossOriginIsolated === true,
+    sab: typeof SharedArrayBuffer === 'function',
+  }));
+  if (!state.isolated || !state.sab) {
+    throw new Error(
+      `page is not cross-origin isolated (crossOriginIsolated=${state.isolated}, SharedArrayBuffer=${state.sab}); ` +
+        'the preview must send COOP same-origin + COEP require-corp',
+    );
+  }
+  console.log('✓ crossOriginIsolated === true, SharedArrayBuffer available');
+}
+
 async function main() {
   const appUrl = buildAudioSmokeUrl(BASE_URL);
   console.log('Audio product-flow smoke (#380)');
@@ -277,6 +292,7 @@ async function main() {
 
     try {
       await goto(page, engine, appUrl, TIMEOUT);
+      await assertCrossOriginIsolated(page);
       report.phases.push({ id: 'boot', status: 'PASS' });
 
       const phaseStart = phaseConsoleStart();

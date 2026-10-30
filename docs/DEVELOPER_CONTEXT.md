@@ -132,33 +132,33 @@ The app needs **cross-origin isolation** so Emscripten can use `SharedArrayBuffe
 | Header | Dev (`vite.config.ts`) | Production (`public/.htaccess` → `dist/.htaccess`) |
 |--------|------------------------|-----------------------------------------------------|
 | `Cross-Origin-Opener-Policy` | `same-origin` | `same-origin` |
-| `Cross-Origin-Embedder-Policy` | `credentialless` | `credentialless` |
+| `Cross-Origin-Embedder-Policy` | `require-corp` | `require-corp` |
 
-**Keep dev and production aligned on `credentialless`.** Older Apache configs used `require-corp`, which blocks any cross-origin script, WASM, or worker asset that does not send `Cross-Origin-Resource-Policy` (CORP) or proper CORS. That can break:
+`public/_headers` carries the same pair; `tests/crossOriginIsolationHeaders.test.ts` pins all three
+sources. **`require-corp`, not `credentialless` (#516):** WebKit does not implement `credentialless`,
+so under it Safari is never isolated and silently takes every fallback — in-worklet module create on
+the audio thread (#513) and `postMessage` instead of `SharedArrayBuffer`. `require-corp` blocks any
+cross-origin subresource that sends neither CORP nor (for a `crossorigin` request) CORS; the audit
+below found only one such surface, `?media=` links.
 
-- (Historical) main-thread `libopenmptjs.js` from a CDN — libopenmpt is now self-hosted, see below
-- The same script fetched again inside `openmpt-parser.worker`
-- esm.sh React importmap modules
+### Load order
 
-If production must use `require-corp`, every external dependency below must satisfy CORP **and** you should self-host libopenmpt under `/xm-player/` with explicit headers.
-
-### External CDN Chain (load order)
-
-1. Vite bundle (`index-*.js`, `index-*.css`)
-2. esm.sh React importmap (`react`, `react-dom/client`)
-3. `/xm-player/worklets/libopenmpt-worklet.js` + `.wasm` (**self-hosted**, same-origin; main thread `<script>` in `index.html`, the parser worker, and the AudioWorklet all use this one pair)
-4. Audio worklet scripts under `/xm-player/worklets/`
-
-`index.html` includes a `preconnect` hint for `esm.sh` (there is no third-party libopenmpt host any more).
+1. Vite bundle (`index-*.js`, `index-*.css`; React lives in the `react-vendor` chunk — there is no importmap or CDN)
+2. `/xm-player/worklets/libopenmpt-worklet.js` + `.wasm` (**self-hosted**, same-origin; main thread `<script>` in `index.html`, the parser worker, and the AudioWorklet all use this one pair)
+3. Audio worklet scripts under `/xm-player/worklets/`
 
 ### CORP / CORS Requirements
 
-| Resource | URL | Required for `credentialless` | Required for `require-corp` |
-|----------|-----|------------------------------|----------------------------|
-| libopenmpt JS + WASM | `/xm-player/worklets/libopenmpt-worklet.{js,wasm}` | Same-origin | Same-origin |
-| React (importmap) | `esm.sh/react@18.2.0` | Typically works under `credentialless` | Verify CORP on each esm.sh response |
-| App static assets | `/xm-player/assets/*` | Same-origin | Same-origin |
-| Worklets | `/xm-player/worklets/*` | Same-origin | Same-origin |
+| Resource | URL | Under `require-corp` |
+|----------|-----|----------------------|
+| libopenmpt JS + WASM | `/xm-player/worklets/libopenmpt-worklet.{js,wasm}` | Same-origin |
+| App static assets | `/xm-player/assets/*` | Same-origin |
+| Worklets | `/xm-player/worklets/*` | Same-origin |
+| Catalog API | `storage.noahcohn.com/api/{mods,shaders}` | CORS `fetch()`; server echoes the origin |
+| Module files | `storage.noahcohn.com/files/mods/*` | `ACAO: *` + `CORP: cross-origin` |
+| Remote media | `?media=<any https URL>` | Needs CORS (requested via `mediaCrossOrigin` → `crossorigin="anonymous"`) or `CORP: cross-origin`; otherwise a "needs CORS or CORP" toast |
+
+Any new cross-origin `<img>` / `<video>` / `<iframe>` needs `crossorigin` plus CORS, or CORP, from its host.
 
 **Operational note:** libopenmpt is self-hosted, so COEP no longer depends on a third party for audio. The `.wasm` must be served as `application/wasm` (else Emscripten falls back from streaming to ArrayBuffer instantiation with a console warning); every request carries a content-hash `?v=` and the `<script>` tag is SRI-pinned from `audio-worklet/js/libopenmpt-worklet.generated.json`.
 

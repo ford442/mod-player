@@ -141,9 +141,9 @@ All strict flags are enabled (see `tsconfig.json`):
 ### CORS & Security
 `vite.config.ts` sets:
 - `Cross-Origin-Opener-Policy: same-origin`
-- `Cross-Origin-Embedder-Policy: credentialless`
+- `Cross-Origin-Embedder-Policy: require-corp`
 
-These enable `SharedArrayBuffer` / Atomics (the worklet's oscilloscope / audio-reactive buffer) while still allowing cross-origin resources such as the esm.sh React importmap in `index.html`. **Do not remove these headers.**
+These enable `SharedArrayBuffer` / Atomics (the worklet's oscilloscope / audio-reactive buffer) in every browser, Safari included. Cross-origin subresources need CORS or CORP (see `docs/DEPLOY.md`). **Do not remove these headers.**
 
 ### Asset Caching Gotchas
 - **AudioWorklet files** are cached aggressively. After editing `public/worklets/openmpt-worklet.js`, hard-refresh or disable cache in DevTools.

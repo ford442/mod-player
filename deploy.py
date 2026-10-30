@@ -9,7 +9,7 @@ Usage:
   python deploy.py                 # build test.1ink.us profile + validate + upload
   python deploy.py --site go       # build go.1ink.us public-lock profile + validate + upload
   python deploy.py --no-build      # upload existing dist/ only (must already match --site profile)
-  python deploy.py --dry-run       # validate locally; never upload
+  python deploy.py --dry-run       # validate locally + probe live COOP/COEP; never upload
 
 This script contacts https://storage.noahcohn.com to upload the dist/ folder
 as a single zip archive. The server extracts it and pushes files over a
@@ -41,6 +41,9 @@ from pathlib import Path
 from typing import Optional
 
 import requests
+
+sys.path.insert(0, str(Path(__file__).resolve().parent / "scripts" / "lib"))
+from coi_headers import FAIL, OK, print_probe, probe_live_coi, worst_status  # noqa: E402
 
 # ============================================================
 # PER-PROJECT CONFIGURATION
@@ -442,7 +445,7 @@ def main() -> None:
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="Validate dist/ only; do not contact the deploy API",
+        help="Validate dist/ and probe the live site's COOP/COEP; do not contact the deploy API",
     )
     parser.add_argument(
         "--site",
@@ -504,8 +507,10 @@ def main() -> None:
         print("Building zip archive (dry-run, no remote size map)...")
         zip_bytes = build_zip(build_path, skip_sizes={})
         print(f"Dry-run archive size: {len(zip_bytes) / 1024:.1f} KB")
+        coi_status = report_live_coi(host)
         print("\n=== Dry run complete (nothing uploaded) ===")
-        sys.exit(0)
+        # A warn (credentialless) is allowed: it is what the live site serves before require-corp ships.
+        sys.exit(1 if coi_status == FAIL else 0)
 
     try:
         health = requests.get(f"{CONTABO_BASE_URL}/api/deploy/health", timeout=10)
@@ -535,9 +540,21 @@ def main() -> None:
             )
 
     print(f"\n=== {'Deployment complete' if success else 'Deployment finished with errors'} ===")
-    if success:
-        verify_live_directory_index(build_path, target_site=target_site)
-    sys.exit(0 if success else 1)
+    if not success:
+        sys.exit(1)
+    verify_live_directory_index(build_path, target_site=target_site)
+    if report_live_coi(host) != OK:
+        print("\n✗ Uploaded, but the live site is not cross-origin isolated (COOP same-origin + COEP require-corp).")
+        sys.exit(1)
+    sys.exit(0)
+
+
+def report_live_coi(host: str) -> str:
+    """Probe the live COOP/COEP headers (see scripts/lib/coi_headers.py) and print the result."""
+    print(f"\nLive cross-origin isolation headers ({host}):")
+    results = probe_live_coi(host)
+    print_probe(results)
+    return worst_status([result for _, result in results])
 
 
 def verify_live_directory_index(build_path: Path, *, target_site: str = "test") -> None:

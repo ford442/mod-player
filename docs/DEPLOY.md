@@ -96,16 +96,46 @@ If `/xm-player/` returns UTF-16 HTML or references an old `index-D7iykI5o.js` wh
 
 ## COOP / COEP headers
 
-Production must match dev (`public/.htaccess` copied into `dist/`):
+Production must match dev. One value everywhere — `vite-plugins/crossOriginIsolationHeaders.ts`
+(dev + preview), `public/.htaccess` (copied into `dist/`) and `public/_headers`;
+`tests/crossOriginIsolationHeaders.test.ts` pins all three:
 
 | Header | Value |
 |--------|-------|
 | `Cross-Origin-Opener-Policy` | `same-origin` |
-| `Cross-Origin-Embedder-Policy` | `credentialless` |
+| `Cross-Origin-Embedder-Policy` | `require-corp` |
 
-**Do not use `require-corp`** unless every cross-origin dependency (CDN libopenmpt, esm.sh) is audited or self-hosted with CORP. See `docs/DEVELOPER_CONTEXT.md` §6.
+`require-corp`, not `credentialless` (#516): WebKit does not implement `credentialless`, so under it
+Safari is never `crossOriginIsolated` and silently takes every fallback (module create on the audio
+thread, `postMessage` instead of `SharedArrayBuffer`). Every cross-origin surface was audited for
+`require-corp` — see the runtime-dependencies table below.
 
-After changing `.htaccess`, redeploy and verify:
+`.htaccess` uses `Header always set` for both headers and unsets COEP in both mod_headers tables
+(`Header unset` + `Header always unset`), so a parent vhost's COEP cannot leave a second value
+behind (a duplicated COEP is ignored by browsers). Do not add `Cross-Origin-Resource-Policy`: our
+subresources are same-origin, and the parent vhost already sends `CORP: cross-origin`.
+
+`sw.js` replays the cached `index.html` (with whatever COEP it was stored with) offline; bump its
+`CACHE_NAME` whenever these headers change.
+
+### Checking the live headers
+
+`python3 deploy.py --dry-run` probes `https://<host>/xm-player/` and
+`https://<host>/xm-player/worklets/openmpt-worklet.js` for the `--site` being deployed (follows
+redirects, `Cache-Control: no-cache`) and prints the result of each (`scripts/lib/coi_headers.py`):
+
+| Result | Meaning |
+|--------|---------|
+| `OK` | COOP `same-origin` + COEP `require-corp` |
+| `WARN` | COEP `credentialless` — isolated on Chromium/Firefox only, not Safari |
+| `FAIL` | COOP not `same-origin`, COEP missing / unknown / sent twice, or a non-200 response |
+
+The dry run exits non-zero on `FAIL` (a `WARN` is allowed, since the live site serves
+`credentialless` until this ships). After a real upload the same probe runs next to the
+directory-index check, and the deploy exits 1 unless every probe is `OK` ("uploaded, but the live
+site is not cross-origin isolated") — the files are already live, so fix the server headers.
+
+By hand:
 
 ```bash
 curl -sI https://test.1ink.us/xm-player/index.html | grep -i cross-origin
@@ -113,14 +143,19 @@ curl -sI https://test.1ink.us/xm-player/index.html | grep -i cross-origin
 
 ## External dependencies at runtime
 
-| # | Resource | Notes |
-|---|----------|-------|
-| 1 | `index-*.js` / `index-*.css` | Vite bundle |
-| 2 | esm.sh React importmap | `preconnect` in `index.html` |
-| 3 | `/xm-player/worklets/libopenmpt-worklet.{js,wasm}` | Self-hosted real-WASM libopenmpt — main-thread `<script>`, parser worker and AudioWorklet all use it (ship both files; `.wasm` as `application/wasm`) |
-| 4 | `/xm-player/worklets/openmpt-worklet.js` | AudioWorklet processor |
+| # | Resource | Origin | Under `require-corp` |
+|---|----------|--------|----------------------|
+| 1 | `index-*.js` / `index-*.css` (React is bundled into `react-vendor`) | Same-origin | Fine |
+| 2 | `/xm-player/worklets/libopenmpt-worklet.{js,wasm}` | Same-origin | Fine. Self-hosted real-WASM libopenmpt — main-thread `<script>`, parser worker and AudioWorklet all use it (ship both files; `.wasm` as `application/wasm`) |
+| 3 | `/xm-player/worklets/*.js` | Same-origin | Fine. AudioWorklet processors (+ the playback pair on an isolated page) |
+| 4 | Bezel / button / lens-cap textures, shader thumbnails | Same-origin or `data:` | Fine |
+| 5 | Catalog API `storage.noahcohn.com/api/mods`, `/api/shaders` | Cross-origin, CORS `fetch()` | Fine: the server echoes the origin with `allow-credentials: true` |
+| 6 | Module files `storage.noahcohn.com/files/mods/*` | Cross-origin | Fine: `ACAO: *` and `CORP: cross-origin` |
+| 7 | Remote media via `?media=<url>` | Any https host | Loads only if the host sends CORS (we request it with `crossorigin="anonymous"`, `mediaCrossOrigin` in `utils/remoteMedia.ts`) or `CORP: cross-origin`. Otherwise the app shows "This host doesn't allow embedding (needs CORS or CORP)". Local files are `blob:` URLs and unaffected |
 
-libopenmpt is same-origin, so it has no CORP requirement even if COEP is tightened to `require-corp`.
+There is no esm.sh or other CDN dependency any more (the dead importmap and preconnect were removed
+from `index.html`). Any new cross-origin `<img>` / `<video>` / `<iframe>` needs `crossorigin` plus
+CORS, or CORP, from its host.
 
 ## Post-deploy smoke check
 

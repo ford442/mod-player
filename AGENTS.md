@@ -17,7 +17,7 @@
 - **`tsconfig.json`** — High strictness. Excludes `archive/`, `jules_patch` (not production).
 - **`tsconfig.node.json`** — Strict check (extends `tsconfig.json`, `noEmit`) of `vite.config.ts`, `vitest.config.ts` and `vite-plugins/`. Run by `npm run typecheck` (`typecheck:node`).
 - **`tsconfig.scripts.json`** — `checkJs` over an explicit list of the pure-Node `scripts/*.mjs` (`typecheck:scripts`, part of `npm run typecheck`). Opt a script in by adding it to `include`, **not** with `// @ts-check` (that would also activate in `tsconfig.test.json`, which loads some of the same files with strict options). The Playwright/browser scripts are not checked yet.
-- **`vite.config.ts`** — Base path from `VITE_APP_BASE_PATH`; React plugin; COOP/COEP headers (`same-origin` / `credentialless`); `watch.followSymlinks: false` (guards against CodeQL self-referential symlink); `assetsInclude: ['**/*.wasm']`.
+- **`vite.config.ts`** — Base path from `VITE_APP_BASE_PATH`; React plugin; COOP/COEP headers (`same-origin` / `require-corp`); `watch.followSymlinks: false` (guards against CodeQL self-referential symlink); `assetsInclude: ['**/*.wasm']`.
 - **`tailwind.config.js`** — Explicit `content` paths only (no broad globs) to prevent build OOM. Custom theme extensions for `panel`, `edge`, `accent`, `glow`, `borderColor`, and `boxShadow`.
 - **`postcss.config.js`** — TailwindCSS + Autoprefixer.
 - **`eslint.config.js`** — Ignores `dist`, `public`, `vendor`, `archive`, `node_modules`, `jules_patch`, `subdir`, `.claude`. Lints `scripts/**/*.mjs` (Node + browser globals), forbids DOM globals in the worklet sources (`no-restricted-globals` on `audio-worklet/js/**` and the two modules it bundles), and enables the type-aware `@typescript-eslint/no-floating-promises` on `src/ hooks/ audio-worklet/ utils/`. CI: `npm run lint` (max 40 warnings; ratchet down as debt is paid).
@@ -208,8 +208,8 @@ python3 deploy.py
 ## Security & CORS Considerations
 - **COOP/COEP headers:** `vite.config.ts` sets:
   - `Cross-Origin-Opener-Policy: same-origin`
-  - `Cross-Origin-Embedder-Policy: credentialless`
-  - This unlocks `SharedArrayBuffer` / Atomics (the worklet's oscilloscope / audio-reactive buffer) while still allowing cross-origin resources (e.g., the esm.sh React importmap in `index.html`). libopenmpt itself is same-origin and loaded with SRI.
+  - `Cross-Origin-Embedder-Policy: require-corp`
+  - This unlocks `SharedArrayBuffer` / Atomics (the worklet's oscilloscope / audio-reactive buffer, the shared playback heap) in every browser, Safari included (WebKit has no `credentialless`). Cross-origin subresources need CORS or CORP; libopenmpt itself is same-origin and loaded with SRI.
 - **CORS:** Loading MOD files or WASM from external URLs can trigger CORS errors. `utils/remoteMedia.ts` handles remote fetching; ensure servers send proper CORS headers.
 - **Service Worker:** `public/sw.js` is scope-aware and works under any base path. It caches module files (`.mod`, `.xm`, `.s3m`, `.it`, `.mptm`, `.wasm`) with a cache-first strategy. SW registration only happens in production builds (`import.meta.env.PROD`).
 - **PWA:** `public/manifest.json` and `sw.js` provide installability.

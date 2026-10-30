@@ -228,8 +228,8 @@ if (!existsSync(htaccessPath)) {
   if (!htaccess.includes('Cross-Origin-Opener-Policy')) {
     errors.push('.htaccess missing Cross-Origin-Opener-Policy');
   }
-  if (!htaccess.includes('credentialless')) {
-    errors.push('.htaccess missing Cross-Origin-Embedder-Policy credentialless');
+  if (!htaccess.includes('Cross-Origin-Embedder-Policy "require-corp"')) {
+    errors.push('.htaccess missing Cross-Origin-Embedder-Policy require-corp');
   }
 }
 

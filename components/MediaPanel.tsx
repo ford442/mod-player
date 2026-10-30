@@ -1,6 +1,12 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import type { MediaItem } from '../types';
-import { deriveMediaCandidates, checkMediaAvailability, createRemoteMediaItem } from '../utils/remoteMedia';
+import {
+  deriveMediaCandidates,
+  checkMediaAvailability,
+  createRemoteMediaItem,
+  mediaCrossOrigin,
+  reportMediaLoadError,
+} from '../utils/remoteMedia';
 import { DEFAULT_MEDIA_FADES, type MediaFades } from '../utils/mediaFades';
 
 interface MediaPanelProps {
@@ -122,9 +128,9 @@ export const MediaPanel: React.FC<MediaPanelProps> = ({ media, activeMediaId, on
           {media.map(item => (
             <div key={item.id} className="relative bg-gray-900 rounded overflow-hidden">
               {item.kind === 'video' ? (
-                <video src={item.url} className="w-full h-24 object-cover" muted loop={!!item.loop} playsInline />
+                <video src={item.url} crossOrigin={mediaCrossOrigin(item.url)} onError={() => reportMediaLoadError(item.url)} className="w-full h-24 object-cover" muted loop={!!item.loop} playsInline />
               ) : (
-                <img src={item.url} alt={item.fileName || 'media'} className="w-full h-24 object-cover" />
+                <img src={item.url} crossOrigin={mediaCrossOrigin(item.url)} onError={() => reportMediaLoadError(item.url)} alt={item.fileName || 'media'} className="w-full h-24 object-cover" />
               )}
 
               <div className="absolute right-1 top-1 flex gap-1">
@@ -148,11 +154,11 @@ export const MediaPanel: React.FC<MediaPanelProps> = ({ media, activeMediaId, on
                 if (!item) return null;
                 if (item.kind === 'video') {
                   return (
-                    <video src={item.url} controls autoPlay muted={!!item.muted} loop={!!item.loop} className="max-h-[70vh] w-auto max-w-full" />
+                    <video src={item.url} crossOrigin={mediaCrossOrigin(item.url)} onError={() => reportMediaLoadError(item.url)} controls autoPlay muted={!!item.muted} loop={!!item.loop} className="max-h-[70vh] w-auto max-w-full" />
                   );
                 }
                 // images & gifs
-                return <img src={item.url} alt={item.fileName || 'media'} className="max-h-[70vh] w-auto max-w-full" />;
+                return <img src={item.url} crossOrigin={mediaCrossOrigin(item.url)} onError={() => reportMediaLoadError(item.url)} alt={item.fileName || 'media'} className="max-h-[70vh] w-auto max-w-full" />;
               })()}
             </div>
           </div>
