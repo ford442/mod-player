@@ -10,12 +10,10 @@
  * #330 already cost us.
  *
  * Rules enforced here:
- * 1. **One context per page session.** `useAudioGraph` and
- *    `OpenMPTWorkletEngine.attachAudioContext` both reuse it. Nothing else may
- *    call `new AudioContext` (and the native engine never calls
- *    `emscripten_create_audio_context`).
- * 2. **`sampleRate` is locked to 48000.** The `--grow` native heap build and
- *    the JS engine's libopenmpt worklet both render at this rate, and the JS worklet's
+ * 1. **One context per page session.** `useAudioGraph` reuses it. Nothing
+ *    else may call `new AudioContext`.
+ * 2. **`sampleRate` is locked to 48000.** The JS engine's libopenmpt worklet
+ *    renders at this rate, and the JS worklet's
  *    interpolation / playhead math (`samplesWritten / sampleRate`) is only
  *    stable when the rate does not depend on whatever the OS defaulted to.
  *    If the constructor rejects the explicit rate (rare — some Firefox / older

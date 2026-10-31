@@ -31,7 +31,6 @@ export interface PerformanceCaptureOptions {
   preferWebGL2?: boolean;
   frameRate?: number;
   fileName?: string;
-  /** Native engine uses a separate AudioContext — audio tap may be unavailable. */
 }
 
 export function usePerformanceCapture() {

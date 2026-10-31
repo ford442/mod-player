@@ -162,7 +162,6 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   const containerRef = useRef<HTMLDivElement>(null);
   const bloomRef = useRef<BloomPostProcessor | null>(null);
   const gpuDeviceRef = useRef<GPUDevice | null>(null);
-  const gpuContextRef = useRef<GPUCanvasContext | null>(null);
 
   const themeBlendRef = useRef<number>(nightModeEnabled ? 1.0 : 0.0);
   const nightModeTargetRef = useRef<number>(nightModeEnabled ? 1.0 : 0.0);
@@ -218,9 +217,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     numChannels,
     cellWidth,
     liteMode,
-    bloomRef,
     gpuDeviceRef,
-    gpuContextRef,
   });
 
   const {
@@ -304,7 +301,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
 
   const oscTextureRef = useRef<GPUTexture | null>(null);
 
-  const { gpuReady, vizOffline, render: renderWebGPU, deviceRef: gpuDevRef, deviceStatus, contextRef: gpuHookContextRef } = useWebGPURender(
+  const { gpuReady, vizOffline, render: renderWebGPU, deviceRef: gpuDevRef, deviceStatus, canvasOutput } = useWebGPURender(
     canvasRef, glCanvasRef, shaderFile,
     syncCanvasSize, renderParamsRef, matrix, padTopChannel, backendDebugInfo, setWebgpuAvailable,
     bloomRef,
@@ -324,14 +321,12 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
   const { debugBloomLayer } = usePatternBloom({
     bloomRef,
     canvasRef,
-    glCanvasRef,
     shaderFile,
     gpuReady,
     useWebGPU,
     liteMode,
     gpuDevRef,
-    gpuHookContextRef,
-    syncCanvasSize,
+    canvasOutput,
   });
 
   const gpuReadyEffective = useWebGPU ? gpuReady : useWebGL2 ? glReady : false;
@@ -339,7 +334,6 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
 
   useEffect(() => {
     gpuDeviceRef.current = gpuDevRef.current;
-    gpuContextRef.current = gpuHookContextRef.current;
   });
 
   useEffect(() => {
@@ -347,12 +341,9 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     const canvas = canvasRef.current;
     setCurrentPatternRenderer({
       backend: 'webgpu',
-      readPixels: () => {
-        if (!canvas) return null;
-        const gl = canvas.getContext('webgl2');
-        void gl;
-        return null;
-      },
+      // No synchronous WebGPU readback (smokes screenshot instead). Never getContext('webgl2')
+      // here: on a canvas WebGPU has not claimed yet it would lock it to WebGL2 (#492).
+      readPixels: () => null,
       getCanvas: () => canvas,
       setDebugMode: () => {},
       getDebugMode: () => 'normal',

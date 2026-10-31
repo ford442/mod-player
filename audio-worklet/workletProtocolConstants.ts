@@ -30,6 +30,8 @@ export const MAIN_TO_WORKLET = {
   returnPcmBuffer: 'returnPcmBuffer',
   /** Shared position/VU ring (audio-worklet/positionRing.ts); replaces `position` messages when sent. */
   setPositionRing: 'setPositionRing',
+  /** Hands the worklet its end of the create-worker channel (#513). */
+  attachCreatePort: 'attachCreatePort',
 } as const;
 
 /** AudioWorklet processor → main thread */
@@ -44,6 +46,8 @@ export const WORKLET_TO_MAIN = {
   starvation: 'starvation',
   projectmPcm: 'projectm-pcm',
   audioDiag: 'audioDiag',
+  /** The worklet's libopenmpt is the shared-memory playback heap: memory + a stack for the create worker (#513). */
+  createHeap: 'createHeap',
 } as const;
 
 export type MainToWorkletType = (typeof MAIN_TO_WORKLET)[keyof typeof MAIN_TO_WORKLET];
@@ -77,7 +81,16 @@ export type FieldKind =
   /** Array of finite numbers, at most `maxLength` long. */
   | 'finiteArray'
   /** 1 or 2. */
-  | 'pcmChannels';
+  | 'pcmChannels'
+  /** Safe integer > 0. */
+  | 'positiveInt'
+  /**
+   * A MessagePort. Duck-typed (`postMessage` is a function): a port transferred into the worklet
+   * realm is not `instanceof MessagePort` of the realm that built the message.
+   */
+  | 'messagePort'
+  /** `WebAssembly.Memory` (the shared playback heap). */
+  | 'wasmMemory';
 
 export interface FieldSpec {
   readonly kind: FieldKind;
@@ -118,6 +131,7 @@ export const MAIN_TO_WORKLET_SPEC = {
   [MAIN_TO_WORKLET.ctlSetText]: { fields: { key: req('string'), value: req('string') } },
   [MAIN_TO_WORKLET.returnPcmBuffer]: { fields: { buffer: req('float32Array') } },
   [MAIN_TO_WORKLET.setPositionRing]: { fields: { buffer: req('sharedArrayBuffer') } },
+  [MAIN_TO_WORKLET.attachCreatePort]: { fields: { port: req('messagePort') } },
 } as const satisfies Record<MainToWorkletType, MessageSpec>;
 
 /** The pre-`type` load shim some callers still send: `{ moduleData }`. */
@@ -191,6 +205,21 @@ export const WORKLET_TO_MAIN_SPEC = {
       heapBytes: opt('nonNegInt'),
       heapMoves: opt('nonNegInt'),
       playingChannels: opt('nonNegInt'),
+      /** Worst wall-clock gap between two process() calls (ms) — a blocked audio thread shows here. */
+      maxWallGapMs: opt('finite'),
+      /** Worst audio-thread time spent bringing in a module this window (ms). */
+      loadBlockMs: opt('finite'),
+      /** Loads are created on the create worker, not this thread (#513). */
+      createThread: opt('boolean'),
+    },
+  },
+  [WORKLET_TO_MAIN.createHeap]: {
+    fields: {
+      memory: req('wasmMemory'),
+      /** Stable per heap (per AudioWorkletGlobalScope); the Memory object itself is a new wrapper per message. */
+      heapId: req('positiveInt'),
+      stackLow: req('nonNegInt'),
+      stackSize: req('nonNegInt'),
     },
   },
 } as const satisfies Record<WorkletToMainType, MessageSpec>;
@@ -209,6 +238,13 @@ interface FieldKindTypes {
   sharedArrayBuffer: SharedArrayBuffer;
   finiteArray: number[];
   pcmChannels: 1 | 2;
+  positiveInt: number;
+  /**
+   * Structural, not `MessagePort` / `WebAssembly.Memory`: this file is also type-checked in the
+   * worklet project, whose lib is ES2022 only. A real MessagePort / Memory is assignable.
+   */
+  messagePort: { postMessage(message: unknown, transfer?: unknown[]): void };
+  wasmMemory: { buffer: ArrayBufferLike };
 }
 
 type Fields = MessageSpec['fields'];

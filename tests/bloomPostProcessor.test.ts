@@ -1,8 +1,12 @@
+import { readFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { beforeAll, describe, expect, it } from 'vitest';
 import {
   BloomPostProcessor,
   BLOOM_SCENE_FORMAT,
   DEFAULT_LAYERS,
+  HDR_OUTPUT_HEADROOM,
 } from '../utils/bloomPostProcessor';
 import {
   createFakeDevice,
@@ -19,6 +23,7 @@ const SHADERS = {
 };
 
 const CANVAS = { width: 800, height: 600 } as HTMLCanvasElement;
+const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 
 beforeAll(() => {
   installGpuGlobals();
@@ -126,6 +131,35 @@ describe('BloomPostProcessor blur uniforms (#449 bug 1)', () => {
     const { fake } = await setup(true);
     expect(fake.syncPipelineCalls).toEqual([]);
     expect(fake.pipelines.map((p) => p.label).sort()).toEqual(['bloom_blur', 'bloom_composite', 'bloom_threshold']);
+  });
+
+  it.each([false, true])('composites SDR with the unmodified pipeline, HDR with the hdrHeadroom override (layered=%s) — #492', async (layered) => {
+    const composite = (fake: ReturnType<typeof createFakeDevice>) =>
+      fake.pipelines.find((p) => p.label === 'bloom_composite')!.descriptor.fragment!;
+
+    const { fake: sdr, bloom: sdrBloom } = await setup(layered);
+    expect(sdrBloom.outputFormat).toBe('bgra8unorm');
+    expect(composite(sdr)).not.toHaveProperty('constants');
+
+    const hdr = createFakeDevice();
+    const hdrBloom = new BloomPostProcessor(hdr.device, CANVAS, hdr.context, {
+      ...SHADERS,
+      ...(layered ? { layers: DEFAULT_LAYERS } : {}),
+      finalFormat: 'rgba16float',
+      outputHeadroom: HDR_OUTPUT_HEADROOM,
+    });
+    await hdrBloom.init();
+    expect(hdrBloom.outputFormat).toBe('rgba16float');
+    expect(Array.from(composite(hdr).targets)[0]?.format).toBe('rgba16float');
+    expect(composite(hdr).constants).toEqual({ hdrHeadroom: HDR_OUTPUT_HEADROOM });
+    expect(HDR_OUTPUT_HEADROOM).toBeGreaterThan(1);
+  });
+
+  it.each(['bloom_composite.wgsl', 'bloom_composite_layered.wgsl'])('%s declares the hdrHeadroom override (default 1.0) in both shader trees', (file) => {
+    for (const dir of ['shaders', 'public/shaders']) {
+      const src = readFileSync(join(ROOT, dir, file), 'utf8');
+      expect(src, `${dir}/${file}`).toMatch(/override hdrHeadroom: f32 = 1\.0;/);
+    }
   });
 });
 

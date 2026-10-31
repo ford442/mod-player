@@ -2,16 +2,26 @@ import { useRef, useEffect, useState, useCallback } from 'react';
 import type React from 'react';
 import type { PatternMatrix } from '../../../types';
 import type { WebGPURenderParams, DebugInfo } from '../params';
-import { WebGL2PatternRenderer } from './WebGL2PatternRenderer';
+import type { WebGL2PatternRenderer } from './WebGL2PatternRenderer';
 import { setCurrentPatternRenderer } from '../global';
 import type { CurrentPatternRenderer, WebGL2DebugMode } from '../types';
 import { cycleDebugMode } from './debugModes';
 import { createLogger } from '../../../utils/log';
 
 const log = createLogger('WebGL2 debug');
+const glLog = createLogger('WebGL2');
 
 /** DebugInfo.errors prefix for WebGL2 session init failures (mirrors `DEVICE-INIT:` / `SHADER-INIT:`). */
 const INIT_ERROR_PREFIX = 'WEBGL2-INIT:';
+/** DebugInfo.errors prefix while the context is lost / when its restore failed (#492). */
+const CONTEXT_ERROR_PREFIX = 'WEBGL2-CONTEXT:';
+
+/**
+ * The renderer (its GLSL, bloom and the GL plumbing) is its own chunk: it is only ever
+ * constructed on the WebGL2 opt-in (`?webgl2=1` / failure-card button), so WebGPU and HTML
+ * sessions never download it (#492).
+ */
+const loadWebGL2Renderer = () => import('./WebGL2PatternRenderer');
 
 export function useWebGL2PatternRender(
   canvasRef: React.RefObject<HTMLCanvasElement>,
@@ -36,24 +46,14 @@ export function useWebGL2PatternRender(
       setGlReady(false);
       return;
     }
-    const canvas = canvasRef.current;
-    if (!canvas) return;
+    if (!canvasRef.current) return;
 
-    syncCanvasSize(canvas, null);
-    const renderer = new WebGL2PatternRenderer();
-    let initError: string | null = null;
-    let ok = false;
-    try {
-      ok = renderer.init(canvas, shaderFile);
-      // `getContext('webgl2')` returns null when the canvas already holds another context
-      // type (WebGPU after a late hard-fail) or when WebGL2 is unavailable.
-      if (!ok) initError = 'no WebGL2 context on this canvas (unsupported, or already bound to WebGPU)';
-    } catch (err) {
-      // Shader compile/link failures throw; there is no ErrorBoundary, so never let one escape.
-      initError = err instanceof Error ? err.message : String(err);
-      renderer.destroy();
-    }
-    if (!ok) {
+    // Set by the cleanup: a backend switch, shader change or unmount while the chunk was still
+    // loading must not construct (and leak) a renderer for a session that is already gone.
+    let cancelled = false;
+    let renderer: WebGL2PatternRenderer | null = null;
+
+    const reportInitError = (initError: string) => {
       console.error(`[Renderer] WebGL2 init failed: ${initError}`);
       setDebugInfo((prev) => ({
         ...prev,
@@ -61,33 +61,96 @@ export function useWebGL2PatternRender(
       }));
       setWebgl2Available(false);
       setGlReady(false);
-      return;
-    }
-    setDebugInfo((prev) => ({ ...prev, errors: prev.errors.filter((e) => !e.startsWith(INIT_ERROR_PREFIX)) }));
-
-    rendererRef.current = renderer;
-    setWebgl2Available(true);
-    setGlReady(true);
-
-    const handle: CurrentPatternRenderer = {
-      backend: 'webgl2',
-      readPixels: () => renderer.readPixels(),
-      getCanvas: () => renderer.getCanvas(),
-      setDebugMode: (mode: WebGL2DebugMode) => renderer.setDebugConfig({ mode }),
-      getDebugMode: () => renderer.getDebugConfig().mode,
-      setScrollSpeed: (speed: number) => renderer.setDebugConfig({ scrollSpeed: speed }),
-      getScrollSpeed: () => renderer.getDebugConfig().scrollSpeed,
-      resize: () => {
-        const c = canvasRef.current;
-        if (c) renderer.resize(c.width, c.height);
-      },
     };
-    setCurrentPatternRenderer(handle);
+
+    const start = (Renderer: typeof WebGL2PatternRenderer) => {
+      const canvas = canvasRef.current;
+      if (cancelled || !canvas) return;
+      syncCanvasSize(canvas, null);
+      const instance = new Renderer();
+      let initError: string | null = null;
+      let ok = false;
+      try {
+        ok = instance.init(canvas, shaderFile, {
+          onContextLost: () => {
+            glLog.warn('WebGL2 context lost — rendering paused until the browser restores it');
+            setDebugInfo((prev) => ({
+              ...prev,
+              errors: [
+                ...prev.errors.filter((e) => !e.startsWith(CONTEXT_ERROR_PREFIX)),
+                `${CONTEXT_ERROR_PREFIX} lost — rendering paused until the browser restores it`,
+              ],
+              uniforms: { ...prev.uniforms, glContext: 'lost' },
+            }));
+          },
+          onContextRestored: (error) => {
+            if (error) {
+              console.error(`[Renderer] WebGL2 context restored, but re-creating its resources failed: ${error}`);
+            } else {
+              log.log('context restored — GL resources re-created, rendering resumed');
+            }
+            const restores = instance.getContextState().restores;
+            setDebugInfo((prev) => ({
+              ...prev,
+              errors: [
+                ...prev.errors.filter((e) => !e.startsWith(CONTEXT_ERROR_PREFIX)),
+                ...(error ? [`${CONTEXT_ERROR_PREFIX} restore failed: ${error}`] : []),
+              ],
+              uniforms: { ...prev.uniforms, glContext: error ? 'restore-failed' : `restored ×${restores}` },
+            }));
+          },
+        });
+        // `getContext('webgl2')` returns null when the canvas already holds another context
+        // type (WebGPU after a late hard-fail) or when WebGL2 is unavailable.
+        if (!ok) initError = 'no WebGL2 context on this canvas (unsupported, or already bound to WebGPU)';
+      } catch (err) {
+        // Shader compile/link failures throw; there is no ErrorBoundary, so never let one escape.
+        initError = err instanceof Error ? err.message : String(err);
+        instance.destroy();
+      }
+      if (!ok) {
+        reportInitError(initError ?? 'unknown error');
+        return;
+      }
+      setDebugInfo((prev) => ({ ...prev, errors: prev.errors.filter((e) => !e.startsWith(INIT_ERROR_PREFIX)) }));
+
+      renderer = instance;
+      rendererRef.current = instance;
+      setWebgl2Available(true);
+      setGlReady(true);
+
+      const handle: CurrentPatternRenderer = {
+        backend: 'webgl2',
+        readPixels: () => instance.readPixels(),
+        getCanvas: () => instance.getCanvas(),
+        setDebugMode: (mode: WebGL2DebugMode) => instance.setDebugConfig({ mode }),
+        getDebugMode: () => instance.getDebugConfig().mode,
+        setScrollSpeed: (speed: number) => instance.setDebugConfig({ scrollSpeed: speed }),
+        getScrollSpeed: () => instance.getDebugConfig().scrollSpeed,
+        resize: () => {
+          const c = canvasRef.current;
+          if (c) instance.resize(c.width, c.height);
+        },
+      };
+      setCurrentPatternRenderer(handle);
+    };
+
+    void loadWebGL2Renderer().then(
+      (mod) => start(mod.WebGL2PatternRenderer),
+      (err: unknown) => {
+        // Chunk fetch failed (offline, or a deploy replaced the hashed file under this page).
+        if (cancelled) return;
+        reportInitError(`could not load the WebGL2 renderer: ${err instanceof Error ? err.message : String(err)}`);
+      },
+    );
 
     return () => {
-      renderer.destroy();
-      rendererRef.current = null;
+      cancelled = true;
       setGlReady(false);
+      if (!renderer) return;
+      renderer.destroy();
+      renderer = null;
+      rendererRef.current = null;
       setCurrentPatternRenderer(null);
     };
   }, [shaderFile, canvasRef, syncCanvasSize, setWebgl2Available, setDebugInfo, enabled]);
@@ -111,7 +174,8 @@ export function useWebGL2PatternRender(
   const render = useCallback(() => {
     const renderer = rendererRef.current;
     const canvas = canvasRef.current;
-    if (!renderer || !canvas || !glReady) return;
+    // A lost context issues no GL calls; the renderer rebuilds itself on `webglcontextrestored`.
+    if (!renderer || !canvas || !glReady || renderer.isContextLost()) return;
 
     renderer.resize(canvas.width, canvas.height);
     if (crtEnabledRef) {

@@ -25,6 +25,7 @@ import {
 import {
   parseMainToWorkletMessage,
   parseWorkletToMainMessage,
+  postAttachCreatePort,
   postCtlSetText,
   postGetOscBuffer,
   postInitLib,
@@ -56,6 +57,9 @@ function validValue(spec: FieldSpec): unknown {
     case 'sharedArrayBuffer': return new SharedArrayBuffer(spec.minBytes ?? 64);
     case 'finiteArray': return [0.5, 1];
     case 'pcmChannels': return 2;
+    case 'positiveInt': return 1;
+    case 'messagePort': return { postMessage() {} };
+    case 'wasmMemory': return new WebAssembly.Memory({ initial: 1 });
   }
 }
 
@@ -70,6 +74,8 @@ function boundaryValues(spec: FieldSpec): unknown[] {
     case 'sharedArrayBuffer': return spec.minBytes ? [new SharedArrayBuffer(spec.minBytes)] : [new SharedArrayBuffer(1)];
     case 'finiteArray': return [[], new Array(spec.maxLength ?? 128).fill(0)];
     case 'pcmChannels': return [1];
+    case 'positiveInt': return [1, Number.MAX_SAFE_INTEGER];
+    case 'messagePort': return typeof MessageChannel !== 'undefined' ? [new MessageChannel().port1] : [];
     default: return [];
   }
 }
@@ -103,6 +109,9 @@ function invalidValues(spec: FieldSpec): unknown[] {
         ...(spec.maxLength !== undefined ? [new Array(spec.maxLength + 1).fill(0)] : []),
       ];
     case 'pcmChannels': return [...common, 0, 3, '2', 1.5];
+    case 'positiveInt': return [...common, 0, -1, 1.5, Number.NaN, Infinity, '1'];
+    case 'messagePort': return [...common, { postMessage: 1 }, 'port', 1];
+    case 'wasmMemory': return [...common, new ArrayBuffer(8), { buffer: new ArrayBuffer(8) }];
   }
 }
 
@@ -212,6 +221,7 @@ describe('worklet protocol: zod and the worklet guard agree (one table, #492)', 
       postCtlSetText('play.at_end', 'continue'),
       postReturnPcmBuffer(new Float32Array(new ArrayBuffer(16))),
       postSetPositionRing(new SharedArrayBuffer(64)),
+      postAttachCreatePort(new MessageChannel().port1),
     ];
     expect(new Set(outbound.map((m) => m.type)).size).toBe(Object.keys(MAIN_TO_WORKLET_SPEC).length);
     for (const message of outbound) {

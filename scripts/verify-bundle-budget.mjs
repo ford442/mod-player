@@ -29,12 +29,19 @@ const REACT_VENDOR_CHUNK_PREFIX = 'react-vendor';
 const LAZY_3D_CHUNK_PREFIX = 'App3DView';
 /** FX rack (#453): the rack graph (FxRack, modules, loaders) loads only once a module is enabled. */
 const LAZY_FX_CHUNK_PREFIX = 'fxRackController';
+/** Opt-in WebGL2 pattern renderer (#492): only `?webgl2=1` / the failure-card button load it. */
+const LAZY_WEBGL2_CHUNK_PREFIX = 'WebGL2PatternRenderer';
 /**
- * JS-engine assets under worklets/ (everything except the optional, gitignored openmpt-native.*):
- * libopenmpt-worklet.{js,wasm} + the generated processor. Was ~5 MB of wasm2js JS (fetched a
- * second time for the main thread as libmpt/libopenmptjs.js); real WASM is ~1.8 MB in total.
+ * JS-engine assets under worklets/ (everything except README.md): two libopenmpt pairs —
+ * libopenmpt-worklet.{js,wasm} (main thread + parser worker) and libopenmpt-playback.{js,wasm} (the
+ * AudioWorklet's shared-memory heap, #513; a crossOriginIsolated page fetches both) — plus the
+ * generated processors. Was ~5 MB of wasm2js JS (fetched a second time for the main thread as
+ * libmpt/libopenmptjs.js); real WASM is ~1.8 MB per pair.
  */
-const MAX_JS_ENGINE_BYTES = Number(process.env.MAX_JS_ENGINE_BYTES || 2.5 * 1024 * 1024);
+const MAX_JS_ENGINE_BYTES = Number(process.env.MAX_JS_ENGINE_BYTES || 4.25 * 1024 * 1024);
+/** One glue + wasm pair: a pair over this means the wasm itself grew (SIMD, a debug build, …). */
+const MAX_LIBOPENMPT_PAIR_BYTES = Number(process.env.MAX_LIBOPENMPT_PAIR_BYTES || 2 * 1024 * 1024);
+const LIBOPENMPT_PAIRS = ['libopenmpt-worklet', 'libopenmpt-playback'];
 const MAX_LIBOPENMPT_GLUE_BYTES = Number(process.env.MAX_LIBOPENMPT_GLUE_BYTES || 256 * 1024);
 
 function resolveAssetHref(href) {
@@ -131,6 +138,11 @@ const fxChunks = jsChunks(LAZY_FX_CHUNK_PREFIX);
 if (fxChunks.length === 0) {
   errors.push(`no ${LAZY_FX_CHUNK_PREFIX}-*.js lazy chunk found (FX rack not code-split?)`);
 }
+// A static import of the WebGL2 renderer folds it into the entry, and this chunk disappears.
+const webgl2Chunks = jsChunks(LAZY_WEBGL2_CHUNK_PREFIX);
+if (webgl2Chunks.length === 0) {
+  errors.push(`no ${LAZY_WEBGL2_CHUNK_PREFIX}-*.js lazy chunk found (opt-in WebGL2 renderer not code-split?)`);
+}
 // Room IRs are fetched on demand from dist/ir/, never bundled.
 {
   const irDir = join(BUILD_DIR, 'ir');
@@ -188,6 +200,9 @@ for (const [rel, { via, code }] of eagerChunks) {
   if (name.startsWith(`${LAZY_FX_CHUNK_PREFIX}-`)) {
     errors.push(`initial load statically imports ${name}${via ? ` (via ${via})` : ''} — FX rack is not lazy`);
   }
+  if (name.startsWith(`${LAZY_WEBGL2_CHUNK_PREFIX}-`)) {
+    errors.push(`initial load statically imports ${name}${via ? ` (via ${via})` : ''} — the opt-in WebGL2 renderer is not lazy`);
+  }
   // Node factory names survive minification, and only the FX rack's modules call them.
   const text = code.toString('utf8');
   if (text.includes('createConvolver') || text.includes('createDynamicsCompressor')) {
@@ -213,12 +228,12 @@ if (!existsSync(htaccessPath)) {
   if (!htaccess.includes('Cross-Origin-Opener-Policy')) {
     errors.push('.htaccess missing Cross-Origin-Opener-Policy');
   }
-  if (!htaccess.includes('credentialless')) {
-    errors.push('.htaccess missing Cross-Origin-Embedder-Policy credentialless');
+  if (!htaccess.includes('Cross-Origin-Embedder-Policy "require-corp"')) {
+    errors.push('.htaccess missing Cross-Origin-Embedder-Policy require-corp');
   }
 }
 
-// JS engine assets: budget the shipped worklets/ dir (minus optional native engine files).
+// JS engine assets: budget the shipped worklets/ dir.
 let jsEngineBytes = 0;
 {
   const workletsDir = join(BUILD_DIR, 'worklets');
@@ -226,12 +241,24 @@ let jsEngineBytes = 0;
     errors.push('dist/worklets missing');
   } else {
     for (const f of readdirSync(workletsDir)) {
-      if (f.startsWith('openmpt-native') || f.endsWith('.md')) continue;
+      if (f.endsWith('.md')) continue;
       const size = statSync(join(workletsDir, f)).size;
       jsEngineBytes += size;
-      if (f === 'libopenmpt-worklet.js' && size > MAX_LIBOPENMPT_GLUE_BYTES) {
+      if ((f === 'libopenmpt-worklet.js' || f === 'libopenmpt-playback.js') && size > MAX_LIBOPENMPT_GLUE_BYTES) {
         errors.push(`worklets/${f} is ${size} bytes (budget ${MAX_LIBOPENMPT_GLUE_BYTES}) — wasm2js glue crept back in?`);
       }
+    }
+    for (const pair of LIBOPENMPT_PAIRS) {
+      const files = [`${pair}.js`, `${pair}.wasm`].map((f) => join(workletsDir, f));
+      // Presence is verify-wasm-assets' / verify:js-libopenmpt's job; this one budgets what ships.
+      if (!files.every((f) => existsSync(f))) continue;
+      const pairBytes = files.reduce((n, f) => n + statSync(f).size, 0);
+      if (pairBytes > MAX_LIBOPENMPT_PAIR_BYTES) {
+        errors.push(`worklets/${pair}.{js,wasm} is ${pairBytes} bytes (budget ${MAX_LIBOPENMPT_PAIR_BYTES})`);
+      }
+    }
+    if (existsSync(join(workletsDir, 'libopenmpt-playback.ww.js'))) {
+      errors.push('worklets/libopenmpt-playback.ww.js is shipped — the build deletes Emscripten\'s unused worker bootstrap');
     }
     if (jsEngineBytes > MAX_JS_ENGINE_BYTES) {
       errors.push(`JS engine worklet assets total ${jsEngineBytes} bytes (budget ${MAX_JS_ENGINE_BYTES})`);
@@ -256,5 +283,6 @@ console.log(
     `react-vendor=${kib(reactVendorChunks).toFixed(1)} KiB, ` +
     `three-r3f=${kib(threeChunks).toFixed(1)} KiB lazy (${threeChunks.length} file(s)), ` +
     `App3DView lazy chunk present, FX rack lazy chunk present, ` +
+    `WebGL2 renderer=${kib(webgl2Chunks).toFixed(1)} KiB lazy, ` +
     `js-engine worklets/=${(jsEngineBytes / 1024).toFixed(1)} KiB`,
 );

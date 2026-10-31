@@ -65,6 +65,14 @@ export function useAppTestHooks(): void {
       // #411 acceptance: a JS play and an ?engine=native play in the same tab
       // must report the same state and rate — there is one context per session.
       getAudioContextSampleRate: () => engine.getAudioContext()?.sampleRate ?? 0,
+      getAudioPlaybackStats: () => {
+        const stats = (engine.getAudioContext() as (AudioContext & {
+          playbackStats?: { underrunEvents: number; underrunDuration: number; totalDuration: number };
+        }) | null)?.playbackStats;
+        return stats
+          ? { underrunEvents: stats.underrunEvents, underrunDuration: stats.underrunDuration, totalDuration: stats.totalDuration }
+          : null;
+      },
       isModuleLoaded: () => engine.getSnapshot().isModuleLoaded,
       getPatternRenderer: () => window.currentPatternRenderer,
       loadModuleFromUrl: async (url: string) => {
@@ -149,7 +157,7 @@ export function useAppTestHooks(): void {
       getPlaybackRow: () => Math.floor(engine.playbackStateRef.current.playheadRow),
       getPlaybackRowFraction: () => engine.playbackStateRef.current.playheadRow,
       getActiveRenderer: () => window.currentPatternRenderer?.backend ?? null,
-      getAudioEngine: () => engine.getSnapshot().activeEngine,
+      getAudioEngine: () => engine.getPlaybackEngine() ?? 'worklet',
       getLiteMode: () => usePlayerUiStore.getState().liteMode,
       getShaderFile: () => {
         const raw = localStorage.getItem('xasm1_last_shader');
@@ -242,6 +250,7 @@ export function useAppTestHooks(): void {
         if (!ctx) return null;
         const heard = resolveAudioHeardTime(ctx);
         return { source: heard.source, outputDelayMs: (ctx.currentTime - heard.time) * 1000 };
+      },
       getPositionPathStats: () => engine.getPositionPathStats(),
       // #492 allocation check: run a position path N times in a tight loop (measured by the caller,
       // e.g. CDP heap sampling in scripts/audio-smoke.mjs). The bench module is a lazy chunk.

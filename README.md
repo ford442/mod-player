@@ -63,11 +63,11 @@ Lint (ESLint, hard CI gate; max 7 warnings budget)
 npm run lint
 ```
 
-### Native C++ audio engine (optional)
+### Audio engine (libopenmpt WASM)
 
-Production audio uses the tracked **JS** AudioWorklet at `public/worklets/openmpt-worklet.js`. Do not overwrite it.
+Audio plays through the JS AudioWorklet (`public/worklets/openmpt-worklet.js`, generated from `audio-worklet/js/openmpt-processor.ts` by `npm run build:js-worklet`) on top of a self-hosted real-WASM libopenmpt (`public/worklets/libopenmpt-worklet.{js,wasm}`). Both are committed; the native C++ engine was retired (`docs/ADR-native-engine.md`).
 
-The optional native engine is built with a **single** supported path:
+Rebuilding libopenmpt is only needed when changing it:
 
 ```bash
 # Prerequisites: emsdk 3.1.51 (matches CI)
@@ -76,25 +76,14 @@ git clone https://github.com/emscripten-core/emsdk.git && cd emsdk
 source ./emsdk_env.sh
 
 cd /path/to/mod-player
-npm run build:emcc              # release (-O3)
-# npm run build:emcc -- --debug # -O0 -g -sASSERTIONS=2
+npm run build:js-libopenmpt     # → public/worklets/libopenmpt-worklet.{js,wasm}
+npm run build:js-libopenmpt -- --playback   # → libopenmpt-playback.{js,wasm} (the worklet's shared-memory heap, #513)
+npm run verify:js-libopenmpt    # static + boot/render checks of both pairs (no emsdk needed)
 ```
 
-Outputs (gitignored until built): `public/worklets/openmpt-native.{js,wasm,aw.js}`.
+Another active emsdk is an error (`XASM_ALLOW_EMSDK_DRIFT=1` overrides it for experiments); why the pin is still 3.1.51 is in `docs/WORKLET_AUDIO_BUG.md` § "One toolchain".
 
-| Command | Notes |
-|---------|--------|
-| `npm run build:emcc` | **Canonical** — runs `scripts/build-wasm.sh` |
-| `npm run build:worklet` | Deprecated alias → same script |
-| `./build-wasm.sh` | Deprecated root wrapper → same script |
-
-Verify exported symbols stay in sync with TypeScript/C++:
-
-```bash
-npm run verify:native-exports
-```
-
-See also: `docs/WASM_BUILD_SOLUTIONS.md`, `public/worklets/README.md`, `AGENTS.md`.
+See also: `public/worklets/README.md`, `AGENTS.md`.
 
 ### Visual smoke (browser verification)
 
@@ -130,7 +119,7 @@ Project structure (important files)
 
 Notes and configuration
 
-- libopenmpt: Self-hosted real WebAssembly build of libopenmpt **0.8.4** — `public/worklets/libopenmpt-worklet.{js,wasm}` — shared by the AudioWorklet, the main thread (`index.html`, BASE_URL-aware, SRI-pinned) and the parser worker. Rebuild with `npm run build:js-libopenmpt` (emsdk 3.1.51). See `public/worklets/README.md`.
+- libopenmpt: Self-hosted real WebAssembly build of libopenmpt **0.8.9** (tarball sha256-pinned in `scripts/lib/libopenmpt-source.sh`) — `public/worklets/libopenmpt-worklet.{js,wasm}`, shared by the main thread (`index.html`, BASE_URL-aware, SRI-pinned), the parser worker and the AudioWorklet on a page that is not cross-origin isolated; an isolated page's worklet uses the shared-memory `libopenmpt-playback.{js,wasm}` (#513). Rebuild with `npm run build:js-libopenmpt` (emsdk 3.1.51). See `public/worklets/README.md`.
 - Tailwind: Styles are compiled by PostCSS/Tailwind (`tailwind.config.js`, `postcss.config.js`) in dev and production alike; there is no Tailwind CDN script. The `content` globs are deliberately explicit — see `CLAUDE.md` pitfall 5.
 - **Pattern renderers:** GPU viz requires **WebGPU** (hard-fail on probe/device failure — no auto WebGL2/HTML **shader** session). Explicit `?renderer=html` selects the DOM pattern grid; `?webgl2=1` / the failure-card button opt in to the WebGL2 GLSL session. Probe breadcrumb: `window.__WEBGPU_PROBE__`.
 - **WebGPU → WebGL2 (opt-in viz):** Shared packing lives in `utils/gpuPacking.ts`; WebGL2 GLSL mirrors `hooks/webGLShaders.ts`. Chassis/night mode/bloom approximations are in `src/renderers/webgl2/shaders/`.

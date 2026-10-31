@@ -1,9 +1,7 @@
 import type { LibOpenMPT, PatternMatrix, ChannelShadowState, ModuleInfo } from '../../types';
-import type { OpenMPTWorkletEngine } from '../../audio-worklet/OpenMPTWorkletEngine';
 import type { Ref, StateSetter } from '../../audio/engine/store';
 import type { WorkletPositionSample } from '../../utils/playheadPrediction';
 import type { PositionRingConsumer } from '../../utils/positionRingConsumer';
-import type { NativeClockAnchor } from '../../utils/nativeClockAnchor';
 
 /**
  * What the engine start paths read and write. PlayerEngine passes its own refs bag (a superset; see
@@ -22,7 +20,6 @@ export interface AudioGraphRefs {
   gainNodeRef:         Ref<GainNode | null>;
   analyserRef:         Ref<AnalyserNode | null>;
   audioWorkletNodeRef: Ref<AudioWorkletNode | null>;
-  nativeEngineRef:     Ref<OpenMPTWorkletEngine | null>;
   workletOrderRef:     Ref<number>;
   workletRowRef:       Ref<number>;
   workletTimeRef:      Ref<number>;
@@ -56,7 +53,7 @@ export interface AudioGraphRefs {
    */
   isPausedRef:         Ref<boolean>;
   /** Written by each engine start path: which engine is really rendering (pause/resume drive this one). */
-  playbackEngineRef:   Ref<'worklet' | 'native-worklet' | 'scriptprocessor' | null>;
+  playbackEngineRef:   Ref<'worklet' | 'scriptprocessor' | null>;
   animationFrameHandle: Ref<number>;
   currentModulePtr:    Ref<number>;
   channelStatesRef:    Ref<ChannelShadowState[]>;
@@ -65,8 +62,6 @@ export interface AudioGraphRefs {
   workletTimeAtStartRef: Ref<number>;
   driftAccumulatorRef: Ref<number>;
   updateUIRef:         Ref<(() => void) | null>;
-  nativeClockAnchorRef: Ref<NativeClockAnchor | null>;
-  nativeBridgeLatencyRef: Ref<number>;
   /** Callback to lazily create a main-thread libopenmpt module for ScriptProcessor fallback. */
   ensureMainThreadModuleRef: Ref<((data: Uint8Array) => Promise<void>) | null>;
   /** Incremented on each processModuleData — guards stale worklet `loaded` acks. */
@@ -82,7 +77,6 @@ export interface AudioGraphCallbacks {
    * FSM's `started` / `fault` events, and treats a report that no longer fits as stale.
    */
   setIsPlaying:      (v: boolean) => void;
-  setActiveEngine:   StateSetter<'worklet' | 'native-worklet'>;
   setModuleInfo:     StateSetter<ModuleInfo>;
   setSequencerMatrix: StateSetter<PatternMatrix | null>;
   stopMusic:         (destroy?: boolean) => void;
@@ -103,9 +97,7 @@ export interface AudioGraphCallbacks {
  * sees a loop toggle made during playback instead of the value captured when play() was called.
  */
 export interface AudioGraphConfig {
-  activeEngine:           'worklet' | 'native-worklet';
   isWorkletSupported:     boolean;
-  isNativeWorkletAvailable: boolean;
   panValue:               number;
   volume:                 number;
   isLooping:              boolean;
@@ -116,7 +108,7 @@ export interface AudioGraphConfig {
 
 /**
  * What startAudioPlayback did: `pending` — the JS worklet is set up and plays on its `loaded` ack;
- * `started` — the native engine is rendering (or paused, if the transport is); `nudged` — already
+ * `started` — an engine is rendering (or paused, if the transport is); `nudged` — already
  * playing, the node was re-poked; `failed` — nothing will render.
  */
 export type AudioStartResult = 'pending' | 'started' | 'nudged' | 'failed';

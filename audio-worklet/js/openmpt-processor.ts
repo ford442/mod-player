@@ -35,6 +35,13 @@ if (typeof self !== 'undefined' && (!self.crypto || !self.crypto.getRandomValues
  * with `new Function` and seeded with Module.wasmBinary, so it instantiates the
  * bytes directly. There is no wasm2js path: wasmBytes is required.
  *
+ * Module create (#513): on a crossOriginIsolated page the glue is the shared-memory playback build
+ * (libopenmpt-playback.*). This processor then posts WT.createHeap, the main thread starts the
+ * create worker (workers/openmpt-create.worker.ts) on the same heap, and hands this node a
+ * MessagePort to it (MT.attachCreatePort). Loads go to that worker; process() only renders, and
+ * swaps a staged module in after a short fade (`_adoptStaged`). Without that port, `load` still
+ * creates here (`loadModule`), and the stall it causes comes back.
+ *
  * NOTE: Chrome 116+ provides setTimeout in AudioWorkletGlobalScope. Older
  * browsers don't, so we polyfill it below using process()-driven ticks.
  *
@@ -64,6 +71,21 @@ import {
 import { PositionRingWriter } from '../positionRingWriter';
 import { ensureSharedLib } from '../libSingleton';
 import { waitForRuntimeInitialized } from '../libRuntimeReady';
+import {
+  CREATE_FAILED_MESSAGE,
+  CREATE_PORT,
+  CREATE_THREAD_STACK_ALIGN,
+  CREATE_THREAD_STACK_BYTES,
+  STAGED_SWAP_TIMEOUT_MS,
+  alignCreateThreadStack,
+} from '../createThreadProtocol';
+
+function isObject(v: unknown): v is Record<string, unknown> {
+  return v != null && typeof v === 'object';
+}
+function isNonNegInt(v: unknown): v is number {
+  return typeof v === 'number' && Number.isInteger(v) && v >= 0;
+}
 
 const MT = MAIN_TO_WORKLET;
 const WT = WORKLET_TO_MAIN;
@@ -143,14 +165,54 @@ function utf8Bytes(str: string): Uint8Array {
   return bytes;
 }
 
+/**
+ * The heap as it is now. On the shared playback heap the create worker grows memory, and the glue
+ * only refreshes Module.HEAP* on the thread that grew it — so this thread's HEAPU8 can be shorter
+ * than the heap, and a write past its end is silently dropped. The wasm itself always sees the
+ * whole memory; only these JS views go stale.
+ */
+function heapBuffer(lib: LibOpenMPT): ArrayBufferLike {
+  return lib.wasmMemory ? lib.wasmMemory.buffer : lib.HEAPU8.buffer;
+}
+function heapU8(lib: LibOpenMPT): Uint8Array {
+  const buf = heapBuffer(lib);
+  return lib.HEAPU8.buffer === buf ? lib.HEAPU8 : new Uint8Array(buf);
+}
+
 /** Allocate a NUL-terminated UTF-8 C string in the WASM heap. Caller must _free() it. */
 function allocUtf8CString(lib: LibOpenMPT, str: string): number {
   const bytes = utf8Bytes(str);
   const ptr = lib._malloc(bytes.byteLength + 1);
   if (!ptr) throw new Error('_malloc returned 0 for ctl string');
-  lib.HEAPU8.set(bytes, ptr);
-  lib.HEAPU8[ptr + bytes.byteLength] = 0;
+  const heap = heapU8(lib);
+  heap.set(bytes, ptr);
+  heap[ptr + bytes.byteLength] = 0;
   return ptr;
+}
+
+/** True when `lib` is the shared-memory playback build the create worker can join. */
+function isPlaybackHeap(lib: LibOpenMPT): boolean {
+  return typeof SharedArrayBuffer !== 'undefined'
+    && lib.wasmMemory != null
+    && lib.wasmMemory.buffer instanceof SharedArrayBuffer
+    && typeof lib._emscripten_wasm_worker_initialize === 'function';
+}
+
+/**
+ * The create worker's stack + TLS block — one per heap, i.e. per AudioWorkletGlobalScope (every
+ * node shares the scope's libopenmpt, so a restarted node reuses the worker and its stack).
+ */
+function ensureCreateThreadStack(lib: LibOpenMPT): { heapId: number; stackLow: number; stackSize: number } | null {
+  const existing = globalThis.__openmptCreateThreadStack;
+  if (existing) return existing;
+  const raw = lib._malloc(CREATE_THREAD_STACK_BYTES + CREATE_THREAD_STACK_ALIGN);
+  if (!raw) return null;
+  // The id is how the main thread tells "same heap, new node" from "new heap": every postMessage of
+  // the WebAssembly.Memory arrives as a new wrapper object, so object identity cannot.
+  const heapId = 1 + Math.floor(Math.random() * 0x7ffffffe);
+  const stack = { heapId, ...alignCreateThreadStack(raw, CREATE_THREAD_STACK_BYTES) };
+  globalThis.__openmptCreateThreadStack = stack;
+  return stack;
 }
 
 /**
@@ -263,6 +325,12 @@ interface AudioDiagMessage {
   heapBytes: number;
   heapMoves: number;
   playingChannels?: number;
+  /** Worst wall-clock time between two process() calls in this window (ms; Date.now resolution). */
+  maxWallGapMs: number;
+  /** Worst audio-thread time spent swapping in a module (create + destroy in-worklet; the swap with the create worker). */
+  loadBlockMs: number;
+  /** A create worker is attached: loads do not run create on this thread. */
+  createThread: boolean;
 }
 
 class XMPlayerProcessor extends AudioWorkletProcessor {
@@ -359,6 +427,17 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
   declare _diagSlowOrder: number;
   declare _diagSlowRow: number;
   declare _diagMaxGapMs: number;
+  declare _diagMaxWallGapMs: number;
+  declare _diagLoadBlockMs: number;
+  /** Wall clock of the previous process() (ms), -1 until the first diag quantum. */
+  declare _lastProcessWall: number;
+
+  // ── Create worker (#513) ───────────────────────────────────────
+  /** Port to the create worker; null → `load` creates on this thread. */
+  declare _createPort: WorkletMessagePort | null;
+  /** A module the create worker handed over that is not rendering yet (0 = none). */
+  declare _stagedPtr: number;
+  declare _stagedTimer: number | null;
 
   constructor(options?: AudioWorkletCtorOptions) {
     super(options);
@@ -390,6 +469,13 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
     this.pcmInterleaved = new Float32Array(this.pcmChunkSize * 2);
     this.pcmAccumCount = 0;
     this.pcmBufferPool = [];
+
+    this._createPort = null;
+    this._stagedPtr = 0;
+    this._stagedTimer = null;
+    this._diagMaxWallGapMs = 0;
+    this._diagLoadBlockMs = 0;
+    this._lastProcessWall = -1;
 
     log('Constructor called, sampleRate:', sampleRate);
 
@@ -438,6 +524,8 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
         log('Playback started');
       } else if (type === MT.pause) {
         this.isPlaying = false;
+        // Paused output never finishes the swap fade — take the staged module now.
+        if (this._stagedPtr) this._adoptStaged();
         log('Playback paused');
       } else if (type === MT.seek) {
         this.hasEnded = false;
@@ -467,6 +555,7 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
         this._resetAudioDiag();
         this._diagSessionWrapProcessMs = [];
         this._lastProcessTime = -1;
+        this._lastProcessWall = -1;
       } else if (type === MT.setChannelMute) {
         // TODO(#416): live channel mute needs the libopenmpt `openmpt_module_ext`
         // interactive interface (set_channel_mute_status): create the module with
@@ -475,8 +564,7 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
         // Module.dynCall('iiii', …) (the real-wasm glue exports getValue/dynCall;
         // utils/libopenmptExt.ts already does this on the main thread for offline
         // render). Land it as its own change (#416) rather than guess at an
-        // untested audio-thread swap of the create path here. Native engine mutes
-        // via cpp/openmpt_wrapper.cpp's KEEPAlives in the meantime.
+        // untested audio-thread swap of the create path here.
         if (WORKLET_DEV) {
           throw new Error('setChannelMute not implemented for JS engine yet (TODO #416)');
         }
@@ -511,6 +599,9 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
             lib._free(valuePtr);
           }
         }
+      } else if (type === MT.attachCreatePort) {
+        // The shared protocol type is structural (no DOM lib in this project); the port is a MessagePort.
+        this._attachCreatePort(msg.port as WorkletMessagePort);
       } else if (!type) {
         await this.loadModule(msg.moduleData);
       }
@@ -570,6 +661,8 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
     this._diagSlowOrder = 0;
     this._diagSlowRow = 0;
     this._diagMaxGapMs = 0;
+    this._diagMaxWallGapMs = 0;
+    this._diagLoadBlockMs = 0;
   }
 
   /** High-resolution clock for diagnostics.
@@ -711,11 +804,131 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
       this.isLibReady = true;
       this._resolveLib();
       log('libopenmpt ready ✅');
+      this._announceCreateHeap(lib);
     } catch (err) {
       error('Failed to initialise libopenmpt:', err);
       this._rejectLib(err);
       this.port.postMessage({ type: WT.error, message: 'Lib init failed: ' + String(err) });
     }
+  }
+
+  // ── Create worker (#513) ────────────────────────────────────────────
+  /**
+   * On the shared playback heap, tell the main thread how a create worker can join it. The render
+   * buffers are allocated here, once, so swapping a staged module in never mallocs.
+   */
+  _announceCreateHeap(lib: LibOpenMPT): void {
+    if (!isPlaybackHeap(lib) || !lib.wasmMemory) return;
+    const stack = ensureCreateThreadStack(lib);
+    if (!stack) return;
+    this._ensureRenderBuffers(lib);
+    this.port.postMessage({
+      type: WT.createHeap,
+      memory: lib.wasmMemory,
+      heapId: stack.heapId,
+      stackLow: stack.stackLow,
+      stackSize: stack.stackSize,
+    });
+  }
+
+  _ensureRenderBuffers(lib: LibOpenMPT): void {
+    if (!this.leftBufPtr) this.leftBufPtr = lib._malloc(4 * this.maxFrames);
+    if (!this.rightBufPtr) this.rightBufPtr = lib._malloc(4 * this.maxFrames);
+    this._heapBuffer = null;
+  }
+
+  _attachCreatePort(port: WorkletMessagePort): void {
+    if (this._createPort && this._createPort !== port) this._createPort.onmessage = null;
+    this._createPort = port;
+    port.onmessage = (e: WorkletMessageEvent) => { this._onCreatePortMessage(e.data); };
+  }
+
+  _onCreatePortMessage(data: unknown): void {
+    if (!isObject(data)) return;
+    if (data.type === CREATE_PORT.staged && isNonNegInt(data.modulePtr) && data.modulePtr > 0) {
+      // A newer module supersedes one still waiting for its fade: hand the older one back.
+      if (this._stagedPtr) this._retireModule(this._stagedPtr);
+      this._stagedPtr = data.modulePtr;
+      this.hasEnded = false;
+      if (!this.modulePtr || !this.isPlaying || this.faulted) {
+        this._adoptStaged();
+        return;
+      }
+      // Fade the playing module out; _renderQuantum swaps once the gain reaches 0. A suspended
+      // context runs no process(), so the timer swaps it in from here instead.
+      this._fadeTarget = 0;
+      if (this._stagedTimer != null) clearTimeout(this._stagedTimer);
+      this._stagedTimer = setTimeout(() => {
+        this._stagedTimer = null;
+        if (this._stagedPtr) this._adoptStaged();
+      }, STAGED_SWAP_TIMEOUT_MS);
+    } else if (data.type === CREATE_PORT.failed) {
+      const message = typeof data.message === 'string' ? data.message : CREATE_FAILED_MESSAGE;
+      error('create worker: load failed:', message);
+      this.port.postMessage({ type: WT.error, message });
+    }
+  }
+
+  /**
+   * Swap the staged module in. Runs on the audio thread (from process() at the end of the fade,
+   * or from a message handler): pointer swap, render-param setup, two postMessages — no create,
+   * no destroy, no malloc. The replaced module goes back to the create worker to be freed.
+   */
+  _adoptStaged(): void {
+    const lib = this.lib;
+    const next = this._stagedPtr;
+    if (!lib || !next) return;
+    const diagStart = this._audioDiag ? this._diagNow() : 0;
+    this._stagedPtr = 0;
+    if (this._stagedTimer != null) {
+      clearTimeout(this._stagedTimer);
+      this._stagedTimer = null;
+    }
+    const previous = this.modulePtr;
+    this.modulePtr = next;
+    this.faulted = false;
+    this.hasEnded = false;
+    this._fracRowInt = -1;
+    this._rowStartPosSec = 0;
+    this._configureLoadedModule(lib, next);
+    this._fadeTarget = 1;
+    if (previous) this._retireModule(previous);
+    if (this._audioDiag) this._noteLoadBlock(this._diagNow() - diagStart);
+    log('Staged module swapped in ✅ ptr=', next);
+    this.port.postMessage({ type: WT.loaded });
+  }
+
+  /** Give a module this node no longer renders back to the create worker (its free runs there). */
+  _retireModule(modulePtr: number): void {
+    if (this._createPort) {
+      this._createPort.postMessage({ type: CREATE_PORT.destroy, modulePtr });
+      return;
+    }
+    try {
+      this.lib?._openmpt_module_destroy(modulePtr);
+    } catch (err) {
+      error('destroy of retired module failed (ignored):', err);
+    }
+  }
+
+  /** Per-module setup after any create: create resets render params, and heavy modules go lite. */
+  _configureLoadedModule(lib: LibOpenMPT, modulePtr: number): void {
+    lib._openmpt_module_set_render_param(
+      modulePtr,
+      OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH,
+      this._interpolationLength,
+    );
+    const numCh = lib._openmpt_module_get_num_channels(modulePtr);
+    // Heavy XM/IT modules: full-band audio-reactive scan at 60 Hz still tips
+    // process() over budget at pattern starts — auto-lite unless host opted in.
+    if (numCh > 16 && !this._audioLiteExplicit) {
+      this._audioLite = true;
+      log('Auto audio-lite for', numCh, 'channels');
+    }
+  }
+
+  _noteLoadBlock(ms: number): void {
+    if (ms > this._diagLoadBlockMs) this._diagLoadBlockMs = ms;
   }
 
   // ── Module loading ─────────────────────────────────────────────────
@@ -744,10 +957,17 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
     this._fadeTarget = 0;
     await new Promise<void>((resolve) => { globalThis.setTimeout(resolve, LOAD_FADE_MS); });
 
+    const diagStart = this._audioDiag ? this._diagNow() : 0;
     try {
       const lib = this.lib;
       const bytes = moduleBytesFromPayload(moduleData);
       log('Loading module into libopenmpt:', bytes.byteLength, 'bytes');
+
+      // This load replaces anything the create worker staged before it.
+      if (this._stagedPtr) {
+        this._retireModule(this._stagedPtr);
+        this._stagedPtr = 0;
+      }
 
       // Tear down previous module. Best-effort: after a process() trap (this.faulted)
       // the old pointer may itself be the corrupt one that caused the trap, so a
@@ -769,7 +989,7 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
       const filePtr = lib._malloc(bytes.byteLength);
       if (!filePtr) throw new Error('_malloc returned 0 – out of WASM heap memory');
 
-      lib.HEAPU8.set(bytes, filePtr);
+      heapU8(lib).set(bytes, filePtr);
       const create = lib._openmpt_module_create_from_memory2 ?? lib._openmpt_module_create_from_memory;
       if (!create) throw new Error('libopenmpt exports neither create_from_memory2 nor create_from_memory');
       this.modulePtr = create(
@@ -790,19 +1010,7 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
       this._fracRowInt = -1;
       this._rowStartPosSec = 0;
 
-      lib._openmpt_module_set_render_param(
-        this.modulePtr,
-        OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH,
-        this._interpolationLength,
-      );
-
-      const numCh = lib._openmpt_module_get_num_channels(this.modulePtr);
-      // Heavy XM/IT modules: full-band audio-reactive scan at 60 Hz still tips
-      // process() over budget at pattern starts — auto-lite unless host opted in.
-      if (numCh > 16 && !this._audioLiteExplicit) {
-        this._audioLite = true;
-        log('Auto audio-lite for', numCh, 'channels');
-      }
+      this._configureLoadedModule(lib, this.modulePtr);
 
       log('Module loaded ✅ ptr=', this.modulePtr);
       this.port.postMessage({ type: WT.loaded });
@@ -810,6 +1018,7 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
       error('loadModule error:', err);
       this.port.postMessage({ type: WT.error, message: String(err) });
     } finally {
+      if (this._audioDiag) this._noteLoadBlock(this._diagNow() - diagStart);
       // Always fade back in — including on failure, so a bad file doesn't
       // leave the node permanently silent while still marked "playing".
       this._fadeTarget = 1;
@@ -943,6 +1152,11 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
     if (samplesWritten === 0) {
       outL.fill(0);
       outR.fill(0);
+      // The old module ran out mid-fade: nothing to fade, take the staged one.
+      if (this._stagedPtr) {
+        this._adoptStaged();
+        return;
+      }
       if (!this.hasEnded) {
         this.hasEnded = true;
         this.port.postMessage({ type: WT.ended });
@@ -954,7 +1168,7 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
     // Zero-copy view into WASM heap (reuse TypedArray when heap buffer stable).
     // Manual copy — NOT subarray()+set — avoids allocating 2 TypedArray views
     // per quantum (~700 GC objects/s) which showed up as skip→crackle cascades.
-    const heapBuf = lib.HEAPF32.buffer;
+    const heapBuf = heapBuffer(lib);
     if (this._heapBuffer !== heapBuf) {
       this._heapBuffer = heapBuf;
       this._leftHeapView = new Float32Array(heapBuf, this.leftBufPtr, this.maxFrames);
@@ -970,6 +1184,11 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
 
     if (this._fadeGain !== this._fadeTarget) {
       this._applyLoadFade(outL, outR, samplesWritten);
+    }
+    // Faded out with a staged module waiting: swap now, the next quantum fades the new one in.
+    // (This quantum's remaining samples were already scaled to 0 by the fade.)
+    if (this._stagedPtr && this._fadeGain === 0) {
+      this._adoptStaged();
     }
 
     // Copy first 128 samples into oscilloscope ring buffer
@@ -1095,6 +1314,13 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
         if (gapMs > this._diagMaxGapMs) this._diagMaxGapMs = gapMs;
       }
       this._lastProcessTime = audioTime;
+      // The audio clock above advances one quantum per call however long the thread stalled;
+      // the wall clock is what shows a message handler (an in-worklet create) holding the thread.
+      if (this._lastProcessWall >= 0) {
+        const wallGapMs = diagStart - this._lastProcessWall;
+        if (wallGapMs > this._diagMaxWallGapMs) this._diagMaxWallGapMs = wallGapMs;
+      }
+      this._lastProcessWall = diagStart;
 
       this._diagQuanta++;
       this._diagSumMs += elapsedMs;
@@ -1142,6 +1368,9 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
           maxCallbackGapMs: this._diagMaxGapMs,
           heapBytes: heapBuf.byteLength,
           heapMoves: this._heapMoves,
+          maxWallGapMs: this._diagMaxWallGapMs,
+          loadBlockMs: this._diagLoadBlockMs,
+          createThread: this._createPort != null,
         };
         if (playingChannels >= 0) diagMsg.playingChannels = playingChannels;
         this.port.postMessage(diagMsg);

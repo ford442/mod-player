@@ -220,20 +220,6 @@ describe('PlayerEngine (headless)', () => {
     expect(seeks()).toEqual([[1, 11], [1, 10], [2, 0], [2, 0], [0, 0]]);
   });
 
-  it('restarts playback on an engine toggle while playing, and stops a paused one', async () => {
-    const f = setup();
-    await playing(f);
-    f.engine.toggleAudioEngine();
-    expect(f.start).toHaveBeenCalledTimes(2);
-    expect(f.engine.transport.phase).toBe('loading');
-    await vi.waitFor(() => expect(f.calls).toHaveLength(2));
-    f.ack();
-    f.engine.pause();
-    f.engine.toggleAudioEngine();
-    expect(f.engine.transport.phase).toBe('stopped');
-    expect(f.start).toHaveBeenCalledTimes(2);
-  });
-
   it('notifies subscribers once per microtask, however many fields changed', async () => {
     const f = setup();
     const listener = vi.fn();

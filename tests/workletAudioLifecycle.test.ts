@@ -13,9 +13,6 @@ import {
   shouldForceWorkletModuleLoad,
   shouldPostInitLib,
   shouldReportWorkletPosition,
-  shouldFillNativePosition,
-  shouldReloadNativeModule,
-  nativeModuleFingerprint,
   WORKLET_POSITION_REPORT_INTERVAL_SEC,
 } from '../utils/workletAudioLifecycle';
 import { ensureSharedLib, type SharedLibHolder } from '../audio-worklet/libSingleton';
@@ -35,21 +32,15 @@ describe('workletAudioLifecycle (#329 hot reload)', () => {
   it('reuses worklet node when JS engine is loaded and node exists', () => {
     expect(
       canReuseWorkletNode({
-        activeEngine: 'worklet',
         workletLoaded: true,
         hasWorkletNode: true,
       }),
     ).toBe(true);
   });
 
-  it('does not reuse when engine is native-worklet', () => {
-    expect(
-      canReuseWorkletNode({
-        activeEngine: 'native-worklet',
-        workletLoaded: true,
-        hasWorkletNode: true,
-      }),
-    ).toBe(false);
+  it('does not reuse before the worklet module is loaded or without a node', () => {
+    expect(canReuseWorkletNode({ workletLoaded: false, hasWorkletNode: true })).toBe(false);
+    expect(canReuseWorkletNode({ workletLoaded: true, hasWorkletNode: false })).toBe(false);
   });
 
   it('does not post initLib on hot reload', () => {
@@ -256,20 +247,6 @@ describe('audio hook source invariants', () => {
     expect(jsDispatch).toContain('shouldAcceptWorkletLoadedAck');
   });
 
-  it('native pause silences render without AudioContext.suspend', () => {
-    const cpp = readFileSync(join(ROOT, 'cpp/worklet_processor.cpp'), 'utf8');
-    const suspendIdx = cpp.indexOf('void suspend_audio()');
-    expect(suspendIdx).toBeGreaterThan(0);
-    const suspendBody = cpp.slice(suspendIdx, suspendIdx + 280);
-    expect(suspendBody).toContain('g_paused');
-    expect(suspendBody).not.toMatch(/ctx\.suspend/);
-    const engine = readFileSync(join(ROOT, 'audio-worklet/OpenMPTWorkletEngine.ts'), 'utf8');
-    const initMatch = engine.match(/async init\([\s\S]*?async attachAudioContext/);
-    expect(initMatch?.[0]).not.toContain('_init_audio(');
-    expect(engine).toContain('_init_audio_with_context');
-    expect(useAudioGraph).toContain('attachAudioContext');
-    expect(useAudioGraph).toContain('broadcastPcmBlock');
-  });
 });
 
 describe('workletAudioLifecycle (#354 pure helpers smoke)', () => {
@@ -277,19 +254,7 @@ describe('workletAudioLifecycle (#354 pure helpers smoke)', () => {
     expect(WORKLET_POSITION_REPORT_INTERVAL_SEC).toBeCloseTo(1 / 60, 12);
     expect(shouldReportWorkletPosition(0, Number.NEGATIVE_INFINITY)).toBe(true);
     expect(shouldReportWorkletPosition(0.001, 0)).toBe(false);
-    expect(shouldFillNativePosition(0, Number.NEGATIVE_INFINITY)).toBe(true);
-    expect(shouldFillNativePosition(0.001, 0)).toBe(false);
-    expect(shouldFillNativePosition(1 / 60, 0)).toBe(true);
-  });
-
-  it('native fingerprint skip avoids a second parse of the same bytes', () => {
-    const a = new Uint8Array([1, 2, 3, 4, 5]).buffer;
-    const b = new Uint8Array([1, 2, 3, 4, 5]).buffer;
-    const c = new Uint8Array([9, 2, 3, 4, 5]).buffer;
-    const fp = nativeModuleFingerprint(a);
-    expect(shouldReloadNativeModule(null, a)).toBe(true);
-    expect(shouldReloadNativeModule(fp, b)).toBe(false);
-    expect(shouldReloadNativeModule(fp, c)).toBe(true);
+    expect(shouldReportWorkletPosition(1 / 60, 0)).toBe(true);
   });
 
   it('loaded-ack helper drops mismatched tokens', () => {
@@ -302,7 +267,6 @@ describe('workletAudioLifecycle (#354 pure helpers smoke)', () => {
 
   it('hot-reload plan reuses node without disconnect or re-initLib', () => {
     const plan = planJsWorkletHotReloadPlay({
-      activeEngine: 'worklet',
       workletLoaded: true,
       hasWorkletNode: true,
       libJsText: 'glue',

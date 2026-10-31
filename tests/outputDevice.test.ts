@@ -414,13 +414,12 @@ describe('the real start path (hooks/useAudioGraph.ts) prepares the context befo
     const factory = await import('../utils/audioContextFactory');
     const { startAudioPlayback } = await import('../hooks/useAudioGraph');
 
-    const refs = createEngineRefs({ transport: new TransportMachine({ strict: true }), activeEngine: () => 'worklet' });
+    const refs = createEngineRefs({ transport: new TransportMachine({ strict: true }) });
     refs.libopenmptRef.current = {} as LibOpenMPT;
     refs.fileDataRef.current = new Uint8Array([1, 2, 3, 4]);
     const callbacks: AudioGraphCallbacks = {
       setStatus: vi.fn(),
       setIsPlaying: vi.fn(),
-      setActiveEngine: vi.fn(),
       setModuleInfo: vi.fn(),
       setSequencerMatrix: vi.fn(),
       stopMusic: vi.fn(),
@@ -434,9 +433,7 @@ describe('the real start path (hooks/useAudioGraph.ts) prepares the context befo
       },
     };
     const config: AudioGraphConfig = {
-      activeEngine: 'worklet',
       isWorkletSupported: true,
-      isNativeWorkletAvailable: false,
       panValue: 0,
       volume: 0.5,
       isLooping: true,

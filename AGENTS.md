@@ -10,27 +10,26 @@
 - **3D Graphics:** `@react-three/fiber` + `@react-three/drei` + `three`
 - **Visualization:** WebGPU (WGSL shaders) primary; **WebGL2** GLSL reference renderer (`src/renderers/webgl2/`) and **HTML** fallback
 - **Audio Backend:** `libopenmpt` (WASM) inside a customized AudioWorklet
-- **Native Audio Engine:** C++17 → Emscripten (`scripts/build-wasm.sh` / `npm run build:emcc` only; outputs `openmpt-native.*`)
 - **Module System:** ES modules (`"type": "module"` in `package.json`)
 
 ## Key Configuration Files
-- **`package.json`** — Defines scripts (`dev`, `build`, `typecheck`, `lint`, `preview`, `build:worklet`, `build:emcc`), dependencies, and `"type": "module"`.
+- **`package.json`** — Defines scripts (`dev`, `build`, `typecheck`, `lint`, `preview`, `build:js-worklet`, `build:js-libopenmpt`), dependencies, and `"type": "module"`.
 - **`tsconfig.json`** — High strictness. Excludes `archive/`, `jules_patch` (not production).
 - **`tsconfig.node.json`** — Strict check (extends `tsconfig.json`, `noEmit`) of `vite.config.ts`, `vitest.config.ts` and `vite-plugins/`. Run by `npm run typecheck` (`typecheck:node`).
-- **`tsconfig.scripts.json`** — `checkJs` over an explicit list of the pure-Node `scripts/*.mjs` plus `cpp/pre.js`/`post.js` (`typecheck:scripts`, part of `npm run typecheck`). Opt a script in by adding it to `include`, **not** with `// @ts-check` (that would also activate in `tsconfig.test.json`, which loads some of the same files with strict options). The Playwright/browser scripts are not checked yet.
-- **`vite.config.ts`** — Base path from `VITE_APP_BASE_PATH`; React plugin; COOP/COEP headers (`same-origin` / `credentialless`); `watch.followSymlinks: false` (guards against CodeQL self-referential symlink); `optimizeDeps.exclude: ['openmpt-native']`; `assetsInclude: ['**/*.wasm']`.
+- **`tsconfig.scripts.json`** — `checkJs` over an explicit list of the pure-Node `scripts/*.mjs` (`typecheck:scripts`, part of `npm run typecheck`). Opt a script in by adding it to `include`, **not** with `// @ts-check` (that would also activate in `tsconfig.test.json`, which loads some of the same files with strict options). The Playwright/browser scripts are not checked yet.
+- **`vite.config.ts`** — Base path from `VITE_APP_BASE_PATH`; React plugin; COOP/COEP headers (`same-origin` / `require-corp`); `watch.followSymlinks: false` (guards against CodeQL self-referential symlink); `assetsInclude: ['**/*.wasm']`.
 - **`tailwind.config.js`** — Explicit `content` paths only (no broad globs) to prevent build OOM. Custom theme extensions for `panel`, `edge`, `accent`, `glow`, `borderColor`, and `boxShadow`.
 - **`postcss.config.js`** — TailwindCSS + Autoprefixer.
-- **`eslint.config.js`** — Ignores `dist`, `public`, `vendor`, `archive`, `node_modules`, `jules_patch`, `subdir`, `.claude`, `cpp`. Lints `scripts/**/*.mjs` (Node + browser globals), forbids DOM globals in the worklet sources (`no-restricted-globals` on `audio-worklet/js/**` and the two modules it bundles), and enables the type-aware `@typescript-eslint/no-floating-promises` on `src/ hooks/ audio-worklet/ utils/`. CI: `npm run lint` (max 40 warnings; ratchet down as debt is paid).
+- **`eslint.config.js`** — Ignores `dist`, `public`, `vendor`, `archive`, `node_modules`, `jules_patch`, `subdir`, `.claude`. Lints `scripts/**/*.mjs` (Node + browser globals), forbids DOM globals in the worklet sources (`no-restricted-globals` on `audio-worklet/js/**` and the two modules it bundles), and enables the type-aware `@typescript-eslint/no-floating-promises` on `src/ hooks/ audio-worklet/ utils/`. CI: `npm run lint` (max 40 warnings; ratchet down as debt is paid).
 - **`package-lock.json`** — Committed for reproducible installs. CI uses `npm ci`. Never hand-edit it; regenerate with `npm install`. Guarded by `npm run verify:lockfile` (metadata) plus `npm ci --dry-run --ignore-scripts --offline` (graph), both part of `npm run preflight`.
 
 ## Before Committing
-Run `npm run preflight` — one chained command (`verify:lockfile` → `npm ci --dry-run --ignore-scripts --offline` → `verify:wasm` → `verify:js-libopenmpt` → `verify:js-worklet-fresh` → `lint` → `typecheck` → `typecheck:worklet` → `typecheck:tests` → `test` → `test:shader-includes` → `build` → `verify:build:root` → `verify:bundle-budget`) that stops at the first failure. The `lint-and-build` CI job is literally `npm ci` + `npm run preflight`, so the two cannot drift; add new gates to the `preflight` script in `package.json`. It needs no network after `npm ci`, and does **not** cover the browser/emsdk jobs (`visual-smoke`, `audio-smoke`, `playhead-smoke`, `wasm-smoke-test`, `native-full-build`).
+Run `npm run preflight` — one chained command (`verify:lockfile` → `npm ci --dry-run --ignore-scripts --offline` → `verify:wasm` → `verify:js-libopenmpt` → `verify:js-worklet-fresh` → `lint` → `typecheck` → `typecheck:worklet` → `typecheck:tests` → `test` → `test:shader-includes` → `build` → `verify:build:root` → `verify:bundle-budget`) that stops at the first failure. The `lint-and-build` CI job is literally `npm ci` + `npm run preflight`, so the two cannot drift; add new gates to the `preflight` script in `package.json`. It needs no network after `npm ci`, and does **not** cover the browser/emsdk jobs (`visual-smoke`, `audio-smoke`, `playhead-smoke`, `build-scripts`, `js-libopenmpt-rebuild`).
 
 `main` **should** be covered by a repository ruleset (PR + passing `lint-and-build` required, force-push and branch deletion blocked) but as of 2026-09-26 it is not: `GET /repos/ford442/mod-player/rulesets` returns `[]`, and a direct `git push origin main` currently succeeds. An agent session cannot create the ruleset — repo-administration API calls are blocked by the proxy — so this is a manual step for the repo owner (see `CONTRIBUTING.md`). Work on a feature branch regardless; do not rely on the ruleset existing.
 
-## Audio Architecture (Three Tiers + Fallback)
-The audio logic is split across the **Main Thread** and the **Audio Worklet Thread**, with an optional high-performance native C++ worklet.
+## Audio Architecture (Two Tiers + Fallback)
+The audio logic is split across the **Main Thread** and the **Audio Worklet Thread**. The JS AudioWorklet is the only engine; the native C++ worklet was retired (`docs/ADR-native-engine.md`).
 
 ### 1. Main Thread
 Managed by `hooks/useLibOpenMPT.ts`. Responsibilities:
@@ -44,23 +43,16 @@ Managed by `hooks/useLibOpenMPT.ts`. Responsibilities:
 Files: `public/worklets/openmpt-worklet.js` + `libopenmpt-worklet.{js,wasm}` (tracked in git)
 - `openmpt-worklet.js` is **generated** from `audio-worklet/js/openmpt-processor.ts` via `npm run build:js-worklet` (esbuild) — edit the TS source, never the generated file (#435).
 - Processor is an `AudioWorkletProcessor` loaded via `audioWorklet.addModule()` (cache-busted `?v=` — a content hash from `audio-worklet/js/worklet-version.generated.json`, via `audio/engine/workletUrls.ts`).
-- Main thread fetches `libopenmpt-worklet.js` (~100 KB Emscripten glue) **and** `libopenmpt-worklet.wasm` (~1.7 MB, **real WebAssembly**) and posts `{ type: 'initLib', scriptText, wasmBytes }` into the worklet; the worklet evaluates the glue with `new Function` (classic scripts cannot `import()` / `importScripts()`) seeded with `Module.wasmBinary`, then **waits for `onRuntimeInitialized`** (`audio-worklet/libRuntimeReady.ts` — never infer readiness from `_openmpt_*` existing).
+- Main thread fetches `libopenmpt-worklet.js` (~50 KB Emscripten glue, Closure-compiled) **and** `libopenmpt-worklet.wasm` (~1.4 MB at `-Os`, **real WebAssembly**) and posts `{ type: 'initLib', scriptText, wasmBytes }` into the worklet; the worklet evaluates the glue with `new Function` (classic scripts cannot `import()` / `importScripts()`) seeded with `Module.wasmBinary`, then **waits for `onRuntimeInitialized`** (`audio-worklet/libRuntimeReady.ts` — never infer readiness from `_openmpt_*` existing).
 - **The same `libopenmpt-worklet.{js,wasm}` pair also serves the main thread (`<script>`) and the parser worker** — one artifact, built by `npm run build:js-libopenmpt` (emsdk 3.1.51; see `public/worklets/README.md`). It never replaces `globalThis.WebAssembly` (the old wasm2js `libmpt/` glue did; that workaround is gone). There is no wasm2js / JS-only path: `initLib` without `wasmBytes` is rejected. Do not commit an HTML/404 body as the `.wasm`, and do not export a real `stringToUTF8` from the glue (the app's polyfill has a different signature).
 - Interpolation defaults to Sinc+LP (8) on the JS engine; `?interp=4` opts down to cubic.
 - Runs the `libopenmpt` render loop, reports position (~60 Hz) back to the main thread, and handles seek/load messages.
 - **Rule:** You cannot use React state or DOM APIs inside the worklet. Communication is strictly via `port.postMessage()`.
 - **Hygiene:** `npm run verify:wasm` fails CI if any `public/**/*.wasm` or `dist/**/*.wasm` is HTML/tiny/missing `\0asm` magic. See `public/worklets/README.md`.
 
-### 3. Native C++/Wasm AudioWorklet Engine (Optional)
-Files: `audio-worklet/OpenMPTWorkletEngine.ts`, `cpp/openmpt_wrapper.cpp`, `cpp/worklet_processor.cpp`
-- Built with `scripts/build-wasm.sh` (requires Emscripten SDK).
-- Emscripten flags: `-sAUDIO_WORKLET=1`, `-sWASM_WORKERS=1`, `-sMODULARIZE=1`, `-sEXPORT_NAME=createOpenMPTModule`.
-- Outputs: `public/worklets/openmpt-native.js`, `.wasm`, `.aw.js` (these are `.gitignore`d until built).
-- **Engine selection** (`utils/audioEngineSelection.ts`): `?engine=js|native` → `localStorage.xasm1_audio_engine` (`js`\|`native`\|`auto`) → auto (default **JS**). Native only when explicitly preferred (`?engine=native` / storage `native`) and glue is present. Soft-fail to JS if `?engine=native` without artifacts. UI toggle persists override. See `public/worklets/README.md`.
-- `useLibOpenMPT.ts` probes for `openmpt-native.js` at startup; if present and preference allows, it instantiates `OpenMPTWorkletEngine`, which starts its worklet thread on the **shared** `AudioContext` via `init_audio_with_context` (never its own).
+### Shared AudioContext and capture
 - **`AudioContext` is constructed in exactly one place:** `utils/audioContextFactory.ts` (`createPlayerAudioContext` / `getSharedPlayerAudioContext`). One context per page session, `sampleRate` locked to **48000**, `latencyHint` = `playback` unless stage mode / `?latency=interactive`. Do **not** add another `new AudioContext` call site — `tests/audioContextFactory.test.ts` fails the build if you do.
-- The native engine polls a shared-memory `PositionInfo` struct for row/BPM/channel VU data; main thread applies via shared `utils/workletPositionAdapter.ts` (same path as JS worklet).
-- **Capture:** MediaRecorder taps the shared main graph on both engines, so nothing blocks Record clip. The `?nativeCtx=legacy` dual-context path is deleted. See `docs/EXPORT.md`.
+- **Capture:** MediaRecorder taps the shared main graph, so nothing blocks Record clip. See `docs/EXPORT.md`.
 
 ### Fallback Path
 If the JS AudioWorklet fails to initialize WASM, `hooks/useAudioGraph.ts` falls back to a `ScriptProcessorNode` on the main thread (deprecated but functional). This is triggered by the worklet posting an `error` message.
@@ -123,19 +115,17 @@ Tracker cells are bit-packed into `Uint32Array` before upload to the GPU:
   - `useLibOpenMPT.ts` – Mounts the PlayerEngine (init / dispose)
   - `useAudioGraph.ts` – Audio graph construction and playback start (composed by the engine)
   - `usePlaylist.ts`, `useKeyboardShortcuts.ts`, `useWebGPURender.ts` (thin React glue; GPU logic in `src/renderers/webgpu/`), `useWebGLOverlay.ts`
-- **`/audio-worklet`** – `js/openmpt-processor.ts` (the JS worklet processor source), the modules esbuild bundles into it (`libRuntimeReady.ts`, `workletProtocolConstants.ts`), the main-thread side of the message protocol (`protocol.ts`, `jsWorkletDispatch.ts`), and the native C++ engine wrapper (`OpenMPTWorkletEngine.ts`, `types.ts`, `diagnostics.ts`)
-- **`/cpp`** – C++ source for the native worklet (`openmpt_wrapper.cpp`, `openmpt_wrapper.h`, `worklet_processor.cpp`, `pre.js`)
+- **`/audio-worklet`** – `js/openmpt-processor.ts` (the JS worklet processor source), the modules esbuild bundles into it (`libRuntimeReady.ts`, `workletProtocolConstants.ts`), the main-thread side of the message protocol (`protocol.ts`, `jsWorkletDispatch.ts`) and diagnostics (`diagnostics.ts`)
 - **`/public/worklets`** – AudioWorklet JS processors served as static assets
   - `openmpt-worklet.js` – JS worklet processor (tracked in git)
   - `libopenmpt-worklet.js` / `.wasm` – real-WASM libopenmpt for the JS engine (glue + binary; tracked in git; built by `scripts/build-js-libopenmpt.sh`)
-  - `openmpt-native.js` / `.wasm` / `.aw.js` – Generated by Emscripten (ignored in git)
 - **`/shaders`** – WGSL shader source files (50+ versioned files)
 - **`/utils`** – `patternExtractor.ts`, `bloomPostProcessor.ts`, `remoteMedia.ts`, `gpuPacking.ts`, `geometryConstants.ts`, `shaderVersion.ts`, `cn.ts`
 - **`/types`** – Shared TS types, including `types.ts` (core interfaces) and `bloomPresets.ts`
 - **`/src`** – Supplementary code
   - `src/lib/paths.ts` – Path helpers
 - **`/docs`** – Technical guides (`BLOOM.md`, `planning/`, `agent-swarm/`)
-- **`/scripts`** – `build-wasm.sh` / `build-js-libopenmpt.sh` (emscripten builds), `build-js-worklet.mjs`, `sync-shaders.mjs`, the `verify-*.mjs` guards run by `npm run preflight`, and the Playwright smoke scripts (`visual-smoke.mjs`, `audio-smoke.mjs`, `playhead-acceptance.mjs`, …)
+- **`/scripts`** – `build-js-libopenmpt.sh` (the emscripten build), `build-js-worklet.mjs`, `sync-shaders.mjs`, the `verify-*.mjs` guards run by `npm run preflight`, and the Playwright smoke scripts (`visual-smoke.mjs`, `audio-smoke.mjs`, `playhead-acceptance.mjs`, …)
 - **`/archive`** – Demoted experiments; not imported by the app (see `docs/REPO_LAYOUT.md`)
 - **`/dist`** – Vite production build output (deployment artifact)
 
@@ -167,29 +157,18 @@ npm run preview         # Preview the production build locally
 
 Do **not** add `package-lock.json` to `.gitignore`.
 
-### Native Audio Engine Build (single supported path)
-Requires Emscripten **emsdk 3.1.51** (CI pin; override with `EMSDK_PIN` only for experiments):
+### libopenmpt WASM build (JS engine)
+Requires Emscripten **emsdk 3.1.51** (the pin in `scripts/lib/wasm-flags.sh`; another active emcc is an error unless `XASM_ALLOW_EMSDK_DRIFT=1`). Only needed when changing libopenmpt itself — both output pairs are committed:
 
 ```bash
-# Install pin (once)
-git clone https://github.com/emscripten-core/emsdk.git && cd emsdk
-./emsdk install 3.1.51 && ./emsdk activate 3.1.51
-source ./emsdk_env.sh
-
-# From repo root — only supported native build:
-npm run build:emcc
-# equivalent: bash scripts/build-wasm.sh [--debug] [--safe-heap]
-# npm run build:worklet  → same script (deprecated alias name)
+npm run build:js-libopenmpt   # → public/worklets/libopenmpt-worklet.{js,wasm} (+ audio-worklet/js/libopenmpt-worklet.generated.json)
+npm run build:js-libopenmpt -- --playback   # → libopenmpt-playback.{js,wasm} (+ its manifest)
+npm run verify:js-libopenmpt  # static + instruction-level feature + boot/render/corrupt-input checks (no emsdk needed)
 ```
 
-| Output (gitignored) | Role |
-|---------------------|------|
-| `public/worklets/openmpt-native.js` | Emscripten modular glue (`createOpenMPTModule`) |
-| `public/worklets/openmpt-native.wasm` | WASM binary |
-| `public/worklets/openmpt-native.aw.js` | AudioWorklet bootstrap |
+libopenmpt's version and tarball sha256 live in `scripts/lib/libopenmpt-source.sh`; the wasm feature / exception flags in `scripts/lib/wasm-flags.sh`.
 
-**Never** overwrites tracked `public/worklets/openmpt-worklet.js` (JS processor).  
-Export audit: `npm run verify:native-exports`.
+The build never touches the tracked JS processor `public/worklets/openmpt-worklet.js` (that one comes from `npm run build:js-worklet`).
 
 ### Deployment
 ```bash
@@ -219,19 +198,19 @@ python3 deploy.py
   npm run screenshot:shaders
   ```
   Outputs are written to `/mnt/ramdisk/mod-player-screenshots` by default, including `report.json` and `SCREENSHOT_REPORT.md`.
-- **GitHub Actions** (`.github/workflows/ci.yml`) runs PR jobs plus a scheduled native build:
+- **GitHub Actions** (`.github/workflows/ci.yml`) runs these PR jobs:
   1. `lint-and-build` – `npm ci` → **`npm run preflight`** (the same chain contributors run locally: lockfile guards, `verify:wasm`, `verify:js-libopenmpt`, worklet freshness, lint, typechecks, `npm test`, shader includes/parity, build, `verify:build:root`, `verify:bundle-budget`).
   2. `visual-smoke` – Build, preview server, Playwright smoke (`smoke:visual:ci`) on the HTML renderer.
      `visual-smoke-webgpu` runs experimental WebGPU coverage in parallel.
-  3. `wasm-smoke-test` – Installs Emscripten **3.1.51**, verifies safe native build scripts, `verify:native-exports`, `bash -n`, and that tracked `openmpt-worklet.js` still looks like the JS processor.
-  4. `native-full-build` – Path-filtered full `npm run build:emcc` when `cpp/**`, `scripts/build-wasm.sh`, or `audio-worklet/**` change; caches `vendor/libopenmpt-0.8.4+release-native-release`, keyed on the flag stamp from `scripts/build-wasm.sh --print-flag-stamp` (no prefix fallback).
-  5. `native-wasm-scheduled.yml` – Weekly (and manual) full `npm run build:emcc` with the same libopenmpt cache; uploads `openmpt-native.*` artifacts and asserts the JS worklet is unchanged.
+  3. `audio-smoke` / `playhead-smoke` – Playwright `smoke:audio:ci` + `smoke:fx:ci`, and `smoke:playhead`, on the JS worklet.
+  4. `build-scripts` – `shellcheck --severity=warning` + `bash -n` on `scripts/build-js-libopenmpt.sh` and the `scripts/lib/*.sh` it sources, and a guard that tracked `openmpt-worklet.js` still looks like the JS processor (no emsdk).
+  5. `js-libopenmpt-rebuild` – Path-filtered rebuild of both libopenmpt pairs with emsdk **3.1.51**; fails if the committed pairs drift from a fresh build, uploads the release symbol maps, and boots both `--debug` builds in a fake AudioWorkletGlobalScope.
 
 ## Security & CORS Considerations
 - **COOP/COEP headers:** `vite.config.ts` sets:
   - `Cross-Origin-Opener-Policy: same-origin`
-  - `Cross-Origin-Embedder-Policy: credentialless`
-  - This unlocks `SharedArrayBuffer` / Atomics for Emscripten WASM workers while still allowing cross-origin resources (e.g., the esm.sh React importmap in `index.html`). libopenmpt itself is same-origin and loaded with SRI.
+  - `Cross-Origin-Embedder-Policy: require-corp`
+  - This unlocks `SharedArrayBuffer` / Atomics (the worklet's oscilloscope / audio-reactive buffer, the shared playback heap) in every browser, Safari included (WebKit has no `credentialless`). Cross-origin subresources need CORS or CORP; libopenmpt itself is same-origin and loaded with SRI.
 - **CORS:** Loading MOD files or WASM from external URLs can trigger CORS errors. `utils/remoteMedia.ts` handles remote fetching; ensure servers send proper CORS headers.
 - **Service Worker:** `public/sw.js` is scope-aware and works under any base path. It caches module files (`.mod`, `.xm`, `.s3m`, `.it`, `.mptm`, `.wasm`) with a cache-first strategy. SW registration only happens in production builds (`import.meta.env.PROD`).
 - **PWA:** `public/manifest.json` and `sw.js` provide installability.
@@ -240,18 +219,15 @@ python3 deploy.py
 1. **Worklet Caching:** Browsers cache AudioWorklet files aggressively. After changing `audio-worklet/js/openmpt-processor.ts` (rebuild the generated `public/worklets/openmpt-worklet.js`) or any worklet asset, hard-refresh or disable cache in DevTools.
 2. **Shader Imports:** If you rename a shader file in `/shaders`, you **must** update the reference in `appConfig.ts` (the `SHADER_GROUPS` constants), the `utils/shaderRegistry.ts` entry, and any code that fetches the file by name. WGSL files must also be kept in sync between `/shaders` (source) and `/public/shaders` (served).
 3. **Base Path Mismatch:** Deploying to a subdirectory without setting `VITE_APP_BASE_PATH` will break shader fetches, worklet loads, and the default module fetch. Use `deploy.py` or set the env var manually before building.
-4. **Missing Native Engine:** `openmpt-native.js` does not exist in the repo by default. Run `npm run build:emcc` after activating emsdk **3.1.51**. Force JS while debugging with artifacts present: `?engine=js` or `localStorage.xasm1_audio_engine=js` (see `public/worklets/README.md`).
-5. **Node OOM during build:** The Tailwind config was intentionally narrowed to explicit paths. Do not broaden the `content` glob to `"./**/*.{js,ts,jsx,tsx}"` or production builds may run out of heap memory.
-6. **Native vs JS worklet names:** Native glue is always `openmpt-native.*`. The tracked production processor is `openmpt-worklet.js`. Both `npm run build:emcc` and `npm run build:worklet` call `scripts/build-wasm.sh` and refuse to clobber the JS processor.
-7. **Shader-Uniform coupling:** Shaders are tightly coupled to TypeScript host code. Changing a shader's `struct Uniforms` requires a matching change to `fillUniformPayload()` in `utils/gpuPacking.ts`. Adding a new shader means registering a `ShaderMeta` block in `utils/shaderRegistry.ts` (layout, packing, canvas size, input handling) plus a picker entry in `appConfig.ts` — do not add `shaderFile.includes('v0.XX')` checks.
-8. **Symlink watcher infinite loop:** The CodeQL scanner leaves a self-referential symlink (`_codeql_detected_source_root` → `.`). The Vite config mitigates this with `watch.followSymlinks: false`. Do not remove this setting.
-9. **MOD/XM silent playback / hiccups:** Do not re-init libopenmpt per `play()`, do not `suspend()` the `AudioContext` on module reload, do not post worklet `position` every audio quantum, and do not `disconnect()` the worklet node on hot reload. See `docs/WORKLET_AUDIO_BUG.md` and `tests/workletAudioLifecycle.test.ts`.
-10. **Emscripten output names:** Never commit `a.out` / `a.out.*` (Emscripten default names; gitignored). The only native engine artifacts are `public/worklets/openmpt-native.{js,wasm,aw.js}` from `npm run build:emcc` — and those are gitignored build outputs. Do not confuse leftover `a.out.*` in a dirty tree with production engine files.
-11. **Agent planning scratch:** Do not commit `.swarm-state.md` or `weekly_plan.md` (gitignored). Use GitHub issues and `docs/planning/ROADMAP.md` for tracked planning. Do not re-add root `git.sh` “push fix” helpers.
+4. **Node OOM during build:** The Tailwind config was intentionally narrowed to explicit paths. Do not broaden the `content` glob to `"./**/*.{js,ts,jsx,tsx}"` or production builds may run out of heap memory.
+5. **Shader-Uniform coupling:** Shaders are tightly coupled to TypeScript host code. Changing a shader's `struct Uniforms` requires a matching change to `fillUniformPayload()` in `utils/gpuPacking.ts`. Adding a new shader means registering a `ShaderMeta` block in `utils/shaderRegistry.ts` (layout, packing, canvas size, input handling) plus a picker entry in `appConfig.ts` — do not add `shaderFile.includes('v0.XX')` checks.
+6. **Symlink watcher infinite loop:** The CodeQL scanner leaves a self-referential symlink (`_codeql_detected_source_root` → `.`). The Vite config mitigates this with `watch.followSymlinks: false`. Do not remove this setting.
+7. **MOD/XM silent playback / hiccups:** Do not re-init libopenmpt per `play()`, do not `suspend()` the `AudioContext` on module reload, do not post worklet `position` every audio quantum, and do not `disconnect()` the worklet node on hot reload. See `docs/WORKLET_AUDIO_BUG.md` and `tests/workletAudioLifecycle.test.ts`.
+8. **Agent planning scratch:** Do not commit `.swarm-state.md` or `weekly_plan.md` (gitignored). Use GitHub issues and `docs/planning/ROADMAP.md` for tracked planning. Do not re-add root `git.sh` “push fix” helpers.
 
 ## Cursor Cloud specific instructions
 This is a **frontend-only** app; there is no backend to run for local dev. `libopenmpt` is self-hosted as `public/worklets/libopenmpt-worklet.{js,wasm}` and sample modules (`4-mat_madness.mod`, `test.xm`, `libopenmpt-test.mod`) ship in `public/`, so the player works fully offline with no CDN or storage API. `VITE_STORAGE_API_URL` (proxied `/api`, `/songs`) is optional and only needed for the remote song browser.
 - **Run/build/test/lint:** use the standard scripts in `package.json` (`npm run dev` → Vite on `http://localhost:5173`, `npm run build`, `npm test` (Vitest), `npm run typecheck`, `npm run lint`). See README/AGENTS build sections above.
 - **Base path:** default dev and `npm run build` use site root (`VITE_APP_BASE_PATH=/` in `.env.development` / `.env.production`). The live deploy at `test.1ink.us/xm-player/` uses `npm run build:xm-player` which bakes `/xm-player/` into asset URLs. If you see 404s for `/xm-player/assets/*` or `libopenmpt-worklet.js` while testing at root, you built with the xm-player profile — use `npm run dev` or a root-base `npm run build` instead.
 - **Browser testing without WebGPU:** the cloud VM's Chrome has no WebGPU by default. Append `?renderer=html` (DOM grid) or opt in to the GLSL session with `?webgl2=1` (badge `WebGL2 fallback — WebGPU not in use`); the app otherwise tries WebGPU first and shows the failure card (which has a **Use WebGL2 visualizer** button) — there is no automatic fallback. Audio playback requires a user gesture (click Play).
-- **Hello-world check:** open `http://localhost:5173/?webgl2=1`, wait for the default module `4-mat_madness.mod` to auto-load, click Play, and confirm the position/order/row counters advance and the visualizer animates. Force JS engine with `?engine=js` when native artifacts are present locally.
+- **Hello-world check:** open `http://localhost:5173/?webgl2=1`, wait for the default module `4-mat_madness.mod` to auto-load, click Play, and confirm the position/order/row counters advance and the visualizer animates.

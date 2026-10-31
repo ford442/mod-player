@@ -13,7 +13,6 @@
  *   spFallbackTriggered         `playbackEngineRef.current === 'scriptprocessor'`.
  *   workletLoadedRef            `addModule` resolved on *this* AudioContext — a module loaded into a
  *                               closed context no longer reads as loaded on its successor.
- *   activeEngineRef             the snapshot's engine selection.
  *
  * (`uiLoopActiveRef` is gone: the UI loop runs exactly while the transport is playing or paused.)
  */
@@ -69,7 +68,6 @@ export function createInitialPlaybackState(): PlaybackState {
 
 export interface EngineRefSources {
   transport: Pick<TransportMachine, 'isPlaying' | 'isPaused'>;
-  activeEngine: () => 'worklet' | 'native-worklet';
 }
 
 export function createEngineRefs(sources: EngineRefSources): LibOpenMPTRefs {
@@ -147,11 +145,7 @@ export function createEngineRefs(sources: EngineRefSources): LibOpenMPTRefs {
     lastChannelStatePublishMsRef: num(0),
     noteAgesScratchRef: ref([]),
     userModuleLoadedRef: ref(false),
-    nativeEngineRef: ref(null),
-    activeEngineRef: viewRef(sources.activeEngine),
     playbackEngineRef,
-    nativeClockAnchorRef: ref(null),
-    nativeBridgeLatencyRef: num(0),
     oscBufferRef: ref(null),
     audioReactiveRef: ref(null),
     playbackStateRef: ref(createInitialPlaybackState()),

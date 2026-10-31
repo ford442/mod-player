@@ -14,10 +14,7 @@
  *   PLAY_MS          playback sample window (default 3000)
  *   LAG_THRESHOLD    max |predictionLagRows| (default 1.0)
  *   PASS_RATIO       min fraction of samples under threshold (default 0.95)
- *   AUDIO_ENGINE     js (default) | native — force ?engine= for acceptance
- *   SKIP_NATIVE      set to 1 to skip native scenario even if artifacts exist
  */
-import { existsSync } from 'node:fs';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
@@ -38,32 +35,15 @@ const LAG_THRESHOLD = Number(process.env.LAG_THRESHOLD || 1.0);
 const PASS_RATIO = Number(process.env.PASS_RATIO || 0.95);
 const TIMEOUT = Number(process.env.TIMEOUT || 60000);
 const SEEK_ROWS = (process.env.SEEK_ROWS || '0,32,64,96').split(',').map(Number);
-const AUDIO_ENGINE = (process.env.AUDIO_ENGINE || 'js').toLowerCase();
-const SKIP_NATIVE = process.env.SKIP_NATIVE === '1';
-
-const NATIVE_GLUE = join(process.cwd(), 'public', 'worklets', 'openmpt-native.js');
-const nativeArtifactsPresent = () =>
-  existsSync(NATIVE_GLUE)
-  && existsSync(join(process.cwd(), 'public', 'worklets', 'openmpt-native.wasm'));
 
 // Renderer = what these runs actually need: none. Playhead math is renderer-independent
 // (__PLAYHEAD_DEBUG__), and the CI `playhead-smoke` job is GPU-less, so the DOM `html` grid avoids a
 // WebGPU hard-fail card / presentation flake there. (`renderer=webgl2` used to be requested here, but it
 // was a silent no-op → WebGPU; WebGL2 is opt-in only since #462.)
-const SCENARIOS_BASE = [
+const SCENARIOS = [
   { id: 'square', shader: 'patternv0.44.wgsl', renderer: 'html', paging: false, lagCheck: true },
   { id: 'circular', shader: 'patternv0.46.wgsl', renderer: 'html', paging: true, lagCheck: false },
 ];
-
-function buildScenarios() {
-  const engine = AUDIO_ENGINE === 'native' ? 'native' : 'js';
-  const scenarios = SCENARIOS_BASE.map((s) => ({
-    ...s,
-    id: engine === 'native' ? `${s.id}-native` : s.id,
-    audioEngine: engine,
-  }));
-  return scenarios;
-}
 
 mkdirSync(OUTPUT_DIR, { recursive: true });
 
@@ -207,12 +187,10 @@ async function checkCircularPaging(page, _engine) {
 
 async function runScenario(browser, engine, scenario) {
   const { page, context } = await openPage(browser, engine);
-  const audioEngine = scenario.audioEngine ?? 'js';
   const result = {
     id: scenario.id,
     shader: scenario.shader,
     renderer: scenario.renderer,
-    requestedEngine: audioEngine,
     status: 'PENDING',
     lag: null,
     paging: null,
@@ -221,8 +199,7 @@ async function runScenario(browser, engine, scenario) {
   };
 
   try {
-    const engineParam = audioEngine === 'native' ? '&engine=native' : '&engine=js';
-    const url = `${BASE_URL}/?renderer=${scenario.renderer}&lite=0${engineParam}`;
+    const url = `${BASE_URL}/?renderer=${scenario.renderer}&lite=0`;
     await goto(page, engine, url, TIMEOUT);
     await seedSession(page, scenario);
     await goto(page, engine, url, TIMEOUT);
@@ -249,37 +226,6 @@ async function runScenario(browser, engine, scenario) {
     await new Promise((r) => setTimeout(r, 500));
 
     result.audioEngine = await evaluate(page, () => window.__TEST_HOOKS__?.getAudioEngine?.() ?? null);
-
-    if (audioEngine === 'native' && result.audioEngine !== 'native-worklet') {
-      try {
-        await waitForFunction(
-          page,
-          () => window.__TEST_HOOKS__?.getAudioEngine?.() === 'native-worklet',
-          { timeout: 15000 },
-        );
-        result.audioEngine = await evaluate(page, () => window.__TEST_HOOKS__?.getAudioEngine?.() ?? null);
-      } catch {
-        /* keep observed engine */
-      }
-    }
-
-    // Fail closed: never green native parity after soft-fail to JS worklet.
-    if (audioEngine === 'native' && result.audioEngine !== 'native-worklet') {
-      result.status = 'FAIL';
-      result.errors.push(
-        `requested native engine but active engine is ${JSON.stringify(result.audioEngine)} `
-        + '(expected "native-worklet"). Soft-fail to JS does not count as parity.',
-      );
-      return result;
-    }
-    if (audioEngine === 'js' && result.audioEngine === 'native-worklet') {
-      result.status = 'FAIL';
-      result.errors.push(
-        `requested js engine but active engine is native-worklet `
-        + '(force-JS escape hatch failed)',
-      );
-      return result;
-    }
 
     if (scenario.lagCheck !== false) {
       const samples = await samplePlayheadDuringPlayback(page, engine);
@@ -331,28 +277,15 @@ async function runScenario(browser, engine, scenario) {
 }
 
 async function main() {
-  const scenarios = buildScenarios();
-  const engineLabel = scenarios[0]?.audioEngine ?? 'js';
-
-  if (engineLabel === 'native' && SKIP_NATIVE) {
-    console.log('SKIP_NATIVE=1 — skipping native playhead acceptance');
-    process.exit(0);
-  }
-
-  if (engineLabel === 'native' && !nativeArtifactsPresent()) {
-    console.error('Native playhead acceptance requires openmpt-native.* — run npm run build:emcc first');
-    process.exit(2);
-  }
-
   console.log('Playhead sync acceptance');
-  console.log(`  base=${BASE_URL} module=${MODULE_URL} engine=${engineLabel}`);
+  console.log(`  base=${BASE_URL} module=${MODULE_URL}`);
   console.log(`  lag threshold=${LAG_THRESHOLD} rows, pass ratio>=${PASS_RATIO}`);
 
   const { browser, engine, close } = await launchBrowser();
   const results = [];
 
   try {
-    for (const scenario of scenarios) {
+    for (const scenario of SCENARIOS) {
       console.log(`\n▶ ${scenario.id} (${scenario.shader}, ${scenario.renderer})`);
       const result = await runScenario(browser, engine, scenario);
       results.push(result);
@@ -377,7 +310,6 @@ async function main() {
     generatedAt: new Date().toISOString(),
     baseUrl: BASE_URL,
     moduleUrl: MODULE_URL,
-    audioEngine: engineLabel,
     lagThreshold: LAG_THRESHOLD,
     passRatio: PASS_RATIO,
     scenarios: results,
@@ -388,25 +320,8 @@ async function main() {
     },
   };
 
-  const reportPath = join(OUTPUT_DIR, engineLabel === 'native' ? 'report-native.json' : 'report.json');
+  const reportPath = join(OUTPUT_DIR, 'report.json');
   writeFileSync(reportPath, JSON.stringify(report, null, 2));
-
-  if (engineLabel === 'native' && report.summary.pass) {
-    const okPath = join(OUTPUT_DIR, 'native-parity.ok');
-    writeFileSync(
-      okPath,
-      [
-        `native-parity-pass ${report.generatedAt}`,
-        `fixture=${MODULE_URL}`,
-        `lagThreshold=${LAG_THRESHOLD}`,
-        `report=${reportPath}`,
-        'Deploy: set VITE_NATIVE_PARITY_GATE=1 only when openmpt-native.* is shipped with this green report.',
-        '',
-      ].join('\n'),
-    );
-    console.log('Native parity gate: set VITE_NATIVE_PARITY_GATE=1 in deploy after this job passes.');
-    console.log(`Parity marker: ${okPath}`);
-  }
 
   console.log(`\nReport: ${reportPath}`);
   console.log(`Summary: ${report.summary.passed}/${report.summary.total} PASS`);

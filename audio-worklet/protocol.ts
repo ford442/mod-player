@@ -29,6 +29,15 @@ export type { MainToWorkletMessage, MainToWorkletType, WorkletToMainMessage, Wor
 
 // ── zod, generated from the table ────────────────────────────────────
 
+/** Duck-typed: a port from another realm is not `instanceof MessagePort` here. */
+function isMessagePort(value: unknown): value is MessagePort {
+  return value !== null && typeof value === 'object' && typeof (value as { postMessage?: unknown }).postMessage === 'function';
+}
+
+function isWasmMemory(value: unknown): value is WebAssembly.Memory {
+  return typeof WebAssembly !== 'undefined' && value instanceof WebAssembly.Memory;
+}
+
 function zodForKind(spec: FieldSpec): z.ZodType {
   switch (spec.kind) {
     case 'nonNegInt':
@@ -63,6 +72,12 @@ function zodForKind(spec: FieldSpec): z.ZodType {
     }
     case 'pcmChannels':
       return z.union([z.literal(1), z.literal(2)]);
+    case 'positiveInt':
+      return z.number().int().positive();
+    case 'messagePort':
+      return z.custom<MessagePort>(isMessagePort, { message: 'port must be a MessagePort' });
+    case 'wasmMemory':
+      return z.custom<WebAssembly.Memory>(isWasmMemory, { message: 'memory must be a WebAssembly.Memory' });
     default: {
       const exhaustive: never = spec.kind;
       return exhaustive;
@@ -91,6 +106,7 @@ function zodUnion(table: { readonly [type: string]: MessageSpec }) {
 export const workletToMainMessageSchema = zodUnion(WORKLET_TO_MAIN_SPEC) as unknown as z.ZodType<WorkletToMainMessage>;
 
 export type WorkletAudioDiagMessage = Extract<WorkletToMainMessage, { type: typeof WORKLET_TO_MAIN.audioDiag }>;
+export type WorkletCreateHeapMessage = Extract<WorkletToMainMessage, { type: typeof WORKLET_TO_MAIN.createHeap }>;
 export type WorkletPositionMessage = Extract<WorkletToMainMessage, { type: typeof WORKLET_TO_MAIN.position }>;
 export type WorkletOscBufferMessage = Extract<WorkletToMainMessage, { type: typeof WORKLET_TO_MAIN.oscBuffer }>;
 
@@ -228,7 +244,11 @@ export function postReturnPcmBuffer(buffer: Float32Array<ArrayBuffer>): MainToWo
   return { type: MAIN_TO_WORKLET.returnPcmBuffer, buffer };
 }
 
-/** Hand the worklet the shared position/VU ring (audio-worklet/positionRing.ts). */
+/** Hand the worklet its end of the create-worker channel (transfer the port). */
+export function postAttachCreatePort(port: MessagePort): MainToWorkletMessage {
+  return { type: MAIN_TO_WORKLET.attachCreatePort, port };
+}
+
 export function postSetPositionRing(buffer: SharedArrayBuffer): MainToWorkletMessage {
   return { type: MAIN_TO_WORKLET.setPositionRing, buffer };
 }

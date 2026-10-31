@@ -3,7 +3,7 @@
 A post-engine master FX rack that makes the XASM-1 sound like hardware:
 **character** (tape saturation, Amiga 500/1200 LED filter, Paula-style crush),
 a **3-band EQ**, a **glue compressor** and a convolution **room**. It works with
-every engine (JS worklet, native, ScriptProcessor), per-song presets persist,
+every engine (JS worklet, ScriptProcessor), per-song presets persist,
 the v0.61 chassis shader shows the rack's settings, and WAV export renders
 through the same rack — export equals what plays.
 

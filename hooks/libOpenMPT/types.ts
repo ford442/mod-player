@@ -7,19 +7,17 @@ import type {
   SyncDebugInfo,
 } from '../../types';
 import type { InstrumentTable } from '../../types/instruments';
-import type { OpenMPTWorkletEngine } from '../../audio-worklet/OpenMPTWorkletEngine';
 import type { Ref, StateSetter } from '../../audio/engine/store';
 import type { TransportMachine } from '../../audio/engine/transport';
 import type { WorkletPositionSample } from '../../utils/playheadPrediction';
 import type { PositionRingConsumer } from '../../utils/positionRingConsumer';
-import type { NativeClockAnchor } from '../../utils/nativeClockAnchor';
 import type { PauseClock } from '../../utils/transportClock';
 import type {
   PlayheadLagTracker,
   PositionReportTracker,
 } from '../../utils/playheadLagMonitor';
 
-export type PlaybackEngine = 'worklet' | 'native-worklet' | 'scriptprocessor';
+export type PlaybackEngine = 'worklet' | 'scriptprocessor';
 
 /**
  * The engine's mutable state, shared with the action factories and the start paths (#492: owned by
@@ -27,7 +25,7 @@ export type PlaybackEngine = 'worklet' | 'native-worklet' | 'scriptprocessor';
  *
  * Several members are *views*, not storage — see engineRefs.ts: `isPlayingRef` / `isPausedRef` read
  * the transport FSM, `seekAcknowledgedRef` reads `pendingSeekRef`, `spFallbackTriggered` reads
- * `playbackEngineRef`, `workletLoadedRef` is keyed to the AudioContext, `activeEngineRef` reads the
+ * `playbackEngineRef`, `workletLoadedRef` is keyed to the AudioContext.
  * snapshot. Unit tests hand the factories plain `{ current }` objects instead, which is why the
  * factories keep the ref shape.
  */
@@ -95,19 +93,11 @@ export interface LibOpenMPTRefs {
   lastChannelStatePublishMsRef: Ref<number>;
   noteAgesScratchRef: Ref<number[]>;
   userModuleLoadedRef: Ref<boolean>;
-  nativeEngineRef: Ref<OpenMPTWorkletEngine | null>;
-  /** View of the snapshot's engine *selection* (what the toggle says). */
-  activeEngineRef: Ref<'worklet' | 'native-worklet'>;
   /**
    * The engine that actually started the current playback, written by the engine start paths and
-   * cleared by stop. Unlike activeEngineRef (selection state, which still says native after a failed
-   * native start fell back to the JS worklet) this is what pause/resume must drive.
+   * cleared by stop. Pause/resume drive this one.
    */
   playbackEngineRef: Ref<PlaybackEngine | null>;
-  /** Maps native frame clock → main heard-time for playhead prediction. */
-  nativeClockAnchorRef: Ref<NativeClockAnchor | null>;
-  /** Bridge latency estimate (ring vs MediaStream) for clock anchor. */
-  nativeBridgeLatencyRef: Ref<number>;
   oscBufferRef: Ref<Float32Array | null>;
   audioReactiveRef: Ref<Float32Array | null>;
   playbackStateRef: Ref<PlaybackState>;
@@ -139,8 +129,6 @@ export interface LibOpenMPTSetters {
   setSyncDebug: StateSetter<SyncDebugInfo>;
   setIsReady: StateSetter<boolean>;
   setIsWorkletSupported: StateSetter<boolean>;
-  setIsNativeWorkletAvailable: StateSetter<boolean>;
-  setActiveEngine: StateSetter<'worklet' | 'native-worklet'>;
   setWorkletLoadError: StateSetter<string | null>;
 }
 
@@ -164,8 +152,6 @@ export interface UpdateUIParams {
     | 'setBeatPhase'
     | 'setSyncDebug'
   >;
-  /** Read on every frame — PlayerEngine passes a getter onto its snapshot. */
-  activeEngine: 'worklet' | 'native-worklet';
   kickTrigger: number;
   grooveAmount: number;
 }

@@ -72,7 +72,6 @@ describe('PlayerEngine import graph (#492)', () => {
       'audio/engine/engineRefs.ts',
       'hooks/useAudioGraph.ts',
       'hooks/audioGraph/startJsWorkletPlayback.ts',
-      'hooks/audioGraph/startNativePlayback.ts',
       'hooks/audioGraph/scriptProcessorFallback.ts',
       'hooks/libOpenMPT/createTransportActions.ts',
       'hooks/libOpenMPT/createModuleActions.ts',

@@ -42,7 +42,7 @@ export function useModuleMediaHintText(): string {
   );
 }
 
-const TRACKER_LABEL = { 'native-worklet': 'Native C++/Wasm', worklet: 'JS AudioWorklet' } as const;
+const TRACKER_LABEL = 'JS AudioWorklet';
 
 export function useModuleMetadata(): ModuleMetadata | null {
   const m = usePlayerEngine(
@@ -52,7 +52,6 @@ export function useModuleMetadata(): ModuleMetadata | null {
       hasMatrix: s.sequencerMatrix !== null,
       numChannels: s.sequencerMatrix?.numChannels ?? 0,
       rowsPerPattern: s.sequencerMatrix?.numRows || 64,
-      activeEngine: s.activeEngine,
       totalPatternRows: s.totalPatternRows,
       instrumentNames: s.instrumentNames,
       sampleNames: s.sampleNames,
@@ -69,7 +68,7 @@ export function useModuleMetadata(): ModuleMetadata | null {
       // read "Playing..." as the title as soon as playback started.
       title: m.title || 'Unknown',
       artist: '',
-      tracker: TRACKER_LABEL[m.activeEngine],
+      tracker: TRACKER_LABEL,
       numChannels: m.numChannels,
       numOrders: m.totalPatternRows > 0 ? Math.ceil(m.totalPatternRows / m.rowsPerPattern) : 0,
       numPatterns: 0,
@@ -130,7 +129,6 @@ export interface PlayerActions {
   setIsLooping: (v: boolean | ((prev: boolean) => boolean)) => void;
   setVolume: (v: number | ((prev: number) => number)) => void;
   setPan: (v: number) => void;
-  toggleAudioEngine: () => void;
   toggleChannelMute: (channel: number) => void;
   /** Route playback to an output device ('' = system default) on the same AudioContext. */
   setOutputDevice: (deviceId: string, label?: string) => Promise<boolean>;
@@ -147,7 +145,6 @@ export function usePlayerActions(): PlayerActions {
     setIsLooping: (v: boolean | ((prev: boolean) => boolean)) => engine.setLooping(v),
     setVolume: (v: number | ((prev: number) => number)) => engine.setMasterVolume(v),
     setPan: (v: number) => engine.setMasterPan(v),
-    toggleAudioEngine: () => engine.toggleAudioEngine(),
     toggleChannelMute: (channel: number) => engine.toggleChannelMute(channel),
     setOutputDevice: (deviceId: string, label?: string) => engine.setOutputDevice(deviceId, label),
   }), [engine]);

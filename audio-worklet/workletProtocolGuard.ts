@@ -89,6 +89,17 @@ export function fieldValueMatches(spec: FieldSpec, value: unknown): boolean {
     }
     case 'pcmChannels':
       return value === 1 || value === 2;
+    case 'positiveInt':
+      return typeof value === 'number' && Number.isSafeInteger(value) && value > 0;
+    case 'messagePort':
+      return value !== null && typeof value === 'object'
+        && typeof (value as { postMessage?: unknown }).postMessage === 'function';
+    case 'wasmMemory': {
+      // No WebAssembly lib in the worklet tsconfig; the runtime global is what instanceof needs.
+      const WasmMemory = (globalThis as { WebAssembly?: { Memory?: abstract new (...args: never[]) => object } })
+        .WebAssembly?.Memory;
+      return typeof WasmMemory === 'function' && value instanceof WasmMemory;
+    }
     default: {
       const exhaustive: never = spec.kind;
       return exhaustive;

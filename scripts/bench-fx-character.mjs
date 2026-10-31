@@ -48,7 +48,7 @@ async function loadTsKernels() {
     bundle: true,
     format: 'esm',
     platform: 'node',
-    target: 'es2020',
+    target: 'es2022',
     write: false,
   });
   const url = `data:text/javascript;base64,${Buffer.from(result.outputFiles[0].text).toString('base64')}`;

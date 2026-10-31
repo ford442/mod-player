@@ -1,26 +1,16 @@
 /**
- * Unify JS worklet and native engine position/VU reports into one apply path.
- *
- * Both engines feed `applyWorkletPositionSample` via `toWorkletPositionInput`.
- * Native uses the sample-accurate frame clock (`audioFramesRendered/sampleRate`)
- * when available; JS uses quantum `audioTime` / `workletTime`.
+ * Normalize JS worklet position/VU reports into the one apply path
+ * (`applyWorkletPositionSample` via `jsWorkletPositionToInput`), clocked by the
+ * quantum `audioTime` / `workletTime`.
  */
 
 import type { ChannelShadowState } from '../types';
-import type { WorkletPositionData } from '../audio-worklet/types';
-import {
-  type NativeClockAnchor,
-  mapNativeFrameClockToHeardTime,
-  nativeFrameSecondsFromData,
-} from './nativeClockAnchor';
 import {
   applyWorkletPositionSample,
   type WorkletPositionInput,
   type WorkletPositionRefs,
   type WorkletPositionSample,
 } from './playheadPrediction';
-
-export type PositionSource = 'js-worklet' | 'native' | 'scriptprocessor';
 
 /** Loose JS worklet `position` message fields. */
 export interface JsWorkletPositionMessage {
@@ -41,70 +31,6 @@ export interface ApplyPositionResult {
   sample: WorkletPositionSample;
   order: number;
   rowInt: number;
-}
-
-/**
- * Native frame clock: seconds of audio rendered since load/play.
- * Prefers pre-quantum count when the struct is tagged that way; otherwise
- * uses cumulative frames / sampleRate.
- */
-export function nativeWorkletTimeFromFrames(
-  audioFramesRendered: number | undefined,
-  sampleRate: number | undefined,
-  fallbackTime: number,
-): number {
-  if (
-    audioFramesRendered != null &&
-    Number.isFinite(audioFramesRendered) &&
-    sampleRate != null &&
-    sampleRate > 0
-  ) {
-    return audioFramesRendered / sampleRate;
-  }
-  return fallbackTime;
-}
-
-export interface NativePositionMapOptions {
-  /** Maps frame clock onto main AudioContext heard-time (native engine). */
-  clockAnchor?: NativeClockAnchor | null;
-  /** Heard-time fallback when frame clock or anchor is unavailable. */
-  fallbackHeardTime?: number;
-}
-
-/** Map native `WorkletPositionData` → canonical position input. */
-export function nativePositionToInput(
-  data: WorkletPositionData,
-  fallbackWorkletTime: number,
-  options: NativePositionMapOptions = {},
-): WorkletPositionInput {
-  const heardFallback = options.fallbackHeardTime ?? fallbackWorkletTime;
-  const frameSec = nativeFrameSecondsFromData(data.audioFramesRendered, data.sampleRate);
-  let workletTime: number;
-  if (frameSec != null && options.clockAnchor) {
-    workletTime = mapNativeFrameClockToHeardTime(frameSec, options.clockAnchor, heardFallback);
-  } else if (frameSec != null) {
-    workletTime = data.workletTime ?? frameSec;
-  } else {
-    workletTime = data.workletTime ?? nativeWorkletTimeFromFrames(
-      data.audioFramesRendered,
-      data.sampleRate,
-      heardFallback,
-    );
-  }
-  const input: WorkletPositionInput = {
-    order: data.order ?? data.currentOrder,
-    row: data.row ?? data.currentRow,
-    positionSeconds: data.positionMs / 1000,
-    workletTime,
-    bpm: data.bpm,
-  };
-  if (data.rowFraction != null && Number.isFinite(data.rowFraction)) {
-    input.rowFraction = data.rowFraction;
-  }
-  if (data.speed != null && data.speed > 0) {
-    input.speed = data.speed;
-  }
-  return input;
 }
 
 /** Map JS worklet position message → canonical position input. */

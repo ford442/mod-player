@@ -3,17 +3,6 @@ import { publishFxHost } from '../../audio/fx/fxHost';
 import { closeSharedPlayerAudioContext } from '../../utils/audioContextFactory';
 import { releaseMasterNodes } from '../../utils/audioMasterGraph';
 import { unwireAudioSuspendRecovery } from '../useAudioGraph';
-import { OpenMPTWorkletEngine } from '../../audio-worklet/OpenMPTWorkletEngine';
-import {
-  resolveAudioEnginePreference,
-  shouldPromoteNativeEngine,
-  writeStoredAudioEngineOverride,
-  isPublicModeAudioBuild,
-} from '../../utils/audioEngineSelection';
-import {
-  getNativeGlueUrl,
-  isNativeGlueAvailable,
-} from '../../audio/engine/workletUrls';
 import { verifyParserWorkerUrl } from '../../utils/parserWorker';
 import type { LibOpenMPTRefs, LibOpenMPTSetters } from './types';
 import { WORKLET_URL } from './constants';
@@ -29,9 +18,7 @@ export interface InitDeps {
     | 'setStatus'
     | 'setIsReady'
     | 'setIsWorkletSupported'
-    | 'setActiveEngine'
     | 'setWorkletLoadError'
-    | 'setIsNativeWorkletAvailable'
   >;
   checkWorkletSupport: () => boolean;
   verifyWorkletFile: () => Promise<boolean>;
@@ -82,9 +69,7 @@ export async function runLibOpenMPTInit(deps: InitDeps): Promise<void> {
     setStatus,
     setIsReady,
     setIsWorkletSupported,
-    setActiveEngine,
     setWorkletLoadError,
-    setIsNativeWorkletAvailable,
   } = setters;
 
   log.log('Starting libopenmpt initialization...');
@@ -128,7 +113,6 @@ export async function runLibOpenMPTInit(deps: InitDeps): Promise<void> {
 
         if (fileAccessible) {
           setIsWorkletSupported(true);
-          setActiveEngine('worklet');
           log.log('✅ AudioWorklet API available and file accessible');
         } else {
           console.warn('⚠️ [INIT] AudioWorklet API available but worklet file not accessible');
@@ -148,75 +132,6 @@ export async function runLibOpenMPTInit(deps: InitDeps): Promise<void> {
       setWorkletLoadError('AudioWorklet check failed: ' + (e as Error).message);
       setStatus('Error: AudioWorklet not supported in this browser.');
     }
-
-    const enginePref = resolveAudioEnginePreference();
-    log.log('Audio engine preference:', enginePref);
-    setActiveEngine('worklet');
-
-    if (enginePref.mode === 'force-js') {
-      log.log('force-JS default — JS worklet is active engine');
-    } else if (enginePref.mode === 'auto') {
-      log.log('auto mode — native promotes only when parity gate is open and glue is present');
-    }
-
-    const shouldProbeNative =
-      enginePref.mode === 'prefer-native'
-      || enginePref.mode === 'auto'
-      || !isPublicModeAudioBuild();
-
-    if (shouldProbeNative) {
-      try {
-        const nativeGlueUrl = getNativeGlueUrl();
-        log.log('Probing for native engine at:', nativeGlueUrl);
-        const glueIsSafe = await isNativeGlueAvailable(nativeGlueUrl);
-        if (isCancelled()) return;
-
-        if (glueIsSafe) {
-          log.log('Native C++/Wasm AudioWorklet glue detected');
-
-          const engine = new OpenMPTWorkletEngine();
-          await engine.init();
-          if (isCancelled()) {
-            engine.destroy();
-            return;
-          }
-          refs.nativeEngineRef.current = engine;
-          window.__XASM1_NATIVE__ = {
-            setChannelMute: (channel, muted) => engine.setChannelMute(channel, muted),
-            setInterpolationLength: (length) => engine.setInterpolationLength(length),
-            ctlSetText: (key, value) => engine.ctlSetText(key, value),
-          };
-          setIsNativeWorkletAvailable(true);
-
-          if (shouldPromoteNativeEngine(enginePref, true)) {
-            setActiveEngine('native-worklet');
-            log.log('Native engine initialized and promoted (preference:', enginePref.mode, ')');
-          } else {
-            if (enginePref.mode === 'force-js') {
-              writeStoredAudioEngineOverride('js');
-            }
-            if (enginePref.mode === 'auto') {
-              log.log('Native glue present but parity gate closed — staying on JS worklet');
-            }
-            log.log('Native engine initialized but not promoted — active engine is JS worklet');
-          }
-        } else if (enginePref.mode === 'prefer-native') {
-          console.warn(
-            '[INIT] ?engine=native / localStorage prefer-native but glue missing — soft-fail to JS worklet',
-          );
-          setActiveEngine('worklet');
-        } else {
-          log.log('Native engine glue not available — using JS AudioWorklet');
-          setActiveEngine('worklet');
-        }
-      } catch (nativeErr) {
-        console.warn('[INIT] Native engine probe failed — using JS AudioWorklet fallback:', nativeErr);
-        setIsNativeWorkletAvailable(false);
-        setActiveEngine('worklet');
-      }
-    } else if (isPublicModeAudioBuild()) {
-      setIsNativeWorkletAvailable(false);
-    }
   } catch (e) {
     const error = e as Error;
     if (error.message === 'Initialization timed out') {
@@ -233,13 +148,6 @@ export function cleanupLibOpenMPT(refs: LibOpenMPTRefs) {
   // Drop the PCM demand listener before the node goes away; the next
   // startJsWorkletPlayback installs a fresh one bound to the new node.
   setPcmDemandListener(null);
-  if (refs.nativeEngineRef.current) {
-    refs.nativeEngineRef.current.destroy();
-    refs.nativeEngineRef.current = null;
-  }
-  if (typeof window !== 'undefined') {
-    delete window.__XASM1_NATIVE__;
-  }
   if (refs.audioWorkletNodeRef.current) refs.audioWorkletNodeRef.current.disconnect();
   // The FX rack (#453) detaches when its host goes away; then drop every master
   // node so a remount builds fresh ones on the next context.

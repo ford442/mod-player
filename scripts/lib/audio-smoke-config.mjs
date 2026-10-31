@@ -51,11 +51,10 @@ export const AUDIO_CHROME_ARGS = [
  * so it uses the DOM `html` pattern grid. (`renderer=webgl2` used to be the default here, but WebGL2 is
  * opt-in only (#462): `?renderer=webgl2` was a silent no-op → WebGPU hard-fail card on these hosts.)
  */
-export function buildAudioSmokeUrl(baseUrl, { audioDiag = true, engine = 'js', renderer = 'html' } = {}) {
+export function buildAudioSmokeUrl(baseUrl, { audioDiag = true, renderer = 'html' } = {}) {
   const root = baseUrl.replace(/\/$/, '');
   const params = new URLSearchParams();
   params.set('renderer', renderer);
-  params.set('engine', engine);
   // The smoke runs against a production build, where diagnostics are off by default (utils/log.ts).
   // classifyAudioConsole() counts the `[PLAY] Worklet reported module ended` line (#329 runaway guard).
   params.set('debug', 'log');

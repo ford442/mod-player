@@ -5,9 +5,9 @@ import {
 } from '../vite-plugins/crossOriginIsolationHeaders';
 
 describe('crossOriginIsolationHeaders', () => {
-  it('exports COOP same-origin and COEP credentialless', () => {
+  it('exports COOP same-origin and COEP require-corp', () => {
     expect(CROSS_ORIGIN_ISOLATION_HEADERS['Cross-Origin-Opener-Policy']).toBe('same-origin');
-    expect(CROSS_ORIGIN_ISOLATION_HEADERS['Cross-Origin-Embedder-Policy']).toBe('credentialless');
+    expect(CROSS_ORIGIN_ISOLATION_HEADERS['Cross-Origin-Embedder-Policy']).toBe('require-corp');
   });
 
   it('routes three/R3F/drei into three-r3f vendor chunk', () => {

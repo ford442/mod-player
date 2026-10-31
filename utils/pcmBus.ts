@@ -12,8 +12,7 @@
  * arrives — and to stop again when the last one leaves.
  *
  * Deliberately framework-free (no React, no worklet imports) so both the audio
- * graph and the renderer can depend on it without a cycle. A native PCM ring
- * can publish through the same entry point later without touching consumers.
+ * graph and the renderer can depend on it without a cycle.
  */
 
 export interface PcmBlock {

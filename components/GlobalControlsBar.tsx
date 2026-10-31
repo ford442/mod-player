@@ -6,7 +6,7 @@ import { setLiteOverride } from '../utils/deviceCapabilities';
 import { usesInstrumentPalette } from '../utils/shaderVersion';
 import { IS_PUBLIC_MODE, AVAILABLE_SHADERS, THEME_OPTIONS, LIGHT_THEMES, type AppTheme } from '../appConfig';
 import { usePlayerEngine } from '../hooks/usePlayerEngine';
-import { useDisplayShader, usePlayerActions, useValidShaderLists } from '../hooks/usePlayerView';
+import { useDisplayShader, useValidShaderLists } from '../hooks/usePlayerView';
 import { usePlayerFeatures } from '../context/PlayerFeaturesContext';
 import { usePlayerUiStore } from '../store/playerUiStore';
 import { useShaderPrefsStore } from '../store/shaderPrefsStore';
@@ -43,10 +43,6 @@ export function GlobalControlsBar() {
   const isDarkMode = !LIGHT_THEMES.has(theme);
   const showDevSurface = !IS_PUBLIC_MODE;
   const isModuleLoaded = usePlayerEngine((s) => s.isModuleLoaded);
-  const activeEngine = usePlayerEngine((s) => s.activeEngine);
-  const isWorkletSupported = usePlayerEngine((s) => s.isWorkletSupported);
-  const workletLoadError = usePlayerEngine((s) => s.workletLoadError);
-  const { toggleAudioEngine } = usePlayerActions();
   const { isStepsShader } = useDisplayShader();
   const { favorites: validShaderFavorites, recents: validShaderRecents } = useValidShaderLists();
   const {
@@ -94,24 +90,6 @@ export function GlobalControlsBar() {
             <option key={opt.value} value={opt.value}>{opt.label}</option>
           ))}
         </select>
-        {showDevSurface && (
-          <button
-            onClick={toggleAudioEngine}
-            disabled={!isWorkletSupported || !!workletLoadError}
-            title={workletLoadError ? `Worklet Error: ${workletLoadError}` : !isWorkletSupported ? "AudioWorklet not supported" : "Toggle Audio Engine (Worklet vs ScriptProcessor)"}
-            className={`px-4 py-2 text-sm font-mono rounded-lg shadow-lg transition-colors border ${
-              !isWorkletSupported || !!workletLoadError
-                ? 'bg-gray-300 text-gray-500 cursor-not-allowed border-gray-400 opacity-50'
-                : activeEngine === 'native-worklet'
-                  ? 'bg-purple-600 text-white border-purple-500 hover:bg-purple-700'
-                  : activeEngine === 'worklet'
-                    ? 'bg-green-600 text-white border-green-500 hover:bg-green-700'
-                    : 'bg-yellow-500 text-black border-yellow-400 hover:bg-yellow-600'
-            }`}
-          >
-            {activeEngine === 'native-worklet' ? '🚀 Native' : activeEngine === 'worklet' ? '⚡ Worklet' : '🐌 Script'}
-          </button>
-        )}
         {/* Output device (#492): a listener setting like the theme, so public builds get it too; it
             renders nothing where AudioContext.setSinkId is missing. */}
         <OutputDevicePicker isDarkMode={isDarkMode} />

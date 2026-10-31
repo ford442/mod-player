@@ -63,7 +63,10 @@ async function buildEntry({ entry, outfile, versionFile }) {
     outfile: outPath,
     bundle: true,
     format: 'iife',
-    target: 'es2020',
+    // Same target as the app bundle (vite.config.ts): class fields stay native instead of being
+    // lowered to __publicField/defineProperty helper calls (#515). The numeric-initializer rule
+    // for the FX kernels still applies (audio-worklet/js/fx/smoothing.ts).
+    target: 'es2022',
     platform: 'browser',
     minify: false,
     write: false,

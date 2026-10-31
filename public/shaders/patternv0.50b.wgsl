@@ -313,7 +313,7 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
     let effCmd = (in.packedB >> 24) & 255u;
     let volCmdFull = in.packedB & 255u;
     let isExpressionOnly = (instRaw & 128u) != 0u;
-    let volCmd = (volPacked >> 4) << 4;
+    let volCmd = volPacked >> 4u;               // exact VolumeCommand (utils/openmptCommands.ts)
 
     let dInfo = unpackDurationInfo(in.packedA, in.packedB);
     let isNoteOn   = (note > 0u && note < NOTE_OFF_MIN && dInfo.isTrigger);

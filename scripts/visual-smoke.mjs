@@ -81,8 +81,8 @@ async function assertCrossOriginIsolation(appRoot) {
   if (!coop || coop.toLowerCase() !== 'same-origin') {
     throw new Error(`expected COOP same-origin, got ${coop ?? '(missing)'}`);
   }
-  if (!coep || !coep.toLowerCase().includes('credentialless')) {
-    throw new Error(`expected COEP credentialless, got ${coep ?? '(missing)'}`);
+  if (!coep || coep.toLowerCase() !== 'require-corp') {
+    throw new Error(`expected COEP require-corp, got ${coep ?? '(missing)'}`);
   }
   console.log('✓ COOP/COEP headers present on preview server');
 }
@@ -90,7 +90,7 @@ async function assertCrossOriginIsolation(appRoot) {
 async function assertBrowserCrossOriginIsolated(page) {
   const isolated = await evaluate(page, () => window.crossOriginIsolated === true);
   if (!isolated) {
-    throw new Error('window.crossOriginIsolated is false — native SAB path not exercisable');
+    throw new Error('window.crossOriginIsolated is false — the worklet oscilloscope SharedArrayBuffer is unavailable');
   }
   console.log('✓ window.crossOriginIsolated === true');
 }
@@ -500,7 +500,7 @@ async function main() {
   const results = [];
 
   try {
-    // Browser-level isolation (SharedArrayBuffer / native ring-buffer path)
+    // Browser-level isolation (the worklet's oscilloscope SharedArrayBuffer)
     const { page: isoPage, context: isoContext } = await openPage(browser, engine);
     try {
       await goto(isoPage, engine, `${appRoot}/?renderer=html`, TIMEOUT);

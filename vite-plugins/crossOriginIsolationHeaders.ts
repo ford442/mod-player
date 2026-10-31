@@ -1,11 +1,13 @@
 /**
  * COOP/COEP headers required for SharedArrayBuffer / Atomics (Emscripten WASM workers).
- * Used by Vite dev, preview (CI visual-smoke), and documented for production (.htaccess).
+ * Used by Vite dev and preview (CI smokes); public/.htaccess and public/_headers carry the same
+ * values for production (tests/crossOriginIsolationHeaders.test.ts pins all three).
  */
 export const CROSS_ORIGIN_ISOLATION_HEADERS: Record<string, string> = {
   'Cross-Origin-Opener-Policy': 'same-origin',
-  // credentialless unlocks SharedArrayBuffer while allowing cross-origin CDN resources.
-  'Cross-Origin-Embedder-Policy': 'credentialless',
+  // require-corp: the only COEP value WebKit implements, so the only one that isolates Safari. Every subresource is same-origin or sends CORS/CORP; remote
+  // ?media= items load with crossorigin="anonymous" (utils/remoteMedia.ts mediaCrossOrigin).
+  'Cross-Origin-Embedder-Policy': 'require-corp',
 };
 
 export const THREE_CHUNK = 'three-r3f';

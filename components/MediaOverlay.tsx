@@ -1,5 +1,6 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import type { MediaItem } from '../types';
+import { mediaCrossOrigin, reportMediaLoadError } from '../utils/remoteMedia';
 
 interface MediaOverlayProps {
   item?: MediaItem | null;
@@ -189,7 +190,8 @@ export const MediaOverlay: React.FC<MediaOverlayProps> = ({
             <video
               ref={videoRef}
               src={item.url}
-              crossOrigin="anonymous"
+              crossOrigin={mediaCrossOrigin(item.url)}
+              onError={() => reportMediaLoadError(item.url)}
               controls
               autoPlay
               draggable={false}
@@ -200,6 +202,8 @@ export const MediaOverlay: React.FC<MediaOverlayProps> = ({
           ) : (
             <img
               src={item.url}
+              crossOrigin={mediaCrossOrigin(item.url)}
+              onError={() => reportMediaLoadError(item.url)}
               alt={item.fileName || 'media'}
               draggable={false}
               style={{ width: '100%', height: '100%', objectFit: fit }}

@@ -5,21 +5,14 @@
  */
 import { PLAYER_SAMPLE_RATE } from './sampleRates';
 
-export type WorkletEngine = 'worklet' | 'native-worklet';
-
 export interface ReuseWorkletNodeInput {
-  activeEngine: WorkletEngine;
   workletLoaded: boolean;
   hasWorkletNode: boolean;
 }
 
 /** True when play() may hot-reload module data into the existing JS worklet node. */
 export function canReuseWorkletNode(input: ReuseWorkletNodeInput): boolean {
-  return (
-    input.activeEngine === 'worklet' &&
-    input.workletLoaded &&
-    input.hasWorkletNode
-  );
+  return input.workletLoaded && input.hasWorkletNode;
 }
 
 /** Main thread must not re-send initLib when the shared-scope lib is already live. */
@@ -62,6 +55,9 @@ export const WORKLET_POSITION_REPORT_HZ = 60;
 /** Seconds between allowed `position` posts (matches openmpt-worklet.js). */
 export const WORKLET_POSITION_REPORT_INTERVAL_SEC = 1 / WORKLET_POSITION_REPORT_HZ;
 
+/** Web Audio render quantum, in frames. */
+export const RENDER_QUANTUM_FRAMES = 128;
+
 /**
  * Whether the worklet process() quantum may post a `position` message.
  * Posting every quantum (~350 Hz at 128-sample blocks) floods the main thread
@@ -74,50 +70,6 @@ export function shouldReportWorkletPosition(
 ): boolean {
   return currentTime - lastReportTime >= intervalSec;
 }
-
-/**
- * Native audio thread: fill PositionInfo + VU at the same ~60 Hz cadence as
- * JS worklet position reports. C++ `audio_process_cb` mirrors this with
- * `timeSinceLastReport >= 1/60` (plus cheap getCurrentRow for row changes).
- */
-export function shouldFillNativePosition(
-  currentTime: number,
-  lastFillTime: number,
-  intervalSec: number = WORKLET_POSITION_REPORT_INTERVAL_SEC,
-): boolean {
-  return shouldReportWorkletPosition(currentTime, lastFillTime, intervalSec);
-}
-
-// ── Native duplicate-load skip ──────────────────────────────────────────────
-
-export interface NativeModuleFingerprint {
-  byteLength: number;
-  sig: number;
-}
-
-/** Cheap identity for "already parsed this module into the native engine". */
-export function nativeModuleFingerprint(data: ArrayBuffer): NativeModuleFingerprint {
-  const u8 = new Uint8Array(data);
-  let sig = u8.byteLength;
-  const n = Math.min(64, u8.length);
-  for (let i = 0; i < n; i++) {
-    sig = (Math.imul(sig, 33) + (u8[i] ?? 0) + (u8[u8.length - 1 - i] ?? 0)) | 0;
-  }
-  return { byteLength: u8.byteLength, sig };
-}
-
-/** True when play() must call engine.load again (fingerprint missing or differs). */
-export function shouldReloadNativeModule(
-  loaded: NativeModuleFingerprint | null | undefined,
-  incoming: ArrayBuffer,
-): boolean {
-  if (!loaded) return true;
-  const next = nativeModuleFingerprint(incoming);
-  return loaded.byteLength !== next.byteLength || loaded.sig !== next.sig;
-}
-
-/** Frames per AudioWorklet `process()` call (the Web Audio render quantum). */
-export const RENDER_QUANTUM_FRAMES = 128;
 
 /**
  * Simulate N audio quanta and count how many position reports the throttle allows.
@@ -187,7 +139,6 @@ export interface HotReloadPlayDecision {
  * (no disconnect) and still post `load` when the module token advanced.
  */
 export function planJsWorkletHotReloadPlay(input: {
-  activeEngine: WorkletEngine;
   workletLoaded: boolean;
   hasWorkletNode: boolean;
   libJsText: string | null | undefined;
@@ -196,7 +147,6 @@ export function planJsWorkletHotReloadPlay(input: {
   forceModuleLoad?: boolean;
 }): HotReloadPlayDecision {
   const reuseNode = canReuseWorkletNode({
-    activeEngine: input.activeEngine,
     workletLoaded: input.workletLoaded,
     hasWorkletNode: input.hasWorkletNode,
   });

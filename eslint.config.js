@@ -47,8 +47,6 @@ export default tseslint.config(
       '.claude/**',
       // Generated / non-app surfaces
       '**/*.cjs',
-      // Emscripten --pre-js/--post-js snippets run in emcc's injected scope; tsconfig.scripts.json checks them.
-      'cpp/**',
     ],
   },
   {

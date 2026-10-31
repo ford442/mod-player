@@ -5,7 +5,7 @@
  * `useLibOpenMPT`, some of them duplicated as both (`isPlaying`, `spFallbackTriggered`,
  * `workletLoadedRef`, `seekAcknowledgedRef`, `uiLoopActiveRef`). This class owns all of it:
  *
- *   - the engine handles (JS worklet node, native engine, ScriptProcessor), the module pointer and
+ *   - the engine handles (JS worklet node, ScriptProcessor), the module pointer and
  *     the master chain — the refs bag built by `engineRefs.ts`;
  *   - the transport FSM (`transport.ts`): the only thing that changes playing / paused / stopped;
  *   - a snapshot store (`store.ts`) that React reads through `useSyncExternalStore`
@@ -50,10 +50,6 @@ import { cleanupLibOpenMPT, runLibOpenMPTInit } from '../../hooks/libOpenMPT/run
 import { DEFAULT_MODULE_URL, WORKLET_URL } from '../../hooks/libOpenMPT/constants';
 import type { LibOpenMPTRefs, LibOpenMPTSetters } from '../../hooks/libOpenMPT/types';
 import { postPause, postSetAudioLite } from '../../audio-worklet/protocol';
-import {
-  overrideFromActiveEngine,
-  writeStoredAudioEngineOverride,
-} from '../../utils/audioEngineSelection';
 import { applyMasterLevels } from '../../utils/audioMasterGraph';
 import { resetAudioHeardTime } from '../../utils/playheadPrediction';
 import { hasShareModuleIntent } from '../../utils/shareState';
@@ -71,8 +67,6 @@ import { TransportMachine, type TransportPhase } from './transport';
 import { isAudioWorkletSupported, verifyWorkletFile } from './workletUrls';
 
 const log = createLogger('Engine');
-
-export type AudioEngineKind = 'worklet' | 'native-worklet';
 
 /**
  * Everything React (or any other observer) may read. Immutable; replaced on every change. The
@@ -111,10 +105,7 @@ export interface PlayerSnapshot extends OutputDeviceState {
   /** Master pan −1…1. */
   readonly pan: number;
   readonly isMuted: boolean;
-  /** Engine *selection* (what the toggle says); `playbackEngineRef` is what actually renders. */
-  readonly activeEngine: AudioEngineKind;
   readonly isWorkletSupported: boolean;
-  readonly isNativeWorkletAvailable: boolean;
   readonly syncDebug: SyncDebugInfo;
   readonly workletLoadError: string | null;
   /** The master analyser, once the master chain exists. */
@@ -137,8 +128,7 @@ export type EngineCommand =
   | { type: 'toggleMute' }
   | { type: 'setLooping'; value: boolean }
   | { type: 'toggleLoop' }
-  | { type: 'toggleChannelMute'; channel: number }
-  | { type: 'toggleAudioEngine' };
+  | { type: 'toggleChannelMute'; channel: number };
 
 export type StartAudioPlayback = (
   refs: AudioGraphRefs,
@@ -190,9 +180,7 @@ function createInitialSnapshot(volume: number, output: OutputDeviceState): Playe
     volume,
     pan: 0,
     isMuted: false,
-    activeEngine: 'worklet',
     isWorkletSupported: false,
-    isNativeWorkletAvailable: false,
     syncDebug: {
       mode: 'none',
       bufferMs: 0,
@@ -268,7 +256,6 @@ export class PlayerEngine {
 
     this.refs = createEngineRefs({
       transport: this.transport,
-      activeEngine: () => this.store.getSnapshot().activeEngine,
     });
 
     const s = this.store;
@@ -294,19 +281,13 @@ export class PlayerEngine {
       setSyncDebug: s.setter('syncDebug'),
       setIsReady: s.setter('isReady'),
       setIsWorkletSupported: s.setter('isWorkletSupported'),
-      setIsNativeWorkletAvailable: s.setter('isNativeWorkletAvailable'),
-      setActiveEngine: s.setter('activeEngine'),
       setWorkletLoadError: s.setter('workletLoadError'),
     };
 
-    // The factories read `activeEngine` when they run, not when they were created.
     const transportDeps: TransportActionsDeps = {
       refs: this.refs,
       setters: this.setters,
       transport: this.transport,
-      get activeEngine() {
-        return s.getSnapshot().activeEngine;
-      },
     };
     this.stopFn = createStopMusic(transportDeps);
     this.pauseFn = createPauseMusic(transportDeps);
@@ -326,9 +307,6 @@ export class PlayerEngine {
     this.updateUIFn = createUpdateUI({
       refs: this.refs,
       setters: this.setters,
-      get activeEngine() {
-        return s.getSnapshot().activeEngine;
-      },
       kickTrigger: 0,
       grooveAmount: 0,
     });
@@ -341,7 +319,6 @@ export class PlayerEngine {
         if (rendering) this.onEngineStarted();
         else this.onEngineFaulted();
       },
-      setActiveEngine: this.setters.setActiveEngine,
       setModuleInfo: this.setters.setModuleInfo,
       setSequencerMatrix: this.setters.setSequencerMatrix,
       stopMusic: (destroy) => this.stopFn(destroy),
@@ -524,11 +501,7 @@ export class PlayerEngine {
     const previous = this.store.getSnapshot().isLooping;
     const next = typeof action === 'function' ? action(previous) : action;
     this.store.patch({ isLooping: next });
-    // The JS worklet's `ended` handler and the ScriptProcessor read the live value (audioConfig);
-    // the native module loops by itself, so tell it.
-    if (this.refs.playbackEngineRef.current === 'native-worklet') {
-      this.refs.nativeEngineRef.current?.setLoop(next);
-    }
+    // The JS worklet's `ended` handler and the ScriptProcessor read the live value (audioConfig).
   }
 
   private applyLevels(): void {
@@ -562,27 +535,7 @@ export class PlayerEngine {
     this.refs.driftAccumulatorRef.current = 0;
   }
 
-  // ── engine selection, channels, misc ──────────────────────────────────────────────────────────
-
-  toggleAudioEngine(): void {
-    const { activeEngine, isNativeWorkletAvailable, isWorkletSupported } = this.store.getSnapshot();
-    const next: AudioEngineKind =
-      activeEngine === 'native-worklet' ? 'worklet' : isNativeWorkletAvailable ? 'native-worklet' : 'worklet';
-    writeStoredAudioEngineOverride(overrideFromActiveEngine(next));
-    const wasPlaying = this.transport.isPlaying;
-    log.log('toggleEngine', {
-      from: activeEngine,
-      to: next,
-      isNativeAvailable: isNativeWorkletAvailable,
-      isWorkletSupported,
-      willRestart: wasPlaying,
-    });
-    // A pause belongs to the engine that holds the cursor; the other engine cannot continue it, so a
-    // paused transport stops (position resets) rather than leave a paused UI over a dead engine.
-    if (wasPlaying || this.transport.isPaused) this.stopFn(false);
-    this.store.patch({ activeEngine: next, workletLoadError: null });
-    if (wasPlaying) void this.play();
-  }
+  // ── channels, misc ────────────────────────────────────────────────────────────────────────────
 
   toggleChannelMute(channelIndex: number): void {
     const previous = this.store.getSnapshot().channelStates;
@@ -633,7 +586,7 @@ export class PlayerEngine {
     return this.refs.stereoPannerRef.current?.pan.value ?? null;
   }
 
-  /** The engine that is really rendering (vs `activeEngine`, the selection). */
+  /** The engine that is really rendering. */
   getPlaybackEngine(): LibOpenMPTRefs['playbackEngineRef']['current'] {
     return this.refs.playbackEngineRef.current;
   }
@@ -682,7 +635,6 @@ export class PlayerEngine {
       case 'setLooping': this.setLooping(command.value); return;
       case 'toggleLoop': this.setLooping((l) => !l); return;
       case 'toggleChannelMute': this.toggleChannelMute(command.channel); return;
-      case 'toggleAudioEngine': this.toggleAudioEngine(); return;
       default: {
         const exhaustive: never = command;
         throw new Error(`unknown engine command ${JSON.stringify(exhaustive)}`);
@@ -693,8 +645,8 @@ export class PlayerEngine {
   // ── engine reports (asynchronous; may be stale) ───────────────────────────────────────────────
 
   /**
-   * An engine start path reports it is rendering. The JS worklet does so from its `loaded` ack, the
-   * native engine after several awaits — by which time the user may have stopped. A report that no
+   * An engine start path reports it is rendering. The JS worklet does so from its `loaded` ack,
+   * after several awaits — by which time the user may have stopped. A report that no
    * longer fits the transport is stale: the engine that sent it is silenced instead of letting it
    * flip the transport back to playing (the #329 class of bug).
    */
@@ -729,8 +681,7 @@ export class PlayerEngine {
   /** Pause whichever engine renders, without a transport change (used for a stale start under a pause). */
   private silenceRenderingEngine(): void {
     const engine = this.refs.playbackEngineRef.current;
-    if (engine === 'native-worklet') this.refs.nativeEngineRef.current?.pause();
-    else if (engine === 'worklet') {
+    if (engine === 'worklet') {
       try { this.refs.audioWorkletNodeRef.current?.port.postMessage(postPause()); } catch { /* torn down */ }
     }
     // 'scriptprocessor' renders silence by itself while the transport is paused.
@@ -740,9 +691,7 @@ export class PlayerEngine {
   private audioConfig(options?: { forceModuleLoad?: boolean }): AudioGraphConfig {
     const store = this.store;
     return {
-      get activeEngine() { return store.getSnapshot().activeEngine; },
       get isWorkletSupported() { return store.getSnapshot().isWorkletSupported; },
-      get isNativeWorkletAvailable() { return store.getSnapshot().isNativeWorkletAvailable; },
       get panValue() { return store.getSnapshot().pan; },
       get volume() { return store.getSnapshot().volume; },
       get isLooping() { return store.getSnapshot().isLooping; },

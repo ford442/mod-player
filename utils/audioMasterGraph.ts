@@ -3,7 +3,7 @@
  *
  *   engine → masterInput → masterDirect → analyser → stereo panner → gain → destination
  *
- * Every engine (JS worklet, native, ScriptProcessor) connects to `masterInput`,
+ * Every engine (JS worklet, ScriptProcessor fallback) connects to `masterInput`,
  * never to the analyser. The FX rack (audio/fx/, lazy) attaches in parallel to
  * `masterDirect` — masterInput → rack → analyser — and owns `masterDirect.gain`.
  * With no rack attached (or the rack collapsed) the path is unity gain all the

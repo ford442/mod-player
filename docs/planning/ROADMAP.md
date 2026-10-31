@@ -2,27 +2,34 @@
 
 Living pointer to active work. **Do not** append agent run diaries here — use GitHub issues and PRs for status.
 
-**Last reconciled:** 2026-10-16 (evening pass; the morning reconcile in #499 described the queue below as pending).
+**Last reconciled:** 2026-10-30 (weekly planner pass). It replaces the 2026-10-23 (#519) and 2026-10-25 (#522) passes. Both were merged, so their sections were interleaved here twice.
 
-**`main` is green.** CI run 693 on `c506a27` (#496) passed every job. The whole #490 integration queue landed on 2026-10-16 between 08:26 and 10:17 UTC, in the agreed order: #494 (unbreak `main`), #495 (the #453 FX rack, `audio/fx/` byte-identical to the stack tip), #471, #472, #497 (Vite 7.3.7, one Vite), #498 (lint 40 → 27), #499 (roadmap) and #496 (WAV export at the live 48 kHz, bit-exact with playback). Runs 683–688 show `cancelled` only because #469's concurrency group superseded them within seconds; 690 and 693 are the real verdicts.
+**`main` is green.** CI run 720 on `e2251b3` (#508) passed. Run 714 on `f2b9894` (#522) was the last red run (the SC2054 shellcheck break, which #522 itself fixed). `main` has not moved since 2026-10-27.
 
-**There are no open PRs.** The eight `feat/453-*` branches and `docs/453-faust-adr` are gone from the remote. The only non-`main` branch left is `feat/revive-webgl2-viz` (#415 Option A, automatic WebGL2 fallback), which contradicts the owner's Option B decision (#462 → #464) and is obsolete; its one other idea, detecting a blank WebGPU `captureStream` frame before recording, would need to fail visibly rather than silently switch renderers (a candidate for #417). Delete the branch.
+**Landed 2026-10-25 → 10-27:**
+- #520 retired the native engine.
+- #521 moved module create off the AudioWorklet thread (#513).
+- #522 shipped the #515 toolchain: libopenmpt 0.8.9 pinned, `wasm-flags.sh`, typed catches on the worklet thread, `-Os` + Closure.
+- #506 fixed WebGL2 context loss.
+- #524 added per-song memory on the fingerprint (#511).
+- #508 made WebGPU configure the canvas once, added device-pixel sizing, opt-in HDR and the compatibility rung.
 
-**Correction:** earlier reconciles called the real-WASM libopenmpt change "#449". That was **#439** (`2d6a4ed`). #449 is the WebGPU render-loop issue, which is what `CLAUDE.md` pitfall 14 cites.
+The native drafts #502–#505 were closed against the ADR. #509 and #510 were folded into #507's branch.
 
-## #490 leftovers (bookkeeping, not blockers)
+**The one open PR is #507** (`refactor/492-player-engine`, PlayerEngine + transport FSM, now with #509's position ring and #510's output-device picker). It is still based on `3732a7a`, and a merge with `main` conflicts in ~38 files. Most of that is "drop the native branch" (#520) and routing `postModuleLoad` through #513's create worker. Only the owner merges it. Until it is rebased, any work under `hooks/libOpenMPT/`, `hooks/audioGraph/`, `audio-worklet/` or `App.tsx` adds to its conflicts.
 
-The acceptance criteria that are still open after the queue:
+**The owner's order (comment on #511, 2026-10-20)** was: land the foundation drafts, then #511 → #512 → #513 → #514. #511 and #513 are done. #516 says its item 1 (now **#523**) lands before #512 and #514. On 2026-10-27 the owner opened #525–#529 (resume from the SongSession cursor, one render-settings value, WebGL context options, S3M waveforms, an OPFS crate).
+
+## Open bookkeeping
 
 | Item | State |
 |---|---|
-| Close **#437** (landed in #445, pinned by `tests/threeDModeLayout.test.ts`) | still open on GitHub |
-| Close **#451** (its last slices #471, #472, #497 are on `main`) | still open on GitHub |
-| Close **#490** itself once the two above are closed and the rows below are decided | open |
-| 25 `react-hooks/exhaustive-deps` warnings + the two context files' `only-export-components` | budget holds at 27; review the hooks warnings one by one (stale-closure risk in a ref-heavy codebase), then lower the budget to the new count |
-| `CLAUDE.md` called `PatternDisplay.tsx` "the largest file" | fixed in this reconcile (it is 578 lines; `openmpt-processor.ts` 1284 and `WebGPURenderer.ts` 1092 are larger) |
+| #490 | Closed 2026-10-25 by #519. Done. |
+| Lint budget | 26 warnings since #520, budget 27. Review the `react-hooks/exhaustive-deps` warnings one by one (stale-closure risk in a ref-heavy codebase), then lower the budget. #507 claims 7. Do this after #507 lands, because it rewrites most of those hooks. |
+| Stale remote branches | Only `main`, `refactor/492-player-engine` and this planner branch are left. |
+| Branch ruleset (#442, closed) | Still absent. It is an owner action (the GitHub proxy rejects `POST /rulesets`); see `CONTRIBUTING.md`. |
 
-**Build on foundation before new content** still applies, but the foundation is now in place: `main` is green, the FX rack is on it, export matches live. Feature work is unblocked. The first user-facing feature in the queue is the P1 row **#448** (live mute/solo on the JS engine); the `openmpt_module_ext_*` C API it needs is confirmed exported by `public/worklets/libopenmpt-worklet.js` and `utils/libopenmptExt.ts` already drives it on the main thread.
+**Correction (kept):** earlier reconciles called the real-WASM libopenmpt change "#449". That was **#439** (`2d6a4ed`). #449 is the WebGPU render-loop issue.
 
 ## ✅ CI history — three breaks (runs 597–603), all fixed
 
@@ -61,7 +68,7 @@ Landed by `8175cc9` (`fix(stage): URL ?stage= preference, toggle/exit commands, 
 
 **The same bug class is still live for 3D mode**, which is what #427 originally cited as the anti-pattern: `App.tsx:508` still early-returns `<App3DModeShell />`, and `components/App3DView.tsx:159` remounts `PatternDisplay` again with `key={shader3D}`. Tracked as **#437**. It landed via #445 on 2026-09-18.
 
-**#411 audio-graph leftovers are now cleared:** `utils/audioContextFactory.ts` is the single `AudioContext` construction site (one context per page session, `sampleRate` locked to 48000, `latencyHint` from the stage-mode / `?latency=` profile), and the `?nativeCtx=legacy` dual-context path — `parseNativeCtxQueryParam`, `isNativeLegacyAudioContext`, the dual-context capture block and `public/worklets/native-bridge-processor.js` — is deleted. Still outstanding on #411: `docs/planning/native-engine-bench-notes.md` now carries the methodology plus **one** recorded JS baseline row (2026-09-18); the native column is still empty and needs an emsdk 3.1.51 host to fill.
+**#411 audio-graph leftovers are now cleared:** `utils/audioContextFactory.ts` is the single `AudioContext` construction site (one context per page session, `sampleRate` locked to 48000, `latencyHint` from the stage-mode / `?latency=` profile), and the `?nativeCtx=legacy` dual-context path — `parseNativeCtxQueryParam`, `isNativeLegacyAudioContext`, the dual-context capture block and `public/worklets/native-bridge-processor.js` — is deleted. The #411 leftover (the empty native column in `docs/planning/native-engine-bench-notes.md`) is moot: the native engine was retired, and #505's ADR carries the JS-vs-native measurements.
 
 **Build on foundation before new content.** #437 has landed, so #438 (spectrum-shader family) is unblocked. #417 (performance instrument) is unblocked once #462 lands (the #436 decision is made: opt-in WebGL2 session). #403 (tracker studio) can proceed in parallel with P1; typed worklets (#435) are done, so its sample-audition worklet builds on `audio-worklet/js/` instead of adding more untyped classic JS.
 
@@ -69,25 +76,24 @@ Landed by `8175cc9` (`fix(stage): URL ?stage= preference, toggle/exit commands, 
 
 | Priority | Issue | Summary |
 |----------|-------|---------|
-| **close** | [#490](https://github.com/ford442/mod-player/issues/490) | The integration queue landed 2026-10-16 (see "#490 leftovers" above). What remains is closing #437 / #451 and the 25 `react-hooks/exhaustive-deps` warnings; none of it blocks feature work. |
-| **P1, current focus** | [#448](https://github.com/ford442/mod-player/issues/448) / [#416](https://github.com/ford442/mod-player/issues/416) | Live mute/solo on the JS engine (the default engine). First feature after the integration month. Worklet-side: swap the create path to `openmpt_module_ext_create_from_memory`, read `set_channel_mute_status` from the interactive interface, replay the mask after every load / hot reload, destroy with `ext_destroy`. Main thread send path exists (`hooks/libOpenMPT/runInit.ts`). |
-| P1 (next, in parallel) | [#491](https://github.com/ford442/mod-player/issues/491) / [#492](https://github.com/ford442/mod-player/issues/492) | #491: native engine + WASM toolchain correctness (`g_moduleData` race, parse off the audio thread, libopenmpt exceptions, SIMD gate). #492: `PlayerEngine` FSM outside React, one protocol table, SAB position ring. |
-| P1 (small bugs, decoupled from #448) | [#485](https://github.com/ford442/mod-player/issues/485) / [#489](https://github.com/ford442/mod-player/issues/489) | #485: per-song shader prefs key on `computeModuleHash` (first 16 bytes, so every XM collides); move `store/shaderPrefsStore.ts` onto the song fingerprint `utils/songIdentity.ts` already publishes, with a one-time legacy-key migration. #489: the native engine applies master volume twice (C++ `setVolume` and the master GainNode); keep the native engine at unity. |
-| **close** | [#451](https://github.com/ford442/mod-player/issues/451) | Every slice is on `main` (#465, #466, #468, #469, #470, #471, #472, #497). Close it. |
-| **close** | [#437](https://github.com/ford442/mod-player/issues/437) | Landed in #445 (`c686bc0`); pinned by `tests/threeDModeLayout.test.ts` and `tests/webgpuDeviceOwnership.test.ts`. Still open on GitHub. |
-| **narrow, keep open** | [#442](https://github.com/ford442/mod-player/issues/442) | Preflight + lockfile guard landed in #446. The ruleset still does not exist, and agent sessions cannot create it (the GitHub proxy rejects `POST /rulesets`). The repo owner has to do it by hand once; see `CONTRIBUTING.md`. |
+| **P1, current focus** | [#523](https://github.com/ford442/mod-player/issues/523) (#516 item 1) | Swapped volume/effect columns in `utils/patternExtractor.ts` (still `3 → volVal`, `4 → effCmd` on `e2251b3`), a dead `volPacked` nibble layout, and hand-typed `EFFECT_E_DECIMAL` guesses in `gpuPacking.ts` and `compute_note_duration.wgsl`. Fix them with a real-WASM fixture test and `utils/openmptCommands.ts`. Must land before #512 and #514. Disjoint from #507's file list. The native-reader half went away with #520. |
+| **P0, owner** | [#507](https://github.com/ford442/mod-player/pull/507) | Rebase on `main` (~38 conflicting files), then merge. It blocks #512 in practice, since both touch the engine and the worklet protocol. |
+| P1, decoupled | #516 item 4 (cross-origin isolation) | No sub-issue yet; drafted 2026-10-30. COEP `credentialless` in three places (WebKit has no support for it, so Safari is never isolated), the dead esm.sh importmap and preconnect in `index.html`, and a `deploy.py` that never checks COOP/COEP on the live response. |
+| P1 (next) | [#512](https://github.com/ford442/mod-player/issues/512) | JS-engine mixer (mute / solo / per-channel volume that playback and export obey). The ext create goes in `workers/openmpt-create.worker.ts`'s `create()`; in-worklet creates must keep working. After #523 and #507. |
+| P1 | [#526](https://github.com/ford442/mod-player/issues/526), [#527](https://github.com/ford442/mod-player/issues/527) | #516 items 2 and 6 as sub-issues: one render-settings value for live / SP fallback / export, and WebGL context options matched to the WebGPU device. #526 touches the worklet, so it goes after #507. |
+| P1 | #516 items 5, 7 | iOS cold-start audio unlock (`useAudioGraph`, so after #507), the worklet load-timer leak, Tailwind tokens that emit no CSS, the duplicated parser-worker loader. |
+| P2 | [#525](https://github.com/ford442/mod-player/issues/525) | Resume a song from its `SongSession` cursor (#511 follow-up; touches transport actions, so after #507). |
 
-## Next (after foundation)
+## Next
 
 | Priority | Issue | Summary |
 |----------|-------|---------|
-| P2 | [#403](https://github.com/ford442/mod-player/issues/403) | Tracker studio: inspector waveforms, S3M extract, **audible** pattern edits via a sample-audition worklet (re-check the "libopenmpt cannot write cells" premise against #493 first). Build the worklet on `audio-worklet/js/` (typed, #435). |
-| P2 | [#417](https://github.com/ford442/mod-player/issues/417) | Performance instrument: MIDI/chassis on `playerCommands`, `stageMode`, WebCodecs music-video. Unblocked: #462 landed (#464). |
-| P2 | [#452](https://github.com/ford442/mod-player/issues/452) | Shader Lab: typed uniform schema (generated WGSL structs) + live WGSL editor with hot pipeline swap. Builds on #449's checked async pipelines. |
-| P2 | [#486](https://github.com/ford442/mod-player/issues/486)–[#488](https://github.com/ford442/mod-player/issues/488) | FX rack follow-ups (the rack is on `main` since #495): chunked export for long modules (#486), fallback IRs where Ogg Opus fails, i.e. Safari (#487), enable in public builds after a soak (#488; public builds are gated on `VITE_FX_RACK=1`). #485 moved to Active. Design + limits: `docs/FX_RACK.md`; Faust decision: `docs/ADR-fx-character-dsp.md`. |
-| P2 | [#493](https://github.com/ford442/mod-player/issues/493) | Editable modules: libopenmpt 0.8.4 already contains OpenMPT's soundlib writers behind `MODPLUG_NO_FILESAVE`, which challenges #403's "libopenmpt cannot write" premise. After #491 / #492. |
-| P3 | [#454](https://github.com/ford442/mod-player/issues/454) | Module library v2: metadata DB, full-text search, per-song presets, offline crate. |
-| P2 (leftover) | #411 (closed) | `native-engine-bench-notes.md` native column still empty. Filling it needs an emsdk 3.1.51 host. #439 rewrote the JS baseline notes, so re-baseline both columns together. |
+| P2 | [#514](https://github.com/ford442/mod-player/issues/514) | Audible pattern studio: ext `play_note` audition (after #512) and a TypeScript XM/MOD writer in `workers/` (after #523, because the writer reads `PatternCell`). |
+| P1 (after #507) | [#517](https://github.com/ford442/mod-player/issues/517) | Codebase architecture: move-proof tests, `src/` feature layout with `@/`, one shader source of truth with generated uniform layouts, React 19 / R3F 9 / Tailwind 4, lint `--max-warnings 0`. Land the move between feature PRs. |
+| P2 | [#518](https://github.com/ford442/mod-player/issues/518) | Render worker + deterministic music-video export. After #517 splits `WebGPURenderer.ts`. |
+| P2 | [#528](https://github.com/ford442/mod-player/issues/528), [#529](https://github.com/ford442/mod-player/issues/529) | S3M sample waveforms + public instrument panel; an OPFS module crate keyed by the song fingerprint. |
+| P2 | [#487](https://github.com/ford442/mod-player/issues/487) / [#488](https://github.com/ford442/mod-player/issues/488) | FX rack: fallback IRs where Ogg Opus fails (Safari); enable in public builds after a soak. |
+| P3 (toolchain) | emsdk bump | Blocked upstream: 6.0.13 cannot link `-sWASM_WORKERS` with wasm EH. See `docs/WORKLET_AUDIO_BUG.md` § "One toolchain". |
 
 ## Landed (do not re-open)
 
@@ -133,6 +139,14 @@ Landed by `8175cc9` (`fix(stage): URL ?stage= preference, toggle/exit commands, 
 | [#451](https://github.com/ford442/mod-player/issues/451) last slices: native libopenmpt flag stamp (#471), scoped logger + `no-console` (#472), Vite 5.4 → 7.3.7 with one Vite for app and Vitest (#497) | On `main` 2026-10-16 (`f600eb3`, `f34c800`, `37fe00d`). Close #451. |
 | Lint budget 40 → 27 (13 non-hooks warnings fixed) | [#498](https://github.com/ford442/mod-player/pull/498), on `main` 2026-10-16 (`5492556`). The 27 left are 25 `exhaustive-deps` + 2 `only-export-components`. |
 | [#490](https://github.com/ford442/mod-player/issues/490) WAV export at the live 48 kHz by default, bit-exact with playback; 44.1 kHz as an explicit option | [#496](https://github.com/ford442/mod-player/pull/496), on `main` 2026-10-16 (`c506a27`, CI run 693 green). |
+| [#489](https://github.com/ford442/mod-player/issues/489) Native engine at unity (master volume once, in the GainNode) | [#501](https://github.com/ford442/mod-player/pull/501), on `main` 2026-10-17 (`3732a7a`). Moot after #520. |
+| [#491](https://github.com/ford442/mod-player/issues/491) / #505 Native engine retired: `cpp/`, engine selection, native scripts/tests/CI jobs; ADR on `main` | [#520](https://github.com/ford442/mod-player/pull/520), on `main` 2026-10-25 (`3387245`, CI run 710 green). |
+| [#513](https://github.com/ford442/mod-player/issues/513) Module create off the AudioWorklet thread (playback heap + create worker); SIMD measured and rejected | [#521](https://github.com/ford442/mod-player/pull/521), on `main` 2026-10-25 (`d8279da`; CI run 712 red on `build-scripts` only, see the top). |
+| [#515](https://github.com/ford442/mod-player/issues/515) toolchain: libopenmpt 0.8.9 sha256-pinned, `wasm-flags.sh`, fatal emsdk drift, instruction-level feature gate, worklet typed-catch fix, `-Os` + Closure | [#522](https://github.com/ford442/mod-player/pull/522), on `main` 2026-10-25 (`f2b9894`). Turned `build-scripts` green. |
+| #492 Phase 3: WebGL2 context loss / restore, probe context released, opt-in renderer lazy | [#506](https://github.com/ford442/mod-player/pull/506), on `main` 2026-10-27 (`fd0a5b5`, CI run 718 green). |
+| [#511](https://github.com/ford442/mod-player/issues/511) Per-song memory on the song fingerprint (`SongSession` in IndexedDB, `computeModuleHash` off the production path) | [#524](https://github.com/ford442/mod-player/pull/524), on `main` 2026-10-27 (`ef4efb1`). |
+| #492 Phase 3: canvas configured once per device/format, device-pixel sizing, opt-in HDR output, compatibility adapter rung | [#508](https://github.com/ford442/mod-player/pull/508), on `main` 2026-10-27 (`e2251b3`, CI run 720 green). |
+| #502–#505 native drafts | Closed unmerged 2026-10-27 against the #505 ADR (superseded by #520 / #522). |
 
 ## Planning scratch (local, gitignored)
 

@@ -35,7 +35,6 @@ const CHANNELS = 32;
 function benchRefs(node: AudioWorkletNode) {
   const refs = createEngineRefs({
     transport: { isPlaying: true, isPaused: false },
-    activeEngine: () => 'worklet',
   });
   refs.audioWorkletNodeRef.current = node;
   refs.channelStatesRef.current = Array.from({ length: CHANNELS }, (): ChannelShadowState => ({

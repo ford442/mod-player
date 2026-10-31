@@ -1,9 +1,7 @@
 import { useState, useCallback, useMemo } from 'react';
 import type { MutableRefObject } from 'react';
-import { computeModuleHash } from '../appConfig';
 import type { SongSaveRequest } from '../utils/storageApi';
 import { usePlayerEngine, usePlayerEngineInstance } from '../hooks/usePlayerEngine';
-import { useShaderPrefsStore } from '../store/shaderPrefsStore';
 
 export interface UseAppModuleLoadingParams {
   patternEditDirtyRef: MutableRefObject<boolean>;
@@ -26,7 +24,6 @@ export function useAppModuleLoading(params: UseAppModuleLoadingParams): UseAppMo
   const isModuleLoaded = usePlayerEngine((s) => s.isModuleLoaded);
   const moduleTitle = usePlayerEngine((s) => s.moduleInfo.title);
   const numChannels = usePlayerEngine((s) => s.sequencerMatrix?.numChannels ?? 0);
-  const setModuleHash = useShaderPrefsStore((s) => s.setModuleHash);
 
   const [currentModuleFileName, setCurrentModuleFileName] = useState<string>('');
   const [moduleSourceUrl, setModuleSourceUrl] = useState<string | null>(null);
@@ -38,10 +35,9 @@ export function useAppModuleLoading(params: UseAppModuleLoadingParams): UseAppMo
       );
       if (!ok) return;
     }
-    setModuleHash(computeModuleHash(fileData));
     setCurrentModuleFileName(fileName);
     void engine.loadFile(fileData, fileName);
-  }, [engine, setModuleHash, patternEditDirtyRef]);
+  }, [engine, patternEditDirtyRef]);
 
   const handleFileSelected = useCallback(async (file: File) => {
     const arrayBuffer = await file.arrayBuffer();

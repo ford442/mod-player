@@ -67,7 +67,6 @@ export function createUpdateUI(params: UpdateUIParams): () => void {
     playbackStateRef,
     animationFrameHandle,
     audioWorkletNodeRef,
-    nativeEngineRef,
   } = refs;
 
   const {
@@ -91,7 +90,7 @@ export function createUpdateUI(params: UpdateUIParams): () => void {
     // anything below reads the position refs.
     positionRingRef.current?.drain();
 
-    const { activeEngine, kickTrigger, grooveAmount } = params;
+    const { kickTrigger, grooveAmount } = params;
     const wallNowMs = performance.now();
 
     const lib = libopenmptRef.current;
@@ -111,9 +110,7 @@ export function createUpdateUI(params: UpdateUIParams): () => void {
     let heardSource: HeardTimeSource | null = null;
     let outputDelaySec = Number.NaN;
 
-    const usingWorkletEngine =
-      (activeEngine === 'worklet' || activeEngine === 'native-worklet') &&
-      (audioWorkletNodeRef.current != null || nativeEngineRef.current != null);
+    const usingWorkletEngine = audioWorkletNodeRef.current != null;
 
     if (usingWorkletEngine && audioCtx) {
       rowSmoothing = WORKLET_ROW_SMOOTHING;
@@ -202,7 +199,7 @@ export function createUpdateUI(params: UpdateUIParams): () => void {
     }
     if (smoothedPlayhead < 0) smoothedPlayhead = 0;
 
-    const engineMode = scriptProcessorRef.current ? 'scriptprocessor' : activeEngine;
+    const engineMode = scriptProcessorRef.current ? 'scriptprocessor' : 'worklet';
     const rowIntUi = Math.floor(smoothedPlayhead);
     const orderChanged = order !== lastUiOrderRef.current;
     const rowChanged = rowIntUi !== lastUiRowIntRef.current;
@@ -234,7 +231,7 @@ export function createUpdateUI(params: UpdateUIParams): () => void {
           row: rowIntUi,
           rows: newMatrix?.numRows,
           channels: newMatrix?.numChannels,
-          engine: activeEngine,
+          engine: engineMode,
         });
       }
     } else {
@@ -273,7 +270,9 @@ export function createUpdateUI(params: UpdateUIParams): () => void {
         orderChanged ||
         wallNowMs - lastChannelStatePublishMsRef.current >= 100;
 
-      const spLib = activeEngine !== 'worklet' && activeEngine !== 'native-worklet' ? lib : null;
+      // The ScriptProcessor renders the main-thread module, so its VU is read here; the worklet's
+      // arrives with its position reports.
+      const spLib = scriptProcessorRef.current ? lib : null;
       const spPtr = spLib && modPtr !== 0 ? modPtr : 0;
 
       for (let c = 0; c < numChannels; c++) {

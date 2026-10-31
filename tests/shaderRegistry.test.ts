@@ -29,6 +29,7 @@ import {
   supportsStepsLength,
   usesAudioReactive,
   usesCircularRowPaging,
+  usesHdrOutput,
   usesHighPrecisionPacking,
   usesInstrumentPalette,
   usesOscilloscope,
@@ -93,6 +94,7 @@ describe('registry + SHADER_GROUPS coverage', () => {
     expect(usesOscilloscope(filename), 'oscilloscope').toBe(m.oscilloscope);
     expect(usesInstrumentPalette(filename), 'instrumentPalette').toBe(m.instrumentPalette);
     expect(usesAudioReactive(filename), 'audioReactive').toBe(m.audioReactive);
+    expect(usesHdrOutput(filename), 'hdrOutput').toBe(m.hdrOutput ?? false);
     expect(getHitTestProfile(filename), 'hitTestProfile').toBe(m.hitTestProfile);
     expect(usesCircularRowPaging(filename), 'circularRowPaging').toBe(m.circularRowPaging);
     expect(isHorizontalLayoutShader(filename), 'isHorizontal').toBe(m.layoutMode === 'horizontal_32');
@@ -151,6 +153,20 @@ describe('bloom profile consistency', () => {
     ['patternv0.55.wgsl', 'three-emitter-osc'],
   ])('%s uses the %s bloom profile', (filename, profile) => {
     expect(SHADER_REGISTRY[filename]?.bloomProfile).toBe(profile);
+  });
+});
+
+describe('hdrOutput opt-in (#492)', () => {
+  it('is the chassis family (v0.58 / v0.60 / v0.61), each on a layered bloom profile', () => {
+    const opted = registry.filter(([, m]) => m.hdrOutput).map(([filename]) => filename);
+    expect(opted).toEqual(['patternv0.58.wgsl', 'patternv0.60.wgsl', 'patternv0.61.wgsl']);
+    for (const filename of opted) {
+      expect(meta(filename).bloomProfile, filename).not.toBeNull();
+    }
+  });
+
+  it('unregistered shaders never opt in', () => {
+    expect(usesHdrOutput('patternv0.99-experimental.wgsl')).toBe(false);
   });
 });
 

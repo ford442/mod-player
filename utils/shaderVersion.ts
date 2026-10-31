@@ -129,6 +129,10 @@ export const usesSpectrumBuffer = (shaderFile: string): boolean =>
 export const usesFxUniforms = (shaderFile: string): boolean =>
   resolveShaderMeta(shaderFile).fxUniforms ?? false;
 
+/** Shader opted in to the extended-range HDR canvas (`ShaderMeta.hdrOutput`, #492). */
+export const usesHdrOutput = (shaderFile: string): boolean =>
+  resolveShaderMeta(shaderFile).hdrOutput ?? false;
+
 export const usesBareCanvasChrome = (shaderFile: string): boolean =>
   resolveShaderMeta(shaderFile).bareCanvasChrome;
 
