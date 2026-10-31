@@ -21,6 +21,7 @@ import type {
   AudioGraphCallbacks,
   AudioGraphConfig,
   AudioGraphRefs,
+  AudioStartResult,
 } from './audioGraph/types';
 import { createLogger } from '../utils/log';
 
@@ -30,6 +31,7 @@ export type {
   AudioGraphCallbacks,
   AudioGraphConfig,
   AudioGraphRefs,
+  AudioStartResult,
 } from './audioGraph/types';
 
 // Contexts we've wired suspend-recovery for, keyed to their disposer — a page
@@ -126,16 +128,16 @@ export async function startAudioPlayback(
   refs: AudioGraphRefs,
   callbacks: AudioGraphCallbacks,
   config: AudioGraphConfig
-): Promise<void> {
+): Promise<AudioStartResult> {
   if (!refs.libopenmptRef.current) {
     console.error("[PLAY] libopenmpt not initialized");
     callbacks.setStatus("Error: Audio library not ready");
-    return;
+    return 'failed';
   }
   if (!refs.fileDataRef.current) {
     console.error("[PLAY] No module data available (fileDataRef is null)");
     callbacks.setStatus("Error: No module loaded");
-    return;
+    return 'failed';
   }
 
   const moduleToken = refs.workletModuleTokenRef.current;
@@ -157,7 +159,7 @@ export async function startAudioPlayback(
         postModuleLoad(refs.audioWorkletNodeRef.current, moduleBuf);
         callbacks.setStatus('Loading audio engine...');
       }
-      return;
+      return 'nudged';
     }
 
     // Recover from "UI playing / worklet paused" races: stopMusic pauses the
@@ -183,7 +185,7 @@ export async function startAudioPlayback(
     if (!refs.animationFrameHandle.current && refs.updateUIRef.current) {
       refs.animationFrameHandle.current = requestAnimationFrame(refs.updateUIRef.current);
     }
-    return;
+    return 'nudged';
   }
 
   log.log('Starting playback...', {
@@ -215,6 +217,13 @@ export async function startAudioPlayback(
       log.log('AudioContext resumed, new state:', ctx.state);
     }
 
+    // Output device (#492): the engine moves a new context to the chosen device here — after resume,
+    // so the resume stays within the user gesture, and before any engine is connected, so no sample
+    // of the song reaches the old device. Awaited only when there is a switch to make; the audio
+    // clock is anchored below, on the device that will really play.
+    const preparing = callbacks.prepareAudioContext?.(ctx);
+    if (preparing) await preparing;
+
     // TIMING FIX: Initialize audio clock reference
     refs.audioClockStartRef.current = ctx.currentTime;
     refs.workletTimeAtStartRef.current = refs.workletTimeRef.current || 0;
@@ -239,14 +248,14 @@ export async function startAudioPlayback(
     }
 
     if (config.isWorkletSupported) {
-      await startJsWorkletPlayback(refs, callbacks, config, ctx, reuseWorkletNode);
-    } else {
-      callbacks.setStatus("Error: AudioWorklet not supported/available.");
-      return;
+      const jsResult = await startJsWorkletPlayback(refs, callbacks, config, ctx, reuseWorkletNode);
+      return jsResult === 'setup-complete' ? 'pending' : 'failed';
     }
-
+    callbacks.setStatus("Error: AudioWorklet not supported/available.");
+    return 'failed';
   } catch (e) {
     console.error("[PLAY] Play error:", e);
     callbacks.setStatus("Error starting playback");
+    return 'failed';
   }
 }

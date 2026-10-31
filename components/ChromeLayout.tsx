@@ -5,7 +5,7 @@ import { TransportBar } from './TransportBar';
 import { SidePanelGrid } from './SidePanelGrid';
 import { PatternEditorSection } from './PatternEditorSection';
 import { LibraryAndPlaylistSection } from './LibraryAndPlaylistSection';
-import { usePlayerSession } from '../context/PlayerSessionContext';
+import { usePlayerEngine } from '../hooks/usePlayerEngine';
 import { usePlayerUiStore } from '../store/playerUiStore';
 
 export interface ChromeLayoutProps {
@@ -19,7 +19,8 @@ export interface ChromeLayoutProps {
  * 3D mode is likewise CSS/overlay (App.tsx renders it as a sibling), never a subtree swap.
  */
 export function ChromeLayout({ studioDisplayHost = null }: ChromeLayoutProps = {}) {
-  const { status, isModuleLoaded } = usePlayerSession();
+  const status = usePlayerEngine((s) => s.status);
+  const isModuleLoaded = usePlayerEngine((s) => s.isModuleLoaded);
   const { stageMode } = usePlayerUiStore();
 
   return (

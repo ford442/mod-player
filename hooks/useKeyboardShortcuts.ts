@@ -1,22 +1,17 @@
 import { useEffect, useLayoutEffect } from 'react';
 import { playerCommands, trackInputFocusForCommands } from '../utils/playerCommands';
-import { mediaSessionPlaybackState, type TransportState } from '../utils/transportClock';
+import { usePlayerUiStore } from '../store/playerUiStore';
 
-interface KeyboardShortcutOptions {
-  cheatsheetOpen: boolean;
-  /** Mirrored to `navigator.mediaSession.playbackState` so the OS media card shows play vs pause. */
-  transportState?: TransportState;
-}
+/**
+ * Keyboard → command bus. (The OS media keys and `mediaSession.playbackState` follow the engine
+ * directly since #492 — audio/engine/mediaSession.ts.)
+ */
+export function useKeyboardShortcuts() {
+  const cheatsheetOpen = usePlayerUiStore((s) => s.cheatsheetOpen);
 
-export function useKeyboardShortcuts({ cheatsheetOpen, transportState = 'stopped' }: KeyboardShortcutOptions) {
   useLayoutEffect(() => {
     playerCommands.setState({ cheatsheetOpen });
   }, [cheatsheetOpen]);
-
-  useEffect(() => {
-    if (!('mediaSession' in navigator)) return;
-    navigator.mediaSession.playbackState = mediaSessionPlaybackState(transportState);
-  }, [transportState]);
 
   useEffect(() => trackInputFocusForCommands(), []);
 
@@ -109,30 +104,8 @@ export function useKeyboardShortcuts({ cheatsheetOpen, transportState = 'stopped
     };
 
     window.addEventListener('keydown', handleKeyDown);
-
-    if ('mediaSession' in navigator) {
-      navigator.mediaSession.setActionHandler('play', () => {
-        playerCommands.dispatch('transport.play', 'mediaSession');
-      });
-      navigator.mediaSession.setActionHandler('pause', () => {
-        playerCommands.dispatch('transport.pause', 'mediaSession');
-      });
-      navigator.mediaSession.setActionHandler('seekforward', () => {
-        playerCommands.dispatch('seek.forwardRow', 'mediaSession');
-      });
-      navigator.mediaSession.setActionHandler('seekbackward', () => {
-        playerCommands.dispatch('seek.backwardRow', 'mediaSession');
-      });
-    }
-
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
-      if ('mediaSession' in navigator) {
-        navigator.mediaSession.setActionHandler('play', null);
-        navigator.mediaSession.setActionHandler('pause', null);
-        navigator.mediaSession.setActionHandler('seekforward', null);
-        navigator.mediaSession.setActionHandler('seekbackward', null);
-      }
     };
   }, [cheatsheetOpen]);
 }

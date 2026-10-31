@@ -1,14 +1,20 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-/** All production sources that replaced the monolithic useLibOpenMPT.ts hook body. */
+/**
+ * All production sources that replaced the monolithic useLibOpenMPT.ts hook body. Since #492 the state
+ * lives in the PlayerEngine (audio/engine/), and `useLibOpenMPTState.ts` is gone (usePlayerEngine
+ * replaced it).
+ */
 const LIB_OPENMPT_SOURCE_FILES = [
   'hooks/useLibOpenMPT.ts',
+  'audio/engine/PlayerEngine.ts',
+  'audio/engine/engineRefs.ts',
+  'audio/engine/transport.ts',
   'hooks/libOpenMPT/constants.ts',
   'hooks/libOpenMPT/parseModule.ts',
   'hooks/libOpenMPT/types.ts',
   'hooks/libOpenMPT/useLibOpenMPTRefs.ts',
-  'hooks/libOpenMPT/useLibOpenMPTState.ts',
   'hooks/libOpenMPT/createUpdateUI.ts',
   'hooks/libOpenMPT/createModuleActions.ts',
   'hooks/libOpenMPT/createTransportActions.ts',

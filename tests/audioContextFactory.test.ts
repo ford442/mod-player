@@ -4,12 +4,17 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   PLAYER_SAMPLE_RATE,
+  SILENT_SINK_ID,
   __resetSharedPlayerAudioContextForTests,
   closeSharedPlayerAudioContext,
   createPlayerAudioContext,
+  getPlayerAudioContextConstructionCount,
   getSharedPlayerAudioContext,
+  isAudioSinkSelectionSupported,
   parseLatencyQueryParam,
+  readAudioSinkId,
   resolveAudioGraphProfile,
+  switchPlayerAudioSink,
 } from '../utils/audioContextFactory';
 import { STAGE_MODE_STORAGE_KEY } from '../utils/stageModeSelection';
 
@@ -169,9 +174,51 @@ describe('audioContextFactory', () => {
     expect(constructed).toHaveLength(2);
   });
 
-  it('applies sinkId when supported', () => {
-    const ctx = createPlayerAudioContext({ sinkId: 'device-7' }) as unknown as MockAudioContext;
-    expect(ctx.setSinkIdCalls).toEqual(['device-7']);
+  it('constructs on the default output and never passes a sinkId to the constructor (#492)', () => {
+    const ctx = createPlayerAudioContext() as unknown as MockAudioContext;
+    expect(constructed[0]).not.toHaveProperty('sinkId');
+    expect(ctx.setSinkIdCalls).toEqual([]);
+  });
+
+  it('switches the output on the same context with setSinkId, and counts one construction', async () => {
+    const ctx = createPlayerAudioContext();
+    const mock = ctx as unknown as MockAudioContext & { sinkId?: string };
+    mock.setSinkId = (id: string) => {
+      mock.setSinkIdCalls.push(id);
+      mock.sinkId = id;
+      return Promise.resolve();
+    };
+    await expect(switchPlayerAudioSink(ctx, 'device-7')).resolves.toBe('device-7');
+    await expect(switchPlayerAudioSink(ctx, '')).resolves.toBe('');
+    expect(mock.setSinkIdCalls).toEqual(['device-7', '']);
+    expect(createPlayerAudioContext()).toBe(ctx);
+    expect(getPlayerAudioContextConstructionCount()).toBe(1);
+    expect(mock.state).toBe('suspended'); // no resume / suspend / close to switch
+  });
+
+  it('passes a refused switch through and reads the sink the context kept', async () => {
+    const ctx = createPlayerAudioContext();
+    const mock = ctx as unknown as MockAudioContext & { sinkId?: string };
+    mock.sinkId = 'usb-dac';
+    mock.setSinkId = () => Promise.reject(new DOMException('gone', 'NotFoundError'));
+    await expect(switchPlayerAudioSink(ctx, 'unplugged')).rejects.toMatchObject({ name: 'NotFoundError' });
+    expect(readAudioSinkId(ctx)).toBe('usb-dac');
+  });
+
+  it('reports setSinkId support from the constructor prototype, and rejects where it is missing', async () => {
+    expect(isAudioSinkSelectionSupported()).toBe(true);
+    class NoSinkContext { state = 'suspended'; sampleRate = 48000; }
+    installMockAudioContext(NoSinkContext);
+    expect(isAudioSinkSelectionSupported()).toBe(false);
+    const ctx = createPlayerAudioContext();
+    await expect(switchPlayerAudioSink(ctx, 'x')).rejects.toMatchObject({ name: 'NotSupportedError' });
+    expect(readAudioSinkId(ctx)).toBe('');
+  });
+
+  it('reads an AudioSinkInfo { type: "none" } sink as SILENT_SINK_ID', () => {
+    const ctx = createPlayerAudioContext() as unknown as AudioContext & { sinkId: unknown };
+    ctx.sinkId = { type: 'none' };
+    expect(readAudioSinkId(ctx)).toBe(SILENT_SINK_ID);
   });
 
   it('throws when Web Audio is unavailable rather than returning a stub', () => {
@@ -208,6 +255,8 @@ const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const SKIP_DIRS = new Set([
   'node_modules', 'dist', '.git', 'tests', 'vendor',
   '_codeql_detected_source_root',
+  // Agent worktrees: nested checkouts, not this tree's sources (eslint/vitest skip them too).
+  '.claude',
 ]);
 
 /** Strip comments so prose about the removed call sites does not trip a check. */

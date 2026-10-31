@@ -212,12 +212,16 @@ export interface PlayheadDebugSnapshot {
   maxAbsLagRows?: number;
   /** Measured worklet position postMessage rate (Hz). */
   positionReportHz?: number;
+  /** Clock behind the heard time: `getOutputTimestamp()` or the latency formula (#492). */
+  heardTimeSource?: import('./utils/playheadPrediction').HeardTimeSource;
+  /** `currentTime − heardTime`: the output delay the playhead compensates (ms). */
+  outputDelayMs?: number;
 }
 
 /**
  * Rolling AudioWorklet `process()` timing snapshot (?audioDiag=1).
  *
- * Each quantum is 128 frames (~2.9 ms @ 44.1 kHz); `budgetMs` is that deadline.
+ * Each quantum is 128 frames (~2.7 ms at the locked 48 kHz); `budgetMs` is that deadline.
  * `wrap*` fields cover only the quanta where the row counter went backwards —
  * a pattern wrap or order change — which is where hitches are reported.
  */
@@ -292,6 +296,8 @@ export interface SyncDebugInfo {
   lastWorkletUpdate: number;
   seekPending: boolean;
   bufferHealth?: number;
+  /** Clock behind the playhead's heard time (worklet engines): output timestamp or latency formula. */
+  heardTimeSource?: import('./utils/playheadPrediction').HeardTimeSource;
 
   // Playhead prediction (when debug enabled)
   sampleRow?: number;
@@ -305,7 +311,8 @@ export interface SyncDebugInfo {
 // Window extensions
 declare global {
   interface Window {
-    libopenmptReady: Promise<LibOpenMPT>;
+    /** Set by the libopenmpt glue `<script>` index.html loads (vite-plugins/libopenmptHtml.ts) — absent if it failed. */
+    libopenmptReady?: Promise<LibOpenMPT>;
     libopenmpt: LibOpenMPT;
     _libopenmptReject?: (reason: Error) => void;
     webkitAudioContext?: typeof AudioContext;
@@ -319,6 +326,8 @@ declare global {
     __AUDIO_DIAG__?: AudioDiagSnapshot;
     /** Main-thread/GPU pattern-boundary timings (when ?patternDiag=1 or ?audioDiag=1) */
     __PATTERN_DIAG__?: PatternDiagSnapshot;
+    /** The page's PlayerEngine, in dev builds only (#492) — for the console and headless debugging. */
+    __PLAYER_ENGINE__?: import('./audio/engine/PlayerEngine').PlayerEngine;
     /** Headless Chrome / Playwright automation hooks (dev + CI) */
     __TEST_HOOKS__?: {
       /** FX rack (#453): drive the store like the panel / MIDI would. */
@@ -404,6 +413,31 @@ declare global {
       getMasterPanValue: () => number | null;
       setMasterVolume: (value: number) => void;
       setMasterPan: (value: number) => void;
+      /** Output device (#492): what the engine snapshot says the context renders to. */
+      getOutputDevice: () => {
+        supported: boolean;
+        deviceId: string;
+        label: string;
+        switching: boolean;
+        error: string | null;
+      };
+      setOutputDevice: (deviceId: string, label?: string) => Promise<boolean>;
+      listOutputDevices: () => Promise<import('./utils/audioOutputDevices').AudioOutputList>;
+      /** A stable number per AudioContext object (0 = none) — an identity check across device switches. */
+      getAudioContextSerial: () => number;
+      /** Contexts the factory has constructed this page session (pitfall 12: stays 1). */
+      getAudioContextConstructions: () => number;
+      /** RMS of the master analyser's current time-domain window, or null before the master chain exists. */
+      getMasterRms: () => number | null;
+      /** Which clock the playhead's heard time comes from right now, and the output delay it implies. */
+      getHeardTime: () => { source: import('./utils/playheadPrediction').HeardTimeSource; outputDelayMs: number } | null;
+      /** #492: how position reports reach the main thread (shared ring vs messages), with counts. */
+      getPositionPathStats: () => { transport: 'ring' | 'message'; samples: number; dropped: number };
+      /** #492: a warmed-up position-path loop for allocation measurement (`run(n)` → reports applied). */
+      runPositionPathBenchmark: (
+        path: 'ring' | 'message',
+        iterations: number,
+      ) => Promise<{ applied: number; run: (n: number) => number }>;
     };
   }
 }

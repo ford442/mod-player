@@ -167,7 +167,7 @@ describe('#513 module create off the audio thread (compiled worklet + real creat
     const after = await renderQuanta(scope, node, 200);
     expect(after.peak).toBeGreaterThan(0.01);
     const lastPos = [...scope.posted].reverse().find((m) => m.type === WT.position)!;
-    expect((lastPos.channelVU as number[]).length).toBe(32); // the 64-channel IT (VU is capped at 32)
+    expect((lastPos.channelVU as number[]).length).toBe(64); // the 64-channel IT (VU cap is MAX_VU_CHANNELS)
   }, 60_000);
 
   it('a corrupt file fails on the worker: the worklet reports the usual error and keeps playing', async () => {

@@ -33,7 +33,7 @@ export type JsWorkletDispatchResult =
   | { kind: 'error'; message: string; shouldAttemptSpFallback: boolean; fatal: boolean }
   | { kind: 'seek-ack' }
   | { kind: 'diagnostic'; subtype: 'needData' | 'starvation'; raw: unknown }
-  | { kind: 'projectm-pcm'; buffer: Float32Array; channels: 1 | 2 }
+  | { kind: 'projectm-pcm'; buffer: Float32Array<ArrayBuffer>; channels: 1 | 2 }
   | { kind: 'audio-diag'; diag: WorkletAudioDiagMessage }
   | { kind: 'create-heap'; heap: WorkletCreateHeapMessage }
   | { kind: 'ignored' };

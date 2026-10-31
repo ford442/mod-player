@@ -49,7 +49,26 @@ if (typeof self !== 'undefined' && (!self.crypto || !self.crypto.getRandomValues
  * to public/worklets/openmpt-worklet.js. Do not hand-edit the generated file.
  */
 
-import { MAIN_TO_WORKLET, WORKLET_TO_MAIN } from '../workletProtocolConstants';
+import {
+  MAIN_TO_WORKLET,
+  MAX_VU_CHANNELS,
+  WORKLET_TO_MAIN,
+  type MainToWorkletMessage,
+} from '../workletProtocolConstants';
+import { protocolError, validateMainToWorklet } from '../workletProtocolGuard';
+import {
+  F_AUDIO_TIME,
+  F_BPM,
+  F_NUM_VU,
+  F_ORDER,
+  F_POSITION_SECONDS,
+  F_ROW,
+  F_ROW_FRACTION,
+  F_SAMPLE_RATE,
+  F_SAMPLES_WRITTEN,
+  F_SPEED,
+} from '../positionRing';
+import { PositionRingWriter } from '../positionRingWriter';
 import { ensureSharedLib } from '../libSingleton';
 import { waitForRuntimeInitialized } from '../libRuntimeReady';
 import {
@@ -60,6 +79,13 @@ import {
   STAGED_SWAP_TIMEOUT_MS,
   alignCreateThreadStack,
 } from '../createThreadProtocol';
+
+function isObject(v: unknown): v is Record<string, unknown> {
+  return v != null && typeof v === 'object';
+}
+function isNonNegInt(v: unknown): v is number {
+  return typeof v === 'number' && Number.isInteger(v) && v >= 0;
+}
 
 const MT = MAIN_TO_WORKLET;
 const WT = WORKLET_TO_MAIN;
@@ -114,195 +140,11 @@ function error(...args: unknown[]): void {
   console.error('[Worklet]', ...args);
 }
 
-// ── Lightweight main→worklet message validation ─────────────────────────
-// Deliberately hand-rolled (not the zod schema in audio-worklet/protocol.ts)
-// — zod's parse cost and bundle weight don't belong on the audio thread.
+// ── main→worklet messages ───────────────────────────────────────────────
+// Validated by workletProtocolGuard.ts — generated from the same table as the main thread's zod
+// schemas (workletProtocolConstants.ts, #492), without zod's parse cost or bundle weight.
 
-interface InitLibMsg {
-  type: typeof MAIN_TO_WORKLET.initLib;
-  scriptText: string;
-  wasmBytes?: ArrayBuffer;
-}
-interface LoadMsg {
-  type: typeof MAIN_TO_WORKLET.load;
-  moduleData: ArrayBuffer | Uint8Array;
-}
-interface PlayMsg { type: typeof MAIN_TO_WORKLET.play }
-interface PauseMsg { type: typeof MAIN_TO_WORKLET.pause }
-interface SeekMsg {
-  type: typeof MAIN_TO_WORKLET.seek;
-  order: number;
-  row: number;
-}
-interface GetOscBufferMsg { type: typeof MAIN_TO_WORKLET.getOscBuffer }
-interface SetAudioLiteMsg {
-  type: typeof MAIN_TO_WORKLET.setAudioLite;
-  lite: boolean;
-}
-interface SetProjectmPcmMsg {
-  type: typeof MAIN_TO_WORKLET.setProjectmPcm;
-  enabled: boolean;
-}
-interface SetAudioDiagMsg {
-  type: typeof MAIN_TO_WORKLET.setAudioDiag;
-  enabled: boolean;
-}
-interface SetChannelMuteMsg {
-  type: typeof MAIN_TO_WORKLET.setChannelMute;
-  channel: number;
-  muted: boolean;
-}
-interface SetRenderParamMsg {
-  type: typeof MAIN_TO_WORKLET.setRenderParam;
-  param: number;
-  value: number;
-}
-interface CtlSetTextMsg {
-  type: typeof MAIN_TO_WORKLET.ctlSetText;
-  key: string;
-  value: string;
-}
-interface ReturnPcmBufferMsg {
-  type: typeof MAIN_TO_WORKLET.returnPcmBuffer;
-  buffer: Float32Array<ArrayBuffer>;
-}
-interface AttachCreatePortMsg {
-  type: typeof MAIN_TO_WORKLET.attachCreatePort;
-  port: WorkletMessagePort;
-}
-/** Legacy no-type load shim used by some callers. */
-interface LegacyLoadMsg {
-  type?: undefined;
-  moduleData: ArrayBuffer | Uint8Array;
-}
-
-type MainToWorkletMsg =
-  | InitLibMsg
-  | LoadMsg
-  | PlayMsg
-  | PauseMsg
-  | SeekMsg
-  | GetOscBufferMsg
-  | SetAudioLiteMsg
-  | SetProjectmPcmMsg
-  | SetAudioDiagMsg
-  | SetChannelMuteMsg
-  | SetRenderParamMsg
-  | CtlSetTextMsg
-  | ReturnPcmBufferMsg
-  | AttachCreatePortMsg
-  | LegacyLoadMsg;
-
-type ParseMainToWorkletResult =
-  | { ok: true; message: MainToWorkletMsg }
-  | { ok: false; error: string };
-
-function isObject(v: unknown): v is Record<string, unknown> {
-  return v != null && typeof v === 'object';
-}
-function isFiniteNumber(v: unknown): v is number {
-  return typeof v === 'number' && Number.isFinite(v);
-}
-function isNonNegInt(v: unknown): v is number {
-  return typeof v === 'number' && Number.isInteger(v) && v >= 0;
-}
-function isModulePayload(v: unknown): v is ArrayBuffer | Uint8Array {
-  return v instanceof ArrayBuffer || v instanceof Uint8Array;
-}
-
-/** Lightweight main→worklet receive guard (mirrors audio-worklet/protocol.ts). */
-function parseMainToWorkletMessage(data: unknown): ParseMainToWorkletResult {
-  if (!isObject(data)) {
-    return { ok: false, error: 'message is not an object' };
-  }
-
-  const type = data.type;
-
-  if (type === MAIN_TO_WORKLET.initLib) {
-    if (typeof data.scriptText !== 'string' || data.scriptText.length === 0) {
-      return { ok: false, error: 'initLib requires scriptText' };
-    }
-    if (data.wasmBytes != null && !(data.wasmBytes instanceof ArrayBuffer)) {
-      return { ok: false, error: 'wasmBytes must be ArrayBuffer' };
-    }
-    return { ok: true, message: data as unknown as InitLibMsg };
-  }
-
-  if (type === MAIN_TO_WORKLET.load) {
-    if (!isModulePayload(data.moduleData)) {
-      return { ok: false, error: 'load requires moduleData' };
-    }
-    return { ok: true, message: data as unknown as LoadMsg };
-  }
-
-  if (type === MAIN_TO_WORKLET.play || type === MAIN_TO_WORKLET.pause || type === MAIN_TO_WORKLET.getOscBuffer) {
-    return { ok: true, message: data as unknown as PlayMsg | PauseMsg | GetOscBufferMsg };
-  }
-
-  if (type === MAIN_TO_WORKLET.seek) {
-    if (!isNonNegInt(data.order) || !isNonNegInt(data.row)) {
-      return { ok: false, error: 'seek requires order/row' };
-    }
-    return { ok: true, message: data as unknown as SeekMsg };
-  }
-
-  if (type === MAIN_TO_WORKLET.setAudioLite) {
-    if (typeof data.lite !== 'boolean') {
-      return { ok: false, error: 'setAudioLite requires lite boolean' };
-    }
-    return { ok: true, message: data as unknown as SetAudioLiteMsg };
-  }
-
-  if (type === MAIN_TO_WORKLET.setProjectmPcm || type === MAIN_TO_WORKLET.setAudioDiag) {
-    if (typeof data.enabled !== 'boolean') {
-      return { ok: false, error: String(type) + ' requires enabled boolean' };
-    }
-    return { ok: true, message: data as unknown as SetProjectmPcmMsg | SetAudioDiagMsg };
-  }
-
-  if (type === MAIN_TO_WORKLET.setChannelMute) {
-    if (!isNonNegInt(data.channel) || typeof data.muted !== 'boolean') {
-      return { ok: false, error: 'setChannelMute requires channel/muted' };
-    }
-    return { ok: true, message: data as unknown as SetChannelMuteMsg };
-  }
-
-  if (type === MAIN_TO_WORKLET.setRenderParam) {
-    if (!isFiniteNumber(data.param) || !isFiniteNumber(data.value)) {
-      return { ok: false, error: 'setRenderParam requires param/value' };
-    }
-    return { ok: true, message: data as unknown as SetRenderParamMsg };
-  }
-
-  if (type === MAIN_TO_WORKLET.ctlSetText) {
-    if (typeof data.key !== 'string' || typeof data.value !== 'string') {
-      return { ok: false, error: 'ctlSetText requires key/value strings' };
-    }
-    return { ok: true, message: data as unknown as CtlSetTextMsg };
-  }
-
-  if (type === MAIN_TO_WORKLET.returnPcmBuffer) {
-    if (!(data.buffer instanceof Float32Array)) {
-      return { ok: false, error: 'returnPcmBuffer requires a Float32Array buffer' };
-    }
-    return { ok: true, message: data as unknown as ReturnPcmBufferMsg };
-  }
-
-  if (type === MAIN_TO_WORKLET.attachCreatePort) {
-    const port = data.port;
-    if (!isObject(port) || typeof port.postMessage !== 'function') {
-      return { ok: false, error: 'attachCreatePort requires a MessagePort' };
-    }
-    return { ok: true, message: data as unknown as AttachCreatePortMsg };
-  }
-
-  // Legacy no-type load shim
-  if (type == null && isModulePayload(data.moduleData)) {
-    return { ok: true, message: data as unknown as LegacyLoadMsg };
-  }
-
-  return { ok: false, error: 'unknown main→worklet message type: ' + String(type) };
-}
+type InitLibMsg = Extract<MainToWorkletMessage, { type: typeof MAIN_TO_WORKLET.initLib }>;
 
 /** Normalize postMessage payload to a tight Uint8Array view. */
 function moduleBytesFromPayload(moduleData: ArrayBuffer | Uint8Array): Uint8Array {
@@ -548,6 +390,8 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
   declare _audioDiag: boolean;
   /** Reused channel VU snapshot (length grows once to numChannels, then stable). */
   declare _channelVuArr: number[];
+  /** Shared position/VU ring (#492, crossOriginIsolated pages): replaces `position` messages when set. */
+  declare _positionRing: PositionRingWriter | null;
   declare _lastChannelVU: number[];
   declare _prevRowInt: number;
   declare _lastOrder: number;
@@ -661,12 +505,11 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
     }
 
     this.port.onmessage = async (e: WorkletMessageEvent) => {
-      const parsed = parseMainToWorkletMessage(e.data);
-      if (!parsed.ok) {
-        error('Rejected main→worklet message:', parsed.error, e.data);
+      const msg = validateMainToWorklet(e.data);
+      if (!msg) {
+        error('Rejected main→worklet message:', protocolError(), e.data);
         return;
       }
-      const msg = parsed.message;
       const type = msg.type;
       log('Received message:', type || '(legacy-load)');
 
@@ -740,6 +583,9 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
           && this.pcmBufferPool.length < PCM_BUFFER_POOL_MAX) {
           this.pcmBufferPool.push(msg.buffer);
         }
+      } else if (type === MT.setPositionRing) {
+        this._positionRing = new PositionRingWriter(msg.buffer);
+        log('Position reports go through the shared ring');
       } else if (type === MT.ctlSetText) {
         const lib = this.lib;
         if (this.modulePtr && lib && typeof lib._openmpt_module_ctl_set_text === 'function') {
@@ -754,7 +600,8 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
           }
         }
       } else if (type === MT.attachCreatePort) {
-        this._attachCreatePort(msg.port);
+        // The shared protocol type is structural (no DOM lib in this project); the port is a MessagePort.
+        this._attachCreatePort(msg.port as WorkletMessagePort);
       } else if (!type) {
         await this.loadModule(msg.moduleData);
       }
@@ -776,6 +623,7 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
     this._audioDiag = false;
     this._resetAudioDiag();
     this._channelVuArr = [];
+    this._positionRing = null;
     this._lastChannelVU = this._channelVuArr;
     this._prevRowInt = -1;
     this._lastOrder = 0;
@@ -1402,7 +1250,7 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
     // Per-channel VU / IIR band split must not run every quantum.
     if (shouldReportPosition) {
       const numCh = lib._openmpt_module_get_num_channels(mod);
-      const n = Math.min(numCh, 32);
+      const n = Math.min(numCh, MAX_VU_CHANNELS);
       let channelVU = this._channelVuArr;
       if (channelVU.length !== n) {
         channelVU = new Array<number>(n);
@@ -1416,22 +1264,44 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
       this._updateAudioReactive(outL, outR, samplesWritten, channelVU);
 
       this._lastReportedRowInt = rowInt;
-      this.port.postMessage({
-        type: WT.position,
-        order,
-        row: rowInt,
-        rowFraction,
-        positionSeconds: posSec,
-        bpm,
-        speed,
-        /** Preferred name — audio timeline of pre-render snapshot. */
-        audioTime,
-        /** Alias kept for older main-thread handlers. */
-        workletTime: audioTime,
-        samplesWritten,
-        sampleRate,
-        channelVU,
-      });
+      const ring = this._positionRing;
+      if (ring) {
+        // Shared memory: no message object, no clone, no channelVU copy on the main thread.
+        ring.begin();
+        const f = ring.fields;
+        const o = ring.fieldOffset;
+        f[o + F_ORDER] = order;
+        f[o + F_ROW] = rowInt;
+        f[o + F_ROW_FRACTION] = rowFraction;
+        f[o + F_POSITION_SECONDS] = posSec;
+        f[o + F_BPM] = bpm;
+        f[o + F_SPEED] = speed;
+        f[o + F_AUDIO_TIME] = audioTime;
+        f[o + F_SAMPLES_WRITTEN] = samplesWritten;
+        f[o + F_SAMPLE_RATE] = sampleRate;
+        f[o + F_NUM_VU] = n;
+        const vu = ring.vu;
+        const vo = ring.vuOffset;
+        for (let i = 0; i < n; i++) vu[vo + i] = channelVU[i]!;
+        ring.commit();
+      } else {
+        this.port.postMessage({
+          type: WT.position,
+          order,
+          row: rowInt,
+          rowFraction,
+          positionSeconds: posSec,
+          bpm,
+          speed,
+          /** Preferred name — audio timeline of pre-render snapshot. */
+          audioTime,
+          /** Alias kept for older main-thread handlers. */
+          workletTime: audioTime,
+          samplesWritten,
+          sampleRate,
+          channelVU,
+        });
+      }
       this.lastPositionReportTime = currentTime;
     }
 

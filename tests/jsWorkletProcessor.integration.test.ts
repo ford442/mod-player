@@ -9,6 +9,7 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import { MAIN_TO_WORKLET as MT, WORKLET_TO_MAIN as WT } from '../audio-worklet/workletProtocolConstants';
 import { synthXm } from '../scripts/lib/synth-xm.mjs';
+import { PositionRingReader, createPositionRingBuffer } from '../audio-worklet/positionRing';
 import { FakeScope, QUANTUM, SAMPLE_RATE, initLib, read } from './helpers/workletScope';
 
 /** Render `quanta` 128-frame blocks; returns peak and a cheap PCM fingerprint. */
@@ -182,4 +183,51 @@ describe('compiled JS worklet + real libopenmpt wasm (Node, fake AudioWorkletGlo
     const err = cold.posted.find((m) => m.type === WT.error);
     expect(String(err?.message)).toMatch(/0asm magic/);
   });
+});
+
+describe('64-channel VU and the shared position ring (#492), compiled worklet + real libopenmpt', () => {
+  const XM64 = synthXm(64);
+
+  it('reports VU for all 64 channels of a 64-channel module (the cap was 32)', async () => {
+    const scope = new FakeScope();
+    const n = scope.newNode();
+    await initLib(scope, n.send);
+    await n.send({ type: MT.load, moduleData: scope.toRealm(XM64) });
+    render(scope, n.node, 300);
+    const positions = scope.posted.filter((m) => m.type === WT.position);
+    const vu = positions[positions.length - 1]!.channelVU as number[];
+    expect(vu).toHaveLength(64);
+    expect(vu.slice(32).some((v) => v > 0)).toBe(true);
+  }, 60_000);
+
+  it('with a ring attached, reports go through shared memory — and no position messages', async () => {
+    const scope = new FakeScope();
+    const n = scope.newNode();
+    await initLib(scope, n.send);
+    const ring = createPositionRingBuffer();
+    await n.send({ type: MT.setPositionRing, buffer: ring });
+    const reader = new PositionRingReader(ring);
+    await n.send({ type: MT.load, moduleData: scope.toRealm(XM64) });
+    expect(scope.count(WT.error)).toBe(0);
+    render(scope, n.node, 600); // ~1.6 s of audio
+
+    expect(scope.count(WT.position)).toBe(0);
+    const times: number[] = [];
+    let sawUpperVu = false;
+    while (reader.next()) {
+      const s = reader.sample;
+      times.push(s.audioTime);
+      expect(s.order).toBeGreaterThanOrEqual(0);
+      expect(s.row).toBeGreaterThanOrEqual(0);
+      expect(s.row).toBeLessThan(64);
+      expect(s.sampleRate).toBe(SAMPLE_RATE);
+      expect(s.numVu).toBe(64);
+      if (Array.from(reader.vu.subarray(32, 64)).some((v) => v > 0)) sawUpperVu = true;
+    }
+    // The reader sees at most the ring's depth since it attached; all of them in time order.
+    expect(times.length).toBeGreaterThan(4);
+    expect([...times].sort((a, b) => a - b)).toEqual(times);
+    expect(reader.dropped).toBeGreaterThan(0); // ~96 reports written, 8 slots
+    expect(sawUpperVu).toBe(true);
+  }, 60_000);
 });

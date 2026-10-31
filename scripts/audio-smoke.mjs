@@ -235,6 +235,89 @@ async function runFxPhase(page) {
   return { status: 'PASS', onDiag, irRequests: [...irRequests], onAdvance, offAdvance };
 }
 
+/**
+ * Bytes in a CDP sampling heap profile allocated under a frame from a script whose URL matches
+ * `urlPattern` (that frame and everything it called). The page keeps playing while the profiler
+ * samples, so the UI loop and React allocate in the same window; attributing by the benchmark's own
+ * chunk counts only the path under test.
+ */
+function sampledBytesUnder(profile, urlPattern) {
+  let total = 0;
+  const stack = [{ node: profile.head, inside: false }];
+  while (stack.length > 0) {
+    const { node, inside } = stack.pop();
+    const here = inside || urlPattern.test(node.callFrame.url);
+    if (here) total += node.selfSize;
+    for (const child of node.children) stack.push({ node: child, inside: here });
+  }
+  return total;
+}
+
+/**
+ * Position path (#492): on a crossOriginIsolated page position + VU reach the main thread through the
+ * shared ring, not `position` messages, and that path allocates nothing per report. The allocation
+ * check runs the real ring path (positionRingBenchmark, a lazy chunk) under the CDP sampling heap
+ * profiler with objects collected by minor GCs included, counting what was allocated under that
+ * chunk's frames. V8 tiers the loop up on its own schedule, so windows repeat until two in a row are
+ * quiet.
+ */
+async function runPositionPathPhase(page, context, engine) {
+  const isolated = await page.evaluate(() => window.crossOriginIsolated === true);
+  if (!isolated) {
+    return { status: 'SKIP', reason: 'page not crossOriginIsolated — position reports use postMessage' };
+  }
+  const before = await page.evaluate(() => window.__TEST_HOOKS__.getPositionPathStats());
+  if (before.transport !== 'ring') {
+    throw new Error(`position path: expected the shared ring on an isolated page, got ${before.transport}`);
+  }
+  await new Promise((r) => setTimeout(r, 1000));
+  const after = await page.evaluate(() => window.__TEST_HOOKS__.getPositionPathStats());
+  if (!(after.samples > before.samples)) {
+    throw new Error(`position path: ring did not advance (${before.samples} → ${after.samples} reports)`);
+  }
+
+  const cdp = engine === 'playwright' ? await context.newCDPSession(page) : await page.createCDPSession();
+  await cdp.send('HeapProfiler.enable');
+  const REPORTS = 10_000;
+  const measure = async (path, reports) => {
+    await page.evaluate(async (p) => {
+      window.__positionBench ??= {};
+      window.__positionBench[p] ??= await window.__TEST_HOOKS__.runPositionPathBenchmark(p, 2000);
+    }, path);
+    await cdp.send('HeapProfiler.collectGarbage');
+    await cdp.send('HeapProfiler.startSampling', {
+      samplingInterval: 256,
+      includeObjectsCollectedByMinorGC: true,
+      includeObjectsCollectedByMajorGC: true,
+    });
+    await page.evaluate(({ p, n }) => { window.__positionBench[p].run(n); }, { p: path, n: reports });
+    const { profile } = await cdp.send('HeapProfiler.stopSampling');
+    return sampledBytesUnder(profile, /positionRingBenchmark/) / reports;
+  };
+
+  const ringWindows = [];
+  let quiet = 0;
+  while (ringWindows.length < 30 && quiet < 2) {
+    const perReport = await measure('ring', REPORTS);
+    ringWindows.push(Math.round(perReport * 100) / 100);
+    quiet = perReport < 2 ? quiet + 1 : 0;
+  }
+  const messageBytesPerReport = Math.round((await measure('message', 2000)) * 10) / 10;
+  await cdp.send('HeapProfiler.disable');
+  await cdp.detach();
+  if (quiet < 2) {
+    throw new Error(`position path: the shared ring kept allocating (bytes/report per window: ${ringWindows.join(', ')})`);
+  }
+  return {
+    status: 'PASS',
+    transport: after.transport,
+    reportsPerSecond: Math.round((after.samples - before.samples) / 1),
+    dropped: after.dropped,
+    ringBytesPerReport: ringWindows,
+    messageBytesPerReport,
+  };
+}
+
 function auditConsole(phaseLines) {
   const { failures } = classifyAudioConsole(phaseLines);
   if (failures.length) {
@@ -308,6 +391,8 @@ async function main() {
         status: 'PASS',
         ...playAdvance,
       });
+
+      report.phases.push({ id: 'position-path', ...(await runPositionPathPhase(page, context, engine)) });
 
       const xmPhaseStart = phaseConsoleStart();
       await loadXmMidPlayback(page, BASE_URL);

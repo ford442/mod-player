@@ -53,7 +53,7 @@ Every request carries `?v=<content hash>` so a browser/service-worker cache can 
 
 ### Load sequence (worklet)
 
-1. Main thread: `audioWorklet.addModule(…/openmpt-worklet.js?v=N)` (`hooks/useWorkletLoader.ts`; `?v=` is a content hash of the compiled processor, from `audio-worklet/js/worklet-version.generated.json` — no manual bump needed).
+1. Main thread: `audioWorklet.addModule(…/openmpt-worklet.js?v=N)` (`audio/engine/workletUrls.ts`; `?v=` is a content hash of the compiled processor, from `audio-worklet/js/worklet-version.generated.json` — no manual bump needed).
 2. Main thread creates `AudioWorkletNode` with processor name `openmpt-processor`.
 3. Main thread fetches the pair's `.js` **and** `.wasm` in parallel — `libopenmpt-playback.*` on a crossOriginIsolated page, else `libopenmpt-worklet.*` — and rejects anything wrong *here* (HTML 404 body, missing `\0asm` magic, a stale wasm2js glue).
 4. Main thread `postMessage({ type: 'initLib', scriptText, wasmBytes }, [wasmBytes])`, then `setRenderParam` (interpolation) and `load` (the first load goes to the worklet; later ones to the create worker once it is up — see above).

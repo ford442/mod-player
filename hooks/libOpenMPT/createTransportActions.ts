@@ -14,14 +14,12 @@ import {
   createPlayheadLagTracker,
   createPositionReportTracker,
 } from '../../utils/playheadLagMonitor';
-import type { LibOpenMPTRefs, LibOpenMPTSetters } from './types';
+import type { LibOpenMPTRefs, LibOpenMPTSetters, TransportPort } from './types';
 
 export interface TransportActionsDeps {
   refs: LibOpenMPTRefs;
   setters: Pick<
     LibOpenMPTSetters,
-    | 'setIsPlaying'
-    | 'setIsPaused'
     | 'setStatus'
     | 'setIsModuleLoaded'
     | 'setModuleInfo'
@@ -33,21 +31,20 @@ export interface TransportActionsDeps {
     | 'setSequencerGlobalRow'
     | 'setPlaybackRowFraction'
   >;
+  /** The transport FSM — the only thing that changes playing / paused / stopped (#492). */
+  transport: TransportPort;
 }
 
 export function createStopMusic(deps: TransportActionsDeps) {
-  const { refs, setters } = deps;
+  const { refs, setters, transport } = deps;
   const {
-    isPlayingRef,
-    isPausedRef,
     pauseClockRef,
-    uiLoopActiveRef,
     animationFrameHandle,
     audioWorkletNodeRef,
     scriptProcessorRef,
     spLeftBufPtr,
     spRightBufPtr,
-    spFallbackTriggered,
+    playbackEngineRef,
     libopenmptRef,
     audioClockStartRef,
     workletTimeAtStartRef,
@@ -67,8 +64,6 @@ export function createStopMusic(deps: TransportActionsDeps) {
     currentModulePtr,
   } = refs;
   const {
-    setIsPlaying,
-    setIsPaused,
     setStatus,
     setIsModuleLoaded,
     setInstrumentNames,
@@ -78,14 +73,12 @@ export function createStopMusic(deps: TransportActionsDeps) {
   } = setters;
 
   return (destroy: boolean = false) => {
-    isPlayingRef.current = false;
-    setIsPlaying(false);
-    // Stop is the one way out of a pause that discards the position (the refs reset below).
-    isPausedRef.current = false;
-    setIsPaused(false);
+    // Legal from every phase. Stop is the one way out of a pause that discards the position (the
+    // refs reset below).
+    transport.send('stop');
     pauseClockRef.current = createPauseClock();
-    uiLoopActiveRef.current = false;
     if (animationFrameHandle.current) cancelAnimationFrame(animationFrameHandle.current);
+    animationFrameHandle.current = 0;
 
     const workletStop = getStopMusicWorkletActions(destroy, audioWorkletNodeRef.current != null);
 
@@ -95,7 +88,10 @@ export function createStopMusic(deps: TransportActionsDeps) {
         try { oldNode.port.postMessage(postPause()); } catch { /* ignore */ }
       }
       if (workletStop.clearMessageHandler) {
+        // Detach the fault handler with the message handler: a processorerror on a stopped node must
+        // not restart it (handleWorkletFault would bring it back up playing).
         try { oldNode.port.onmessage = null; } catch { /* ignore */ }
+        try { oldNode.onprocessorerror = null; } catch { /* ignore */ }
       }
       if (workletStop.disconnectNode) {
         try { oldNode.disconnect(); } catch { /* ignore */ }
@@ -117,7 +113,8 @@ export function createStopMusic(deps: TransportActionsDeps) {
       libopenmptRef.current._free(spRightBufPtr.current);
       spRightBufPtr.current = 0;
     }
-    spFallbackTriggered.current = false;
+    // Nothing is rendering any more (this also re-arms the ScriptProcessor fallback guard).
+    playbackEngineRef.current = null;
 
     audioClockStartRef.current = 0;
     workletTimeAtStartRef.current = 0;
@@ -165,28 +162,23 @@ export function createStopMusic(deps: TransportActionsDeps) {
  * hold (see utils/transportClock.ts).
  */
 export function createPauseMusic(deps: TransportActionsDeps) {
-  const { refs, setters } = deps;
+  const { refs, setters, transport } = deps;
   const {
-    isPlayingRef,
-    isPausedRef,
     pauseClockRef,
     audioContextRef,
     playbackEngineRef,
     audioWorkletNodeRef,
     channelStatesRef,
   } = refs;
-  const { setIsPlaying, setIsPaused, setStatus } = setters;
+  const { setStatus } = setters;
 
   return () => {
     // Pause only means something while playing: a stopped or already-paused transport stays put.
-    if (!isPlayingRef.current) return;
+    if (!transport.can('pause')) return;
 
     const audioCtx = audioContextRef.current;
     pauseClockRef.current = { pausedAt: audioCtx ? audioCtx.currentTime : 0, resumedAt: null };
-    isPlayingRef.current = false;
-    isPausedRef.current = true;
-    setIsPlaying(false);
-    setIsPaused(true);
+    transport.send('pause');
 
     // Drive the engine that actually started this playback.
     if (playbackEngineRef.current === 'worklet' && audioWorkletNodeRef.current) {
@@ -207,10 +199,8 @@ export function createPauseMusic(deps: TransportActionsDeps) {
  * the pause as drift.
  */
 export function createResumeMusic(deps: TransportActionsDeps) {
-  const { refs, setters } = deps;
+  const { refs, setters, transport } = deps;
   const {
-    isPlayingRef,
-    isPausedRef,
     pauseClockRef,
     audioContextRef,
     playbackEngineRef,
@@ -223,14 +213,16 @@ export function createResumeMusic(deps: TransportActionsDeps) {
     workletTimeAtStartRef,
     driftAccumulatorRef,
     lastWorkletUpdateRef,
-    uiLoopActiveRef,
     animationFrameHandle,
     updateUIRef,
   } = refs;
-  const { setIsPlaying, setIsPaused, setStatus } = setters;
+  const { setStatus } = setters;
 
   return () => {
-    if (!isPausedRef.current) return;
+    const engine = playbackEngineRef.current;
+    const target = engine === 'scriptprocessor' ? 'spFallback' : 'playing';
+    // Only a paused transport resumes (a module still being cued has nothing to resume yet).
+    if (!transport.can('resume', target)) return;
 
     const audioCtx = audioContextRef.current;
     const resumeAt = audioCtx ? audioCtx.currentTime : 0;
@@ -250,10 +242,7 @@ export function createResumeMusic(deps: TransportActionsDeps) {
     driftAccumulatorRef.current = 0;
     lastWorkletUpdateRef.current = resumeAt;
 
-    isPausedRef.current = false;
-    isPlayingRef.current = true;
-    setIsPaused(false);
-    setIsPlaying(true);
+    transport.send('resume', target);
 
     if (playbackEngineRef.current === 'worklet' && audioWorkletNodeRef.current) {
       try { audioWorkletNodeRef.current.port.postMessage(postPlay()); } catch { /* node torn down */ }
@@ -263,7 +252,6 @@ export function createResumeMusic(deps: TransportActionsDeps) {
       void audioCtx.resume().catch(() => { /* needs a user gesture; the suspend-recovery listener retries */ });
     }
 
-    uiLoopActiveRef.current = true;
     if (animationFrameHandle.current) cancelAnimationFrame(animationFrameHandle.current);
     animationFrameHandle.current = requestAnimationFrame(() => { updateUIRef.current?.(); });
 
@@ -345,6 +333,7 @@ export function createSeekToStep(deps: TransportActionsDeps) {
     setSequencerGlobalRow(step);
     setPlaybackRowFraction(targetRow);
     playbackStateRef.current.playheadRow = targetRow;
+    playbackStateRef.current.currentOrder = targetOrder;
     lastUiOrderRef.current = targetOrder;
     lastUiRowIntRef.current = targetRow;
 
