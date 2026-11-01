@@ -1,8 +1,9 @@
 /**
  * Transport state machine: stopped → playing → paused → playing → paused → stopped, driven through the
- * real createStopMusic / createPauseMusic / createResumeMusic with hand-built refs and a mock worklet
- * port. Plus the UI loop's playhead behaviour across a pause (createUpdateUI) — the part that, left
- * naive, extrapolates over a silent engine and jumps forward on resume.
+ * real createStopMusic / createPauseMusic / createResumeMusic with hand-built refs, the real transport
+ * FSM (#492: isPlayingRef / isPausedRef are views of it, as in PlayerEngine) and a mock worklet port.
+ * Plus the UI loop's playhead behaviour across a pause (createUpdateUI) — the part that, left naive,
+ * extrapolates over a silent engine and jumps forward on resume.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MAIN_TO_WORKLET } from '../audio-worklet/workletProtocolConstants';
@@ -13,6 +14,7 @@ import {
 } from '../hooks/libOpenMPT/createTransportActions';
 import { createUpdateUI } from '../hooks/libOpenMPT/createUpdateUI';
 import type { LibOpenMPTRefs } from '../hooks/libOpenMPT/types';
+import { TransportMachine } from '../audio/engine/transport';
 import type { WorkletPositionSample } from '../utils/playheadPrediction';
 import { createPauseClock } from '../utils/transportClock';
 
@@ -42,6 +44,7 @@ function makeRefs() {
   const audioCtx = makeAudioContext();
   const node = makeNode();
   const updateUI = vi.fn();
+  const transport = new TransportMachine({ strict: true });
   const refs = {
     libopenmptRef: ref(null),
     currentModulePtr: ref(0),
@@ -54,15 +57,15 @@ function makeRefs() {
     playbackEngineRef: ref<'worklet' | 'scriptprocessor' | null>('worklet'),
     animationFrameHandle: ref(0),
     updateUIRef: ref(updateUI),
-    uiLoopActiveRef: ref(false),
-    isPlayingRef: ref(false),
-    isPausedRef: ref(false),
+    isPlayingRef: { get current() { return transport.isPlaying; } },
+    isPausedRef: { get current() { return transport.isPaused; } },
     pauseClockRef: ref(createPauseClock()),
     channelStatesRef: ref([
       { volume: 0.8, trigger: 1, noteAge: 0 },
       { volume: 0.4, trigger: 0, noteAge: 3 },
     ]),
     workletPositionSampleRef: ref<WorkletPositionSample | null>(makeSample()),
+    positionRingRef: ref(null),
     workletOrderRef: ref(0),
     workletRowRef: ref(4),
     workletTimeRef: ref(1),
@@ -78,8 +81,6 @@ function makeRefs() {
     seekAcknowledgedRef: ref(true),
   };
   const setters = {
-    setIsPlaying: vi.fn(),
-    setIsPaused: vi.fn(),
     setStatus: vi.fn(),
     setIsModuleLoaded: vi.fn(),
     setInstrumentNames: vi.fn(),
@@ -87,13 +88,17 @@ function makeRefs() {
     setModuleFormat: vi.fn(),
     setModuleComments: vi.fn(),
   };
-  return { refs, setters, audioCtx, node, updateUI };
+  return { refs, setters, transport, audioCtx, node, updateUI };
 }
 
 type Fixture = ReturnType<typeof makeRefs>;
 
 function actions(f: Fixture) {
-  const deps = { refs: f.refs as unknown as LibOpenMPTRefs, setters: f.setters as never };
+  const deps = {
+    refs: f.refs as unknown as LibOpenMPTRefs,
+    setters: f.setters as never,
+    transport: f.transport,
+  };
   return {
     stop: createStopMusic(deps),
     pause: createPauseMusic(deps),
@@ -101,10 +106,12 @@ function actions(f: Fixture) {
   };
 }
 
-/** What the page does on a successful play(): flags + a running UI loop. */
+/** What the page does on a successful play(): module loaded, engine started, UI loop running. */
 function startPlaying(f: Fixture) {
-  f.refs.isPlayingRef.current = true;
-  f.refs.uiLoopActiveRef.current = true;
+  f.transport.send('load');
+  f.transport.send('parsed', 'ready');
+  f.transport.send('start');
+  f.transport.send('started', f.refs.playbackEngineRef.current === 'scriptprocessor' ? 'spFallback' : 'playing');
   f.refs.animationFrameHandle.current = 99;
 }
 
@@ -124,7 +131,7 @@ describe('transport state machine (worklet engine)', () => {
     actions(f).pause();
     expect(f.node.port.postMessage).not.toHaveBeenCalled();
     expect(f.refs.isPausedRef.current).toBe(false);
-    expect(f.setters.setIsPaused).not.toHaveBeenCalled();
+    expect(f.transport.phase).toBe('idle');
     expect(f.setters.setStatus).not.toHaveBeenCalled();
   });
 
@@ -145,8 +152,7 @@ describe('transport state machine (worklet engine)', () => {
     expect(messageTypes(f)).toEqual([MAIN_TO_WORKLET.pause]);
     expect(f.refs.isPlayingRef.current).toBe(false);
     expect(f.refs.isPausedRef.current).toBe(true);
-    expect(f.setters.setIsPlaying).toHaveBeenLastCalledWith(false);
-    expect(f.setters.setIsPaused).toHaveBeenLastCalledWith(true);
+    expect(f.transport.phase).toBe('paused');
     expect(f.setters.setStatus).toHaveBeenLastCalledWith('Paused.');
     expect(f.refs.pauseClockRef.current).toEqual({ pausedAt: 10.5, resumedAt: null });
 
@@ -160,7 +166,6 @@ describe('transport state machine (worklet engine)', () => {
     expect(f.refs.driftAccumulatorRef.current).toBe(0.02);
     // The UI loop keeps running (it settles the playhead and is already alive for resume), the worklet
     // keeps its message handler (position / ended must still be handled), and the node stays wired.
-    expect(f.refs.uiLoopActiveRef.current).toBe(true);
     expect(vi.mocked(cancelAnimationFrame)).not.toHaveBeenCalled();
     expect(f.node.port.onmessage).not.toBeNull();
     expect(f.node.disconnect).not.toHaveBeenCalled();
@@ -189,8 +194,7 @@ describe('transport state machine (worklet engine)', () => {
     expect(messageTypes(f)).toEqual([MAIN_TO_WORKLET.pause, MAIN_TO_WORKLET.play]);
     expect(f.refs.isPlayingRef.current).toBe(true);
     expect(f.refs.isPausedRef.current).toBe(false);
-    expect(f.setters.setIsPaused).toHaveBeenLastCalledWith(false);
-    expect(f.setters.setIsPlaying).toHaveBeenLastCalledWith(true);
+    expect(f.transport.phase).toBe('playing');
     expect(f.setters.setStatus).toHaveBeenLastCalledWith('Playing...');
 
     // Same order/row: the stale sample is rebased to where the engine stopped (4 + 0.5 s * 8 = 8).
@@ -250,7 +254,7 @@ describe('transport state machine (worklet engine)', () => {
     stop();
 
     expect(f.refs.isPausedRef.current).toBe(false);
-    expect(f.setters.setIsPaused).toHaveBeenLastCalledWith(false);
+    expect(f.transport.phase).toBe('stopped');
     expect(f.refs.pauseClockRef.current).toEqual(createPauseClock());
     expect(f.refs.workletOrderRef.current).toBe(0);
     expect(f.refs.workletRowRef.current).toBe(0);
@@ -308,6 +312,7 @@ describe('which engine pause/resume drive', () => {
 
     resume();
     expect(f.refs.isPlayingRef.current).toBe(true);
+    expect(f.transport.phase).toBe('spFallback');
     expect(f.node.port.postMessage).not.toHaveBeenCalled();
   });
 });
@@ -341,7 +346,6 @@ describe('UI loop playhead across a pause (createUpdateUI)', () => {
       lastSyncDebugUiMsRef: ref(0),
       lastChannelStatePublishMsRef: ref(0),
       noteAgesScratchRef: ref([]),
-      lastUpdateTimeRef: ref(0),
     };
     Object.assign(f.refs, extra);
     const uiSetters = {
@@ -380,6 +384,20 @@ describe('UI loop playhead across a pause (createUpdateUI)', () => {
     expect(tickAt(40).playheadRow).toBeCloseTo(8);
     expect(tickAt(500).playheadRow).toBeCloseTo(8);
     expect(playbackStateRef.current.timeSec).toBeCloseTo(1.5);
+  });
+
+  it('follows getOutputTimestamp when the context has it (#492), and the pause cap still holds', () => {
+    const { f, tickAt, pause } = makeLoop();
+    // The browser says the frame at the output now is 50 ms behind currentTime (vs 20 ms by the
+    // latency attributes): the playhead follows the browser.
+    Object.assign(f.audioCtx, {
+      getOutputTimestamp: () => ({ contextTime: f.audioCtx.currentTime - 0.05, performanceTime: performance.now() }),
+    });
+    expect(tickAt(10.5).playheadRow).toBeCloseTo(4 + 0.45 * RPS); // 7.6
+    pause(); // pausedAt = 10.5
+    expect(tickAt(10.51).playheadRow).toBeCloseTo(4 + 0.46 * RPS);
+    expect(tickAt(10.6).playheadRow).toBeCloseTo(8);
+    expect(tickAt(90).playheadRow).toBeCloseTo(8);
   });
 
   it('does not measure drift while paused', () => {

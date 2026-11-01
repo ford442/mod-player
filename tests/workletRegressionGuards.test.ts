@@ -12,7 +12,9 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { readLibOpenMPTSources, readTransportActionsSource } from './helpers/libOpenMPTSource';
 import { readAudioGraphSources } from './helpers/audioGraphSource';
+import { PLAYER_SAMPLE_RATE } from '../utils/sampleRates';
 import {
+  RENDER_QUANTUM_FRAMES,
   WORKLET_POSITION_REPORT_HZ,
   WORKLET_POSITION_REPORT_INTERVAL_SEC,
   canReuseWorkletNode,
@@ -37,18 +39,19 @@ describe('#354 position postMessage throttle (behavioral)', () => {
   });
 
   it('suppresses reports inside the ~60 Hz window', () => {
-    // 128-sample quantum @ 44.1 kHz ≈ 2.9 ms — far below 16.6 ms
-    const quantum = 128 / 44100;
+    // 128-frame quantum @ 48 kHz (the locked playback rate) ≈ 2.7 ms — far below 16.6 ms
+    const quantum = RENDER_QUANTUM_FRAMES / PLAYER_SAMPLE_RATE;
     expect(shouldReportWorkletPosition(quantum, 0)).toBe(false);
     expect(shouldReportWorkletPosition(1 / 60 - 1e-6, 0)).toBe(false);
   });
 
   it('caps reports to ≤~60 Hz over a simulated 1 s of audio quanta (fake clock)', () => {
-    // Pre-fix flood: one postMessage per quantum → ~344 Hz at 128/44100.
+    // Pre-fix flood: one postMessage per quantum → 375 Hz at 128 frames / 48 kHz.
     const unthrottled = countThrottledPositionReports({
       durationSec: 1,
       intervalSec: 0, // every quantum
     });
+    expect(unthrottled).toBe(Math.floor(PLAYER_SAMPLE_RATE / RENDER_QUANTUM_FRAMES) + 1); // t = 0 … 1 s inclusive
     expect(unthrottled).toBeGreaterThan(300);
 
     const throttled = countThrottledPositionReports({ durationSec: 1 });
@@ -58,13 +61,18 @@ describe('#354 position postMessage throttle (behavioral)', () => {
     expect(throttled).toBeLessThan(unthrottled / 4);
   });
 
-  it('stays near 60 Hz across a longer simulated window', () => {
+  it('stays near 60 Hz across a longer simulated window, at the locked rate and at the fallback 44.1 kHz', () => {
     const durationSec = 5;
-    const reports = countThrottledPositionReports({ durationSec });
-    const hz = reports / durationSec;
-    // Must not flood; must still refresh UI often enough for playhead prediction.
-    expect(hz).toBeLessThanOrEqual(WORKLET_POSITION_REPORT_HZ + 0.5);
-    expect(hz).toBeGreaterThanOrEqual(50);
+    // 44.1 kHz: the factory falls back to the device default when a browser refuses 48 kHz.
+    for (const sampleRate of [PLAYER_SAMPLE_RATE, 44100]) {
+      const reports = countThrottledPositionReports({ durationSec, sampleRate });
+      const hz = reports / durationSec;
+      // Must not flood; must still refresh UI often enough for playhead prediction.
+      expect(hz).toBeLessThanOrEqual(WORKLET_POSITION_REPORT_HZ + 0.5);
+      expect(hz).toBeGreaterThanOrEqual(50);
+    }
+    // The quantum really follows the rate it is given.
+    expect(countThrottledPositionReports({ durationSec: 1, intervalSec: 0, sampleRate: 44100 })).toBe(345);
   });
 
 
@@ -189,7 +197,7 @@ describe('#354 production source invariants', () => {
   const workletSource = readFileSync(join(ROOT, 'public/worklets/openmpt-worklet.js'), 'utf8');
   const useAudioGraph = readAudioGraphSources(ROOT);
   const useLibOpenMPT = readLibOpenMPTSources(ROOT);
-  const useWorkletLoader = readFileSync(join(ROOT, 'hooks/useWorkletLoader.ts'), 'utf8');
+  const workletUrls = readFileSync(join(ROOT, 'audio/engine/workletUrls.ts'), 'utf8');
   const lifecycle = readFileSync(join(ROOT, 'utils/workletAudioLifecycle.ts'), 'utf8');
 
   it('worklet throttles position posts at 1/60 s (not every quantum)', () => {
@@ -309,10 +317,10 @@ describe('#354 production source invariants', () => {
     // derive the `?v=` cache-bust from a content hash of the compiled
     // processor (scripts/build-js-worklet.mjs), so it only changes when the
     // generated openmpt-worklet.js actually changes.
-    expect(useWorkletLoader).toMatch(
-      /from ['"]\.\.\/audio-worklet\/js\/worklet-version\.generated\.json['"]/,
+    expect(workletUrls).toMatch(
+      /from ['"](?:\.\.\/)+audio-worklet\/js\/worklet-version\.generated\.json['"]/,
     );
-    expect(useWorkletLoader).toContain('WORKLET_VERSION = workletVersionData.version');
+    expect(workletUrls).toContain('WORKLET_VERSION = workletVersionData.version');
 
     const versionJson = JSON.parse(
       readFileSync(join(ROOT, 'audio-worklet/js/worklet-version.generated.json'), 'utf8'),
@@ -380,6 +388,7 @@ describe('#354 ScriptProcessor fallback structural immunity', () => {
   it('stopMusic tears down ScriptProcessor on every stop/reload', () => {
     expect(transportActions).toContain('scriptProcessorRef.current.disconnect()');
     expect(transportActions).toContain('scriptProcessorRef.current = null');
-    expect(transportActions).toContain('spFallbackTriggered.current = false');
+    // #492: spFallbackTriggered is a view of playbackEngineRef; stop clears that, re-arming the fallback.
+    expect(transportActions).toContain('playbackEngineRef.current = null');
   });
 });

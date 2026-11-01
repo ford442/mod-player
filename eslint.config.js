@@ -11,6 +11,9 @@ import tseslint from 'typescript-eslint';
 const WORKLET_FILES = [
   'audio-worklet/js/**/*.ts',
   'audio-worklet/workletProtocolConstants.ts',
+  'audio-worklet/workletProtocolGuard.ts',
+  'audio-worklet/positionRing.ts',
+  'audio-worklet/positionRingWriter.ts',
   'audio-worklet/libRuntimeReady.ts',
   'audio-worklet/fxCharacterParams.ts', // bundled into fx-character-worklet.js (#453)
 ];
@@ -95,18 +98,66 @@ export default tseslint.config(
     },
   },
   {
-    // Type-aware rules (need type information, so scoped to the directories where a dropped
-    // promise is a real bug rather than the whole repo). The worklet sources are outside the root
-    // tsconfig, hence the second project.
-    files: ['src/**/*.{ts,tsx}', 'hooks/**/*.{ts,tsx}', 'audio-worklet/**/*.ts', 'utils/**/*.{ts,tsx}'],
+    // Type-aware rules (#492: projectService, so each file is checked against the tsconfig that owns
+    // it). Scoped to the async audio / GPU / engine code, where a dropped or misused promise is a real
+    // bug (an unawaited start path, an async handler whose rejection nobody sees) rather than the
+    // whole repo.
+    files: [
+      'audio/**/*.{ts,tsx}',
+      'hooks/**/*.{ts,tsx}',
+      'src/**/*.{ts,tsx}',
+      'utils/**/*.{ts,tsx}',
+      'audio-worklet/*.ts',
+    ],
     languageOptions: {
       parserOptions: {
-        project: ['./tsconfig.json', './tsconfig.worklet.json'],
+        projectService: true,
         tsconfigRootDir: import.meta.dirname,
       },
     },
     rules: {
       '@typescript-eslint/no-floating-promises': 'error',
+      '@typescript-eslint/no-misused-promises': 'error',
+    },
+  },
+  {
+    // The worklet sources live in their own tsconfig (no DOM lib), which the project service would not
+    // pick for them; same rules.
+    files: ['audio-worklet/js/**/*.ts'],
+    languageOptions: {
+      parserOptions: {
+        project: ['./tsconfig.worklet.json'],
+        tsconfigRootDir: import.meta.dirname,
+      },
+    },
+    rules: {
+      '@typescript-eslint/no-floating-promises': 'error',
+      '@typescript-eslint/no-misused-promises': 'error',
+    },
+  },
+  {
+    // #492: the player engine core is framework-free. React observes it (hooks/usePlayerEngine.ts); it
+    // never imports React or a React state library. This catches direct imports;
+    // tests/playerEngineImports.test.ts walks the whole import graph from PlayerEngine.ts. The start
+    // paths and action factories live under hooks/ only because their unit tests import them there.
+    files: [
+      'audio/engine/**/*.ts',
+      'hooks/useAudioGraph.ts',
+      'hooks/audioGraph/**/*.ts',
+      'hooks/libOpenMPT/**/*.ts',
+    ],
+    ignores: ['hooks/libOpenMPT/useLibOpenMPTRefs.ts'],
+    rules: {
+      'no-restricted-imports': ['error', {
+        paths: ['react', 'react-dom', 'zustand'].map((name) => ({
+          name,
+          message: 'The PlayerEngine core is framework-free (#492): React reads it through hooks/usePlayerEngine.ts.',
+        })),
+        patterns: [{
+          group: ['react/*', 'react-dom/*', 'zustand/*', '@tanstack/*', '@react-three/*'],
+          message: 'The PlayerEngine core is framework-free (#492): React reads it through hooks/usePlayerEngine.ts.',
+        }],
+      }],
     },
   },
   {

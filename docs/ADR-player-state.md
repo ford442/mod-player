@@ -1,6 +1,6 @@
 # ADR: Player UI state — stores vs context vs refs
 
-**Status:** Accepted (2026-07)  
+**Status:** Accepted (2026-07); playback-session layer superseded by the PlayerEngine (2026-10, #492 — see below)  
 **Context:** `MainLayout` previously accepted ~169 props drilled from `App.tsx`. Feature panels (library, export, MIDI, pattern edit) each added more wiring surface.
 
 ## Decision
@@ -38,3 +38,17 @@ npm run lint
 ```
 
 Manual: play/stop/seek, shader switch, library browse, export panel, share URL, pattern edit toggle.
+
+## Update (2026-10, #492): the playback session is a PlayerEngine
+
+The "Playback session" row above is gone. `PlayerSessionContext` carried ~50 fields — including the
+playhead — in one value, so every consumer re-rendered on every row, and App threaded the 29 UI-store
+values it selected into it. Now:
+
+| Layer | Mechanism | What belongs here |
+|-------|-----------|-------------------|
+| **Player** | `audio/engine/PlayerEngine.ts` (framework-free) + `hooks/usePlayerEngine.ts` | Transport (an FSM), module, levels, engine selection, status; high-rate refs (`playbackStateRef`, `channelStatesRef`, `oscBufferRef`, `audioReactiveRef`) on the engine. Components select snapshot fields with `usePlayerEngine(selector)` (useSyncExternalStore) and call the engine / `usePlayerActions()`; derived values live in `hooks/usePlayerView.ts`. |
+
+Rule 1 still holds, and is now structural: high-frequency audio never enters the snapshot. Rule 4 is
+narrower: App wires app-level features (library, media, export, share) and mounts the engine; it does
+not pass player state or store values down — `App3DModeShell` and `ProjectMEmbedHost` select their own.

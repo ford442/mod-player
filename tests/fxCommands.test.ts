@@ -7,11 +7,8 @@ import { COMMAND_LABELS, isTextInputFocused, playerCommands } from '../utils/pla
 const noop = () => {};
 function handlers(extra: Partial<PlayerCommandHandlers>): PlayerCommandHandlers {
   return {
-    onPlayPause: noop, onPlay: noop, onPause: noop, onSeekForward: noop, onSeekBackward: noop,
-    onSeekNextOrder: noop, onSeekPrevOrder: noop, onJumpToOrder: noop, onVolumeUp: noop,
-    onVolumeDown: noop, onToggleLoop: noop, onToggleMute: noop, onToggleFullscreen: noop,
-    onToggleDebugPanel: noop, onToggleCheatsheet: noop, onCloseCheatsheet: noop,
-    onToggleStageMode: noop, onExitStageMode: noop,
+    onToggleFullscreen: noop, onToggleDebugPanel: noop, onToggleCheatsheet: noop,
+    onCloseCheatsheet: noop, onToggleStageMode: noop, onExitStageMode: noop,
     ...extra,
   };
 }

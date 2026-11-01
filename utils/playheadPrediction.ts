@@ -6,8 +6,15 @@
  * (pre-render snapshot). The main thread maps that to the instant currently
  * heard at the speakers:
  *
- *   heardTime = audioContext.currentTime − (baseLatency + outputLatency)
+ *   heardTime = contextTime + (performance.now() − performanceTime) / 1000   (getOutputTimestamp)
+ *             ≈ audioContext.currentTime − (baseLatency + outputLatency)      (fallback)
  *   playhead  = sample.row + (heardTime − sample.workletTime) × rowsPerSecond
+ *
+ * `getOutputTimestamp()` is the browser's own answer — the context time of the
+ * frame at the output now — so it includes whatever the latency attributes
+ * leave out, and it advances with the wall clock between render callbacks
+ * (`currentTime` moves in callback-sized steps: 1024 frames ≈ 21 ms in
+ * headless Chromium). The latency formula stays as the fallback (#492).
  *
  * Negative dt is allowed (bounded) so we can step slightly *behind* a just-
  * reported sample when output latency means the ear is still hearing earlier
@@ -47,12 +54,112 @@ export interface WorkletPositionSample {
   speed: number;
 }
 
-/** Playback instant currently at the speakers (seconds, audio clock). */
-export function getAudioHeardTime(audioCtx: AudioContext, now = audioCtx.currentTime): number {
+/** Which clock answered "what is at the speakers now?" (diagnostics). */
+export type HeardTimeSource = 'output-timestamp' | 'latency';
+
+/** An output timestamp older than this is stale (context suspended, device switching): not used. */
+export const OUTPUT_TIMESTAMP_MAX_AGE_SEC = 0.5;
+/** A believable output delay is under this (Bluetooth sinks reach ~0.3 s); beyond it the reading is junk. */
+export const OUTPUT_TIMESTAMP_MAX_LATENCY_SEC = 1;
+/**
+ * How far a reading may run past `currentTime` before it is junk rather than rounding. `currentTime`
+ * moves once per render callback while the extrapolation follows the wall clock; such a reading is
+ * capped at `currentTime` (nothing can be heard before it is rendered).
+ */
+export const OUTPUT_TIMESTAMP_AHEAD_TOLERANCE_SEC = 0.05;
+/** A backward step up to this is timestamp-refresh jitter: the previous value is held instead. */
+export const OUTPUT_TIMESTAMP_JITTER_HOLD_SEC = 0.05;
+
+/** The `AudioTimestamp` shape, loosely typed: browsers have shipped zeros and undefined here. */
+export interface OutputTimestampLike {
+  contextTime?: number;
+  performanceTime?: number;
+}
+
+/** Fallback heard time: `currentTime − (baseLatency + outputLatency)`. */
+export function getLatencyHeardTime(audioCtx: AudioContext, now = audioCtx.currentTime): number {
   const base = audioCtx.baseLatency ?? 0;
   // outputLatency is missing or 0 in some browsers; baseLatency alone is still useful.
   const output = audioCtx.outputLatency ?? 0;
   return now - base - output;
+}
+
+/**
+ * Heard time from one `getOutputTimestamp()` reading, or null when it cannot be trusted: zeros
+ * (Chromium before the first rendered quantum), a `contextTime` past what has been rendered, a stale or
+ * foreign-origin `performanceTime`, or an implausible output delay. Pure.
+ */
+export function heardTimeFromOutputTimestamp(
+  ts: OutputTimestampLike | null | undefined,
+  currentTime: number,
+  perfNowMs: number,
+): number | null {
+  if (!ts) return null;
+  const { contextTime, performanceTime } = ts;
+  if (typeof contextTime !== 'number' || typeof performanceTime !== 'number') return null;
+  if (!Number.isFinite(contextTime) || !Number.isFinite(performanceTime)) return null;
+  if (!(contextTime > 0 && performanceTime > 0)) return null;
+  if (contextTime > currentTime + 1e-3) return null;
+  const ageSec = (perfNowMs - performanceTime) / 1000;
+  if (ageSec < -OUTPUT_TIMESTAMP_AHEAD_TOLERANCE_SEC || ageSec > OUTPUT_TIMESTAMP_MAX_AGE_SEC) return null;
+  const heard = contextTime + ageSec;
+  if (heard > currentTime + OUTPUT_TIMESTAMP_AHEAD_TOLERANCE_SEC) return null;
+  const capped = Math.min(heard, currentTime);
+  if (currentTime - capped > OUTPUT_TIMESTAMP_MAX_LATENCY_SEC) return null;
+  return capped;
+}
+
+/** Last heard time the timestamp path returned, per context — for the jitter hold. */
+const lastTimestampHeard = new WeakMap<AudioContext, number>();
+
+const perfNow = (): number => (typeof performance !== 'undefined' ? performance.now() : Date.now());
+
+export interface AudioHeardTime {
+  /** Seconds in the context's time domain (that of `currentTime` and `WorkletPositionSample.workletTime`). */
+  time: number;
+  source: HeardTimeSource;
+}
+
+/**
+ * The playback instant at the speakers now. `getOutputTimestamp()` when it returns a sane reading
+ * (non-zero, not past `currentTime`, fresh, a plausible delay), held over small backward jitter so the
+ * playhead never steps back on a timestamp refresh; otherwise — missing (Safari, node tests), not yet
+ * valid (the first callbacks after resume), stale (suspended, switching device) — the latency formula.
+ */
+export function resolveAudioHeardTime(audioCtx: AudioContext, perfNowMs = perfNow()): AudioHeardTime {
+  const now = audioCtx.currentTime;
+  const read = (audioCtx as Partial<Pick<AudioContext, 'getOutputTimestamp'>>).getOutputTimestamp;
+  if (typeof read === 'function') {
+    let ts: OutputTimestampLike | null = null;
+    try {
+      ts = read.call(audioCtx);
+    } catch {
+      ts = null;
+    }
+    const heard = heardTimeFromOutputTimestamp(ts, now, perfNowMs);
+    if (heard !== null) {
+      const last = lastTimestampHeard.get(audioCtx);
+      const time =
+        last !== undefined && heard < last && last - heard <= OUTPUT_TIMESTAMP_JITTER_HOLD_SEC ? last : heard;
+      lastTimestampHeard.set(audioCtx, time);
+      return { time, source: 'output-timestamp' };
+    }
+  }
+  return { time: getLatencyHeardTime(audioCtx, now), source: 'latency' };
+}
+
+/**
+ * Playback instant currently at the speakers (seconds, audio clock). Every heard-time reader — the UI
+ * loop, the drift detector, the native clock anchor and its position fallback — goes through this, so
+ * they stay in one domain.
+ */
+export function getAudioHeardTime(audioCtx: AudioContext): number {
+  return resolveAudioHeardTime(audioCtx).time;
+}
+
+/** Drop the jitter hold for `audioCtx`: its output moved, and the new device has its own delay. */
+export function resetAudioHeardTime(audioCtx: AudioContext): void {
+  lastTimestampHeard.delete(audioCtx);
 }
 
 /** Fallback rows/sec from estimated BPM (4 rows per beat). */
@@ -223,7 +330,20 @@ export function applyWorkletPositionSample(
     bpm: (data.bpm != null && data.bpm > 0) ? data.bpm : refs.workletBpmRef.current,
     speed: (data.speed != null && data.speed > 0) ? data.speed : refs.workletSpeedRef.current,
   };
+  commitWorkletPositionSample(refs, sample);
+  return sample;
+}
 
+/**
+ * Make `sample` the current position: update the rolling row-rate estimate against the previous
+ * sample, then the position refs. Shared by the message path (a fresh sample per report) and the
+ * shared-ring path, which reuses two preallocated samples alternately so it allocates nothing
+ * (utils/positionRingConsumer.ts) — `sample` must therefore not be the current sample object.
+ */
+export function commitWorkletPositionSample(
+  refs: WorkletPositionRefs,
+  sample: WorkletPositionSample,
+): void {
   const numRows = refs.patternMatricesRef.current[sample.order]?.numRows ?? 64;
   const tempoRps = rowsPerSecondFromTempo(sample.bpm, sample.speed);
   // Seed estimate from tempo when empty/stale
@@ -246,6 +366,4 @@ export function applyWorkletPositionSample(
   refs.lastWorkletUpdateRef.current = sample.workletTime;
   if (sample.bpm > 0) refs.workletBpmRef.current = sample.bpm;
   if (sample.speed > 0) refs.workletSpeedRef.current = sample.speed;
-
-  return sample;
 }

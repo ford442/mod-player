@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildShareSearchParams,
-  computeSeekStep,
   parseShareParams,
   paletteModeFromShare,
 } from '../utils/shareState';
@@ -53,9 +52,8 @@ describe('shareState', () => {
     expect(params.get('mod')).toBeNull();
   });
 
-  it('computes global seek step from order and row', () => {
-    expect(computeSeekStep(3, 16, 64)).toBe(3 * 64 + 16);
-  });
+  // The share link's order/row → global step is PlayerEngine.stepOfOrder (real pattern lengths, #492);
+  // tests/playerEngine.test.ts covers it.
 });
 
 describe('remoteModuleSecurity', () => {

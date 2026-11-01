@@ -1,5 +1,4 @@
 import { useEffect } from 'react';
-import type { MutableRefObject } from 'react';
 import {
   calculateNoteDurations,
   packPatternMatrixHighPrecision,
@@ -7,57 +6,44 @@ import {
   isTriggerFromPackedB,
 } from '../utils/gpuPacking';
 import { usesCircularRowPaging } from '../utils/shaderVersion';
-import { circularPageStart, overlayActualRow } from '../utils/playheadPrediction';
-import type { PatternMatrix, PlaybackState } from '../types';
-import { deriveTransportState } from '../utils/transportClock';
+import { circularPageStart, overlayActualRow, resolveAudioHeardTime } from '../utils/playheadPrediction';
+import { getPlayerAudioContextConstructionCount } from '../utils/audioContextFactory';
+import { listAudioOutputDevices } from '../utils/audioOutputDevices';
 import { useFxStore } from '../store/fxStore';
+import { usePlayerUiStore } from '../store/playerUiStore';
+import { usePlayerEngineInstance } from '../hooks/usePlayerEngine';
 
-export interface UseAppTestHooksParams {
-  seekToStep: (step: number) => void;
-  stopMusic: (ended?: boolean) => void;
-  pause: () => void;
-  playGuarded: () => void;
-  isPlaying: boolean;
-  isPaused: boolean;
-  getAudioContext: () => AudioContext | null | undefined;
-  isModuleLoaded: boolean;
-  sequencerMatrix: PatternMatrix | null;
-  loadFile: (fileData: Uint8Array, fileName: string) => void | Promise<void>;
-  setPlaybackRowFraction: (value: number) => void;
-  playbackStateRef: MutableRefObject<PlaybackState>;
-  /** The engine rendering the current playback (null before the first play). */
-  getPlaybackEngine: () => 'worklet' | 'scriptprocessor' | null;
-  liteMode: boolean;
-  getMasterGainValue: () => number | null;
-  getMasterPanValue: () => number | null;
-  applyAudioMasterLevels: (volume: number, pan: number) => void;
-  volume: number;
-  pan: number;
+const contextSerials = new WeakMap<AudioContext, number>();
+let nextContextSerial = 1;
+
+/** A stable number per context object, so a smoke can prove a device switch kept the same context. */
+function audioContextSerial(ctx: AudioContext | null): number {
+  if (!ctx) return 0;
+  let serial = contextSerials.get(ctx);
+  if (serial === undefined) {
+    serial = nextContextSerial++;
+    contextSerials.set(ctx, serial);
+  }
+  return serial;
 }
 
-/** Headless Chrome / Playwright automation hooks (dev server + CI captures). */
-export function useAppTestHooks(params: UseAppTestHooksParams): void {
-  const {
-    seekToStep,
-    stopMusic,
-    pause,
-    playGuarded,
-    isPlaying,
-    isPaused,
-    getAudioContext,
-    isModuleLoaded,
-    sequencerMatrix,
-    loadFile,
-    setPlaybackRowFraction,
-    playbackStateRef,
-    getPlaybackEngine,
-    liteMode,
-    getMasterGainValue,
-    getMasterPanValue,
-    applyAudioMasterLevels,
-    volume,
-    pan,
-  } = params;
+let rmsScratch: Float32Array<ArrayBuffer> | null = null;
+
+function analyserRms(analyser: AnalyserNode | null): number | null {
+  if (!analyser) return null;
+  if (rmsScratch?.length !== analyser.fftSize) rmsScratch = new Float32Array(analyser.fftSize);
+  analyser.getFloatTimeDomainData(rmsScratch);
+  let sum = 0;
+  for (const v of rmsScratch) sum += v * v;
+  return Math.sqrt(sum / rmsScratch.length);
+}
+
+/**
+ * Headless Chrome / Playwright automation hooks (dev server + CI captures). They read the PlayerEngine
+ * when called (#492), so they are installed once instead of on every transport or pattern change.
+ */
+export function useAppTestHooks(): void {
+  const engine = usePlayerEngineInstance();
 
   useEffect(() => {
     window.__TEST_HOOKS__ = {
@@ -69,34 +55,35 @@ export function useAppTestHooks(params: UseAppTestHooksParams): void {
           return { rackStatus: s.rackStatus, moduleStatus: s.moduleStatus, effective: s.effective };
         },
       },
-      seekToRow: (row: number) => seekToStep(row),
-      stopPlayback: () => stopMusic(false),
-      startPlayback: () => playGuarded(),
-      pausePlayback: () => pause(),
-      getIsPlaying: () => isPlaying,
-      getTransportState: () => deriveTransportState(isPlaying, isPaused),
-      getAudioContextState: () => getAudioContext()?.state ?? 'none',
-      // #411 acceptance: every play in a tab reports the same state and rate —
-      // there is one context per session.
-      getAudioContextSampleRate: () => getAudioContext()?.sampleRate ?? 0,
+      seekToRow: (row: number) => engine.seekToStep(row),
+      stopPlayback: () => engine.stop(false),
+      startPlayback: () => { void engine.play(); },
+      pausePlayback: () => engine.pause(),
+      getIsPlaying: () => engine.getSnapshot().isPlaying,
+      getTransportState: () => engine.getSnapshot().transportState,
+      getAudioContextState: () => engine.getAudioContext()?.state ?? 'none',
+      // #411 acceptance: a JS play and an ?engine=native play in the same tab
+      // must report the same state and rate — there is one context per session.
+      getAudioContextSampleRate: () => engine.getAudioContext()?.sampleRate ?? 0,
       getAudioPlaybackStats: () => {
-        const stats = (getAudioContext() as (AudioContext & {
+        const stats = (engine.getAudioContext() as (AudioContext & {
           playbackStats?: { underrunEvents: number; underrunDuration: number; totalDuration: number };
         }) | null)?.playbackStats;
         return stats
           ? { underrunEvents: stats.underrunEvents, underrunDuration: stats.underrunDuration, totalDuration: stats.totalDuration }
           : null;
       },
-      isModuleLoaded: () => isModuleLoaded,
+      isModuleLoaded: () => engine.getSnapshot().isModuleLoaded,
       getPatternRenderer: () => window.currentPatternRenderer,
       loadModuleFromUrl: async (url: string) => {
         const resp = await fetch(url);
         if (!resp.ok) throw new Error(`fetch failed: ${resp.status}`);
         const buf = new Uint8Array(await resp.arrayBuffer());
         const name = url.split('/').pop() || 'module.mod';
-        await loadFile(buf, name);
+        await engine.loadFile(buf, name);
       },
       getTriggerTailStats: () => {
+        const sequencerMatrix = engine.getSnapshot().sequencerMatrix;
         if (!sequencerMatrix) return null;
         const d = calculateNoteDurations(sequencerMatrix);
         let triggers = 0;
@@ -116,6 +103,7 @@ export function useAppTestHooks(params: UseAppTestHooksParams): void {
       },
       /** Per-row note + TRIG-001 state for Playwright / grok cli verification */
       getRowNotes: (row: number) => {
+        const sequencerMatrix = engine.getSnapshot().sequencerMatrix;
         if (!sequencerMatrix) return null;
         const d = calculateNoteDurations(sequencerMatrix);
         const raw = sequencerMatrix.rows[row] ?? [];
@@ -139,6 +127,7 @@ export function useAppTestHooks(params: UseAppTestHooksParams): void {
       },
       /** Packed GPU cell + trigger bit for cross-check against duration oracle */
       getPackedCell: (row: number, ch: number) => {
+        const sequencerMatrix = engine.getSnapshot().sequencerMatrix;
         if (!sequencerMatrix) return null;
         const { packedData } = packPatternMatrixHighPrecision(sequencerMatrix, false);
         const cols = sequencerMatrix.numChannels;
@@ -164,20 +153,12 @@ export function useAppTestHooks(params: UseAppTestHooksParams): void {
         };
       },
       /** Force fractional playhead for paging regression (does not move audio) */
-      setPlayheadFraction: (value: number) => {
-        playbackStateRef.current = {
-          ...playbackStateRef.current,
-          playheadRow: value,
-          lastUpdateTimestamp: performance.now() / 1000,
-        };
-        setPlaybackRowFraction(value);
-      },
-      getPlaybackRow: () => Math.floor(playbackStateRef.current.playheadRow),
-      getPlaybackRowFraction: () => playbackStateRef.current.playheadRow,
+      setPlayheadFraction: (value: number) => engine.setPlayheadForTest(value),
+      getPlaybackRow: () => Math.floor(engine.playbackStateRef.current.playheadRow),
+      getPlaybackRowFraction: () => engine.playbackStateRef.current.playheadRow,
       getActiveRenderer: () => window.currentPatternRenderer?.backend ?? null,
-      // The JS worklet is the only engine; report the ScriptProcessor fallback when it took over.
-      getAudioEngine: () => getPlaybackEngine() ?? 'worklet',
-      getLiteMode: () => liteMode,
+      getAudioEngine: () => engine.getPlaybackEngine() ?? 'worklet',
+      getLiteMode: () => usePlayerUiStore.getState().liteMode,
       getShaderFile: () => {
         const raw = localStorage.getItem('xasm1_last_shader');
         if (!raw) return null;
@@ -197,7 +178,7 @@ export function useAppTestHooks(params: UseAppTestHooksParams): void {
       },
       /** Circular hybrid paging — overlay must fetch rows from current page, not 0..N-1 */
       getCircularOverlayPaging: () => {
-        const matrix = sequencerMatrix;
+        const matrix = engine.getSnapshot().sequencerMatrix;
         if (!matrix) return { ok: false, reason: 'no matrix' };
         const raw = localStorage.getItem('xasm1_last_shader') ?? '';
         let shader = raw;
@@ -209,7 +190,7 @@ export function useAppTestHooks(params: UseAppTestHooksParams): void {
         if (!usesCircularRowPaging(shader)) {
           return { ok: true, skipped: true, reason: 'not circular-paging shader' };
         }
-        const playhead = playbackStateRef.current.playheadRow;
+        const playhead = engine.playbackStateRef.current.playheadRow;
         const numRows = matrix.numRows;
         const pageStart = circularPageStart(playhead, numRows);
         const overlayEl = document.querySelector('[data-overlay-canvas="true"]');
@@ -245,11 +226,41 @@ export function useAppTestHooks(params: UseAppTestHooksParams): void {
         };
       },
       getPlayheadDebug: () => window.__PLAYHEAD_DEBUG__ ?? null,
-      getMasterGainValue,
-      getMasterPanValue,
-      setMasterVolume: (value: number) => applyAudioMasterLevels(Math.max(0, Math.min(1, value)), pan),
-      setMasterPan: (value: number) => applyAudioMasterLevels(volume, Math.max(-1, Math.min(1, value))),
+      getMasterGainValue: () => engine.getMasterGainValue(),
+      getMasterPanValue: () => engine.getMasterPanValue(),
+      setMasterVolume: (value: number) => engine.setMasterVolume(value),
+      setMasterPan: (value: number) => engine.setMasterPan(value),
+      getOutputDevice: () => {
+        const s = engine.getSnapshot();
+        return {
+          supported: s.outputDeviceSupported,
+          deviceId: s.outputDeviceId,
+          label: s.outputDeviceLabel,
+          switching: s.outputDeviceSwitching,
+          error: s.sinkError,
+        };
+      },
+      setOutputDevice: (deviceId: string, label?: string) => engine.setOutputDevice(deviceId, label),
+      listOutputDevices: () => listAudioOutputDevices(),
+      getAudioContextSerial: () => audioContextSerial(engine.getAudioContext()),
+      getAudioContextConstructions: () => getPlayerAudioContextConstructionCount(),
+      getMasterRms: () => analyserRms(engine.getSnapshot().analyserNode),
+      getHeardTime: () => {
+        const ctx = engine.getAudioContext();
+        if (!ctx) return null;
+        const heard = resolveAudioHeardTime(ctx);
+        return { source: heard.source, outputDelayMs: (ctx.currentTime - heard.time) * 1000 };
+      },
+      getPositionPathStats: () => engine.getPositionPathStats(),
+      // #492 allocation check: run a position path N times in a tight loop (measured by the caller,
+      // e.g. CDP heap sampling in scripts/audio-smoke.mjs). The bench module is a lazy chunk.
+      runPositionPathBenchmark: async (path: 'ring' | 'message', iterations: number) => {
+        const { createMessageBench, createRingBench } = await import('../utils/positionRingBenchmark');
+        const bench = path === 'ring' ? createRingBench() : createMessageBench();
+        bench.run(Math.min(iterations, 2000)); // warm up (JIT) outside whatever the caller measures
+        return { applied: bench.applied(), run: (n: number) => { bench.run(n); return bench.applied(); } };
+      },
     };
     return () => { delete window.__TEST_HOOKS__; };
-  }, [seekToStep, stopMusic, pause, playGuarded, isPlaying, isPaused, isModuleLoaded, sequencerMatrix, loadFile, setPlaybackRowFraction, playbackStateRef, getPlaybackEngine, liteMode, getMasterGainValue, getMasterPanValue, applyAudioMasterLevels, volume, pan]);
+  }, [engine]);
 }

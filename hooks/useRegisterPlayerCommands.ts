@@ -7,22 +7,11 @@ import {
   type PlayerCommandId,
 } from '../utils/playerCommands';
 
+/**
+ * The UI's commands. Transport, seek, volume, pan, loop and mute are engine commands, registered once
+ * against the PlayerEngine (audio/engine/engineCommands.ts, #492).
+ */
 export interface PlayerCommandHandlers {
-  onPlayPause: () => void;
-  onPlay: () => void;
-  onPause: () => void;
-  onStop?: () => void;
-  onSeekForward: () => void;
-  onSeekBackward: () => void;
-  onSeekNextOrder: () => void;
-  onSeekPrevOrder: () => void;
-  onJumpToOrder: (order: number) => void;
-  onVolumeUp: () => void;
-  onVolumeDown: () => void;
-  onVolumeSet?: (value: number) => void;
-  onPanSet?: (value: number) => void;
-  onToggleLoop: () => void;
-  onToggleMute: () => void;
   onToggleFullscreen: () => void;
   onToggleDebugPanel: () => void;
   onToggleCheatsheet: () => void;
@@ -35,16 +24,10 @@ export interface PlayerCommandHandlers {
   onFxPreset?: (payload: CommandPayloadMap['fx.preset']) => void;
 }
 
-/** transport.stop: the surface's onStop, or onPause when it has none. */
-export function stopOrPause(handlers: Pick<PlayerCommandHandlers, 'onStop' | 'onPause'>): void {
-  if (handlers.onStop) handlers.onStop();
-  else handlers.onPause();
-}
-
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null;
 const isFxTarget = (v: unknown): boolean => v === 'rack' || (FX_MODULE_IDS as readonly unknown[]).includes(v);
 
-/** Register all player command handlers on the shared command bus. */
+/** Register the UI command handlers on the shared command bus. */
 export function registerPlayerCommands(handlers: PlayerCommandHandlers): () => void {
   const unsubs: Array<() => void> = [];
 
@@ -55,37 +38,6 @@ export function registerPlayerCommands(handlers: PlayerCommandHandlers): () => v
     unsubs.push(playerCommands.register(id, handler));
   };
 
-  bind('transport.playPause', () => { handlers.onPlayPause(); });
-  bind('transport.play', () => { handlers.onPlay(); });
-  bind('transport.pause', () => { handlers.onPause(); });
-  bind('transport.stop', () => { stopOrPause(handlers); });
-  bind('seek.forwardRow', () => { handlers.onSeekForward(); });
-  bind('seek.backwardRow', () => { handlers.onSeekBackward(); });
-  bind('seek.nextOrder', () => { handlers.onSeekNextOrder(); });
-  bind('seek.prevOrder', () => { handlers.onSeekPrevOrder(); });
-  bind('seek.jumpToOrder', (payload) => {
-    if (payload && typeof payload === 'object' && 'order' in payload) {
-      handlers.onJumpToOrder((payload as { order: number }).order);
-    }
-  });
-  bind('volume.up', () => { handlers.onVolumeUp(); });
-  bind('volume.down', () => { handlers.onVolumeDown(); });
-  if (handlers.onVolumeSet) {
-    bind('volume.set', (payload) => {
-      if (payload && typeof payload === 'object' && 'value' in payload) {
-        handlers.onVolumeSet!((payload as { value: number }).value);
-      }
-    });
-  }
-  if (handlers.onPanSet) {
-    bind('pan.set', (payload) => {
-      if (payload && typeof payload === 'object' && 'value' in payload) {
-        handlers.onPanSet!((payload as { value: number }).value);
-      }
-    });
-  }
-  bind('loop.toggle', () => { handlers.onToggleLoop(); });
-  bind('mute.toggle', () => { handlers.onToggleMute(); });
   bind('fullscreen.toggle', () => { handlers.onToggleFullscreen(); });
   bind('debug.toggle', () => { handlers.onToggleDebugPanel(); });
   bind('cheatsheet.toggle', () => { handlers.onToggleCheatsheet(); });
@@ -142,24 +94,6 @@ export function useRegisterPlayerCommands(handlers: PlayerCommandHandlers): void
 
   useEffect(() => {
     return registerPlayerCommands({
-      onPlayPause: () => handlersRef.current.onPlayPause(),
-      onPlay: () => handlersRef.current.onPlay(),
-      onPause: () => handlersRef.current.onPause(),
-      // registerPlayerCommands falls back to onPause only when onStop is absent, but this wrapper is
-      // always present — so the fallback has to be applied here too, or transport.stop is silently
-      // dropped for any surface that registers no onStop.
-      onStop: () => stopOrPause(handlersRef.current),
-      onSeekForward: () => handlersRef.current.onSeekForward(),
-      onSeekBackward: () => handlersRef.current.onSeekBackward(),
-      onSeekNextOrder: () => handlersRef.current.onSeekNextOrder(),
-      onSeekPrevOrder: () => handlersRef.current.onSeekPrevOrder(),
-      onJumpToOrder: (order) => handlersRef.current.onJumpToOrder(order),
-      onVolumeUp: () => handlersRef.current.onVolumeUp(),
-      onVolumeDown: () => handlersRef.current.onVolumeDown(),
-      onVolumeSet: (value) => handlersRef.current.onVolumeSet?.(value),
-      onPanSet: (value) => handlersRef.current.onPanSet?.(value),
-      onToggleLoop: () => handlersRef.current.onToggleLoop(),
-      onToggleMute: () => handlersRef.current.onToggleMute(),
       onToggleFullscreen: () => handlersRef.current.onToggleFullscreen(),
       onToggleDebugPanel: () => handlersRef.current.onToggleDebugPanel(),
       onToggleCheatsheet: () => handlersRef.current.onToggleCheatsheet(),

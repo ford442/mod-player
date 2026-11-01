@@ -6,11 +6,15 @@ import { LibraryPanel } from './LibraryPanel';
 import { IS_PUBLIC_MODE, LIGHT_THEMES } from '../appConfig';
 import { usePlayerFeatures } from '../context/PlayerFeaturesContext';
 import { usePlayerUiStore } from '../store/playerUiStore';
+import { usePlayerEngine } from '../hooks/usePlayerEngine';
+import { useModuleMediaHintText } from '../hooks/usePlayerView';
 
 /** Playlist, media overlay panel, cloud library, and local library sections (chrome mode only). */
 export function LibraryAndPlaylistSection() {
   const features = usePlayerFeatures();
   const { theme, showPlaylist, showLibraryBrowser, showLocalLibrary } = usePlayerUiStore();
+  const isPlaying = usePlayerEngine((s) => s.isPlaying);
+  const moduleMediaHintText = useModuleMediaHintText();
 
   const isDarkMode = !LIGHT_THEMES.has(theme);
   const showDevSurface = !IS_PUBLIC_MODE;
@@ -21,12 +25,10 @@ export function LibraryAndPlaylistSection() {
     setMediaVisible,
     onMediaRemove,
     moduleMediaFileName,
-    moduleMediaHintText,
     handleRemoteMediaSelect,
     onMediaFadesChange,
     playlistItems,
     playlistCurrentIndex,
-    playlistIsPlaying,
     playlistShuffle,
     playlistRepeat,
     onPlaylistSelect,
@@ -74,7 +76,7 @@ export function LibraryAndPlaylistSection() {
             <Playlist
               items={playlistItems}
               currentIndex={playlistCurrentIndex}
-              isPlaying={playlistIsPlaying}
+              isPlaying={isPlaying}
               shuffle={playlistShuffle}
               repeat={playlistRepeat}
               onSelect={onPlaylistSelect}

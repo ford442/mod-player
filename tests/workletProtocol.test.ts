@@ -57,7 +57,9 @@ describe('workletProtocol constants — single source of truth', () => {
     const worklet = readFileSync(join(ROOT, 'public/worklets/openmpt-worklet.js'), 'utf8');
     expect(worklet).toContain('generated — do not edit');
     expect(worklet).not.toContain('WorkletProtocolConstants');
-    expect(worklet).toContain('parseMainToWorklet');
+    // #492: the receive guard is generated from the protocol table (workletProtocolGuard.ts), not hand-rolled.
+    expect(worklet).toContain('validateMainToWorklet');
+    expect(worklet).not.toContain('parseMainToWorkletMessage');
     expect(worklet).toContain('WT.position');
     expect(worklet).toContain('MT.load');
     // The bundled constant values must match the canonical TS module.

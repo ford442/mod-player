@@ -1,15 +1,15 @@
 import { Controls } from './Controls';
-import { SeekBar } from './SeekBar';
+import { LiveSeekBar } from './LiveSeekBar';
 import { cn } from '../utils/cn';
 import { FX_RACK_ENABLED, IS_PUBLIC_MODE, LIGHT_THEMES } from '../appConfig';
-import { usePlayerSession } from '../context/PlayerSessionContext';
+import { usePlayerEngine } from '../hooks/usePlayerEngine';
+import { useDisplayShader, usePlayerActions } from '../hooks/usePlayerView';
 import { usePlayerFeatures } from '../context/PlayerFeaturesContext';
 import { usePlayerUiStore } from '../store/playerUiStore';
 import { useShaderPrefsStore } from '../store/shaderPrefsStore';
 
 /** Full transport: `Controls`, `SeekBar`, and panel-visibility toggle buttons (chrome mode only). */
 export function TransportBar() {
-  const session = usePlayerSession();
   const features = usePlayerFeatures();
   const {
     theme,
@@ -45,29 +45,16 @@ export function TransportBar() {
 
   const isDarkMode = !LIGHT_THEMES.has(theme);
   const showDevSurface = !IS_PUBLIC_MODE;
-  const {
-    isReady,
-    isPlaying,
-    isPaused,
-    isModuleLoaded,
-    isLooping,
-    playbackSeconds,
-    playbackRowFraction,
-    totalPatternRows,
-    volume,
-    pan,
-    moduleDurationSeconds,
-    isNightShader,
-    play,
-    pause,
-    stopMusic,
-    seekToStep,
-    setIsLooping,
-    setVolume,
-    setPan,
-    handleFileSelected,
-  } = session;
-  const { handleMediaAdd, handleRemoteMediaSelect } = features;
+  const isReady = usePlayerEngine((s) => s.isReady);
+  const isPlaying = usePlayerEngine((s) => s.isPlaying);
+  const isPaused = usePlayerEngine((s) => s.isPaused);
+  const isModuleLoaded = usePlayerEngine((s) => s.isModuleLoaded);
+  const isLooping = usePlayerEngine((s) => s.isLooping);
+  const volume = usePlayerEngine((s) => s.volume);
+  const pan = usePlayerEngine((s) => s.pan);
+  const { play, pause, stopMusic, setIsLooping, setVolume, setPan } = usePlayerActions();
+  const { isNightShader } = useDisplayShader();
+  const { handleMediaAdd, handleRemoteMediaSelect, handleFileSelected } = features;
 
   return (
     <>
@@ -113,14 +100,7 @@ export function TransportBar() {
       {/* Seek Bar */}
       {isModuleLoaded && (
         <div className="mt-4">
-          <SeekBar
-            currentSeconds={playbackSeconds}
-            durationSeconds={moduleDurationSeconds}
-            currentRow={playbackRowFraction}
-            totalRows={totalPatternRows}
-            isPlaying={isPlaying}
-            onSeekRow={seekToStep}
-          />
+          <LiveSeekBar />
         </div>
       )}
 

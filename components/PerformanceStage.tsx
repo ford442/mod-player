@@ -3,10 +3,11 @@ import { createPortal } from 'react-dom';
 import { Controls } from './Controls';
 import { PatternDisplay } from './PatternDisplay';
 import { MediaOverlay } from './MediaOverlay';
-import { SeekBar } from './SeekBar';
+import { LiveSeekBar } from './LiveSeekBar';
 import { cn } from '../utils/cn';
-import { IS_PUBLIC_MODE, LIGHT_THEMES } from '../appConfig';
-import { usePlayerSession } from '../context/PlayerSessionContext';
+import { IS_PUBLIC_MODE } from '../appConfig';
+import { usePlayerEngine, usePlayerEngineInstance } from '../hooks/usePlayerEngine';
+import { useDisplayShader, useInstrumentPalette, usePlayerActions } from '../hooks/usePlayerView';
 import { usePlayerFeatures } from '../context/PlayerFeaturesContext';
 import { usePlayerUiStore } from '../store/playerUiStore';
 import { useShaderPrefsStore } from '../store/shaderPrefsStore';
@@ -31,10 +32,8 @@ export interface PerformanceStageProps {
  * (`data-stage-mode` on MainLayout); overlays stay in the tree after the canvas.
  */
 export function PerformanceStage({ studioDisplayHost = null }: PerformanceStageProps = {}) {
-  const session = usePlayerSession();
   const features = usePlayerFeatures();
   const {
-    theme,
     liteMode,
     chassisDark,
     debugPanelOpen,
@@ -57,46 +56,29 @@ export function PerformanceStage({ studioDisplayHost = null }: PerformanceStageP
     cvdPalette,
   } = useShaderPrefsStore();
 
-  const isDarkMode = !LIGHT_THEMES.has(theme);
   const showDevSurface = !IS_PUBLIC_MODE;
-  const {
-    isReady,
-    isModuleLoaded,
-    isPlaying,
-    isPaused,
-    isLooping,
-    playbackSeconds,
-    playbackRowFraction,
-    totalPatternRows,
-    sequencerMatrix,
-    channelStates,
-    beatPhase,
-    grooveAmount,
-    kickTrigger,
-    activeChannels,
-    volume,
-    pan,
-    syncDebug,
-    analyserNode,
-    moduleDurationSeconds,
-    displayShaderFile,
-    instrumentPalette,
-    dimFactor,
-    isNightShader,
-    nightConfig,
-    playbackStateRef,
-    channelStatesRef,
-    oscBufferRef,
-    audioReactiveRef,
-    play,
-    pause,
-    stopMusic,
-    seekToStep,
-    setIsLooping,
-    setVolume,
-    setPan,
-    handleFileSelected,
-  } = session;
+  // The stage feeds PatternDisplay the playhead, so it re-renders per row by design — on its own now,
+  // not as part of an App-wide render (#492). The GPU reads the engine refs every frame regardless.
+  const engine = usePlayerEngineInstance();
+  const { playbackStateRef, channelStatesRef, oscBufferRef, audioReactiveRef } = engine;
+  const isReady = usePlayerEngine((s) => s.isReady);
+  const isModuleLoaded = usePlayerEngine((s) => s.isModuleLoaded);
+  const isPlaying = usePlayerEngine((s) => s.isPlaying);
+  const isPaused = usePlayerEngine((s) => s.isPaused);
+  const isLooping = usePlayerEngine((s) => s.isLooping);
+  const playbackSeconds = usePlayerEngine((s) => s.playbackSeconds);
+  const playbackRowFraction = usePlayerEngine((s) => s.playbackRowFraction);
+  const totalPatternRows = usePlayerEngine((s) => s.totalPatternRows);
+  const sequencerMatrix = usePlayerEngine((s) => s.sequencerMatrix);
+  const channelStates = usePlayerEngine((s) => s.channelStates);
+  const beatPhase = usePlayerEngine((s) => s.beatPhase);
+  const volume = usePlayerEngine((s) => s.volume);
+  const pan = usePlayerEngine((s) => s.pan);
+  const syncDebug = usePlayerEngine((s) => s.syncDebug);
+  const analyserNode = usePlayerEngine((s) => s.analyserNode);
+  const { play, pause, stopMusic, seekToStep, setIsLooping, setVolume, setPan } = usePlayerActions();
+  const { isDarkMode, displayShaderFile, dimFactor, isNightShader, nightConfig } = useDisplayShader();
+  const instrumentPalette = useInstrumentPalette();
   const {
     mediaItem,
     mediaVisible,
@@ -104,6 +86,7 @@ export function PerformanceStage({ studioDisplayHost = null }: PerformanceStageP
     setMediaVisible,
     setMediaItem,
     onSequencerCellEdit,
+    handleFileSelected,
   } = features;
 
   // Stable portal container for PatternDisplay — created once and never
@@ -147,9 +130,6 @@ export function PerformanceStage({ studioDisplayHost = null }: PerformanceStageP
           tickOffset={playbackRowFraction % 1}
           channels={channelStates}
           beatPhase={beatPhase}
-          grooveAmount={grooveAmount}
-          kickTrigger={kickTrigger}
-          activeChannels={activeChannels}
           isModuleLoaded={isModuleLoaded}
           shaderFile={displayShaderFile}
           volume={volume}
@@ -249,14 +229,7 @@ export function PerformanceStage({ studioDisplayHost = null }: PerformanceStageP
           />
           {isModuleLoaded && (
             <div className="mt-2">
-              <SeekBar
-                currentSeconds={playbackSeconds}
-                durationSeconds={moduleDurationSeconds}
-                currentRow={playbackRowFraction}
-                totalRows={totalPatternRows}
-                isPlaying={isPlaying}
-                onSeekRow={seekToStep}
-              />
+              <LiveSeekBar />
             </div>
           )}
         </div>

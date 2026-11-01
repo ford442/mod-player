@@ -37,6 +37,7 @@ import {
   setPcmDemandListener,
   subscribePcm,
 } from '../utils/pcmBus';
+import { PLAYER_SAMPLE_RATE } from '../utils/sampleRates';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const readShader = (rel: string) => readFileSync(join(ROOT, 'shaders', rel), 'utf8');
@@ -496,5 +497,14 @@ describe('PcmRing', () => {
 
   it('a capacity-sized ring holds exactly one FFT window plus headroom', () => {
     expect(new PcmRing(PCM_FRAME_CAPACITY).capacityFrames).toBeGreaterThanOrEqual(MAX_FFT_SIZE);
+  });
+
+  it('takes the rate from the blocks (the context’s), the locked 48 kHz until one is stamped (#492)', () => {
+    const ring = new PcmRing(8);
+    expect(ring.sampleRate).toBe(PLAYER_SAMPLE_RATE);
+    ring.write(ramp(2, 0), 2, 0); // a block without a rate keeps the current one
+    expect(ring.sampleRate).toBe(PLAYER_SAMPLE_RATE);
+    ring.write(ramp(2, 0), 2, 44100); // a context that fell back to the device rate
+    expect(ring.sampleRate).toBe(44100);
   });
 });

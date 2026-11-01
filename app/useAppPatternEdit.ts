@@ -4,29 +4,26 @@ import { usePatternEdit } from '../hooks/usePatternEdit';
 import { patchFromFieldCycle, type PatternEditField } from '../utils/patternEdit';
 import { downloadPatternDump } from '../utils/patternDump';
 import type { PatternMatrix } from '../types';
+import { usePlayerEngine, usePlayerEngineInstance } from '../hooks/usePlayerEngine';
+import { usePlayerUiStore } from '../store/playerUiStore';
 
 export interface UseAppPatternEditParams {
-  sequencerMatrix: PatternMatrix | null;
-  replacePatternMatrix: (matrix: PatternMatrix) => void;
   patternModuleKey: string | null;
   isExporting: boolean;
-  moduleFileName: string;
   currentModuleFileName: string;
-  editMode: boolean;
   patternEditDirtyRef: MutableRefObject<boolean>;
 }
 
 export function useAppPatternEdit(params: UseAppPatternEditParams) {
-  const {
-    sequencerMatrix,
-    replacePatternMatrix,
-    patternModuleKey,
-    isExporting,
-    moduleFileName,
-    currentModuleFileName,
-    editMode,
-    patternEditDirtyRef,
-  } = params;
+  const { patternModuleKey, isExporting, currentModuleFileName, patternEditDirtyRef } = params;
+  const engine = usePlayerEngineInstance();
+  const sequencerMatrix = usePlayerEngine((s) => s.sequencerMatrix);
+  const moduleFileName = usePlayerEngine((s) => s.moduleFileName);
+  const editMode = usePlayerUiStore((s) => s.editMode);
+  const replacePatternMatrix = useCallback(
+    (matrix: PatternMatrix) => engine.replacePatternMatrix(matrix),
+    [engine],
+  );
 
   const patternEdit = usePatternEdit({
     matrix: sequencerMatrix,

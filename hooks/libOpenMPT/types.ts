@@ -1,4 +1,3 @@
-import type React from 'react';
 import type {
   ChannelShadowState,
   LibOpenMPT,
@@ -8,7 +7,10 @@ import type {
   SyncDebugInfo,
 } from '../../types';
 import type { InstrumentTable } from '../../types/instruments';
+import type { Ref, StateSetter } from '../../audio/engine/store';
+import type { TransportMachine } from '../../audio/engine/transport';
 import type { WorkletPositionSample } from '../../utils/playheadPrediction';
+import type { PositionRingConsumer } from '../../utils/positionRingConsumer';
 import type { PauseClock } from '../../utils/transportClock';
 import type {
   PlayheadLagTracker,
@@ -17,102 +19,124 @@ import type {
 
 export type PlaybackEngine = 'worklet' | 'scriptprocessor';
 
-/** All mutable refs owned by useLibOpenMPT — passed to extracted action factories. */
+/**
+ * The engine's mutable state, shared with the action factories and the start paths (#492: owned by
+ * `audio/engine/PlayerEngine.ts`, built by `audio/engine/engineRefs.ts`; it used to be ~63 React refs).
+ *
+ * Several members are *views*, not storage — see engineRefs.ts: `isPlayingRef` / `isPausedRef` read
+ * the transport FSM, `seekAcknowledgedRef` reads `pendingSeekRef`, `spFallbackTriggered` reads
+ * `playbackEngineRef`, `workletLoadedRef` is keyed to the AudioContext.
+ * snapshot. Unit tests hand the factories plain `{ current }` objects instead, which is why the
+ * factories keep the ref shape.
+ */
 export interface LibOpenMPTRefs {
-  libopenmptRef: React.MutableRefObject<LibOpenMPT | null>;
-  currentModulePtr: React.MutableRefObject<number>;
-  audioContextRef: React.MutableRefObject<AudioContext | null>;
-  scriptProcessorRef: React.MutableRefObject<ScriptProcessorNode | null>;
-  spLeftBufPtr: React.MutableRefObject<number>;
-  spRightBufPtr: React.MutableRefObject<number>;
-  spFallbackTriggered: React.MutableRefObject<boolean>;
-  audioWorkletNodeRef: React.MutableRefObject<AudioWorkletNode | null>;
-  masterInputRef: React.MutableRefObject<GainNode | null>;
-  masterDirectRef: React.MutableRefObject<GainNode | null>;
-  stereoPannerRef: React.MutableRefObject<StereoPannerNode | null>;
-  gainNodeRef: React.MutableRefObject<GainNode | null>;
-  analyserRef: React.MutableRefObject<AnalyserNode | null>;
-  fileDataRef: React.MutableRefObject<Uint8Array | null>;
-  workerRef: React.MutableRefObject<Worker | null>;
-  parserWorkerHealthyRef: React.MutableRefObject<boolean>;
-  ensureMainThreadModuleRef: React.MutableRefObject<((data: Uint8Array) => Promise<void>) | null>;
-  animationFrameHandle: React.MutableRefObject<number>;
-  lastUpdateTimeRef: React.MutableRefObject<number>;
-  workletOrderRef: React.MutableRefObject<number>;
-  workletRowRef: React.MutableRefObject<number>;
-  workletTimeRef: React.MutableRefObject<number>;
-  workletTimestampRef: React.MutableRefObject<number>;
-  workletBpmRef: React.MutableRefObject<number>;
-  workletSpeedRef: React.MutableRefObject<number>;
-  workletRowsPerSecRef: React.MutableRefObject<number>;
-  workletPositionSampleRef: React.MutableRefObject<WorkletPositionSample | null>;
-  lastWorkletUpdateRef: React.MutableRefObject<number>;
-  audioClockStartRef: React.MutableRefObject<number>;
-  workletTimeAtStartRef: React.MutableRefObject<number>;
-  driftAccumulatorRef: React.MutableRefObject<number>;
-  lastCorrectedTimeRef: React.MutableRefObject<number>;
-  pendingSeekRef: React.MutableRefObject<{ order: number; row: number; timestamp: number } | null>;
-  seekAcknowledgedRef: React.MutableRefObject<boolean>;
-  patternMatricesRef: React.MutableRefObject<(PatternMatrix | null)[]>;
-  patternBackfillAbortRef: React.MutableRefObject<AbortController | null>;
-  channelStatesRef: React.MutableRefObject<ChannelShadowState[]>;
-  isPlayingRef: React.MutableRefObject<boolean>;
-  /** Paused: the engine is silent but keeps its position. Never true while isPlayingRef is. */
-  isPausedRef: React.MutableRefObject<boolean>;
+  libopenmptRef: Ref<LibOpenMPT | null>;
+  currentModulePtr: Ref<number>;
+  audioContextRef: Ref<AudioContext | null>;
+  scriptProcessorRef: Ref<ScriptProcessorNode | null>;
+  spLeftBufPtr: Ref<number>;
+  spRightBufPtr: Ref<number>;
+  /** View: the ScriptProcessor fallback owns playback (`playbackEngineRef === 'scriptprocessor'`). */
+  spFallbackTriggered: Ref<boolean>;
+  audioWorkletNodeRef: Ref<AudioWorkletNode | null>;
+  masterInputRef: Ref<GainNode | null>;
+  masterDirectRef: Ref<GainNode | null>;
+  stereoPannerRef: Ref<StereoPannerNode | null>;
+  gainNodeRef: Ref<GainNode | null>;
+  analyserRef: Ref<AnalyserNode | null>;
+  fileDataRef: Ref<Uint8Array | null>;
+  workerRef: Ref<Worker | null>;
+  parserWorkerHealthyRef: Ref<boolean>;
+  ensureMainThreadModuleRef: Ref<((data: Uint8Array) => Promise<void>) | null>;
+  animationFrameHandle: Ref<number>;
+  workletOrderRef: Ref<number>;
+  workletRowRef: Ref<number>;
+  workletTimeRef: Ref<number>;
+  workletTimestampRef: Ref<number>;
+  workletBpmRef: Ref<number>;
+  workletSpeedRef: Ref<number>;
+  workletRowsPerSecRef: Ref<number>;
+  workletPositionSampleRef: Ref<WorkletPositionSample | null>;
+  /** Shared position ring of the current JS worklet node (crossOriginIsolated pages); drained by the UI loop. */
+  positionRingRef: Ref<PositionRingConsumer | null>;
+  lastWorkletUpdateRef: Ref<number>;
+  audioClockStartRef: Ref<number>;
+  workletTimeAtStartRef: Ref<number>;
+  driftAccumulatorRef: Ref<number>;
+  lastCorrectedTimeRef: Ref<number>;
+  pendingSeekRef: Ref<{ order: number; row: number; timestamp: number } | null>;
+  /** View: `pendingSeekRef.current === null`; writing `true` clears the pending seek. */
+  seekAcknowledgedRef: Ref<boolean>;
+  patternMatricesRef: Ref<(PatternMatrix | null)[]>;
+  patternBackfillAbortRef: Ref<AbortController | null>;
+  /** Live per-channel state the GPU reads every frame; mutated in place (pitfall 9). */
+  channelStatesRef: Ref<ChannelShadowState[]>;
+  /** View of the transport FSM: an engine is rendering. Writes are ignored — see engineRefs.ts. */
+  isPlayingRef: Ref<boolean>;
+  /** View of the transport FSM: paused (or cueing a module while paused). Writes are ignored. */
+  isPausedRef: Ref<boolean>;
   /** Audio-clock instants of the last pause / resume — see utils/transportClock.ts. */
-  pauseClockRef: React.MutableRefObject<PauseClock>;
-  playRef: React.MutableRefObject<((options?: { forceModuleLoad?: boolean }) => Promise<void>) | null>;
-  workletLoadedRef: React.MutableRefObject<boolean>;
-  workletModuleTokenRef: React.MutableRefObject<number>;
-  lastWorkletModuleTokenSentRef: React.MutableRefObject<number>;
-  playheadLagTrackerRef: React.MutableRefObject<PlayheadLagTracker>;
-  positionReportTrackerRef: React.MutableRefObject<PositionReportTracker>;
-  lastPositionSampleTimeRef: React.MutableRefObject<number>;
-  updateUIRef: React.MutableRefObject<(() => void) | null>;
-  uiLoopActiveRef: React.MutableRefObject<boolean>;
-  lastUiOrderRef: React.MutableRefObject<number>;
-  lastUiRowIntRef: React.MutableRefObject<number>;
-  lastUiBpmRef: React.MutableRefObject<number>;
-  lastSyncDebugUiMsRef: React.MutableRefObject<number>;
-  lastChannelStatePublishMsRef: React.MutableRefObject<number>;
-  noteAgesScratchRef: React.MutableRefObject<number[]>;
-  userModuleLoadedRef: React.MutableRefObject<boolean>;
+  pauseClockRef: Ref<PauseClock>;
+  playRef: Ref<((options?: { forceModuleLoad?: boolean }) => Promise<void>) | null>;
+  /** View: `audioWorklet.addModule` resolved on the current AudioContext (kept per context). */
+  workletLoadedRef: Ref<boolean>;
+  workletModuleTokenRef: Ref<number>;
+  lastWorkletModuleTokenSentRef: Ref<number>;
+  playheadLagTrackerRef: Ref<PlayheadLagTracker>;
+  positionReportTrackerRef: Ref<PositionReportTracker>;
+  lastPositionSampleTimeRef: Ref<number>;
+  updateUIRef: Ref<(() => void) | null>;
+  lastUiOrderRef: Ref<number>;
+  lastUiRowIntRef: Ref<number>;
+  lastUiBpmRef: Ref<number>;
+  lastSyncDebugUiMsRef: Ref<number>;
+  lastChannelStatePublishMsRef: Ref<number>;
+  noteAgesScratchRef: Ref<number[]>;
+  userModuleLoadedRef: Ref<boolean>;
   /**
-   * The engine that actually started the current playback (the JS worklet, or the ScriptProcessor
-   * fallback), written by the engine start paths. Pause/resume drive this one.
+   * The engine that actually started the current playback, written by the engine start paths and
+   * cleared by stop. Pause/resume drive this one.
    */
-  playbackEngineRef: React.MutableRefObject<PlaybackEngine | null>;
-  oscBufferRef: React.MutableRefObject<Float32Array | null>;
-  audioReactiveRef: React.MutableRefObject<Float32Array | null>;
-  playbackStateRef: React.MutableRefObject<PlaybackState>;
+  playbackEngineRef: Ref<PlaybackEngine | null>;
+  oscBufferRef: Ref<Float32Array | null>;
+  audioReactiveRef: Ref<Float32Array | null>;
+  playbackStateRef: Ref<PlaybackState>;
 }
 
+/**
+ * Snapshot setters the factories write through (PlayerEngine binds them to its store). The transport
+ * flags are not here: `isPlaying` / `isPaused` are derived from the FSM.
+ */
 export interface LibOpenMPTSetters {
-  setStatus: React.Dispatch<React.SetStateAction<string>>;
-  setIsPlaying: React.Dispatch<React.SetStateAction<boolean>>;
-  setIsPaused: React.Dispatch<React.SetStateAction<boolean>>;
-  setIsModuleLoaded: React.Dispatch<React.SetStateAction<boolean>>;
-  setModuleInfo: React.Dispatch<React.SetStateAction<ModuleInfo>>;
-  setSequencerMatrix: React.Dispatch<React.SetStateAction<PatternMatrix | null>>;
-  setInstrumentNames: React.Dispatch<React.SetStateAction<string[]>>;
-  setSampleNames: React.Dispatch<React.SetStateAction<string[]>>;
-  setModuleFormat: React.Dispatch<React.SetStateAction<string>>;
-  setInstrumentTable: React.Dispatch<React.SetStateAction<InstrumentTable>>;
-  setModuleComments: React.Dispatch<React.SetStateAction<string>>;
-  setModuleDurationSeconds: React.Dispatch<React.SetStateAction<number>>;
-  setModuleFileName: React.Dispatch<React.SetStateAction<string>>;
-  setSequencerCurrentRow: React.Dispatch<React.SetStateAction<number>>;
-  setSequencerGlobalRow: React.Dispatch<React.SetStateAction<number>>;
-  setPlaybackSeconds: React.Dispatch<React.SetStateAction<number>>;
-  setPlaybackRowFraction: React.Dispatch<React.SetStateAction<number>>;
-  setTotalPatternRows: React.Dispatch<React.SetStateAction<number>>;
-  setChannelStates: React.Dispatch<React.SetStateAction<ChannelShadowState[]>>;
-  setBeatPhase: React.Dispatch<React.SetStateAction<number>>;
-  setSyncDebug: React.Dispatch<React.SetStateAction<SyncDebugInfo>>;
-  setIsReady: React.Dispatch<React.SetStateAction<boolean>>;
-  setIsWorkletSupported: React.Dispatch<React.SetStateAction<boolean>>;
-  setWorkletLoadError: React.Dispatch<React.SetStateAction<string | null>>;
+  setStatus: StateSetter<string>;
+  setIsModuleLoaded: StateSetter<boolean>;
+  setModuleInfo: StateSetter<ModuleInfo>;
+  setSequencerMatrix: StateSetter<PatternMatrix | null>;
+  setInstrumentNames: StateSetter<string[]>;
+  setSampleNames: StateSetter<string[]>;
+  setModuleFormat: StateSetter<string>;
+  setInstrumentTable: StateSetter<InstrumentTable>;
+  setModuleComments: StateSetter<string>;
+  setModuleDurationSeconds: StateSetter<number>;
+  setModuleFileName: StateSetter<string>;
+  setSequencerCurrentRow: StateSetter<number>;
+  setSequencerGlobalRow: StateSetter<number>;
+  setPlaybackSeconds: StateSetter<number>;
+  setPlaybackRowFraction: StateSetter<number>;
+  setTotalPatternRows: StateSetter<number>;
+  setChannelStates: StateSetter<ChannelShadowState[]>;
+  setBeatPhase: StateSetter<number>;
+  setSyncDebug: StateSetter<SyncDebugInfo>;
+  setIsReady: StateSetter<boolean>;
+  setIsWorkletSupported: StateSetter<boolean>;
+  setWorkletLoadError: StateSetter<string | null>;
 }
+
+/** The slice of the transport FSM the action factories drive. */
+export type TransportPort = Pick<
+  TransportMachine,
+  'send' | 'can' | 'phase' | 'isPlaying' | 'isPaused'
+>;
 
 export interface UpdateUIParams {
   refs: LibOpenMPTRefs;

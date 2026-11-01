@@ -10,7 +10,11 @@ import type { OfflineExportState } from '../hooks/useOfflineExport';
 import type { PerformanceCaptureState } from '../hooks/usePerformanceCapture';
 import type { ExportSampleRate } from '../utils/wavEncoder';
 
-/** Feature panels + library — stable callbacks from App composition root. */
+/**
+ * Feature panels, library, media, export — callbacks and state owned by the App composition root.
+ * Player state (transport, module, levels) is not here: components select it from the engine
+ * (hooks/usePlayerEngine.ts, #492).
+ */
 export interface PlayerFeaturesValue {
   setIs3DMode: (v: boolean) => void;
   onCopyShareLink?: () => void;
@@ -18,20 +22,19 @@ export interface PlayerFeaturesValue {
   mediaVisible: boolean;
   mediaFades?: MediaFades;
   moduleMediaFileName?: string;
-  moduleMediaHintText?: string;
   setMediaVisible: (v: boolean) => void;
   setMediaItem: (item: MediaItem | null) => void;
   onMediaRemove: (id: string) => void;
   onMediaFadesChange: (fades: MediaFades) => void;
   handleMediaAdd: (file: File) => void;
   handleRemoteMediaSelect: (item: MediaItem) => void;
+  /** Load a module the user picked (file input / drop): source URL cleared, pattern edits confirmed. */
+  handleFileSelected: (file: File) => void;
   shaderCatalog: ShaderMeta[];
   shaderCatalogLoading: boolean;
   shaderCatalogError: string | null;
   onRateShader: (shaderId: string, score: number) => Promise<void>;
   ratingInFlightShaderId: string | null;
-  validShaderFavorites: string[];
-  validShaderRecents: string[];
   localLibraryRoots: LibraryRoot[];
   localLibraryLoading: boolean;
   localLibraryImporting: boolean;
@@ -47,7 +50,6 @@ export interface PlayerFeaturesValue {
   onLocalLibraryPlay: (entry: LibraryEntry) => Promise<void>;
   playlistItems: PlaylistItem[];
   playlistCurrentIndex: number;
-  playlistIsPlaying: boolean;
   playlistShuffle: boolean;
   playlistRepeat: 'none' | 'one' | 'all';
   onPlaylistSelect: (index: number) => void;

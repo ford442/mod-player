@@ -8,7 +8,7 @@
  * the DOM-free modules it imports) into public/worklets/.
  *
  * Cache-busting: each entry writes a content hash of its built output to its
- * own `*.generated.json` (e.g. hooks/useWorkletLoader.ts imports
+ * own `*.generated.json` (e.g. audio/engine/workletUrls.ts imports
  * audio-worklet/js/worklet-version.generated.json for its `?v=` query param).
  * The version only changes when that processor actually changes
  * (deterministic — safe for the freshness gate below).
