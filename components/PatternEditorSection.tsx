@@ -3,7 +3,7 @@ import { PatternEditor } from './PatternEditor';
 import { IS_PUBLIC_MODE } from '../appConfig';
 import { usePlayerEngine } from '../hooks/usePlayerEngine';
 import { usePlayerActions } from '../hooks/usePlayerView';
-import { usePlayerFeatures } from '../context/PlayerFeaturesContext';
+import { usePlayerFeatures } from '../context/playerFeatures';
 import { usePlayerUiStore } from '../store/playerUiStore';
 
 /** Pattern editor overlay, shown only while `editMode` is on (chrome mode only). */

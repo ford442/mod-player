@@ -81,7 +81,7 @@ export const MediaOverlay: React.FC<MediaOverlayProps> = ({
     }
     setMounted(false);
     return undefined;
-  }, [item?.id, visible]);
+  }, [item, visible]); // re-runs per new item object too, which only re-arms the fade-in
 
   useEffect(() => {
     return () => {

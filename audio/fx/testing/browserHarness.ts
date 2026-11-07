@@ -292,7 +292,7 @@ async function roomChecks(env: Omit<FxRackEnv, 'mode'>): Promise<HarnessCheck[]>
   }
 
   // Toggled room vs a hand-built reference (dry + the same IR fed through the
-  // spec'd send ramp) — see tests/fxRoom.test.ts for why M1/M2 don't apply.
+  // spec'd send ramp) — see tests/webaudio/fxRoom.test.ts for why M1/M2 don't apply.
   const input = lowSine({ sampleRate: SR, seconds: 2, freq: 55, amp: 0.25, dc: 0.1 });
   const T1 = quantumTime(0.3, SR);
   const T2 = quantumTime(0.8, SR);

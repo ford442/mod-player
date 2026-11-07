@@ -25,4 +25,4 @@ MOD/S3M files) shared one legacy key, those songs all inherit the last shader
 picked for any of them, until a new one is picked. That cannot be unpicked.
 
 Reads/writes run on the main thread from load and pick handlers only — never in
-the AudioWorklet or a requestAnimationFrame callback (`tests/songSessionGuards.test.ts`).
+the AudioWorklet or a requestAnimationFrame callback (`tests/build/songSessionGuards.test.ts`).

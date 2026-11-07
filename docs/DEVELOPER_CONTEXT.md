@@ -43,7 +43,7 @@
 1. Add the WGSL under `shaders/` (sync to `public/shaders/`)
 2. One block in `SHADER_REGISTRY`
 3. Picker entry in `appConfig.ts` `SHADER_GROUPS`
-4. `npm run test:shader-registry` (Vitest: `tests/shaderRegistry.test.ts`)
+4. `npm run test:shader-registry` (Vitest: `tests/unit/shaderRegistry.test.ts`)
 
 **Agent Warning:** Do **not** reintroduce `shaderFile.includes('v0.XX')` chains in PatternDisplay/hooks. Extend `ShaderMeta` instead. Unregistered filenames fall through `inferLegacyMeta` only as a safety net.
 
@@ -117,9 +117,9 @@ Unit tests run via **Vitest** (`npm test`). Suites live under `tests/*.test.ts` 
 | `npm run test:trigger-tail` | TRIG-001 trigger + sustain tail flags |
 | `npm run test:octave-brightness` | WGSL octave brightness curve parity |
 
-**PackedA/PackedB bit-layout changes** must update `tests/gpuPacking.test.ts` (pack→unpack round-trip) and the duration parity assertions in `tests/durationParity.test.ts`. These are the invariants that #318 (WGSL includes) and #307 (GPU lifecycle) must not break.
+**PackedA/PackedB bit-layout changes** must update `tests/unit/gpuPacking.test.ts` (pack→unpack round-trip) and the duration parity assertions in `tests/unit/durationParity.test.ts`. These are the invariants that #318 (WGSL includes) and #307 (GPU lifecycle) must not break.
 
-The former ad-hoc Node scripts under `utils/__debug__/*.test.cjs` have all been ported to Vitest (`tests/shaderRegistry.test.ts`, `libraryStore`, `folderImport`, `parserPromise`, `modMetadata`) and the directory removed; there are no unported test scripts left.
+The former ad-hoc Node scripts under `utils/__debug__/*.test.cjs` have all been ported to Vitest (`tests/unit/shaderRegistry.test.ts`, `libraryStore`, `folderImport`, `parserPromise`, `modMetadata`) and the directory removed; there are no unported test scripts left.
 
 ---
 
@@ -134,7 +134,7 @@ The app needs **cross-origin isolation** so Emscripten can use `SharedArrayBuffe
 | `Cross-Origin-Opener-Policy` | `same-origin` | `same-origin` |
 | `Cross-Origin-Embedder-Policy` | `require-corp` | `require-corp` |
 
-`public/_headers` carries the same pair; `tests/crossOriginIsolationHeaders.test.ts` pins all three
+`public/_headers` carries the same pair; `tests/build/crossOriginIsolationHeaders.test.ts` pins all three
 sources. **`require-corp`, not `credentialless` (#516):** WebKit does not implement `credentialless`,
 so under it Safari is never isolated and silently takes every fallback — in-worklet module create on
 the audio thread (#513) and `postMessage` instead of `SharedArrayBuffer`. `require-corp` blocks any

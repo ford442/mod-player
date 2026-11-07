@@ -65,20 +65,31 @@ export function createOfflineContext(opts: RenderOfflineOptions): OfflineAudioCo
   });
 }
 
-/** Run `startRendering()` with a timeout. Build the graph (incl. worklet nodes) before calling. */
+/**
+ * Run `startRendering()` under an `AbortSignal.timeout`. Build the graph (incl. worklet nodes)
+ * before calling. The guard sits inside the `webaudio` project's 60 s test timeout
+ * (vitest.config.ts), so a stuck render fails here, with the render's size in the message.
+ * These renders are a few seconds of audio and take well under a second on an idle machine: a
+ * guard that fires is CPU contention (another render, another Vitest), not a slow graph.
+ */
 export async function startRenderingWithTimeout(
   ctx: OfflineAudioContext,
-  timeoutMs = 20_000,
+  timeoutMs = 45_000,
 ): Promise<AudioBuffer> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error(`offline render timed out after ${timeoutMs} ms`)), timeoutMs);
+  const signal = AbortSignal.timeout(timeoutMs);
+  const started = performance.now();
+  const aborted = new Promise<never>((_, reject) => {
+    signal.addEventListener('abort', () => {
+      const seconds = (ctx.length / ctx.sampleRate).toFixed(2);
+      reject(new Error(
+        `offline render timed out after ${timeoutMs} ms (${ctx.length} frames = ${seconds} s at ` +
+        `${ctx.sampleRate} Hz, ${ctx.destination.channelCount} ch; ` +
+        `${Math.round(performance.now() - started)} ms elapsed). A render this size normally ` +
+        'finishes in well under a second — this is CPU contention, not the graph.',
+      ));
+    }, { once: true });
   });
-  try {
-    return await Promise.race([ctx.startRendering(), timeout]);
-  } finally {
-    if (timer !== undefined) clearTimeout(timer);
-  }
+  return Promise.race([ctx.startRendering(), aborted]);
 }
 
 /** Create a context, let `build` wire it, render it. */

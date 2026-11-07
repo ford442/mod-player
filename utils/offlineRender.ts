@@ -37,7 +37,7 @@ export interface OfflineRenderResult {
  * Live playback pulls libopenmpt one AudioWorklet render quantum at a time, and its float mixer
  * rounds differently depending on how many frames each call asks for (a 4096-frame read drifts
  * ~1e-6 from 32 × 128). Reading in the same quanta makes the export bit-identical to what played
- * (#490, tests/exportLiveParity.test.ts); a crush/bit-depth stage in the FX rack would otherwise
+ * (#490, tests/webaudio/exportLiveParity.test.ts); a crush/bit-depth stage in the FX rack would otherwise
  * turn that sub-LSB drift into whole quantization steps.
  */
 const RENDER_QUANTUM_FRAMES = 128;

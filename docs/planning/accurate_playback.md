@@ -45,7 +45,7 @@ AudioWorklet process()                    Main thread RAF (updateUI)
 
 ```bash
 npm run test:playhead          # focused
-npm test                       # includes tests/playheadPrediction.test.ts + tests/circularPaging.test.ts
+npm test                       # includes tests/unit/playheadPrediction.test.ts + tests/unit/circularPaging.test.ts
 ```
 
 Asserts:
@@ -146,7 +146,7 @@ Acceptance: visual lag ≤ ~120 ms (≤ 1 row), typically **< 0.5 row** after pr
 | `utils/playheadPrediction.ts` | `predictPlayheadFromSample`, latency-aware dt, sample apply |
 | `hooks/useLibOpenMPT.ts` | RAF `updateUI` prediction + light EMA |
 | `hooks/useAudioGraph.ts` | Forwards `rowFraction` / `audioTime` from worklet messages |
-| `tests/playheadPrediction.test.ts` | Vitest math regression (CI via `npm test`) |
+| `tests/unit/playheadPrediction.test.ts` | Vitest math regression (CI via `npm test`) |
 | `scripts/playhead-acceptance.mjs` | Browser lag + paging acceptance (`npm run smoke:playhead`) |
 | `utils/gpuPacking.ts` + `shaderVersion.ts` | f32 playhead uniform for paged/circular shaders |
 | `utils/workletPositionAdapter.ts` | JS worklet `position` → `applyWorkletPositionSample` |

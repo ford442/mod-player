@@ -93,7 +93,7 @@ Shaders are named `patternv0.XX.wgsl` and `chassisv0.XX.wgsl`. Each pattern shad
 | `v0.35`, `v0.37`, `v0.38` | Circular | High-precision | 1024×1024 | Hybrid UI |
 | `v0.45–v0.50` | Circular | High-precision | — | Alpha blending enabled |
 
-**DO NOT add `shaderFile.includes('v0.XX')` chains** to `PatternDisplay.tsx` or the hooks — `tests/shaderRegistry.test.ts` fails if one appears. When adding a new shader, register one `ShaderMeta` block in `utils/shaderRegistry.ts` and add a picker entry in `appConfig.ts`.
+**DO NOT add `shaderFile.includes('v0.XX')` chains** to `PatternDisplay.tsx` or the hooks — `tests/unit/shaderRegistry.test.ts` fails if one appears. When adding a new shader, register one `ShaderMeta` block in `utils/shaderRegistry.ts` and add a picker entry in `appConfig.ts`.
 
 ### Data Packing for GPU
 Tracker cells are bit-packed into `Uint32Array` before upload:

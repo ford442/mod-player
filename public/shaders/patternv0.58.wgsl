@@ -141,7 +141,7 @@ fn selectPalette(id: u32, t: f32) -> vec3<f32> {
 // velocity_led.wgsl — VEL-001 per-step volume/velocity from packed cell layout
 // lib/openmpt_commands.wgsl
 // libopenmpt command values the GPU packers need. Mirrors utils/openmptCommands.ts (values from
-// soundlib/modcommand.h, libopenmpt 0.8.9); tests/patternCommandMapping.test.ts pins every value
+// soundlib/modcommand.h, libopenmpt 0.8.9); tests/wasm/patternCommandMapping.test.ts pins every value
 // here to the TS module and to what the committed wasm returns.
 
 const VOLCMD_VOLUME: u32    = 1u;

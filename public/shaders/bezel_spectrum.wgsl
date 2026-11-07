@@ -60,7 +60,7 @@ struct BezelUniforms {
 // which this lib maps to level 0, so silence always renders the static chassis.
 //
 // SPECTRUM_CHASSIS_BINS duplicates SPECTRUM_BIN_COUNT (computeAnalysis.ts and
-// lib/spectrum_bands.wgsl); tests/spectrumChassis.test.ts pins all three.
+// lib/spectrum_bands.wgsl); tests/unit/spectrumChassis.test.ts pins all three.
 
 const SPECTRUM_CHASSIS_BINS: u32 = 32u;
 

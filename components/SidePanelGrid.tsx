@@ -13,7 +13,7 @@ import {
   useModuleMetadata,
   usePlayerActions,
 } from '../hooks/usePlayerView';
-import { usePlayerFeatures } from '../context/PlayerFeaturesContext';
+import { usePlayerFeatures } from '../context/playerFeatures';
 import { usePlayerUiStore } from '../store/playerUiStore';
 import { useShaderPrefsStore } from '../store/shaderPrefsStore';
 

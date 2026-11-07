@@ -1,0 +1,233 @@
+/**
+ * Drives the COMPILED worklet (public/worklets/openmpt-worklet.js) with the REAL committed
+ * libopenmpt-worklet.{js,wasm} inside a fake AudioWorkletGlobalScope (node:vm), through the same
+ * initLib / load / seek / setRenderParam messages the app posts. No browser needed, but it
+ * exercises the exact bootstrap path that broke in the first real-wasm build ("_malloc is not a
+ * function": readiness was inferred from lazy export stubs) and the MOD↔XM / stop→play lifecycle
+ * contracts (#329/#330): one libopenmpt per scope, node reuse, recovery after a bad file.
+ */
+import { beforeAll, describe, expect, it } from 'vitest';
+import { MAIN_TO_WORKLET as MT, WORKLET_TO_MAIN as WT } from '../../audio-worklet/workletProtocolConstants';
+import { synthXm } from '../../scripts/lib/synth-xm.mjs';
+import { PositionRingReader, createPositionRingBuffer } from '../../audio-worklet/positionRing';
+import { FakeScope, QUANTUM, SAMPLE_RATE, initLib, read } from '../helpers/workletScope';
+
+/** Render `quanta` 128-frame blocks; returns peak and a cheap PCM fingerprint. */
+function render(scope: FakeScope, node: ReturnType<FakeScope['newNode']>['node'], quanta: number) {
+  const l = new Float32Array(QUANTUM);
+  const r = new Float32Array(QUANTUM);
+  let peak = 0;
+  let sum = 0;
+  for (let q = 0; q < quanta; q++) {
+    scope.advance(QUANTUM / SAMPLE_RATE);
+    node.process([[]], [[l, r]], {});
+    for (let i = 0; i < QUANTUM; i++) {
+      peak = Math.max(peak, Math.abs(l[i]!), Math.abs(r[i]!));
+      sum += l[i]! * (i + 1) + r[i]! * (QUANTUM - i);
+    }
+  }
+  return { peak, fingerprint: sum };
+}
+
+const MOD = new Uint8Array(read('public/4-mat_madness.mod'));
+// public/test.xm renders as silence (with the old engine too), so use a real, audible XM.
+const XM = synthXm(8);
+const MOD2 = new Uint8Array(read('public/libopenmpt-test.mod'));
+
+describe('compiled JS worklet + real libopenmpt wasm (Node, fake AudioWorkletGlobalScope)', () => {
+  let scope: FakeScope;
+  let node: ReturnType<FakeScope['newNode']>;
+
+  beforeAll(async () => {
+    scope = new FakeScope();
+    node = scope.newNode();
+    await initLib(scope, node.send);
+  }, 60_000);
+
+  it('initLib boots the real wasm (no "_malloc is not a function"), then load acks and renders audio', async () => {
+    expect(scope.count(WT.error)).toBe(0);
+    await node.send({ type: MT.load, moduleData: scope.toRealm(MOD) });
+    expect(scope.count(WT.error)).toBe(0);
+    expect(scope.count(WT.loaded)).toBe(1);
+
+    const { peak } = render(scope, node.node, 600);
+    expect(peak).toBeGreaterThan(0.01);
+    expect(peak).toBeLessThanOrEqual(1.5);
+  });
+
+  it('posts position reports at ~60 Hz with channel VU while playing', () => {
+    const positions = scope.posted.filter((m) => m.type === WT.position);
+    expect(positions.length).toBeGreaterThan(10);
+    const last = positions[positions.length - 1]!;
+    expect(last.sampleRate).toBe(SAMPLE_RATE);
+    expect(Array.isArray(last.channelVU)).toBe(true);
+    expect((last.channelVU as number[]).length).toBe(4);
+  });
+
+  it('MOD → XM → MOD on one node: every load acks, audio keeps flowing, lib is initialised once', async () => {
+    for (const bytes of [XM, MOD2, MOD]) {
+      const before = scope.count(WT.loaded);
+      await node.send({ type: MT.load, moduleData: scope.toRealm(bytes) });
+      expect(scope.count(WT.loaded)).toBe(before + 1);
+      expect(render(scope, node.node, 300).peak).toBeGreaterThan(0.001);
+    }
+    expect(scope.count(WT.error)).toBe(0);
+  });
+
+  it('a second node in the same scope (hot reload) attaches to the shared lib with NO initLib', async () => {
+    const second = scope.newNode();
+    const before = scope.count(WT.loaded);
+    await second.send({ type: MT.load, moduleData: scope.toRealm(XM) });
+    expect(scope.count(WT.loaded)).toBe(before + 1);
+    expect(render(scope, second.node, 200).peak).toBeGreaterThan(0.001);
+  });
+
+  it('a corrupt file reports an error and does NOT kill the runtime: the next valid load works', async () => {
+    const junk = new Uint8Array(4096);
+    for (let i = 0; i < junk.length; i++) junk[i] = (i * 2654435761) >>> 24;
+    const errorsBefore = scope.count(WT.error);
+    await node.send({ type: MT.load, moduleData: scope.toRealm(junk) });
+    expect(scope.count(WT.error)).toBe(errorsBefore + 1);
+
+    const loadedBefore = scope.count(WT.loaded);
+    await node.send({ type: MT.load, moduleData: scope.toRealm(MOD) });
+    expect(scope.count(WT.loaded)).toBe(loadedBefore + 1);
+    expect(render(scope, node.node, 300).peak).toBeGreaterThan(0.01);
+  });
+
+  it('stop → play: pause silences output, play resumes it, without reloading the module', async () => {
+    await node.send({ type: MT.pause });
+    expect(render(scope, node.node, 20).peak).toBe(0);
+    await node.send({ type: MT.play });
+    expect(render(scope, node.node, 200).peak).toBeGreaterThan(0.01);
+  });
+
+  it('seek acks and playback continues', async () => {
+    const before = scope.count(WT.seekAck);
+    await node.send({ type: MT.seek, order: 0, row: 8 });
+    expect(scope.count(WT.seekAck)).toBe(before + 1);
+    expect(render(scope, node.node, 100).peak).toBeGreaterThan(0.001);
+  });
+
+  it('interpolation: default is Sinc+LP (8); setRenderParam(3, 4) selects cubic and survives a reload', async () => {
+    const renderFresh = async (): Promise<number> => {
+      await node.send({ type: MT.load, moduleData: scope.toRealm(MOD) });
+      return render(scope, node.node, 400).fingerprint;
+    };
+
+    const dflt = await renderFresh();
+    await node.send({ type: MT.setRenderParam, param: 3, value: 4 });
+    const cubicLive = render(scope, node.node, 1).fingerprint; // live change must not throw
+    expect(Number.isFinite(cubicLive)).toBe(true);
+    const cubicAfterReload = await renderFresh();
+    expect(cubicAfterReload).not.toBe(dflt);
+
+    await node.send({ type: MT.setRenderParam, param: 3, value: 8 });
+    expect(await renderFresh()).toBe(dflt);
+  });
+
+  it('a forced wasm trap in process() (corrupt modulePtr) silences output and posts a fatal error; the next valid load recovers', async () => {
+    const ptrField = node.node as unknown as { modulePtr: number; faulted: boolean };
+    const validPtr = ptrField.modulePtr;
+    expect(validPtr).not.toBe(0);
+    const errorsBefore = scope.count(WT.error);
+
+    // Corrupt the wasm module pointer directly — process() passes this to
+    // libopenmpt's exported functions, and real wasm bounds-checks memory
+    // access: dereferencing a bogus pointer this far outside the module's
+    // heap traps with a JS-catchable WebAssembly.RuntimeError.
+    ptrField.modulePtr = 0x7fffffff;
+
+    const { peak } = render(scope, node.node, 5);
+    expect(peak).toBe(0); // silenced, not garbage samples from a half-run quantum
+
+    const errors = scope.posted.filter((m) => m.type === WT.error);
+    expect(errors.length).toBeGreaterThan(errorsBefore);
+    const fatal = errors[errors.length - 1]!;
+    expect(fatal.fatal).toBe(true);
+    expect(String(fatal.message)).toMatch(/PROCESS_FAULT/);
+    expect(ptrField.faulted).toBe(true);
+
+    // Still faulted — further quanta stay silent without re-entering the code
+    // that just trapped.
+    expect(render(scope, node.node, 5).peak).toBe(0);
+
+    // The next valid load recovers the node: loadModule() tears down the
+    // (also-corrupt) old pointer under its own try/catch and clears `faulted`.
+    const loadedBefore = scope.count(WT.loaded);
+    await node.send({ type: MT.load, moduleData: scope.toRealm(MOD) });
+    expect(scope.count(WT.loaded)).toBe(loadedBefore + 1);
+    expect(ptrField.faulted).toBe(false);
+    expect(render(scope, node.node, 300).peak).toBeGreaterThan(0.01);
+  });
+
+  it('initLib without wasm bytes fails fast with a clear error (no wasm2js JS-only path)', async () => {
+    const cold = new FakeScope();
+    const n = cold.newNode();
+    await n.send({
+      type: MT.initLib,
+      scriptText: read('public/worklets/libopenmpt-worklet.js').toString('utf8'),
+    });
+    const err = cold.posted.find((m) => m.type === WT.error);
+    expect(String(err?.message)).toMatch(/missing wasmBytes/);
+  });
+
+  it('initLib with an HTML 404 body as wasm is rejected by the magic check', async () => {
+    const cold = new FakeScope();
+    const n = cold.newNode();
+    await n.send({
+      type: MT.initLib,
+      scriptText: read('public/worklets/libopenmpt-worklet.js').toString('utf8'),
+      wasmBytes: cold.toRealm(new TextEncoder().encode('<!doctype html><title>404</title>')),
+    });
+    const err = cold.posted.find((m) => m.type === WT.error);
+    expect(String(err?.message)).toMatch(/0asm magic/);
+  });
+});
+
+describe('64-channel VU and the shared position ring (#492), compiled worklet + real libopenmpt', () => {
+  const XM64 = synthXm(64);
+
+  it('reports VU for all 64 channels of a 64-channel module (the cap was 32)', async () => {
+    const scope = new FakeScope();
+    const n = scope.newNode();
+    await initLib(scope, n.send);
+    await n.send({ type: MT.load, moduleData: scope.toRealm(XM64) });
+    render(scope, n.node, 300);
+    const positions = scope.posted.filter((m) => m.type === WT.position);
+    const vu = positions[positions.length - 1]!.channelVU as number[];
+    expect(vu).toHaveLength(64);
+    expect(vu.slice(32).some((v) => v > 0)).toBe(true);
+  }, 60_000);
+
+  it('with a ring attached, reports go through shared memory — and no position messages', async () => {
+    const scope = new FakeScope();
+    const n = scope.newNode();
+    await initLib(scope, n.send);
+    const ring = createPositionRingBuffer();
+    await n.send({ type: MT.setPositionRing, buffer: ring });
+    const reader = new PositionRingReader(ring);
+    await n.send({ type: MT.load, moduleData: scope.toRealm(XM64) });
+    expect(scope.count(WT.error)).toBe(0);
+    render(scope, n.node, 600); // ~1.6 s of audio
+
+    expect(scope.count(WT.position)).toBe(0);
+    const times: number[] = [];
+    let sawUpperVu = false;
+    while (reader.next()) {
+      const s = reader.sample;
+      times.push(s.audioTime);
+      expect(s.order).toBeGreaterThanOrEqual(0);
+      expect(s.row).toBeGreaterThanOrEqual(0);
+      expect(s.row).toBeLessThan(64);
+      expect(s.sampleRate).toBe(SAMPLE_RATE);
+      expect(s.numVu).toBe(64);
+      if (Array.from(reader.vu.subarray(32, 64)).some((v) => v > 0)) sawUpperVu = true;
+    }
+    // The reader sees at most the ring's depth since it attached; all of them in time order.
+    expect(times.length).toBeGreaterThan(4);
+    expect([...times].sort((a, b) => a - b)).toEqual(times);
+    expect(reader.dropped).toBeGreaterThan(0); // ~96 reports written, 8 slots
+    expect(sawUpperVu).toBe(true);
+  }, 60_000);
+});
