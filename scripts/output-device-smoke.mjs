@@ -97,9 +97,10 @@ async function startDefaultModule(page) {
 
 async function main() {
   console.log(`output-device smoke — ${BASE_URL}`);
-  const { browser, engine, close } = await launchBrowser({
+  const { browser, engine, close, info: browserInfo } = await launchBrowser({
     args: [...AUDIO_CHROME_ARGS, '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'],
   });
+  report.browser = browserInfo;
   if (engine !== 'playwright') {
     await close();
     throw new Error('needs Playwright (per-context microphone permission reveals the fake outputs)');

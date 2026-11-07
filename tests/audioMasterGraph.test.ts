@@ -6,6 +6,7 @@ import {
   applyMasterLevels,
   ensureMasterOutputChain,
   releaseMasterNodes,
+  setParamIfChanged,
   type MasterGraphRefs,
 } from '../utils/audioMasterGraph';
 import { FxRack } from '../audio/fx/FxRack';
@@ -89,6 +90,56 @@ describe('audioMasterGraph', () => {
 
     expect(gain.gain.value).toBe(0.25);
     expect(panner.pan.value).toBe(-0.5);
+  });
+
+  it('setParamIfChanged writes only a changed value, comparing at float32 precision', () => {
+    const writes: number[] = [];
+    let stored = 0;
+    const param = {
+      get value() { return stored; },
+      set value(v: number) { writes.push(v); stored = Math.fround(v); },
+    } as AudioParam;
+    setParamIfChanged(param, 0.8);
+    setParamIfChanged(param, 0.8); // float32(0.8) !== 0.8: must still be recognised as unchanged
+    setParamIfChanged(param, 0.5);
+    expect(writes).toEqual([0.8, 0.5]);
+  });
+
+  // Chrome 156+ renders a StereoPanner whose pan was written twice 1 ulp off from a single write
+  // (fx-smoke "null: master chain vs pre-rack graph", #535), so the master chain writes each level once.
+  it('ensureCommonMasterNodes + wireMasterOutput write pan and gain exactly once per value', () => {
+    const writes: string[] = [];
+    const makeParam = (name: string) => {
+      let stored = name === 'gain' ? 1 : 0;
+      return {
+        get value() { return stored; },
+        set value(v: number) { writes.push(`${name}=${v}`); stored = Math.fround(v); },
+      };
+    };
+    const holder: { ctx?: AudioContext } = {};
+    // `context` must match, or ensureCommonMasterNodes treats the nodes as stale and rebuilds them.
+    const node = (extra: object = {}) => ({
+      connect: () => undefined,
+      disconnect: () => undefined,
+      get context() { return holder.ctx; },
+      ...extra,
+    });
+    const ctx = {
+      destination: node(),
+      createGain: () => node({ gain: makeParam('gain') }),
+      createStereoPanner: () => node({ pan: makeParam('pan') }),
+      createAnalyser: () => node(),
+    } as unknown as AudioContext;
+    holder.ctx = ctx;
+    const refs = graphRefs();
+    ensureCommonMasterNodes(ctx, refs, 0.8, 0.25);
+    wireMasterOutput(ctx, refs, 0.8, 0.25);
+    ensureCommonMasterNodes(ctx, refs, 0.8, 0.25);
+    expect(writes.filter((w) => w.startsWith('pan='))).toEqual(['pan=0.25']);
+    // masterInput / masterDirect are unity and never written; only the output gain is.
+    expect(writes.filter((w) => w.startsWith('gain='))).toEqual(['gain=0.8']);
+    ensureCommonMasterNodes(ctx, refs, 0.5, -0.5);
+    expect(writes.slice(-2).sort()).toEqual(['gain=0.5', 'pan=-0.5']);
   });
 
   it('applyMasterLevels no-ops when nodes are missing', () => {

@@ -121,7 +121,7 @@ async function runMode(browser, engine, mode) {
 
 async function main() {
   console.log(`Create-thread acceptance (#513): 16 MiB 64-ch IT loaded while a MOD plays — ${BASE_URL}`);
-  const { browser, engine, close } = await launchBrowser();
+  const { browser, engine, close, info: browserInfo } = await launchBrowser();
   if (engine !== 'playwright') throw new Error('needs Playwright (page.route serves the synthetic module)');
   const results = [];
   try {
@@ -139,7 +139,7 @@ async function main() {
     );
   }
   const reportPath = join(OUTPUT_DIR, 'report.json');
-  writeFileSync(reportPath, JSON.stringify({ generatedAt: new Date().toISOString(), baseUrl: BASE_URL, quantumMs: QUANTUM_MS, results }, null, 2));
+  writeFileSync(reportPath, JSON.stringify({ generatedAt: new Date().toISOString(), browser: browserInfo, baseUrl: BASE_URL, quantumMs: QUANTUM_MS, results }, null, 2));
   console.log(`Report: ${reportPath}`);
 
   if (!ASSERT) return;

@@ -433,6 +433,7 @@ function generateMarkdown(report) {
   const lines = [
     '# Visual Smoke Report',
     '',
+    `**Browser:** ${report.browser.product} ${report.browser.version} (${report.browser.source})`,
     `**Date:** ${report.timestamp}`,
     `**Base URL:** ${report.baseUrl}`,
     `**Profile:** ${report.profile}`,
@@ -496,7 +497,7 @@ async function main() {
     process.exit(1);
   }
 
-  const { browser, engine, close } = await launchBrowser();
+  const { browser, engine, close, info: browserInfo } = await launchBrowser();
   const results = [];
 
   try {
@@ -523,6 +524,7 @@ async function main() {
 
   const report = {
     timestamp: new Date().toISOString(),
+    browser: browserInfo,
     baseUrl: BASE_URL,
     appBase,
     appRoot,
