@@ -138,7 +138,7 @@ export default tseslint.config(
   {
     // #492: the player engine core is framework-free. React observes it (hooks/usePlayerEngine.ts); it
     // never imports React or a React state library. This catches direct imports;
-    // tests/playerEngineImports.test.ts walks the whole import graph from PlayerEngine.ts. The start
+    // tests/unit/playerEngineImports.test.ts walks the whole import graph from PlayerEngine.ts. The start
     // paths and action factories live under hooks/ only because their unit tests import them there.
     files: [
       'audio/engine/**/*.ts',
@@ -184,6 +184,22 @@ export default tseslint.config(
     files: ['**/*.d.ts'],
     rules: {
       'no-var': 'off',
+    },
+  },
+  {
+    // #535: tests/unit/ is the fast loop (5 s timeout, threads). Tests that boot the real libopenmpt WASM or render
+    // with node-web-audio-api belong in tests/wasm/ or tests/webaudio/ (see vitest.config.ts).
+    files: ['tests/unit/**/*.ts'],
+    rules: {
+      'no-restricted-imports': ['error', {
+        patterns: [{
+          group: [
+            '**/helpers/webAudioNode', '**/helpers/libopenmptNode', '**/helpers/sharedWasm',
+            '**/helpers/workletScope', '**/helpers/createWorkerThread', 'node-web-audio-api',
+          ],
+          message: 'tests/unit/ must stay fast and pure: move tests that need real WASM to tests/wasm/, Web Audio renders to tests/webaudio/ (#535).',
+        }],
+      }],
     },
   },
   {

@@ -25,13 +25,38 @@ npm run preflight
 
 One command, chained with `&&`, stopping at the first failure. In order:
 `verify:lockfile` → `npm ci --dry-run --ignore-scripts --offline` → `verify:wasm` →
-`verify:js-libopenmpt` → `verify:js-worklet-fresh` → `lint` → `typecheck` →
+`verify:js-libopenmpt` → `verify:js-worklet-fresh` → `lint` (`--max-warnings 0`) → `check:cycles` → `typecheck` →
 `typecheck:worklet` → `typecheck:tests` → `test` → `test:shader-includes` → `build` →
 `verify:build:root` → `verify:bundle-budget`.
 
 The `lint-and-build` CI job is `npm ci` followed by `npm run preflight` — it *is* this
 chain, so the two cannot drift apart. Add new CI gates to the `preflight` script in
 `package.json`, not to the workflow. It needs no network after `npm ci`.
+
+Node 22 is the tested version (CI pins it; `engines` is `>=22.12.0`, and newer majors are expected to
+work but are not part of the gate).
+
+### Tests are Vitest projects, chosen by directory
+
+`npm test` runs every project; a test lands in one by where you write it (`vitest.config.ts`):
+
+| Directory | For | Runs on |
+|---|---|---|
+| `tests/unit/` | pure TypeScript: no real WASM, no Web Audio, no child processes | threads, 5 s |
+| `tests/wasm/` | boots the committed `libopenmpt-*.wasm` (`tests/helpers/sharedWasm.ts` compiles it once per worker) | forks, 30 s |
+| `tests/webaudio/` | renders with `node-web-audio-api` (`tests/helpers/webAudioNode.ts`) | forks, one file at a time, 60 s |
+| `tests/build/` | child processes and build outputs | forks, 120 s |
+
+ESLint stops `tests/unit/` importing the heavy helpers. `npm run test:unit` is the fast loop,
+`VITEST_SKIP_BUILD=1 npm test` skips the build project, and under `CI` the run also writes
+`artifacts/vitest-junit.xml` (uploaded by `lint-and-build`) so a timeout names its test.
+
+### Smoke browsers are pinned
+
+The Playwright smokes launch Playwright's own bundled Chromium (`chromium.executablePath()`), whose
+version is fixed by `playwright` in `package-lock.json`; they do not use the runner image's Google
+Chrome, which moves with the image. Every smoke prints `browser: Chromium <version> [source]` first and
+records it in `report.json`. Set `CHROME_PATH` or `PLAYWRIGHT_CHANNEL=chrome` to opt out locally.
 
 **What preflight does _not_ cover:** `visual-smoke`, `audio-smoke`,
 `playhead-smoke`, `build-scripts` and `js-libopenmpt-rebuild`. Those need a

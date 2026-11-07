@@ -10,9 +10,10 @@
  *
  * Main thread only, from load / user-action handlers: never from the
  * AudioWorklet and never from a requestAnimationFrame callback
- * (tests/songSessionGuards.test.ts).
+ * (tests/build/songSessionGuards.test.ts).
  */
 import { createIndexedDbSongSessionStore } from './songSessionIdb';
+import { createSessionListeners } from './songSessionListeners';
 
 export interface SongPosition {
   order: number;
@@ -45,25 +46,9 @@ export function emptySongSession(fingerprint: string): SongSession {
   return { fingerprint, shader: null, lastPosition: null, legacyShaderMigrated: false };
 }
 
-/** Shared listener set for the adapters. */
-export function createSessionListeners() {
-  const listeners = new Set<(session: SongSession) => void>();
-  return {
-    subscribe(listener: (session: SongSession) => void) {
-      listeners.add(listener);
-      return () => {
-        listeners.delete(listener);
-      };
-    },
-    emit(session: SongSession) {
-      for (const listener of [...listeners]) listener(session);
-    },
-  };
-}
-
 export function createMemorySongSessionStore(): SongSessionStore {
   const records = new Map<string, SongSession>();
-  const listeners = createSessionListeners();
+  const listeners = createSessionListeners<SongSession>();
   return {
     get: (fingerprint) => Promise.resolve(records.has(fingerprint) ? structuredClone(records.get(fingerprint)!) : null),
     put: (session) => {

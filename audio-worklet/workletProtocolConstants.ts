@@ -8,7 +8,7 @@
  *   - worklet:     a tiny allocation-free guard (audio-worklet/workletProtocolGuard.ts), bundled into
  *                  public/worklets/openmpt-worklet.js by esbuild (scripts/build-js-worklet.mjs).
  *
- * tests/workletProtocolParity.test.ts runs every message type, valid and broken, through both.
+ * tests/unit/workletProtocolParity.test.ts runs every message type, valid and broken, through both.
  * Keep this file DOM-free and import-free: it is part of the AudioWorkletGlobalScope bundle.
  */
 

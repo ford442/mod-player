@@ -7,6 +7,7 @@ import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { LibOpenMPT } from '../../types';
+import { sharedWasmModule } from './sharedWasm';
 
 const ROOT = resolve(fileURLToPath(new URL('../..', import.meta.url)));
 
@@ -14,8 +15,16 @@ export async function loadLibOpenMPTNode(): Promise<{ lib: LibOpenMPT; restore: 
   const g = globalThis as Record<string, unknown>;
   const previous = g.libopenmpt;
   const glue = readFileSync(join(ROOT, 'public/worklets/libopenmpt-worklet.js'), 'utf8');
-  const wasmBinary = readFileSync(join(ROOT, 'public/worklets/libopenmpt-worklet.wasm'));
-  g.libopenmpt = { noInitialRun: true, wasmBinary };
+  const module = await sharedWasmModule('libopenmpt-worklet.wasm');
+  // Emscripten's instantiateWasm hook: hand it a fresh instance of the worker's one compiled module
+  // instead of letting every call re-read and re-compile the binary (#535).
+  g.libopenmpt = {
+    noInitialRun: true,
+    instantiateWasm: (imports: WebAssembly.Imports, receive: (instance: WebAssembly.Instance, module: WebAssembly.Module) => void) => {
+      void WebAssembly.instantiate(module, imports).then((instance) => receive(instance, module));
+      return {};
+    },
+  };
   new Function(glue.replace(/^\s*export\s+(default\s+)?/gm, '')).call(globalThis);
   const raw = g.libopenmpt as Record<string, unknown> & { calledRun?: boolean; onRuntimeInitialized?: () => void };
   await new Promise<void>((resolveReady) => {

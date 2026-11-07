@@ -1,4 +1,4 @@
-"""Unit tests for scripts/lib/coi_headers.py (stdlib only, no network). Run via tests/coiHeadersPython.test.ts."""
+"""Unit tests for scripts/lib/coi_headers.py (stdlib only, no network). Run via tests/build/coiHeadersPython.test.ts."""
 
 import sys
 import unittest

@@ -30,7 +30,7 @@ These invariants are **hard gates**. Violating any of them has caused three prod
 | Rule | Rationale | Guard |
 |------|-----------|-------|
 | **Never re-init libopenmpt** on every `play()` / module switch | XM silence, runaway `ended → seek 0` | `ensureSharedLibOpenMPT` singleton; `canReuseWorkletNode`; `shouldPostInitLib` |
-| **Never `AudioContext.suspend()`** on normal `stopMusic(false)` / reload | UI "Playing" but no audio until fresh gesture | `tests/workletAudioLifecycle.test.ts` source invariant |
+| **Never `AudioContext.suspend()`** on normal `stopMusic(false)` / reload | UI "Playing" but no audio until fresh gesture | `tests/unit/workletAudioLifecycle.test.ts` source invariant |
 | **Position reports ≤ ~60 Hz** | ~350 Hz flood → MOD hiccups / main-thread jank | Worklet `positionReportInterval = 1/60`; main thread extrapolates via `playheadPrediction.ts` |
 | **Bump `WORKLET_VERSION`** in `hooks/useWorkletLoader.ts` on any `openmpt-worklet.js` change | Browsers cache AudioWorklet aggressively | Currently `8` |
 | **Hot reload: reuse node, ignore stale `loaded` acks** | XM silence after second `loadModule` | `workletModuleTokenRef` + `shouldAcceptWorkletLoadedAck` |
@@ -135,14 +135,14 @@ Systematic code + test verification of the three #329/#354 guards.
 #### D. Automated guards (run 2026-08-01)
 
 ```bash
-npm test -- tests/workletAudioLifecycle.test.ts tests/workletRegressionGuards.test.ts
+npm test -- tests/unit/workletAudioLifecycle.test.ts tests/unit/workletRegressionGuards.test.ts
 # → 2 files, 35 tests passed
 ```
 
 | Test file | Coverage |
 |-----------|----------|
-| `tests/workletAudioLifecycle.test.ts` | #329 reuse/`initLib`, #330 no suspend, singleton eval-once, source invariants |
-| `tests/workletRegressionGuards.test.ts` | #354 ≤60 Hz throttle simulation, two-load session (1 node, 0 disconnects), stale-ack tokens, source invariants |
+| `tests/unit/workletAudioLifecycle.test.ts` | #329 reuse/`initLib`, #330 no suspend, singleton eval-once, source invariants |
+| `tests/unit/workletRegressionGuards.test.ts` | #354 ≤60 Hz throttle simulation, two-load session (1 node, 0 disconnects), stale-ack tokens, source invariants |
 
 **Verdict:** All three lifecycle guards are present in production code and locked by 35 regression tests. No code changes required for this sub-phase.
 
@@ -159,7 +159,7 @@ if (currentTime - this.lastPositionReportTime >= this.positionReportInterval) {
 }
 ```
 
-Verified by `tests/workletRegressionGuards.test.ts` — simulated 1 s of audio quanta caps reports at ≤~61 Hz (unthrottled would be >300 Hz).
+Verified by `tests/unit/workletRegressionGuards.test.ts` — simulated 1 s of audio quanta caps reports at ≤~61 Hz (unthrottled would be >300 Hz).
 
 #### Playhead extrapolation chain
 
@@ -180,7 +180,7 @@ Enable with `?playheadDebug=1` or `localStorage.xasm1_playhead_debug='1'` (alway
 | `window.__PLAYHEAD_DEBUG__` | `sampleRow`, `predictedRow`, `smoothedRow`, `predictionLagRows`, `maxAbsLagRows`, `positionReportHz` |
 | Console `[Playhead]` warnings | Sustained lag > 1.5 rows for ~0.75 s; growing drift > 1.5 rows/s; position flood > 75 Hz |
 
-Pure helpers: `utils/playheadLagMonitor.ts` (+ `tests/playheadLagMonitor.test.ts`).
+Pure helpers: `utils/playheadLagMonitor.ts` (+ `tests/unit/playheadLagMonitor.test.ts`).
 
 #### Automated acceptance
 
@@ -216,10 +216,10 @@ npm run test:playhead                       # playheadPrediction unit tests
 ```
 
 Key test files:
-- `tests/workletAudioLifecycle.test.ts` — #329/#330 invariants
-- `tests/workletRegressionGuards.test.ts` — #354 throttle + hot-reload token
-- `tests/playheadPrediction.test.ts` — extrapolation math
-- `tests/workletProtocol.test.ts` — typed postMessage boundary
+- `tests/unit/workletAudioLifecycle.test.ts` — #329/#330 invariants
+- `tests/unit/workletRegressionGuards.test.ts` — #354 throttle + hot-reload token
+- `tests/unit/playheadPrediction.test.ts` — extrapolation math
+- `tests/unit/workletProtocol.test.ts` — typed postMessage boundary
 
 ### 1.3 Files in scope (audio only)
 

@@ -1,4 +1,4 @@
-// Test fixture for tests/webAudioNodeHarness.test.ts — a k-rate gain worklet
+// Test fixture for tests/webaudio/webAudioNodeHarness.test.ts — a k-rate gain worklet
 // used to prove node-web-audio-api runs AudioWorklets inside an
 // OfflineAudioContext deterministically. Not shipped.
 class SpikePassthroughProcessor extends AudioWorkletProcessor {

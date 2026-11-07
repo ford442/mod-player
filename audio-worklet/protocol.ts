@@ -3,7 +3,7 @@
  *
  * The messages and their fields are declared once, in workletProtocolConstants.ts (#492). The zod
  * schemas below are generated from that table, as is the worklet's own allocation-free guard
- * (workletProtocolGuard.ts) — tests/workletProtocolParity.test.ts runs every message type through
+ * (workletProtocolGuard.ts) — tests/unit/workletProtocolParity.test.ts runs every message type through
  * both. Runtime validation rejects malformed or version-skewed messages at the receive boundary
  * instead of destructuring e.data blindly.
  */
