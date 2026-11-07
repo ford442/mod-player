@@ -98,6 +98,9 @@ export interface LibOpenMPT {
   _openmpt_module_get_order_pattern: (modPtr: number, order: number) => number;
   _openmpt_module_get_current_estimated_bpm: (modPtr: number) => number;
   _openmpt_module_get_current_speed: (modPtr: number) => number;
+  /** Tracker tempo as a double (libopenmpt ≥ 0.7); the song map's tempo lane reads it. */
+  _openmpt_module_get_current_tempo2?: (modPtr: number) => number;
+  _openmpt_module_get_num_patterns?: (modPtr: number) => number;
   _openmpt_module_get_current_channel_vu_mono: (modPtr: number, channel: number) => number;
   _openmpt_module_get_num_instruments: (modPtr: number) => number;
   _openmpt_module_get_instrument_name: (modPtr: number, index: number) => number;
@@ -386,6 +389,8 @@ declare global {
       } | null;
       getPlaybackRow: () => number;
       getPlaybackRowFraction: () => number;
+      getPlaybackOrder: () => number;
+      getSongStructure: () => import('./utils/songStructure').SongStructure | null;
       getActiveRenderer: () => string | null;
       getAudioEngine: () => string;
       getLiteMode: () => boolean;

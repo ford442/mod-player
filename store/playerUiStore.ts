@@ -19,6 +19,8 @@ export interface PlayerUiState {
   showLocalLibrary: boolean;
   /** FX rack panel (#453); persisted. */
   showFxRack: boolean;
+  /** Song map under the seek bar (#537); persisted. Never shown in stage mode. */
+  showSongMap: boolean;
   /**
    * Pattern editor chrome (session-only; not persisted).
    * Default off so play-only UX is unchanged.
@@ -43,6 +45,7 @@ export interface PlayerUiState {
   setShowLibraryBrowser: (show: boolean) => void;
   setShowLocalLibrary: (show: boolean) => void;
   setShowFxRack: (show: boolean) => void;
+  setShowSongMap: (show: boolean) => void;
   setEditMode: (editMode: boolean) => void;
   toggleEditMode: () => void;
   setStageMode: (stageMode: boolean) => void;
@@ -66,6 +69,7 @@ export const usePlayerUiStore = create<PlayerUiState>((set) => ({
   showLibraryBrowser: false,
   showLocalLibrary: false,
   showFxRack: readLocalStorage<boolean>('xasm1_show_fx_rack', true),
+  showSongMap: readLocalStorage<boolean>('xasm1_show_song_map', true),
   editMode: false,
   stageMode: resolveStageModePreference(),
   selectedInstrumentIndex: null,
@@ -100,6 +104,10 @@ export const usePlayerUiStore = create<PlayerUiState>((set) => ({
   setShowFxRack: (showFxRack) => {
     writeLocalStorage('xasm1_show_fx_rack', showFxRack);
     set({ showFxRack });
+  },
+  setShowSongMap: (showSongMap) => {
+    writeLocalStorage('xasm1_show_song_map', showSongMap);
+    set({ showSongMap });
   },
   setEditMode: (editMode) => set({ editMode }),
   toggleEditMode: () => set((state) => ({ editMode: !state.editMode })),

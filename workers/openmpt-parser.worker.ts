@@ -8,6 +8,8 @@ import { parseModuleWithLib } from '../utils/parseModuleWithLib';
 import { extractInstrumentTable, mergeLibInstrumentNames } from '../utils/sampleExtract';
 import { parserLog, setParserDebugFromMainThread } from '../utils/parserDebug';
 import type { InstrumentTable } from '../types/instruments';
+import { readSongStructureFromBytes } from '../utils/readSongStructure';
+import type { SongStructureRequest, SongStructureResponse } from '../utils/songStructureWorker';
 
 const LIB_FETCH_TIMEOUT_MS = 12_000;
 
@@ -31,7 +33,17 @@ interface ParseError {
   message: string;
 }
 
-type IncomingMessage = ParseRequest;
+type IncomingMessage = ParseRequest | SongStructureRequest;
+
+/** One libopenmpt per worker: a song-structure worker serves every load of the page session. */
+let libPromise: Promise<LibOpenMPT> | null = null;
+function getLib(): Promise<LibOpenMPT> {
+  libPromise ??= loadLibOpenMPT().catch((err: unknown) => {
+    libPromise = null;
+    throw err;
+  });
+  return libPromise;
+}
 
 async function loadLibOpenMPT(): Promise<LibOpenMPT> {
   const jsUrl = getLibOpenMPTJsUrl();
@@ -109,11 +121,31 @@ function postError(message: string): void {
   self.postMessage({ type: 'error', message } satisfies ParseError);
 }
 
+/**
+ * Song map (#537): the order list on libopenmpt's clock, read on a scratch module of this worker —
+ * never on the audio thread (#513). Its own request, after the parse, so it never delays playback.
+ */
+async function handleStructure(data: SongStructureRequest): Promise<void> {
+  const { id, fileData } = data;
+  try {
+    const lib = await getLib();
+    const structure = readSongStructureFromBytes(lib, fileData, data.budgetMs === undefined ? {} : { budgetMs: data.budgetMs });
+    self.postMessage({ type: 'structure', id, structure } satisfies SongStructureResponse);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Song structure failed';
+    self.postMessage({ type: 'structure', id, error: message } satisfies SongStructureResponse);
+  }
+}
+
 async function handleMessage(data: IncomingMessage): Promise<void> {
+  if (data.type === 'structure') {
+    await handleStructure(data);
+    return;
+  }
   const { type, fileData, fileName, debug } = data;
 
   if (type !== 'parse') {
-    postError(`Unknown worker message type: ${type}`);
+    postError(`Unknown worker message type: ${String(type)}`);
     return;
   }
 
@@ -124,7 +156,7 @@ async function handleMessage(data: IncomingMessage): Promise<void> {
 
   try {
     self.postMessage({ type: 'progress', stage: 'wasm' } satisfies { type: 'progress'; stage: 'wasm' });
-    const lib = await loadLibOpenMPT();
+    const lib = await getLib();
     self.postMessage({ type: 'progress', stage: 'patterns' } satisfies { type: 'progress'; stage: 'patterns' });
     const { patternMatrices, metadata } = parseModuleWithLib(lib, fileData, fileName);
     self.postMessage({ type: 'progress', stage: 'instruments' } satisfies { type: 'progress'; stage: 'instruments' });

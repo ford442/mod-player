@@ -28,7 +28,9 @@ const SAMPLE_HEADER_BYTES = 80;
 
 /**
  * @param {number} channels 1..64
- * @param {{ sampleFrames?: number, patterns?: number, rows?: number, seed?: number }} [opts]
+ * @param {{ sampleFrames?: number, patterns?: number, rows?: number, seed?: number, orders?: number[] }} [opts]
+ *   `orders` replaces the default order list (0..patterns-1, then 255): 254 is a skip (`+++`)
+ *   marker, 255 the end (`---`) marker.
  */
 export function synthIt(channels, opts = {}) {
   if (!(channels >= 1 && channels <= 64)) throw new Error(`synthIt: channels must be 1..64, got ${channels}`);
@@ -59,7 +61,8 @@ export function synthIt(channels, opts = {}) {
   }
 
   // ── Layout ─────────────────────────────────────────────────────────
-  const ordNum = numPatterns + 1; // trailing 255 = end of song
+  const orderList = opts.orders ?? [...Array.from({ length: numPatterns }, (_, p) => p), 255]; // trailing 255 = end of song
+  const ordNum = orderList.length;
   const offsetTableBytes = ordNum + 4 * NUM_SAMPLES + 4 * numPatterns;
   const sampleHeadersAt = HEADER_BYTES + offsetTableBytes;
   const patternsAt = sampleHeadersAt + NUM_SAMPLES * SAMPLE_HEADER_BYTES;
@@ -91,8 +94,7 @@ export function synthIt(channels, opts = {}) {
   }
 
   let o = HEADER_BYTES;
-  for (let p = 0; p < numPatterns; p++) buf[o++] = p;
-  buf[o++] = 255;
+  for (const pattern of orderList) buf[o++] = pattern;
   for (let s = 0; s < NUM_SAMPLES; s++, o += 4) dv.setUint32(o, sampleHeadersAt + s * SAMPLE_HEADER_BYTES, true);
   let patOff = patternsAt;
   for (let p = 0; p < numPatterns; p++, o += 4) {
