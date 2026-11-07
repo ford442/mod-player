@@ -4,7 +4,7 @@
  * EFFECT, returns the *internal* enum of libopenmpt's soundlib/modcommand.h, not an XM/MOD/S3M letter
  * (ECx is `CMD_MODCMDEX` with parameter 0xCx; arpeggio is `CMD_ARPEGGIO`, not "effect 0 with a
  * parameter"). The values are read from libopenmpt 0.8.9 (scripts/lib/libopenmpt-source.sh, the
- * pinned tarball) and checked against the committed wasm by tests/patternCommandMapping.test.ts,
+ * pinned tarball) and checked against the committed wasm by tests/wasm/patternCommandMapping.test.ts,
  * which also checks the WGSL mirror in shaders/lib/openmpt_commands.wgsl.
  */
 

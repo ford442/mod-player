@@ -7,6 +7,7 @@ import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { LibOpenMPT } from '../../types';
+import { cachedInstantiateWasm } from './wasmModuleCache';
 
 const ROOT = resolve(fileURLToPath(new URL('../..', import.meta.url)));
 
@@ -14,8 +15,8 @@ export async function loadLibOpenMPTNode(): Promise<{ lib: LibOpenMPT; restore: 
   const g = globalThis as Record<string, unknown>;
   const previous = g.libopenmpt;
   const glue = readFileSync(join(ROOT, 'public/worklets/libopenmpt-worklet.js'), 'utf8');
-  const wasmBinary = readFileSync(join(ROOT, 'public/worklets/libopenmpt-worklet.wasm'));
-  g.libopenmpt = { noInitialRun: true, wasmBinary };
+  // Compiled once per worker (tests/helpers/wasmModuleCache.ts), instantiated fresh per call.
+  g.libopenmpt = { noInitialRun: true, instantiateWasm: cachedInstantiateWasm('public/worklets/libopenmpt-worklet.wasm') };
   new Function(glue.replace(/^\s*export\s+(default\s+)?/gm, '')).call(globalThis);
   const raw = g.libopenmpt as Record<string, unknown> & { calledRun?: boolean; onRuntimeInitialized?: () => void };
   await new Promise<void>((resolveReady) => {

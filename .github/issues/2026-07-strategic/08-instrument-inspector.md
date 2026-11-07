@@ -21,7 +21,7 @@ Follow the existing MVP plan:
 3. **Correlation** — highlight selected instrument on pattern viz / palette mode when shader supports it (`instrumentPalette`, `paletteMode`).
 4. Wire through store/context (after issue 03) rather than expanding MainLayout props.
 
-Reuse `tests/sampleExtract/` foundations if present.
+Reuse `tests/unit/sampleExtract/` foundations if present.
 
 ## Acceptance criteria
 

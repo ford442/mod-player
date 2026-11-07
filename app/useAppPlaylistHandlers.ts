@@ -54,13 +54,14 @@ export function useAppPlaylistHandlers(params: UseAppPlaylistHandlersParams) {
     loadFileWithHash(fileData, fileName);
   }, [loadFileWithHash, playlist, setModuleSourceUrl]);
 
+  const { resolveEntryFile, markPlayed } = localLibrary;
   const handleLocalLibraryPlay = useCallback(async (entry: LibraryEntry) => {
-    const file = await localLibrary.resolveEntryFile(entry);
+    const file = await resolveEntryFile(entry);
     const data = new Uint8Array(await file.arrayBuffer());
     loadFileWithHash(data, entry.fileName);
-    localLibrary.markPlayed(entry.id);
+    markPlayed(entry.id);
     setActiveLibraryEntryId(entry.id);
-  }, [localLibrary.resolveEntryFile, localLibrary.markPlayed, loadFileWithHash]);
+  }, [resolveEntryFile, markPlayed, loadFileWithHash]);
 
   return {
     activeLibraryEntryId,

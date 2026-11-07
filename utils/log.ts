@@ -13,7 +13,7 @@
  * Do NOT import this from the AudioWorklet bundle (audio-worklet/js/**, workletProtocolConstants.ts,
  * libRuntimeReady.ts): esbuild bundles that as a classic IIFE where `import.meta` is empty, so reading
  * `import.meta.env` there throws at runtime. The processor keeps its own `DEBUG`-gated `log`;
- * tests/logger.test.ts fails if a worklet source starts importing this module.
+ * tests/unit/logger.test.ts fails if a worklet source starts importing this module.
  */
 
 export interface Logger {

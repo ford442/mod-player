@@ -8,7 +8,7 @@ import { cn } from '../utils/cn';
 import { IS_PUBLIC_MODE } from '../appConfig';
 import { usePlayerEngine, usePlayerEngineInstance } from '../hooks/usePlayerEngine';
 import { useDisplayShader, useInstrumentPalette, usePlayerActions } from '../hooks/usePlayerView';
-import { usePlayerFeatures } from '../context/PlayerFeaturesContext';
+import { usePlayerFeatures } from '../context/playerFeatures';
 import { usePlayerUiStore } from '../store/playerUiStore';
 import { useShaderPrefsStore } from '../store/shaderPrefsStore';
 

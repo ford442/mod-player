@@ -160,7 +160,7 @@ functions in declaration order. `lib/spectrum_bands.wgsl` likewise has to come
 after `lib/fft.wgsl`.
 
 Sizing constants are duplicated in TypeScript (`MAX_FFT_SIZE`,
-`SPECTRUM_BIN_COUNT`, workgroup sizes). `tests/computeAnalysis.test.ts` pins
+`SPECTRUM_BIN_COUNT`, workgroup sizes). `tests/unit/computeAnalysis.test.ts` pins
 them against the WGSL source — a mismatch there is a silent runtime bug, so it
 fails the suite instead.
 
@@ -211,7 +211,7 @@ stream and the compute pass) on a `circularLed()`/extended-layout `ShaderMeta`, 
 
 Slots are fixed by `SPECTRUM_PATTERN_BINDING` / `SPECTRUM_BACKGROUND_BINDING` in
 `src/renderers/webgpu/bindGroup.ts`; both are FRAGMENT-visible `read-only-storage` and
-128 bytes (`SPECTRUM_BUFFER_BYTES`). `tests/spectrumChassis.test.ts` pins the slots, the
+128 bytes (`SPECTRUM_BUFFER_BYTES`). `tests/unit/spectrumChassis.test.ts` pins the slots, the
 bin count and the uniform slot below against the WGSL.
 
 **Data:** `SPECTRUM_BIN_COUNT` (32) raw peak FFT magnitudes — Hann-windowed, normalised so a

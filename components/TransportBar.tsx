@@ -4,7 +4,7 @@ import { cn } from '../utils/cn';
 import { FX_RACK_ENABLED, IS_PUBLIC_MODE, LIGHT_THEMES } from '../appConfig';
 import { usePlayerEngine } from '../hooks/usePlayerEngine';
 import { useDisplayShader, usePlayerActions } from '../hooks/usePlayerView';
-import { usePlayerFeatures } from '../context/PlayerFeaturesContext';
+import { usePlayerFeatures } from '../context/playerFeatures';
 import { usePlayerUiStore } from '../store/playerUiStore';
 import { useShaderPrefsStore } from '../store/shaderPrefsStore';
 

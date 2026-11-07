@@ -208,7 +208,7 @@ export function usePlayerFeaturesValue(params: UsePlayerFeaturesValueParams): Pl
     rateShaderMutation, localLibrary, activeLibraryEntryId,
     handleLocalLibraryPlay, playlist, handlePlaylistSelect, handlePlaylistPrev,
     handlePlaylistNext, handlePlaylistFilesAdded, songsQuery, libraryErrorMessage,
-    handleLibrarySongLoad, syncLibraryMutation, activeModuleForSave, saveSongMutation,
+    handleLibrarySongLoad, syncLibraryMutation, syncLibraryErrorMessage, activeModuleForSave, saveSongMutation,
     saveSongErrorMessage, patternEdit, handlePatternCellEdit, handlePatternCellPatch,
     handlePatternCellClear, handleSequencerCellEdit, handlePatternRevert, handleExportPatternDump,
     midiControls, handleExportWav, handleStartCapture, stopCapture, offlineExportState,

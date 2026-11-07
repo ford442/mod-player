@@ -10,7 +10,7 @@ export default {
     // `.tsx` only, and only directories that render JSX: Tailwind's scanner reads comments
     // too, so scanning hooks/, utils/ or audio-worklet/ turned bit-layout notes like
     // `[inst:8]` into bogus arbitrary-property rules (and the build's
-    // `"inst" is not a known CSS property` warning). tests/tailwindContent.test.ts keeps this
+    // `"inst" is not a known CSS property` warning). tests/unit/tailwindContent.test.ts keeps this
     // list in sync with the directories that actually contain .tsx files.
     "./index.html",
     "./index.tsx",

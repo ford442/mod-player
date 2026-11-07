@@ -14,7 +14,13 @@ concurrency:
 jobs:
   lint-and-build:
     runs-on: ubuntu-latest
-    
+    # 22 is the engines floor; 24 is the next LTS line and what local runs are on (#541).
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['22', '24']
+    name: lint-and-build (Node ${{ matrix.node }})
+
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -22,7 +28,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: '22'
+          node-version: ${{ matrix.node }}
           cache: 'npm'
       
       - name: Install dependencies
@@ -42,6 +48,16 @@ jobs:
       # post-build CSS/WASM and bundle-budget checks. Needs no network after `npm ci`.
       - name: Preflight
         run: npm run preflight
+
+      # vitest.config.ts writes JUnit on CI: one <testcase> per test, tagged with its project
+      # (unit / wasm / webaudio / build), so a timeout names the test without reading the log.
+      - name: Upload Vitest JUnit report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: vitest-junit-node${{ matrix.node }}
+          path: test-results/junit.xml
+          if-no-files-found: ignore
 
   visual-smoke:
     runs-on: ubuntu-latest

@@ -4,7 +4,7 @@ import { MediaPanel } from './MediaPanel';
 import { LibraryBrowser } from './LibraryBrowser';
 import { LibraryPanel } from './LibraryPanel';
 import { IS_PUBLIC_MODE, LIGHT_THEMES } from '../appConfig';
-import { usePlayerFeatures } from '../context/PlayerFeaturesContext';
+import { usePlayerFeatures } from '../context/playerFeatures';
 import { usePlayerUiStore } from '../store/playerUiStore';
 import { usePlayerEngine } from '../hooks/usePlayerEngine';
 import { useModuleMediaHintText } from '../hooks/usePlayerView';

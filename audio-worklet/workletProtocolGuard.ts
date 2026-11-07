@@ -2,7 +2,7 @@
  * Allocation-free validators for the worklet protocol, generated from the field table in
  * workletProtocolConstants.ts (#492). The AudioWorklet uses `validateMainToWorklet` on every incoming
  * message (zod's parse cost and bundle weight don't belong on the audio thread); the main thread's
- * zod schemas come from the same table (protocol.ts), and tests/workletProtocolParity.test.ts checks
+ * zod schemas come from the same table (protocol.ts), and tests/unit/workletProtocolParity.test.ts checks
  * the two agree on every message type.
  *
  * The success path allocates nothing: each message's field list is compiled once at module load, the

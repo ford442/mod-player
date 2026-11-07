@@ -253,7 +253,7 @@ export function useWebGPURender(
     if (!renderer || !canvas) return;
     renderer.renderFrame(canvas, renderParamsRef.current);
     deviceRef.current = renderer.device;
-  }, [shaderFile]); // reads renderParamsRef; shaderFile is stable per init cycle
+  }, [canvasRef, renderParamsRef]); // refs are stable; the renderer itself is read from rendererRef
 
   return { gpuReady, vizOffline, render, deviceRef, deviceStatus, canvasOutput };
 }

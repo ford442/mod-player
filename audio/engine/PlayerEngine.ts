@@ -17,7 +17,7 @@
  *
  * The engine start paths (`hooks/audioGraph/`) and action factories (`hooks/libOpenMPT/create*.ts`)
  * are framework-free code this class composes; they keep their paths because their unit tests import
- * them there. `tests/playerEngineImports.test.ts` checks nothing reachable from here imports React.
+ * them there. `tests/unit/playerEngineImports.test.ts` checks nothing reachable from here imports React.
  *
  * Callers — the React UI, the command bus (`registerEngineCommands`), MIDI, `mediaSession`, the 3D view,
  * headless tests — drive it with methods or `dispatch(command)`.

@@ -138,7 +138,7 @@ export default tseslint.config(
   {
     // #492: the player engine core is framework-free. React observes it (hooks/usePlayerEngine.ts); it
     // never imports React or a React state library. This catches direct imports;
-    // tests/playerEngineImports.test.ts walks the whole import graph from PlayerEngine.ts. The start
+    // tests/unit/playerEngineImports.test.ts walks the whole import graph from PlayerEngine.ts. The start
     // paths and action factories live under hooks/ only because their unit tests import them there.
     files: [
       'audio/engine/**/*.ts',
@@ -202,6 +202,21 @@ export default tseslint.config(
     ],
     rules: {
       'no-console': ['error', { allow: ['warn', 'error'] }],
+    },
+  },
+  {
+    // The `unit` Vitest project is the fast loop (vitest.config.ts, #541): pure TS only. Real Web
+    // Audio, real-WASM libopenmpt and the worker/worklet realms belong in tests/webaudio/ or
+    // tests/wasm/. tests/unit/testProjectBoundaries.test.ts checks the same list.
+    files: ['tests/unit/**/*.ts'],
+    rules: {
+      'no-restricted-imports': ['error', {
+        paths: [{ name: 'node-web-audio-api', message: 'Real Web Audio tests live in tests/webaudio/.' }],
+        patterns: [
+          { group: ['**/helpers/webAudioNode', '**/helpers/fxRender'], message: 'Real Web Audio tests live in tests/webaudio/.' },
+          { group: ['**/helpers/libopenmptNode', '**/helpers/wasmModuleCache', '**/helpers/workletScope', '**/helpers/createWorkerThread'], message: 'Real-WASM tests live in tests/wasm/.' },
+        ],
+      }],
     },
   },
 );

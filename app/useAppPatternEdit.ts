@@ -84,6 +84,7 @@ export function useAppPatternEdit(params: UseAppPatternEditParams) {
   }, [patternEdit.isDirty]);
 
   // Edit-mode undo/redo shortcuts
+  const { undo: undoEdit, redo: redoEdit } = patternEdit;
   useEffect(() => {
     if (!editMode || isExporting) return;
     const onKeyDown = (event: KeyboardEvent) => {
@@ -91,15 +92,15 @@ export function useAppPatternEdit(params: UseAppPatternEditParams) {
       if (!mod) return;
       if (event.key === 'z' && !event.shiftKey) {
         event.preventDefault();
-        patternEdit.undo();
+        undoEdit();
       } else if ((event.key === 'z' && event.shiftKey) || event.key === 'y') {
         event.preventDefault();
-        patternEdit.redo();
+        redoEdit();
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [editMode, isExporting, patternEdit.undo, patternEdit.redo]);
+  }, [editMode, isExporting, undoEdit, redoEdit]);
 
   return {
     patternEdit,

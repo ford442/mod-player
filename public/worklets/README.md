@@ -45,7 +45,7 @@ A pointer has one owner at a time (worker → worklet on `staged`, worklet → w
 supersedes one still waiting for its fade, and the superseded one goes back. A failed create comes back as the same
 `error` an in-worklet load posts. The first load of a session races the handshake and is created in the worklet;
 nothing is playing yet. If the worker fails, its pending loads are re-sent to the worklet.
-`tests/createThread.integration.test.ts` runs this pipeline in Node (compiled processor, real worker, real heap);
+`tests/wasm/createThread.integration.test.ts` runs this pipeline in Node (compiled processor, real worker, real heap);
 `npm run smoke:create-thread` measures it in Chromium against `?audioCreate=worklet`.
 
 Every request carries `?v=<content hash>` so a browser/service-worker cache can never pair a new glue with an old

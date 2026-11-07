@@ -203,9 +203,9 @@ Add to [`appConfig.ts`](../../appConfig.ts) `SHADER_GROUPS` Circular: `v0.59 (In
 ## Test plan
 
 **Automated**
-- `tests/sampleExtract/mod.test.ts` — known `.mod` fixture: sample count, length, 256-point waveform shape.
-- `tests/sampleExtract/xm.test.ts` — `public/test.xm` or bundled fixture.
-- `tests/instrumentHighlight.test.ts` — `fillUniformPayload` slot 33.
+- `tests/unit/sampleExtract/mod.test.ts` — known `.mod` fixture: sample count, length, 256-point waveform shape.
+- `tests/unit/sampleExtract/xm.test.ts` — `public/test.xm` or bundled fixture.
+- `tests/unit/instrumentHighlight.test.ts` — `fillUniformPayload` slot 33.
 - `npm run test:shader-registry` after v0.59 registration.
 
 **Manual**
@@ -236,7 +236,7 @@ Add to [`appConfig.ts`](../../appConfig.ts) `SHADER_GROUPS` Circular: `v0.59 (In
 | `utils/gpuPacking.ts` | Uniform slot 33 |
 | `hooks/useWebGPURender.ts` | Pass highlight |
 | `components/PatternDisplay.tsx` | Prop drill |
-| `tests/sampleExtract/*.test.ts` | Fixtures |
+| `tests/unit/sampleExtract/*.test.ts` | Fixtures |
 
 ---
 

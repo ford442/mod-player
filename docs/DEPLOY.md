@@ -98,7 +98,7 @@ If `/xm-player/` returns UTF-16 HTML or references an old `index-D7iykI5o.js` wh
 
 Production must match dev. One value everywhere — `vite-plugins/crossOriginIsolationHeaders.ts`
 (dev + preview), `public/.htaccess` (copied into `dist/`) and `public/_headers`;
-`tests/crossOriginIsolationHeaders.test.ts` pins all three:
+`tests/build/crossOriginIsolationHeaders.test.ts` pins all three:
 
 | Header | Value |
 |--------|-------|

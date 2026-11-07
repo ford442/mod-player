@@ -39,6 +39,16 @@ Playwright browser, shellcheck or emsdk 3.1.51 and still only run in CI (or
 locally via `npm run smoke:visual:ci`, `npm run smoke:audio:ci`,
 `npm run smoke:playhead`, `npm run build:js-libopenmpt`).
 
+### Test projects (#541)
+
+`vitest.config.ts` splits the suite by directory: `tests/unit/` (pure TS, threads, 5 s — `npm run test:unit`),
+`tests/wasm/` (real-WASM libopenmpt, forks, 30 s, one compiled module per worker), `tests/webaudio/`
+(`node-web-audio-api`, one file at a time, 60 s) and `tests/build/` (child processes, 120 s; `npm run test:fast`
+skips it). Put a new test in the directory that matches what it does; `tests/unit/` may not import the
+Web Audio or WASM harnesses (ESLint + `tests/unit/testProjectBoundaries.test.ts`).
+
+**Node:** `engines` is `>=22.12.0`; CI runs preflight on Node 22 and 24.
+
 ### Lockfile guards
 
 - `npm run verify:lockfile` (`scripts/verify-lockfile.mjs`) checks only what npm's
