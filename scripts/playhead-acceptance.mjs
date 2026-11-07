@@ -281,7 +281,7 @@ async function main() {
   console.log(`  base=${BASE_URL} module=${MODULE_URL}`);
   console.log(`  lag threshold=${LAG_THRESHOLD} rows, pass ratio>=${PASS_RATIO}`);
 
-  const { browser, engine, close } = await launchBrowser();
+  const { browser, engine, close, info: browserInfo } = await launchBrowser();
   const results = [];
 
   try {
@@ -308,6 +308,7 @@ async function main() {
 
   const report = {
     generatedAt: new Date().toISOString(),
+    browser: browserInfo,
     baseUrl: BASE_URL,
     moduleUrl: MODULE_URL,
     lagThreshold: LAG_THRESHOLD,

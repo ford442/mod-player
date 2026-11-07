@@ -1,7 +1,9 @@
 import { publishFxHost } from '../../audio/fx/fxHost';
 import {
+  applyMasterLevels,
   ensureMasterOutputChain,
   releaseMasterNodes,
+  setParamIfChanged,
   type MasterGraphRefs,
 } from '../../utils/audioMasterGraph';
 import type { AudioGraphRefs } from './types';
@@ -29,13 +31,9 @@ export function wireMasterOutput(
   volume: number,
   pan: number,
 ): void {
-  ensureMasterOutputChain(ctx, masterGraphRefs(refs));
-  if (refs.stereoPannerRef.current) {
-    refs.stereoPannerRef.current.pan.value = pan;
-  }
-  if (refs.gainNodeRef.current) {
-    refs.gainNodeRef.current.gain.value = volume;
-  }
+  const graph = masterGraphRefs(refs);
+  ensureMasterOutputChain(ctx, graph);
+  applyMasterLevels(graph, volume, pan);
 }
 
 /** Exact module bytes for worklet load — safe when Uint8Array is a subarray. */
@@ -75,14 +73,14 @@ export function ensureCommonMasterNodes(
     log.log('Creating StereoPanner node...');
     refs.stereoPannerRef.current = ctx.createStereoPanner();
   }
-  refs.stereoPannerRef.current.pan.value = panValue;
+  setParamIfChanged(refs.stereoPannerRef.current.pan, panValue);
 
   if (!refs.gainNodeRef.current) {
     log.log('Creating Gain node...');
     refs.gainNodeRef.current = ctx.createGain();
   }
   // Always re-apply volume — App slider can change while the GainNode lives on.
-  refs.gainNodeRef.current.gain.value = volume;
+  setParamIfChanged(refs.gainNodeRef.current.gain, volume);
 
   if (!refs.analyserRef.current) {
     log.log('Creating Analyser node...');

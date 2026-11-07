@@ -356,15 +356,17 @@ async function main() {
     defaultModule: DEFAULT_MOD_PATH,
     xmFixture: XM_FIXTURE_PATH,
     headless: HEADLESS,
+    browser: null,
     phases: [],
     status: 'PENDING',
     errors: [],
   };
 
-  const { browser, engine, close } = await launchBrowser({
+  const { browser, engine, close, info: browserInfo } = await launchBrowser({
     headless: HEADLESS,
     args: HEADLESS ? AUDIO_CHROME_ARGS : AUDIO_CHROME_ARGS.filter((a) => a !== '--headless=new'),
   });
+  report.browser = browserInfo;
 
   const phaseConsoleStart = () => consoleLines.length;
 

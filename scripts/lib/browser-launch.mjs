@@ -48,10 +48,6 @@ export function resolvePlaywrightChromiumExecutable() {
   return null;
 }
 
-export function shouldUseBundledPlaywrightChromium() {
-  return resolvePlaywrightChromiumExecutable() != null;
-}
-
 export function resolveChromePath() {
   for (const p of CHROME_CANDIDATES) {
     if (p && existsSync(p)) return p;
@@ -60,7 +56,47 @@ export function resolveChromePath() {
 }
 
 /**
- * @returns {Promise<{ browser: import('playwright').Browser | import('puppeteer').Browser, engine: 'playwright' | 'puppeteer', close: () => Promise<void> }>}
+ * Which Chromium Playwright launches, in order:
+ *  1. an explicit binary: PLAYWRIGHT_CHROMIUM_EXECUTABLE, a PLAYWRIGHT_BROWSERS_PATH layout, or CHROME_PATH;
+ *  2. PLAYWRIGHT_CHANNEL (e.g. `chrome`) — opt in to an installed browser, which floats with the machine;
+ *  3. Playwright's own bundled Chromium (`chromium.executablePath()`), pinned by the playwright version in
+ *     package-lock — so a browser upgrade only ever arrives with a deliberate playwright bump (#535).
+ * The runner image's Google Chrome (channel `chrome`) used to be the CI default and drifted from 155 to 156
+ * with the image, which turned the FX null check red. In CI a missing bundled Chromium is an error rather
+ * than a silent fall-back to whatever the image ships.
+ *
+ * @returns {{ executablePath?: string, channel?: string, source: string }}
+ */
+export function resolvePlaywrightBrowser(chromium) {
+  const explicit = resolvePlaywrightChromiumExecutable();
+  if (explicit) return { executablePath: explicit, source: 'explicit executable' };
+  if (process.env.CHROME_PATH && existsSync(process.env.CHROME_PATH)) {
+    return { executablePath: process.env.CHROME_PATH, source: 'CHROME_PATH' };
+  }
+  if (process.env.PLAYWRIGHT_CHANNEL) {
+    return { channel: process.env.PLAYWRIGHT_CHANNEL, source: `channel ${process.env.PLAYWRIGHT_CHANNEL}` };
+  }
+  const bundled = chromium.executablePath();
+  if (bundled && existsSync(bundled)) return { executablePath: bundled, source: 'playwright bundled chromium' };
+  if (process.env.CI) {
+    throw new Error(
+      `Playwright's bundled Chromium is missing (${bundled}); run \`npx playwright install chromium\`. ` +
+        'Refusing to fall back to the runner image\'s Chrome in CI, which floats with the image.',
+    );
+  }
+  console.warn(`  Playwright's bundled Chromium is missing (${bundled}) — falling back to the installed Chrome.`);
+  return { channel: 'chrome', source: 'channel chrome (fallback)' };
+}
+
+/** Print (and return) the browser identity — the first line of every smoke report, so drift shows up at a glance. */
+export function announceBrowser(info) {
+  const line = `browser: ${info.product} ${info.version} [${info.source}${info.executablePath ? `: ${info.executablePath}` : ''}]`;
+  console.log(`  ${line}`);
+  return line;
+}
+
+/**
+ * @returns {Promise<{ browser: import('playwright').Browser | import('puppeteer').Browser, engine: 'playwright' | 'puppeteer', close: () => Promise<void>, info: { engine: string, product: string, version: string, source: string, executablePath?: string } }>}
  */
 export async function launchBrowser(options = {}) {
   const chromeArgs = options.args ?? DEFAULT_CHROME_ARGS;
@@ -68,25 +104,31 @@ export async function launchBrowser(options = {}) {
 
   try {
     const { chromium } = await import('playwright');
-    const bundledExecutable = resolvePlaywrightChromiumExecutable();
-    const useBundled = shouldUseBundledPlaywrightChromium();
+    const resolved = resolvePlaywrightBrowser(chromium);
     /** @type {import('playwright').LaunchOptions} */
     const launchOptions = {
       headless,
       args: chromeArgs.filter((a) => a !== '--headless=new'),
     };
-    if (bundledExecutable) {
-      launchOptions.executablePath = bundledExecutable;
-    } else if (!useBundled) {
-      launchOptions.channel = process.env.PLAYWRIGHT_CHANNEL || 'chrome';
-    }
+    if (resolved.executablePath) launchOptions.executablePath = resolved.executablePath;
+    if (resolved.channel) launchOptions.channel = resolved.channel;
     const browser = await chromium.launch(launchOptions);
+    const info = {
+      engine: 'playwright',
+      product: 'Chromium',
+      version: browser.version(),
+      source: resolved.source,
+      ...(resolved.executablePath ? { executablePath: resolved.executablePath } : {}),
+    };
+    announceBrowser(info);
     return {
       browser,
       engine: 'playwright',
       close: () => browser.close(),
+      info,
     };
   } catch (err) {
+    if (process.env.CI) throw err;
     console.warn(`  Playwright+Chrome unavailable: ${err.message}`);
   }
 
@@ -110,11 +152,19 @@ export async function launchBrowser(options = {}) {
     args: chromeArgs,
     ignoreDefaultArgs: ['--enable-automation'],
   });
-  console.log(`  using puppeteer + ${resolveChromePath()}`);
+  const info = {
+    engine: 'puppeteer',
+    product: 'Chrome',
+    version: (await browser.version()).replace(/^\D+\//, ''),
+    source: 'puppeteer',
+    executablePath: resolveChromePath(),
+  };
+  announceBrowser(info);
   return {
     browser,
     engine: 'puppeteer',
     close: () => browser.close(),
+    info,
   };
 }
 

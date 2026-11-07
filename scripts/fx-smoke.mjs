@@ -64,7 +64,7 @@ async function main() {
   console.log('FX rack Chromium harness (#453)');
   console.log(`  base=${BASE_URL}`);
 
-  const { browser, engine, close } = await launchBrowser({ args: AUDIO_CHROME_ARGS, headless: true });
+  const { browser, engine, close, info: browserInfo } = await launchBrowser({ args: AUDIO_CHROME_ARGS, headless: true });
   if (engine !== 'playwright') {
     await close();
     throw new Error(`fx-smoke needs Playwright (page.route); got ${engine}`);
@@ -90,6 +90,7 @@ async function main() {
         cpuLimit: Number(process.env.FX_CPU_LIMIT || 0.05),
       },
     );
+    report.browser = browserInfo;
     report.console = consoleLines;
     writeFileSync(join(OUTPUT_DIR, 'report.json'), JSON.stringify(report, null, 2));
 

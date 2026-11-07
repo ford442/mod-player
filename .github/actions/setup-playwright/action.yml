@@ -2,6 +2,9 @@ name: Set up Playwright Chromium
 description: >-
   Install Playwright's Chromium with its OS dependencies, caching the browser download between runs.
   Requires `npm ci` to have run (the cache key is the installed playwright version).
+  The Playwright smokes launch exactly this browser (scripts/lib/browser-launch.mjs prefers
+  chromium.executablePath() and, under CI, fails rather than use the runner image's Google Chrome),
+  so the Chromium version only moves with a playwright bump in package-lock.json (#535).
 
 runs:
   using: composite
