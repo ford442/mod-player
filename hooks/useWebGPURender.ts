@@ -253,7 +253,8 @@ export function useWebGPURender(
     if (!renderer || !canvas) return;
     renderer.renderFrame(canvas, renderParamsRef.current);
     deviceRef.current = renderer.device;
-  }, [shaderFile]); // reads renderParamsRef; shaderFile is stable per init cycle
+  // Only stable refs: PatternDisplay keeps the latest `render` in renderRef and calls it per frame, so its identity never mattered.
+  }, [canvasRef, renderParamsRef]);
 
   return { gpuReady, vizOffline, render, deviceRef, deviceStatus, canvasOutput };
 }

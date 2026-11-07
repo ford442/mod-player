@@ -1,7 +1,7 @@
 /**
  * Drives the two position paths in a tight loop, for allocation measurement (#492): the Playwright
  * audio smoke runs it under the CDP sampling heap profiler in the real browser, and
- * tests/positionRingAlloc.test.ts under V8's new-space counter. Loaded on demand by the test hooks,
+ * tests/unit/positionRingAlloc.test.ts under V8's new-space counter. Loaded on demand by the test hooks,
  * so it never ships in the main chunk.
  *
  *   ring:    what the worklet writes (PositionRingWriter) → the consumer the UI loop drains.

@@ -29,11 +29,14 @@ import * as nwa from 'node-web-audio-api';
 export { nwa };
 
 /**
- * Per-test budget for suites that render on real Web Audio: worklet nodes run
- * on worker threads, and under a full parallel vitest run a few offline renders
- * can exceed vitest's 5 s default.
+ * Per-test budget for suites that render on real Web Audio. It matches the `webaudio` project's testTimeout
+ * (vitest.config.ts, #535): worklet nodes run on worker threads and node-web-audio-api owns an audio backend,
+ * so under contention a render can take far longer than vitest's 5 s default.
  */
-export const WEB_AUDIO_TIMEOUT_MS = 30_000;
+export const WEB_AUDIO_TIMEOUT_MS = 60_000;
+
+/** Default render guard. Shorter than WEB_AUDIO_TIMEOUT_MS, so its diagnostic fires before vitest's bare "Test timed out". */
+export const RENDER_GUARD_MS = 40_000;
 
 const ROOT = resolve(fileURLToPath(new URL('../..', import.meta.url)));
 
@@ -65,19 +68,34 @@ export function createOfflineContext(opts: RenderOfflineOptions): OfflineAudioCo
   });
 }
 
-/** Run `startRendering()` with a timeout. Build the graph (incl. worklet nodes) before calling. */
+/**
+ * Run `startRendering()` under an `AbortSignal.timeout` guard. Build the graph (incl. worklet nodes) before calling.
+ * On expiry the error names the render (frames, rate, channels, audio seconds) and how long it ran: a couple of
+ * seconds of audio that blows the guard is CPU or audio-backend contention (a second vitest run, a busy runner),
+ * not a slow algorithm. `startRendering()` itself cannot be cancelled, so the render is abandoned, not stopped.
+ */
 export async function startRenderingWithTimeout(
   ctx: OfflineAudioContext,
-  timeoutMs = 20_000,
+  timeoutMs = RENDER_GUARD_MS,
 ): Promise<AudioBuffer> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error(`offline render timed out after ${timeoutMs} ms`)), timeoutMs);
+  const started = performance.now();
+  const signal = AbortSignal.timeout(timeoutMs);
+  let onAbort: (() => void) | undefined;
+  const guard = new Promise<never>((_, reject) => {
+    onAbort = () => {
+      const audioSeconds = ctx.length / ctx.sampleRate;
+      reject(new Error(
+        `offline render timed out after ${Math.round(performance.now() - started)} ms (guard ${timeoutMs} ms): ` +
+          `${ctx.length} frames @ ${ctx.sampleRate} Hz = ${audioSeconds.toFixed(2)} s of audio, ${ctx.destination.channelCount} ch. ` +
+          'A render this short that exceeds the guard points at contention (CPU, audio backend), not at the code under test.',
+      ));
+    };
+    signal.addEventListener('abort', onAbort, { once: true });
   });
   try {
-    return await Promise.race([ctx.startRendering(), timeout]);
+    return await Promise.race([ctx.startRendering(), guard]);
   } finally {
-    if (timer !== undefined) clearTimeout(timer);
+    if (onAbort) signal.removeEventListener('abort', onAbort);
   }
 }
 

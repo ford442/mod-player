@@ -131,7 +131,7 @@ early reflections plus a two-band decaying tail, unit energy. Sizes are small
   - `npm run gen:irs` regenerates the files (needs ffmpeg/libopus; it's
     byte-reproducible with the same libopus). The outputs are committed.
   - `npm run verify:irs` checks files, hashes and the synth spec, with no ffmpeg.
-    `tests/irAssets.test.ts` runs it.
+    `tests/build/irAssets.test.ts` runs it.
 
 ## State, presets, persistence
 
@@ -249,7 +249,7 @@ decodes the real Opus IRs and gates the character CPU (< 5 %).
    `fadeOut` if, like the room, it needs an internal fade.
 3. Register it in `modules/index.ts` and `DEFAULT_FX_ORDER`.
 4. Extend `fxTailSeconds` (export length) if it has a tail or latency.
-5. Add it to `tests/fxCrossfade.test.ts` and the harness, to presets if useful,
+5. Add it to `tests/webaudio/fxCrossfade.test.ts` and the harness, to presets if useful,
    and to `fxVisualState` if the chassis should show it.
 
 ## Known limitations / follow-ups

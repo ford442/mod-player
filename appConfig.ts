@@ -130,7 +130,7 @@ export const THEME_OPTIONS: { value: AppTheme; label: string }[] = [
 // Hex of the first 16 bytes of a module buffer: the pre-#511 per-module shader
 // key. It collides for every XM ("Extended Module: "), so nothing in the app calls
 // it any more — songs are keyed on utils/songFingerprint.ts. Kept only so
-// tests/songFingerprint.test.ts can document the collision.
+// tests/unit/songFingerprint.test.ts can document the collision.
 export function computeModuleHash(data: Uint8Array): string {
   return Array.from(data.slice(0, 16))
     .map(b => b.toString(16).padStart(2, '0'))

@@ -1,4 +1,5 @@
-import React, { createContext, useContext } from 'react';
+import React from 'react';
+import { PlayerFeaturesContext } from './usePlayerFeatures';
 import type { PlaylistItem } from '../components/Playlist';
 import type { MediaFades } from '../utils/mediaFades';
 import type { MediaItem } from '../types';
@@ -95,8 +96,6 @@ export interface PlayerFeaturesValue {
   getRendererBackend: () => import('../src/renderers/types').PatternRendererBackend | null;
 }
 
-const PlayerFeaturesContext = createContext<PlayerFeaturesValue | null>(null);
-
 export function PlayerFeaturesProvider({
   value,
   children,
@@ -105,12 +104,4 @@ export function PlayerFeaturesProvider({
   children: React.ReactNode;
 }) {
   return <PlayerFeaturesContext.Provider value={value}>{children}</PlayerFeaturesContext.Provider>;
-}
-
-export function usePlayerFeatures(): PlayerFeaturesValue {
-  const ctx = useContext(PlayerFeaturesContext);
-  if (!ctx) {
-    throw new Error('usePlayerFeatures must be used within PlayerFeaturesProvider');
-  }
-  return ctx;
 }

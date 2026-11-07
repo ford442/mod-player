@@ -2,7 +2,7 @@
  * A fake AudioWorkletGlobalScope (node:vm) running the COMPILED JS worklet
  * (public/worklets/openmpt-worklet.js), plus the initLib message that boots the
  * REAL committed libopenmpt-worklet.{js,wasm} inside it. Shared by
- * tests/jsWorkletProcessor.integration.test.ts and tests/exportLiveParity.test.ts.
+ * tests/wasm/jsWorkletProcessor.integration.test.ts and tests/webaudio/exportLiveParity.test.ts.
  */
 import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';

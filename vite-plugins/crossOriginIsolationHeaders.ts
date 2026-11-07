@@ -1,7 +1,7 @@
 /**
  * COOP/COEP headers required for SharedArrayBuffer / Atomics (Emscripten WASM workers).
  * Used by Vite dev and preview (CI smokes); public/.htaccess and public/_headers carry the same
- * values for production (tests/crossOriginIsolationHeaders.test.ts pins all three).
+ * values for production (tests/unit/crossOriginIsolationHeaders.test.ts pins all three).
  */
 export const CROSS_ORIGIN_ISOLATION_HEADERS: Record<string, string> = {
   'Cross-Origin-Opener-Policy': 'same-origin',

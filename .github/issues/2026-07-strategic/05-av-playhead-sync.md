@@ -22,7 +22,7 @@ Circular/paged shaders remain the most sensitive to residual drift (page flips l
 
 ## Acceptance criteria
 
-- [x] Playhead prediction tests run under Vitest + CI (`tests/playheadPrediction.test.ts` via `npm test`)
+- [x] Playhead prediction tests run under Vitest + CI (`tests/unit/playheadPrediction.test.ts` via `npm test`)
 - [x] Documented manual checklist passes on Worklet engine for at least one circular + one square shader (`accurate_playback.md` §C)
 - [x] Steady 125 BPM case: predicted latency offset < 1 row for typical 30 ms device latency (Vitest `expectedLatencyRows` assertion)
 - [x] No packing/shader uniform layout breaks (no uniform changes in this work)

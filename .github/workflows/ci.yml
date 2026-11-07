@@ -43,6 +43,17 @@ jobs:
       - name: Preflight
         run: npm run preflight
 
+      # `npm test` runs the unit / wasm / webaudio / build Vitest projects (vitest.config.ts) and, under CI,
+      # writes JUnit XML, so a timeout names its test and project instead of just failing the job.
+      - name: Upload Vitest report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: vitest-junit
+          path: artifacts/vitest-junit.xml
+          retention-days: 5
+          if-no-files-found: ignore
+
   visual-smoke:
     runs-on: ubuntu-latest
     timeout-minutes: 20

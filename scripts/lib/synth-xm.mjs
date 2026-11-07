@@ -109,7 +109,7 @@ export function synthXm(channels) {
 /**
  * Rows of `synthCommandTestXm()`, 2 channels, 16 rows, one pattern. Raw XM cell bytes
  * (note, instrument, volume column, effect, parameter); the pattern-command mapping test
- * (tests/patternCommandMapping.test.ts) asserts what libopenmpt reads back for each. Channel 1
+ * (tests/wasm/patternCommandMapping.test.ts) asserts what libopenmpt reads back for each. Channel 1
  * is empty except row 0, so default values leaking into untouched cells would show.
  *
  *   row  ch0 (XM text)                  what it exercises

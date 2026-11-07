@@ -1,6 +1,6 @@
 /**
  * Pure helpers for audio smoke counter monotonicity (#380).
- * Imported by scripts/audio-smoke.mjs and Vitest (tests/audioSmokeCounters.test.ts).
+ * Imported by scripts/audio-smoke.mjs and Vitest (tests/unit/audioSmokeCounters.test.ts).
  */
 
 /** @typedef {{ positionSec: number|null, order: number|null, row: number|null, rowFraction: number|null, isPlaying: boolean, audioEngine: string|null, audioContextState: string|null }} PlaybackCounters */
@@ -108,7 +108,7 @@ export function checkAudioDiag(diag) {
 
 /**
  * Browser-side reader — injected via page.evaluate.
- * Keep in sync with tests/audioSmokeCounters.test.ts fixtures.
+ * Keep in sync with tests/unit/audioSmokeCounters.test.ts fixtures.
  */
 export function readPlaybackCountersInBrowser() {
   // These globals are installed by the app (hooks/diagnostics), not typed in the DOM lib.

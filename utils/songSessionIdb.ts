@@ -1,5 +1,6 @@
 /** IndexedDB adapter for SongSession records (#511): one object store, key = fingerprint. */
-import { createSessionListeners, type SongSession, type SongSessionStore } from './songSession';
+import type { SongSession, SongSessionStore } from './songSession';
+import { createSessionListeners } from './songSessionListeners';
 
 export const SONG_SESSION_DB = 'xasm1-song-sessions';
 export const SONG_SESSION_OBJECT_STORE = 'sessions';
@@ -12,7 +13,7 @@ function request<T>(req: IDBRequest<T>): Promise<T> {
 }
 
 export function createIndexedDbSongSessionStore(dbName = SONG_SESSION_DB): SongSessionStore {
-  const listeners = createSessionListeners();
+  const listeners = createSessionListeners<SongSession>();
   let db: Promise<IDBDatabase> | null = null;
   const open = () => {
     db ??= new Promise<IDBDatabase>((resolve, reject) => {

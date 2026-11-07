@@ -73,7 +73,7 @@ export function synthIrLoader(): IrLoader & { loads: string[] } {
  * rendering with its (future) time, which the rack turns into scheduled
  * automation — the same AudioParam events a live toggle schedules ahead of
  * the clock. Scheduler callbacks (deferred unwire / detach / rewire) are only
- * recorded; their effects are covered with fake nodes in tests/fxRackScheduling.test.ts.
+ * recorded; their effects are covered with fake nodes in tests/unit/fxRackScheduling.test.ts.
  * In the Chromium harness, real suspends are used.
  */
 export class RecordingScheduler implements FxScheduler {

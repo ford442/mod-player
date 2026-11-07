@@ -7,7 +7,7 @@ import { usesInstrumentPalette } from '../utils/shaderVersion';
 import { IS_PUBLIC_MODE, AVAILABLE_SHADERS, THEME_OPTIONS, LIGHT_THEMES, type AppTheme } from '../appConfig';
 import { usePlayerEngine } from '../hooks/usePlayerEngine';
 import { useDisplayShader, useValidShaderLists } from '../hooks/usePlayerView';
-import { usePlayerFeatures } from '../context/PlayerFeaturesContext';
+import { usePlayerFeatures } from '../context/usePlayerFeatures';
 import { usePlayerUiStore } from '../store/playerUiStore';
 import { useShaderPrefsStore } from '../store/shaderPrefsStore';
 

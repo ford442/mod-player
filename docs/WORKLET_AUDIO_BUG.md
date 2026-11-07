@@ -77,17 +77,17 @@ Before modifying the worklet or AudioWorklet-related code:
 - [ ] **Never `import()` an AudioWorklet processor file on the main thread.** Use `audioContext.audioWorklet.addModule()`.
 - [ ] **Verify line numbers in browser console.** After deploy, a hard refresh (`Ctrl+Shift+R` / `Cmd+Shift+R`) should show line numbers matching the current source (e.g., ~250), not the old stub (~130).
 - [ ] **Never commit HTML/404 bodies as `*.wasm`.** The JS engine is real WebAssembly (`libopenmpt-worklet.wasm`) — a corrupt file there means no audio at all, and `initLib` refuses it. Run `npm run verify:wasm` and `npm run verify:js-libopenmpt` before commit/deploy.
-- [ ] **Never infer libopenmpt readiness from `_openmpt_*` being defined.** With real wasm, newer emsdk defines lazy export stubs at glue-eval time (`typeof lib._openmpt_module_create_from_memory2 === 'function'` is true long before instantiate finishes, and `_malloc` may still be missing). Wait on `calledRun` / `onRuntimeInitialized` — `audio-worklet/libRuntimeReady.ts` (regression: `tests/jsWorkletProcessor.integration.test.ts`).
-- [ ] **Run `npm test`** — Vitest guards in `tests/workletAudioLifecycle.test.ts` cover #329 (shared-scope libopenmpt singleton / hot `load`) and #330 (no `AudioContext.suspend()` on normal `stopMusic(false)`). `tests/workletRegressionGuards.test.ts` covers #354 (≤~60 Hz position throttle + hot-reload node reuse / load-token ack).
+- [ ] **Never infer libopenmpt readiness from `_openmpt_*` being defined.** With real wasm, newer emsdk defines lazy export stubs at glue-eval time (`typeof lib._openmpt_module_create_from_memory2 === 'function'` is true long before instantiate finishes, and `_malloc` may still be missing). Wait on `calledRun` / `onRuntimeInitialized` — `audio-worklet/libRuntimeReady.ts` (regression: `tests/wasm/jsWorkletProcessor.integration.test.ts`).
+- [ ] **Run `npm test`** — Vitest guards in `tests/unit/workletAudioLifecycle.test.ts` cover #329 (shared-scope libopenmpt singleton / hot `load`) and #330 (no `AudioContext.suspend()` on normal `stopMusic(false)`). `tests/unit/workletRegressionGuards.test.ts` covers #354 (≤~60 Hz position throttle + hot-reload node reuse / load-token ack).
 
 ### Automated regression harness (#329 / #330 / #354)
 
 | Guard | What it catches |
 |-------|-----------------|
-| `utils/workletAudioLifecycle.ts` + `tests/workletAudioLifecycle.test.ts` | `play()` re-sending `initLib` on module reload; `stopMusic` suspending the context; #354 helper smoke |
-| `tests/workletRegressionGuards.test.ts` | Position postMessage flood (fake-clock ≤~60 Hz); hot-reload disconnect; stale `loaded` ack token; SP structural immunity |
-| `audio-worklet/libSingleton.ts` + `tests/workletAudioLifecycle.test.ts` | Re-evaluating the glue / re-instantiating the wasm when `__openmptWorkletLib` already exists; concurrent callers sharing one init promise; the real-wasm-bytes contract. This is the **same module the worklet bundle runs** (esbuild bundles it; only `bootstrap` — glue eval + runtime wait — is host-specific), not a mirror |
-| `tests/jsWorkletProcessor.integration.test.ts` | The **compiled** processor + the **real** committed wasm in a fake `AudioWorkletGlobalScope`: cold `initLib`, MOD→XM→MOD, hot-reload second node with no `initLib`, corrupt file then recovery, pause/play, seek, interpolation |
+| `utils/workletAudioLifecycle.ts` + `tests/unit/workletAudioLifecycle.test.ts` | `play()` re-sending `initLib` on module reload; `stopMusic` suspending the context; #354 helper smoke |
+| `tests/unit/workletRegressionGuards.test.ts` | Position postMessage flood (fake-clock ≤~60 Hz); hot-reload disconnect; stale `loaded` ack token; SP structural immunity |
+| `audio-worklet/libSingleton.ts` + `tests/unit/workletAudioLifecycle.test.ts` | Re-evaluating the glue / re-instantiating the wasm when `__openmptWorkletLib` already exists; concurrent callers sharing one init promise; the real-wasm-bytes contract. This is the **same module the worklet bundle runs** (esbuild bundles it; only `bootstrap` — glue eval + runtime wait — is host-specific), not a mirror |
+| `tests/wasm/jsWorkletProcessor.integration.test.ts` | The **compiled** processor + the **real** committed wasm in a fake `AudioWorkletGlobalScope`: cold `initLib`, MOD→XM→MOD, hot-reload second node with no `initLib`, corrupt file then recovery, pause/play, seek, interpolation |
 | Source invariants | `stopMusic` body must not call `.suspend()`; worklet must keep `ensureSharedLibOpenMPT` singleton + position throttle `if`; hooks must call token helpers |
 
 CI runs the full Vitest suite (`npm test`) on every PR via `lint-and-build`.
@@ -129,9 +129,9 @@ init used to take seconds (the ~5 MB wasm2js glue) and is now ~0.2 s with real w
 | File picker UX | ❌ manual | Smoke uses programmatic `loadModuleFromUrl` |
 | Storage playlist / share URL deep links | ❌ manual | Not covered by smoke URL matrix |
 
-Vitest helpers in `tests/audioSmokeCounters.test.ts` lock counter/diag parsing logic.
-The smoke **compounds** with `tests/workletAudioLifecycle.test.ts` and
-`tests/workletRegressionGuards.test.ts` — it does not replace them.
+Vitest helpers in `tests/unit/audioSmokeCounters.test.ts` lock counter/diag parsing logic.
+The smoke **compounds** with `tests/unit/workletAudioLifecycle.test.ts` and
+`tests/unit/workletRegressionGuards.test.ts` — it does not replace them.
 
 ---
 
@@ -181,12 +181,12 @@ JS-relevant parts (#504 itself was native-stack work).
 | `scripts/lib/libopenmpt-source.sh` | libopenmpt **0.8.9** and the sha256 of each tarball; a mismatching download is refused. The pristine tree is shared, each variant builds in a copy. |
 | `scripts/lib/wasm-flags.sh` | The one flag set and the pin. `-mbulk-memory -mnontrapping-fptoint`, `-fwasm-exceptions` (compile + link), `-fvisibility=hidden` and pinned `-std=` (what libopenmpt's makefile would add), `-Os`, Closure on the release glue. `require_emsdk_pin` makes another emcc fatal unless `XASM_ALLOW_EMSDK_DRIFT=1`. |
 | Playback link | `EMCC_FORCE_STDLIBS=libwasm_workers` whole-archives the library, as later emsdk does, so the main-thread TLS constructor runs: `__wasm_call_ctors` now calls it first, and `__tls_base` is an sbrk block. `-Wl,--undefined=emscripten_create_wasm_worker` pulled the member in but the constructor still didn't run in a `-O0` link. A hand-written `__wasm_init_tls` constructor (#504's approach) passed or failed with the TLS layout: its "already relocated?" probe reads raw offset 0 as "symbol absent". |
-| `scripts/verify-wasm-features.mjs` + `scripts/lib/wasm-ops.mjs` | Decodes every instruction. `shared`: try/catch, trunc_sat, `memory.copy`/`fill`, no SIMD, no atomics. `playback`: the same plus atomics. `simd`: for the `--simd` experiment. Runs inside `verify:js-libopenmpt`; tests in `tests/wasmFeatures.test.ts`, including the negatives (a non-SIMD wasm fails the SIMD gate; the pairs can't swap). |
+| `scripts/verify-wasm-features.mjs` + `scripts/lib/wasm-ops.mjs` | Decodes every instruction. `shared`: try/catch, trunc_sat, `memory.copy`/`fill`, no SIMD, no atomics. `playback`: the same plus atomics. `simd`: for the `--simd` experiment. Runs inside `verify:js-libopenmpt`; tests in `tests/wasm/wasmFeatures.test.ts`, including the negatives (a non-SIMD wasm fails the SIMD gate; the pairs can't swap). |
 | Truncated-IT checks | `scripts/lib/corrupt-it.mjs` (from #504) is loaded on the shared pair, on the playback heap's main thread *and* its create worker, and through the compiled processor in a fake AudioWorkletGlobalScope (`smokeWorkletBoot`), for both pairs. Every one of them fails on `main`'s playback pair. |
 | `--debug` | `-sENVIRONMENT=web,worker,shell` (the worklet scope is detected as `shell`; `wasmBinary` is always passed in) and `wasmMemory` exported by both pairs. `node scripts/verify-js-libopenmpt.mjs --boot <glue.js>` boots any build through the compiled processor in that fake worklet scope; `js-libopenmpt-rebuild` builds both debug pairs and boots them. |
 | Symbol maps | `--emit-symbol-map` on release links, moved to `vendor/symbol-maps/<pair>.<cache key>.symbols`. The key is the `?v=` the app loads. CI uploads them as `libopenmpt-symbol-maps`. |
 | Dropped | `-ffunction-sections -fdata-sections -Wl,--gc-sections` (dropping them was byte-identical), `-sSAFE_HEAP=0` (the default). `-msign-ext` was never set (default since LLVM 16). |
-| ES2022 | `scripts/build-js-worklet.mjs` (and the FX smoke / bench harnesses) target es2022; `tsconfig.json` and `tsconfig.worklet.json` use the ES2022 target/lib (`useDefineForClassFields` was already true, so semantics are unchanged). `fx-character-worklet.js`: 66 → 0 helper calls, 25,038 → 23,069 B. `openmpt-worklet.js` is byte-identical. `tests/fxCharacterAlloc.test.ts` passes, and the numeric-initializer rule still applies. |
+| ES2022 | `scripts/build-js-worklet.mjs` (and the FX smoke / bench harnesses) target es2022; `tsconfig.json` and `tsconfig.worklet.json` use the ES2022 target/lib (`useDefineForClassFields` was already true, so semantics are unchanged). `fx-character-worklet.js`: 66 → 0 helper calls, 25,038 → 23,069 B. `openmpt-worklet.js` is byte-identical. `tests/unit/fxCharacterAlloc.test.ts` passes, and the numeric-initializer rule still applies. |
 | CI `build-scripts` | Shellchecks `scripts/lib/*.sh` too (`-x`). It was red on `main` at `d8279da` (SC2054 on `-sENVIRONMENT=web,worker` inside an array); that line is gone. |
 
 ### Measured (emsdk 3.1.51, Node 22 V8, 2026-10-25)
@@ -301,7 +301,7 @@ via `new Function`, plus a second copy of the same glue for the main thread / pa
 | `openmpt-processor.ts` | `initLib` **requires** `wasmBytes` (`\0asm`-checked); waits on `onRuntimeInitialized` via `audio-worklet/libRuntimeReady.ts`; interpolation defaults to **8** and is remembered across loads (`setRenderParam` 3). Init failures no longer raise unhandled rejections. |
 | `utils/workletLibAssets.ts` | Main-thread fetch + validation: HTML-as-wasm, wasm2js glue, empty glue are rejected with specific messages. |
 | Versioning | Every request carries `?v=<content hash>` (also on the `.wasm` via `locateFile`), the `<script>` tag carries SRI from the manifest, `public/sw.js` no longer precaches unversioned lib files (cache `v6`). |
-| Guards | `tests/jsEngineArtifacts.test.ts`, `tests/jsWorkletProcessor.integration.test.ts`, `tests/workletLibAssets.test.ts`, `tests/libRuntimeReady.test.ts`, `tests/libopenmptHtmlPlugin.test.ts`; `verify-build` checks tag path / `?v=` / SRI against the shipped bytes and rejects stale wasm2js-era assets; `verify-bundle-budget` budgets `worklets/`. |
+| Guards | `tests/wasm/jsEngineArtifacts.test.ts`, `tests/wasm/jsWorkletProcessor.integration.test.ts`, `tests/unit/workletLibAssets.test.ts`, `tests/unit/libRuntimeReady.test.ts`, `tests/unit/libopenmptHtmlPlugin.test.ts`; `verify-build` checks tag path / `?v=` / SRI against the shipped bytes and rejects stale wasm2js-era assets; `verify-bundle-budget` budgets `worklets/`. |
 
 ### Verified
 
@@ -371,7 +371,7 @@ Two failure modes shipped in #354 (`21cb5b6`) without a test that would have gon
 | Failure | Worklet posts `position` every audio quantum (~350 Hz) → main-thread flood → MOD hiccups |
 | Production guard | `public/worklets/openmpt-worklet.js`: `positionReportInterval = 1/60` gates `port.postMessage({ type: 'position', … })` |
 | Pure helper | `shouldReportWorkletPosition` / `countThrottledPositionReports` in `utils/workletAudioLifecycle.ts` |
-| Tests | `tests/workletRegressionGuards.test.ts` — fake-clock quantum simulation asserts ≤~60 Hz and ≪ unthrottled; source invariant requires the throttle `if` around the position post |
+| Tests | `tests/unit/workletRegressionGuards.test.ts` — fake-clock quantum simulation asserts ≤~60 Hz and ≪ unthrottled; source invariant requires the throttle `if` around the position post |
 | Not a sleep test | Cadence is asserted by advancing a synthetic `currentTime` in `128/44100` steps — no real-time waits |
 
 ### Invariant B — hot module reload reuses node + ignores stale `loaded` acks
@@ -381,8 +381,8 @@ Two failure modes shipped in #354 (`21cb5b6`) without a test that would have gon
 | Failure | Second `loadModule` disconnects/reconnects `AudioWorkletNode` and/or accepts a stale `loaded` ack → XM silence / UI “Playing” with no audio |
 | Production guards | `canReuseWorkletNode` + skip `disconnect`/`connect` on hot path; `workletModuleTokenRef` bumped in `processModuleData`; `forceModuleLoad` from `loadModule`; `shouldAcceptWorkletLoadedAck` drops mismatched tokens in `useAudioGraph.ts` |
 | Pure helpers | `planJsWorkletHotReloadPlay`, `shouldForceWorkletModuleLoad`, `shouldAcceptWorkletLoadedAck` in `utils/workletAudioLifecycle.ts` |
-| Tests | `tests/workletRegressionGuards.test.ts` — two-load session keeps one node identity / zero disconnects / single `initLib`; stale token ack rejected; source invariants require hooks call the helpers |
-| Related | #329 singleton/`initLib` once; #330 never `AudioContext.suspend()` on normal stop — still covered by `tests/workletAudioLifecycle.test.ts` |
+| Tests | `tests/unit/workletRegressionGuards.test.ts` — two-load session keeps one node identity / zero disconnects / single `initLib`; stale token ack rejected; source invariants require hooks call the helpers |
+| Related | #329 singleton/`initLib` once; #330 never `AudioContext.suspend()` on normal stop — still covered by `tests/unit/workletAudioLifecycle.test.ts` |
 
 ### ScriptProcessor fallback (structurally immune)
 
@@ -397,8 +397,8 @@ Native engine (`OpenMPTWorkletEngine`) polls shared-memory position at `setInter
 
 | File | Guards |
 |------|--------|
-| `tests/workletAudioLifecycle.test.ts` | #329 reuse/`initLib`, #330 no suspend, source invariants, #354 helper smoke |
-| `tests/workletRegressionGuards.test.ts` | #354 behavioral throttle + hot-reload token/node identity + SP immunity docs-as-tests |
+| `tests/unit/workletAudioLifecycle.test.ts` | #329 reuse/`initLib`, #330 no suspend, source invariants, #354 helper smoke |
+| `tests/unit/workletRegressionGuards.test.ts` | #354 behavioral throttle + hot-reload token/node identity + SP immunity docs-as-tests |
 | `utils/workletAudioLifecycle.ts` | Single source of pure lifecycle decisions used by hooks **and** tests |
 
 **Do not** weaken `canReuseWorkletNode`, the position throttle interval, or the loaded-ack token check to make a test pass — fix the test.
@@ -437,11 +437,11 @@ directly and compiles (`npm run build:js-worklet`) to the same
 
 | File | Guards |
 |------|--------|
-| `tests/workletProtocol.test.ts` | Constant parity, zod accept/reject, oscBuffer SAB size |
-| `tests/jsWorkletDispatch.test.ts` | Dispatch path: position, stale loaded token, seekAck, SP-fallback flag |
+| `tests/unit/workletProtocol.test.ts` | Constant parity, zod accept/reject, oscBuffer SAB size |
+| `tests/unit/jsWorkletDispatch.test.ts` | Dispatch path: position, stale loaded token, seekAck, SP-fallback flag |
 | `tests/positionInfoLayout.test.ts` | Fixture encode/decode; offset table size 188 B |
-| `tests/workletAudioLifecycle.test.ts` | #329/#330 invariants + dispatch integration |
-| `tests/workletRegressionGuards.test.ts` | #354 throttle + hot-reload source invariants |
+| `tests/unit/workletAudioLifecycle.test.ts` | #329/#330 invariants + dispatch integration |
+| `tests/unit/workletRegressionGuards.test.ts` | #354 throttle + hot-reload source invariants |
 
 This supersedes per-incident string-literal patches as the long-term guard for the
 audio message boundary. Incident-specific helpers in `utils/workletAudioLifecycle.ts`
@@ -489,7 +489,7 @@ Symptom still matched **memory allocation / underrun cascade**: a few skipped qu
 
 ### Guards
 
-`tests/workletRegressionGuards.test.ts` asserts VU/time_at_position sit inside the throttle block, no `subarray` sample-copy path, audio-reactive gated, PCM default off, filter length 4, and `WORKLET_VERSION ≥ 10`.
+`tests/unit/workletRegressionGuards.test.ts` asserts VU/time_at_position sit inside the throttle block, no `subarray` sample-copy path, audio-reactive gated, PCM default off, filter length 4, and `WORKLET_VERSION ≥ 10`.
 
 ### Diagnose live
 
@@ -553,7 +553,7 @@ costs remained and are now gated:
 
 The report gate is the hoisted `shouldReportPosition` boolean — it drives both
 the report-only work and the `postMessage` itself, so they cannot drift apart.
-`tests/workletRegressionGuards.test.ts` asserts VU stays gated and that
+`tests/unit/workletRegressionGuards.test.ts` asserts VU stays gated and that
 `process()` contains **no** `_openmpt_module_get_time_at_position`.
 
 ### Progressive wrap garble — GetLength leftover (2026-09)

@@ -51,7 +51,7 @@ Files: `public/worklets/openmpt-worklet.js` + `libopenmpt-worklet.{js,wasm}` (tr
 - **Hygiene:** `npm run verify:wasm` fails CI if any `public/**/*.wasm` or `dist/**/*.wasm` is HTML/tiny/missing `\0asm` magic. See `public/worklets/README.md`.
 
 ### Shared AudioContext and capture
-- **`AudioContext` is constructed in exactly one place:** `utils/audioContextFactory.ts` (`createPlayerAudioContext` / `getSharedPlayerAudioContext`). One context per page session, `sampleRate` locked to **48000**, `latencyHint` = `playback` unless stage mode / `?latency=interactive`. Do **not** add another `new AudioContext` call site — `tests/audioContextFactory.test.ts` fails the build if you do.
+- **`AudioContext` is constructed in exactly one place:** `utils/audioContextFactory.ts` (`createPlayerAudioContext` / `getSharedPlayerAudioContext`). One context per page session, `sampleRate` locked to **48000**, `latencyHint` = `playback` unless stage mode / `?latency=interactive`. Do **not** add another `new AudioContext` call site — `tests/unit/audioContextFactory.test.ts` fails the build if you do.
 - **Capture:** MediaRecorder taps the shared main graph, so nothing blocks Record clip. See `docs/EXPORT.md`.
 
 ### Fallback Path
@@ -68,7 +68,7 @@ Production silent-playback and MOD/XM switch failures were fixed in PRs **#329**
 | MOD hiccups / main-thread jank | `position` postMessage every audio quantum (~350 Hz) | Worklet throttles position reports to ~60 Hz; main thread extrapolates via `playheadPrediction` |
 | Hot reload glitches | `node.disconnect()` on every `play()` | Skip reconnect when `canReuseWorkletNode` |
 
-**When editing the worklet:** edit `audio-worklet/js/openmpt-processor.ts`, then run `npm run build:js-worklet` to regenerate `openmpt-worklet.js` (also bumps the cache-bust version automatically). Run `npm test` — `tests/workletAudioLifecycle.test.ts` enforces suspend/initLib invariants.
+**When editing the worklet:** edit `audio-worklet/js/openmpt-processor.ts`, then run `npm run build:js-worklet` to regenerate `openmpt-worklet.js` (also bumps the cache-bust version automatically). Run `npm test` — `tests/unit/workletAudioLifecycle.test.ts` enforces suspend/initLib invariants.
 
 **Manual audible checklist** (CI cannot assert speakers): default MOD play → file picker `.mod`/`.xm` → MOD↔XM switch while playing → stop→play. See `docs/WORKLET_AUDIO_BUG.md`.
 
@@ -90,7 +90,7 @@ Production silent-playback and MOD/XM switch failures were fixed in PRs **#329**
 | v0.45–49, v0.30–42, v0.35_bloom, v0.38, square v0.21/39/40/43/44 | A | Utility libs (`notes`, `dura`, `pitch`, `palette`, `sdf`, `tonemap`, …) |
 | v0.55–v0.56 | A | Utility libs + shader-specific bindings (osc / instrument palette) |
 | v0.23, v0.24 | Exception | Procedural video overlay — no PackedA/B cell-packing path |
-- **Shader Groups (in `appConfig.ts`):** `SHADER_GROUPS_ALL` is the full picker list, `SHADER_GROUPS_PUBLIC` the public-build subset, and `SHADER_GROUPS` whichever of the two is active (square, circular, video, night, …). Every id must also be registered in `utils/shaderRegistry.ts`; `tests/shaderRegistry.test.ts` enforces that.
+- **Shader Groups (in `appConfig.ts`):** `SHADER_GROUPS_ALL` is the full picker list, `SHADER_GROUPS_PUBLIC` the public-build subset, and `SHADER_GROUPS` whichever of the two is active (square, circular, video, night, …). Every id must also be registered in `utils/shaderRegistry.ts`; `tests/unit/shaderRegistry.test.ts` enforces that.
 - **Pipeline:** Shaders are fetched as raw text strings (often via `fetch()` or bundled strings) and passed into the WebGPU render pipeline in components like `PatternDisplay.tsx` and `Studio3D.tsx`.
 - **Bloom:** Post-processing bloom passes live in `utils/bloomPostProcessor.ts`; presets are defined in `types/bloomPresets.ts`.
 - **Compatibility:** GPU viz requires **WebGPU** this phase (hard-fail on probe/device failure — no auto WebGL2/HTML **shader** session). **WebGL2 is opt-in only (#462)**: `?webgl2=1` (alias `?renderer=webgl2`) or the "Use WebGL2 visualizer" button on the failure card — never automatic, never persisted; a stored/`DEBUG_RENDERER` `'webgl2'` is ignored. Explicit `?renderer=html` still selects the DOM pattern grid (`PatternHTMLFallback` / `PatternSequencer`) as tracker UI. Debug: `window.__WEBGPU_PROBE__`, `window.DEBUG_RENDERER`.
@@ -190,7 +190,7 @@ python3 deploy.py
 ## Testing
 - **Unit tests (Vitest):** `npm test` runs the full suite (`tests/**/*.test.ts`) — packing, duration parity, trigger tails, shader includes, share state, pattern edit, WAV encoder, and more. Use `npm run test:watch` during development. Focused scripts: `test:shader-includes`, `test:duration-parity`, `test:trigger-tail`, `test:octave-brightness`.
 - **Test TypeScript:** `npm run typecheck:tests` type-checks `tests/**/*.ts` via `tsconfig.test.json` (CI gate).
-- **Shader registry invariant:** `tests/shaderRegistry.test.ts` (also `npm run test:shader-registry`) verifies registry ↔ `SHADER_GROUPS` ↔ `shaderVersion.ts` helper agreement, bloom profiles, note-age range, and bans new `shaderFile.includes('v0.…')` chains. It runs as part of `npm test`.
+- **Shader registry invariant:** `tests/unit/shaderRegistry.test.ts` (also `npm run test:shader-registry`) verifies registry ↔ `SHADER_GROUPS` ↔ `shaderVersion.ts` helper agreement, bloom profiles, note-age range, and bans new `shaderFile.includes('v0.…')` chains. It runs as part of `npm test`.
 - **No ad-hoc test scripts:** the old `utils/__debug__/*.test.cjs` scripts (which shelled out to `npx tsx`) were ported to Vitest under `tests/` and the directory was removed. New tests go in `tests/**/*.test.ts`.
 - **Shader renderer screenshot check:** `scripts/screenshot-shader-check.mjs` is a legacy alias that forwards to `scripts/visual-smoke.mjs` (profile `quick`; renderers per `RENDERERS`, `html`/`webgpu` only — WebGL2 is opt-in via `?webgl2=1`, see `docs/VISUAL_SMOKE.md`). Run it against a local preview with:
   ```bash
@@ -222,7 +222,7 @@ python3 deploy.py
 4. **Node OOM during build:** The Tailwind config was intentionally narrowed to explicit paths. Do not broaden the `content` glob to `"./**/*.{js,ts,jsx,tsx}"` or production builds may run out of heap memory.
 5. **Shader-Uniform coupling:** Shaders are tightly coupled to TypeScript host code. Changing a shader's `struct Uniforms` requires a matching change to `fillUniformPayload()` in `utils/gpuPacking.ts`. Adding a new shader means registering a `ShaderMeta` block in `utils/shaderRegistry.ts` (layout, packing, canvas size, input handling) plus a picker entry in `appConfig.ts` — do not add `shaderFile.includes('v0.XX')` checks.
 6. **Symlink watcher infinite loop:** The CodeQL scanner leaves a self-referential symlink (`_codeql_detected_source_root` → `.`). The Vite config mitigates this with `watch.followSymlinks: false`. Do not remove this setting.
-7. **MOD/XM silent playback / hiccups:** Do not re-init libopenmpt per `play()`, do not `suspend()` the `AudioContext` on module reload, do not post worklet `position` every audio quantum, and do not `disconnect()` the worklet node on hot reload. See `docs/WORKLET_AUDIO_BUG.md` and `tests/workletAudioLifecycle.test.ts`.
+7. **MOD/XM silent playback / hiccups:** Do not re-init libopenmpt per `play()`, do not `suspend()` the `AudioContext` on module reload, do not post worklet `position` every audio quantum, and do not `disconnect()` the worklet node on hot reload. See `docs/WORKLET_AUDIO_BUG.md` and `tests/unit/workletAudioLifecycle.test.ts`.
 8. **Agent planning scratch:** Do not commit `.swarm-state.md` or `weekly_plan.md` (gitignored). Use GitHub issues and `docs/planning/ROADMAP.md` for tracked planning. Do not re-add root `git.sh` “push fix” helpers.
 
 ## Cursor Cloud specific instructions
