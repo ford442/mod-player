@@ -73,15 +73,18 @@ export const MediaOverlay: React.FC<MediaOverlayProps> = ({
   }, [bounds]);
 
   // Trigger fade-in on the next frame after mount so the transition runs.
+  // Keyed on which item is showing (its id), not the item object, which parents recreate freely.
+  const hasItem = item != null;
+  const itemId = item?.id;
   useEffect(() => {
-    if (item && visible) {
+    if (hasItem && visible) {
       setIsClosing(false);
       const raf = requestAnimationFrame(() => setMounted(true));
       return () => cancelAnimationFrame(raf);
     }
     setMounted(false);
     return undefined;
-  }, [item?.id, visible]);
+  }, [hasItem, itemId, visible]);
 
   useEffect(() => {
     return () => {

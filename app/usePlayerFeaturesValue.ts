@@ -209,7 +209,7 @@ export function usePlayerFeaturesValue(params: UsePlayerFeaturesValueParams): Pl
     handleLocalLibraryPlay, playlist, handlePlaylistSelect, handlePlaylistPrev,
     handlePlaylistNext, handlePlaylistFilesAdded, songsQuery, libraryErrorMessage,
     handleLibrarySongLoad, syncLibraryMutation, activeModuleForSave, saveSongMutation,
-    saveSongErrorMessage, patternEdit, handlePatternCellEdit, handlePatternCellPatch,
+    syncLibraryErrorMessage, saveSongErrorMessage, patternEdit, handlePatternCellEdit, handlePatternCellPatch,
     handlePatternCellClear, handleSequencerCellEdit, handlePatternRevert, handleExportPatternDump,
     midiControls, handleExportWav, handleStartCapture, stopCapture, offlineExportState,
     isExporting, captureState, isRecording, setMediaVisible, setMediaItem, setMediaFades,

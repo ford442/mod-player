@@ -335,7 +335,7 @@ export function useWebGLOverlay(
       }
       glResourcesRef.current = null;
     };
-  }, []); // stable — reads from paramsRef
+  }, [glCanvasRef]); // glCanvasRef is a stable ref object; everything else is read from paramsRef
 
   // `webglcontextlost` → stop drawing (drawWebGL bails without resources) and forget the dead GL
   // objects; `webglcontextrestored` → bump the generation so init + the matrix upload run again.
