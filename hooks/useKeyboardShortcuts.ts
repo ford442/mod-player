@@ -40,6 +40,12 @@ export function useKeyboardShortcuts() {
         return;
       }
 
+      // Song map (#537): [ / ] step through the order list. Shift+[ / Shift+] stay free for loop in / out.
+      if ((e.code === 'BracketLeft' || e.code === 'BracketRight') && !e.shiftKey && !e.altKey) {
+        dispatch(e.code === 'BracketLeft' ? 'seek.prevOrder' : 'seek.nextOrder');
+        return;
+      }
+
       const digitMatch = e.code.match(/^Digit([1-9])$/);
       if (digitMatch) {
         dispatch('seek.jumpToOrder', { order: Number(digitMatch[1]) - 1 } as never);

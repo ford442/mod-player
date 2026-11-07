@@ -36,13 +36,13 @@ function concat(parts) {
  * note, instrument, volume column, effect, parameter) and a single looped 16-bit saw+sine
  * instrument.
  */
-function buildXm(title, channels, patterns) {
+function buildXm(title, channels, patterns, orders = patterns.map((_, i) => i)) {
   const numPatterns = patterns.length;
   const parts = [];
   parts.push(str('Extended Module: ', 17), str(title, 20), Uint8Array.of(0x1a), str('bench', 20), u16(0x0104));
   const order = new Uint8Array(256);
-  for (let i = 0; i < numPatterns; i++) order[i] = i;
-  parts.push(u32(276), u16(numPatterns), u16(0), u16(channels), u16(numPatterns), u16(1), u16(1), u16(6), u16(125), order);
+  orders.forEach((pattern, i) => { order[i] = pattern; });
+  parts.push(u32(276), u16(orders.length), u16(0), u16(channels), u16(numPatterns), u16(1), u16(1), u16(6), u16(125), order);
 
   for (const { rows, cells } of patterns) {
     parts.push(u32(9), Uint8Array.of(0), u16(rows), u16(cells.length), cells);
@@ -141,6 +141,58 @@ export function synthCommandTestXm() {
   put(8, 0, 61, 1, 0x30, 0x00, 0x00);
   put(9, 0, 0, 0, 0x50, 0x00, 0x00);
   return buildXm('command test', channels, [{ rows, cells }]);
+}
+
+/**
+ * A 30-order song for the song map (#537): 5 patterns of different lengths (16, 32, 48, 64, 24
+ * rows) played in the order list `SONG_MAP_ORDERS` (repeats, so same pattern = same hue reads),
+ * 2 channels. Tempo / speed changes with XM `Fxx` (CMD_TEMPO for xx ≥ 0x20, CMD_SPEED below):
+ *   pattern 1 row 0   F8C  tempo 140
+ *   pattern 2 row 8   F04  speed 4
+ *   pattern 3 row 0   F64  tempo 100   … row 32  F06  speed 6
+ *   pattern 4 row 12  F7D  tempo 125
+ * A note every 4 rows on channel 0 so it is audible.
+ */
+export const SONG_MAP_ORDERS = [0, 1, 2, 1, 3, 4, 0, 2, 2, 3, 1, 4, 0, 0, 3, 2, 1, 4, 3, 0, 1, 2, 4, 4, 3, 1, 0, 2, 3, 4];
+export const SONG_MAP_PATTERN_ROWS = [16, 32, 48, 64, 24];
+/** @type {Array<[number, number, number, 'tempo' | 'speed']>} */
+export const SONG_MAP_TEMPO_CELLS = [
+  // [pattern, row, XM effect param, kind]
+  [1, 0, 0x8c, 'tempo'],
+  [2, 8, 0x04, 'speed'],
+  [3, 0, 0x64, 'tempo'],
+  [3, 32, 0x06, 'speed'],
+  [4, 12, 0x7d, 'tempo'],
+];
+
+export function synthSongMapXm() {
+  const channels = 2;
+  const patterns = SONG_MAP_PATTERN_ROWS.map((rows, p) => {
+    const cells = new Uint8Array(rows * channels * 5);
+    for (let r = 0; r < rows; r += 4) cells.set([49 + p * 2 + (r % 12), 1, 0x40, 0, 0], r * channels * 5);
+    for (const [pattern, row, param] of SONG_MAP_TEMPO_CELLS) {
+      if (pattern === p) cells.set([0x0f, param], (row * channels + 1) * 5 + 3);
+    }
+    return { rows, cells };
+  });
+  return buildXm('song map', channels, patterns, SONG_MAP_ORDERS);
+}
+
+/**
+ * Order flow for the song map (#537): 4 patterns of 16 rows, orders 0 1 2 3, 2 channels.
+ *   pattern 0 row 8   D16  pattern break → row 10 of order 1 (XM Dxx is decimal: 0x10 = row 10)
+ *   pattern 1 row 12  B03  position jump → order 3 (order 2 is never reached)
+ */
+export function synthJumpXm() {
+  const channels = 2;
+  const patterns = [0, 1, 2, 3].map((p) => {
+    const cells = new Uint8Array(16 * channels * 5);
+    for (let r = 0; r < 16; r += 4) cells.set([49 + p, 1, 0x40, 0, 0], r * channels * 5);
+    if (p === 0) cells.set([0x0d, 0x10], (8 * channels + 1) * 5 + 3);
+    if (p === 1) cells.set([0x0b, 0x03], (12 * channels + 1) * 5 + 3);
+    return { rows: 16, cells };
+  });
+  return buildXm('jumps', channels, patterns);
 }
 
 /**

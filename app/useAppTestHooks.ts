@@ -156,6 +156,9 @@ export function useAppTestHooks(): void {
       setPlayheadFraction: (value: number) => engine.setPlayheadForTest(value),
       getPlaybackRow: () => Math.floor(engine.playbackStateRef.current.playheadRow),
       getPlaybackRowFraction: () => engine.playbackStateRef.current.playheadRow,
+      getPlaybackOrder: () => engine.playbackStateRef.current.currentOrder,
+      /** Song map (#537): the loaded module's structure, once its read has landed. */
+      getSongStructure: () => engine.getSnapshot().songStructure,
       getActiveRenderer: () => window.currentPatternRenderer?.backend ?? null,
       getAudioEngine: () => engine.getPlaybackEngine() ?? 'worklet',
       getLiteMode: () => usePlayerUiStore.getState().liteMode,

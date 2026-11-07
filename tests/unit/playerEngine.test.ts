@@ -220,6 +220,55 @@ describe('PlayerEngine (headless)', () => {
     expect(seeks()).toEqual([[1, 11], [1, 10], [2, 0], [2, 0], [0, 0]]);
   });
 
+  it('seekOrder from a ready transport starts playback, then seeks on the engine report (#537)', async () => {
+    const f = setup();
+    // The start path's matrices exist before play in real life (processModuleData installs them).
+    f.engine.dispatch({ type: 'seekOrder', order: 2, row: 5 });
+    await Promise.resolve();
+    expect(f.start).toHaveBeenCalledTimes(0); // no matrices yet: nothing to seek into
+    await playing(f);
+    f.engine.stop();
+    f.node.port.postMessage.mockClear();
+    f.engine.dispatch({ type: 'seekOrder', order: 2, row: 5 });
+    await vi.waitFor(() => expect(f.start).toHaveBeenCalledTimes(2));
+    expect(f.engine.transport.phase).toBe('loading');
+    // Nothing is posted until the engine renders: the load would put it back at order 0 row 0.
+    expect(f.sent().filter((m) => m.type === MAIN_TO_WORKLET.seek)).toEqual([]);
+    f.ack();
+    expect(f.engine.transport.phase).toBe('playing');
+    expect(f.sent().filter((m) => m.type === MAIN_TO_WORKLET.seek).map((m) => [m.order, m.row])).toEqual([[2, 5]]);
+    expect(f.engine.playbackStateRef.current).toMatchObject({ currentOrder: 2, playheadRow: 5 });
+    // A later plain play does not replay that seek.
+    f.engine.stop();
+    await f.engine.play();
+    f.ack();
+    expect(f.sent().filter((m) => m.type === MAIN_TO_WORKLET.seek)).toHaveLength(1);
+  });
+
+  it('seekOrder while playing seeks at once (row clamped); while paused it stays paused', async () => {
+    const f = setup();
+    await playing(f);
+    const seeks = () => f.sent().filter((m) => m.type === MAIN_TO_WORKLET.seek).map((m) => [m.order, m.row]);
+    f.engine.dispatch({ type: 'seekOrder', order: 1, row: 99 }); // order 1 has 32 rows
+    f.engine.pause();
+    f.engine.dispatch({ type: 'seekOrder', order: -3 });
+    expect(seeks()).toEqual([[1, 31], [0, 0]]);
+    expect(f.engine.transport.phase).toBe('paused');
+    expect(f.start).toHaveBeenCalledTimes(1);
+  });
+
+  it('[ / ] (seek.prevOrder / nextOrder) start a stopped transport at the neighbouring order', async () => {
+    const f = setup();
+    await playing(f);
+    f.engine.playbackStateRef.current = { ...f.engine.playbackStateRef.current, currentOrder: 1, playheadRow: 3 };
+    f.engine.stop();
+    f.node.port.postMessage.mockClear();
+    f.engine.dispatch({ type: 'seekOrders', delta: 1 });
+    await vi.waitFor(() => expect(f.start).toHaveBeenCalledTimes(2));
+    f.ack();
+    expect(f.sent().filter((m) => m.type === MAIN_TO_WORKLET.seek).map((m) => [m.order, m.row])).toEqual([[2, 0]]);
+  });
+
   it('notifies subscribers once per microtask, however many fields changed', async () => {
     const f = setup();
     const listener = vi.fn();

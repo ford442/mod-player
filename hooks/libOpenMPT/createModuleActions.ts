@@ -23,6 +23,11 @@ export interface ModuleActionsDeps {
   setters: LibOpenMPTSetters;
   stopMusic: (destroy?: boolean) => void;
   transport: TransportPort;
+  /**
+   * The module is installed (just before the `parsed` transition) — the engine starts the song map's
+   * structure read (#537) from these bytes. Not called for a superseded or failed parse.
+   */
+  onParsed?: (fileData: Uint8Array, fileName: string) => void;
 }
 
 export interface ProcessModuleOptions {
@@ -57,7 +62,7 @@ export function createEnsureMainThreadModule(refs: LibOpenMPTRefs) {
 }
 
 export function createProcessModuleData(deps: ModuleActionsDeps) {
-  const { refs, setters, stopMusic, transport } = deps;
+  const { refs, setters, stopMusic, transport, onParsed } = deps;
   const {
     libopenmptRef,
     currentModulePtr,
@@ -315,6 +320,7 @@ export function createProcessModuleData(deps: ModuleActionsDeps) {
 
     setIsModuleLoaded(true);
     setStatus(`Loaded "${metadata.title || fileName}"`);
+    onParsed?.(fileDataCopy, fileName);
     // A cued module lands paused at its start; one the user stopped mid-parse stays stopped.
     transport.send(
       'parsed',

@@ -55,6 +55,14 @@ import { resetAudioHeardTime } from '../../utils/playheadPrediction';
 import { hasShareModuleIntent } from '../../utils/shareState';
 import { playShouldResume, type TransportState } from '../../utils/transportClock';
 import { createLogger } from '../../utils/log';
+import { readSongStructureFromBytes } from '../../utils/readSongStructure';
+import type { SongStructure } from '../../utils/songStructure';
+import {
+  createSongStructureClient,
+  SupersededError,
+  type SongStructureClient,
+  type SongStructureSource,
+} from '../../utils/songStructureWorker';
 import { createEngineRefs } from './engineRefs';
 import {
   browserOutputDeviceEnv,
@@ -110,6 +118,11 @@ export interface PlayerSnapshot extends OutputDeviceState {
   readonly workletLoadError: string | null;
   /** The master analyser, once the master chain exists. */
   readonly analyserNode: AnalyserNode | null;
+  /**
+   * The loaded module's order list on libopenmpt's clock (#537 song map). Set once per load, after
+   * the parse — null until the read (in a worker) lands, and for a module whose read failed.
+   */
+  readonly songStructure: SongStructure | null;
 }
 
 /** Commands the command bus, MIDI, mediaSession and the UI send (`dispatch`). */
@@ -122,6 +135,8 @@ export type EngineCommand =
   | { type: 'seekRows'; delta: number }
   | { type: 'seekOrders'; delta: number }
   | { type: 'jumpToOrder'; order: number }
+  /** Go to `row` of `order` and play from there (starts a stopped / ready transport; a pause stays paused). */
+  | { type: 'seekOrder'; order: number; row?: number }
   | { type: 'setVolume'; value: number }
   | { type: 'nudgeVolume'; delta: number }
   | { type: 'setPan'; value: number }
@@ -144,7 +159,16 @@ export interface PlayerEngineOptions {
   startAudioPlayback?: StartAudioPlayback;
   /** Output-device support, storage and `devicechange` source; tests substitute fakes. */
   outputDeviceEnv?: OutputDeviceEnv;
+  /**
+   * Reads a loaded module's SongStructure (#537). Default: a parser worker
+   * (utils/songStructureWorker.ts), or the main thread under a short budget where there are no
+   * workers. `null` turns the song map's read off.
+   */
+  songStructureSource?: SongStructureSource | null;
 }
+
+/** Budget of the main-thread fallback read: past it the starts are extrapolated (readSongStructure). */
+const MAIN_THREAD_STRUCTURE_BUDGET_MS = 150;
 
 const DEFAULT_VOLUME = 0.5;
 
@@ -201,6 +225,7 @@ function createInitialSnapshot(volume: number, output: OutputDeviceState): Playe
     },
     workletLoadError: null,
     analyserNode: null,
+    songStructure: null,
   };
 }
 
@@ -217,6 +242,17 @@ export class PlayerEngine {
   private generation = 0;
   /** Volume to restore on unmute. */
   private preMuteVolume = DEFAULT_VOLUME;
+  /** Song-map structure reads: the injected source, or the lazily created worker client. */
+  private readonly songStructureSourceOption: SongStructureSource | null | undefined;
+  private songStructureClient: SongStructureClient | null = null;
+  /** Bumped per load: a structure read that lands after a newer load is dropped. */
+  private songStructureToken = 0;
+  /**
+   * Global step a stopped / ready transport was asked to play from (seekOrder). The start path loads
+   * the module from its first row, so the seek waits for the engine's `started` report. A position,
+   * not a transport flag; cleared by the next load and by stop.
+   */
+  private pendingStartStep: number | null = null;
 
   private readonly stopFn: (destroy?: boolean) => void;
   private readonly pauseFn: () => void;
@@ -243,6 +279,7 @@ export class PlayerEngine {
     );
     this.preMuteVolume = this.store.getSnapshot().volume;
     this.startAudio = options.startAudioPlayback ?? startAudioPlayback;
+    this.songStructureSourceOption = options.songStructureSource;
 
     this.transport.subscribe(() => {
       const t = this.transport;
@@ -300,6 +337,7 @@ export class PlayerEngine {
       setters: this.setters,
       stopMusic: (destroy) => this.stopFn(destroy),
       transport: this.transport,
+      onParsed: (fileData) => this.onModuleParsed(fileData),
     });
     this.loadModuleFn = createLoadModule(this.refs, this.setters.setStatus, this.processModuleDataFn);
     this.refs.ensureMainThreadModuleRef.current = createEnsureMainThreadModule(this.refs);
@@ -370,6 +408,10 @@ export class PlayerEngine {
   /** Tear everything down (unmount). The engine can be init()ed again afterwards (StrictMode, HMR). */
   dispose(): void {
     this.generation += 1;
+    this.songStructureToken += 1;
+    this.songStructureClient?.dispose();
+    this.songStructureClient = null;
+    this.pendingStartStep = null;
     this.stopFn(false);
     this.output.detach();
     cleanupLibOpenMPT(this.refs);
@@ -417,6 +459,7 @@ export class PlayerEngine {
     }
     const result = await this.startAudio(this.refs, this.callbacks, this.audioConfig(options));
     this.store.patch({ analyserNode: this.refs.analyserRef.current });
+    if (result === 'failed') this.pendingStartStep = null;
     if (result === 'failed' && this.transport.phase === 'loading' && !this.transport.holdPaused) {
       this.transport.send('startFailed');
     }
@@ -438,6 +481,7 @@ export class PlayerEngine {
   }
 
   stop(destroy = false): void {
+    this.pendingStartStep = null;
     this.stopFn(destroy);
   }
 
@@ -453,9 +497,38 @@ export class PlayerEngine {
     return step;
   }
 
+  /** Go to the first row of `order` and play from there (see seekOrder). */
   jumpToOrder(order: number): void {
-    const last = Math.max(0, this.refs.patternMatricesRef.current.length - 1);
-    this.seekFn(this.stepOfOrder(clamp(Math.floor(order), 0, last)));
+    this.seekOrder(order, 0);
+  }
+
+  /**
+   * Go to `row` of `order` (clamped to the module) and play from there — the song map's chips, `[` /
+   * `]`, the digit keys and MIDI. Playing or paused: a seek through the pending-seek path (a pause
+   * stays paused). Stopped or ready: a seek now would be lost, because the start path loads the
+   * module from its first row, so this starts playback and seeks on the engine's `started` report —
+   * before the worklet's first `play`, so nothing renders from the old position.
+   */
+  seekOrder(order: number, row = 0): void {
+    const matrices = this.refs.patternMatricesRef.current;
+    if (matrices.length === 0) return;
+    const target = clamp(Math.floor(order), 0, matrices.length - 1);
+    const rows =
+      this.store.getSnapshot().songStructure?.orders[target]?.rows || matrices[target]?.numRows || 64;
+    const step = this.stepOfOrder(target) + clamp(Math.floor(row), 0, rows - 1);
+    if (this.transport.isPlaying || this.transport.isPaused) {
+      this.seekFn(step);
+      return;
+    }
+    if (this.transport.can('start')) {
+      this.pendingStartStep = step;
+      void this.play();
+      return;
+    }
+    if (this.transport.phase === 'loading' && this.store.getSnapshot().isModuleLoaded) {
+      // An engine start is already in flight: land on the target when it reports.
+      this.pendingStartStep = step;
+    }
   }
 
   /** Move `delta` rows from the live playhead (the ref the GPU reads, not the 10 Hz snapshot). */
@@ -466,7 +539,7 @@ export class PlayerEngine {
   }
 
   seekOrders(delta: number): void {
-    this.jumpToOrder(this.refs.playbackStateRef.current.currentOrder + delta);
+    this.seekOrder(this.refs.playbackStateRef.current.currentOrder + delta, 0);
   }
 
   // ── master levels (the GainNode owns volume — pitfall 16) ─────────────────────────────────────
@@ -628,6 +701,7 @@ export class PlayerEngine {
       case 'seekRows': this.seekRows(command.delta); return;
       case 'seekOrders': this.seekOrders(command.delta); return;
       case 'jumpToOrder': this.jumpToOrder(command.order); return;
+      case 'seekOrder': this.seekOrder(command.order, command.row ?? 0); return;
       case 'setVolume': this.setMasterVolume(command.value); return;
       case 'nudgeVolume': this.setMasterVolume((v) => v + command.delta); return;
       case 'setPan': this.setMasterPan(command.value); return;
@@ -654,6 +728,9 @@ export class PlayerEngine {
     const target = this.refs.playbackEngineRef.current === 'scriptprocessor' ? 'spFallback' : 'playing';
     if (this.transport.can('started', target)) {
       this.transport.send('started', target);
+      const step = this.pendingStartStep;
+      this.pendingStartStep = null;
+      if (step !== null) this.seekFn(step);
       return;
     }
     const phase = this.transport.phase;
@@ -685,6 +762,54 @@ export class PlayerEngine {
       try { this.refs.audioWorkletNodeRef.current?.port.postMessage(postPause()); } catch { /* torn down */ }
     }
     // 'scriptprocessor' renders silence by itself while the transport is paused.
+  }
+
+  // ── song map (#537) ───────────────────────────────────────────────────────────────────────────
+
+  /** A load installed its module: drop the previous structure and read this one's, off the main thread. */
+  private onModuleParsed(fileData: Uint8Array): void {
+    this.pendingStartStep = null;
+    const token = ++this.songStructureToken;
+    this.store.patch({ songStructure: null });
+    const read = this.resolveSongStructureSource();
+    if (!read) return;
+    const land = (structure: SongStructure) => {
+      if (token === this.songStructureToken) this.store.patch({ songStructure: structure });
+    };
+    const viaWorker = read === this.songStructureClient?.read;
+    read(fileData)
+      .then(land)
+      .catch((err: unknown) => {
+        if (err instanceof SupersededError || token !== this.songStructureToken) return;
+        console.warn('[Engine] song structure read failed:', err);
+        if (!viaWorker) return;
+        const fallback = this.readSongStructureOnMainThread(fileData);
+        if (fallback) land(fallback);
+      });
+  }
+
+  private resolveSongStructureSource(): SongStructureSource | null {
+    if (this.songStructureSourceOption !== undefined) return this.songStructureSourceOption;
+    if (typeof Worker === 'undefined') {
+      return (fileData) => {
+        const structure = this.readSongStructureOnMainThread(fileData);
+        return structure ? Promise.resolve(structure) : Promise.reject(new Error('no libopenmpt for the song structure'));
+      };
+    }
+    this.songStructureClient ??= createSongStructureClient();
+    return this.songStructureClient.read;
+  }
+
+  /** Scratch module on the main thread's libopenmpt, short budget (the rest is extrapolated). */
+  private readSongStructureOnMainThread(fileData: Uint8Array): SongStructure | null {
+    const lib = this.refs.libopenmptRef.current;
+    if (!lib) return null;
+    try {
+      return readSongStructureFromBytes(lib, fileData, { budgetMs: MAIN_THREAD_STRUCTURE_BUDGET_MS });
+    } catch (err) {
+      console.warn('[Engine] song structure unavailable:', err);
+      return null;
+    }
   }
 
   /** Start-path config whose fields read live state (see AudioGraphConfig). */

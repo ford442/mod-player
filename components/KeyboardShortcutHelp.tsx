@@ -14,6 +14,7 @@ const SHORTCUTS: Array<[string, string]> = [
   ['ArrowDown', 'Next order (no modifier)'],
   ['Shift + ArrowUp', 'Volume +5%'],
   ['Shift + ArrowDown', 'Volume −5%'],
+  ['[ / ]', 'Previous / next order (song map; starts playback when stopped)'],
   ['1 – 9', 'Jump to order 0–8'],
   ['L', 'Toggle loop'],
   ['M', 'Mute / unmute'],

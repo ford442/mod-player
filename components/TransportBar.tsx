@@ -1,5 +1,6 @@
 import { Controls } from './Controls';
 import { LiveSeekBar } from './LiveSeekBar';
+import { SongMapLazy } from './SongMapLazy';
 import { cn } from '../utils/cn';
 import { FX_RACK_ENABLED, IS_PUBLIC_MODE, LIGHT_THEMES } from '../appConfig';
 import { usePlayerEngine } from '../hooks/usePlayerEngine';
@@ -29,6 +30,8 @@ export function TransportBar() {
     setShowLocalLibrary,
     showFxRack,
     setShowFxRack,
+    showSongMap,
+    setShowSongMap,
   } = usePlayerUiStore();
   const {
     bloomPreset,
@@ -101,6 +104,11 @@ export function TransportBar() {
       {isModuleLoaded && (
         <div className="mt-4">
           <LiveSeekBar />
+          {showSongMap && (
+            <div className="mt-2">
+              <SongMapLazy />
+            </div>
+          )}
         </div>
       )}
 
@@ -109,6 +117,7 @@ export function TransportBar() {
         {[
           { key: 'meters', label: '📊 VU Meters', state: showChannelMeters, toggle: setShowChannelMeters },
           { key: 'meta', label: 'ℹ️ Metadata', state: showMetadata, toggle: setShowMetadata },
+          { key: 'songmap', label: '🗺️ Song Map', state: showSongMap, toggle: setShowSongMap },
           ...(showDevSurface ? [
             { key: 'instruments', label: '🎹 Instruments', state: showInstruments, toggle: setShowInstruments },
           ] : []),
