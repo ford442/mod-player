@@ -114,34 +114,28 @@ describe('the parser worker applies the request’s debug flag', () => {
   });
 });
 
-describe('parseInWorker forwards the debug switch to the worker', () => {
+describe('the parser worker client forwards the debug switch to the worker', () => {
   class FakeWorker {
     posted: WorkerParseMessage[] = [];
-    private listeners = new Map<string, Array<(e: unknown) => void>>();
-    addEventListener(type: string, fn: (e: unknown) => void) {
-      this.listeners.set(type, [...(this.listeners.get(type) ?? []), fn]);
-    }
-    removeEventListener(type: string, fn: (e: unknown) => void) {
-      this.listeners.set(type, (this.listeners.get(type) ?? []).filter((f) => f !== fn));
-    }
+    onmessage: ((e: { data: unknown }) => void) | null = null;
+    addEventListener() {}
     postMessage(message: WorkerParseMessage) {
       this.posted.push(message);
       // Answer immediately so the returned promise settles.
-      for (const fn of this.listeners.get('message') ?? []) fn({ data: { type: 'error', message: 'stub' } });
+      this.onmessage?.({ data: { type: 'error', id: message.id, message: 'stub' } });
     }
     terminate() {}
   }
-
-  const request = (): WorkerParseMessage => ({ type: 'parse', fileData: new Uint8Array([1, 2, 3]), fileName: 'x.mod' });
 
   async function post(search: string) {
     vi.stubGlobal('window', globalThis);
     vi.stubGlobal('location', { search });
     vi.stubGlobal('localStorage', { getItem: () => null });
     vi.resetModules();
-    const { parseInWorker } = await import('../../utils/parserWorker');
+    const { createParserWorkerClient } = await import('../../utils/parserWorker');
     const worker = new FakeWorker();
-    await parseInWorker(worker as unknown as Worker, request(), []);
+    const client = createParserWorkerClient({ createWorker: () => worker as unknown as Worker });
+    await client.parse(new Uint8Array([1, 2, 3]), 'x.mod');
     return worker.posted[0];
   }
 

@@ -1,11 +1,23 @@
-import { applyWorkletPositionSample } from '../../utils/playheadPrediction';
+import type { LibOpenMPT } from '../../types';
+import { applyWorkletPositionSample, type WorkletPositionInput } from '../../utils/playheadPrediction';
 import { postPause } from '../../audio-worklet/protocol';
-import {
-  INTERPOLATION_CUBIC,
-  OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH,
-} from '../../utils/openmptRenderParams';
+import { OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH } from '../../utils/openmptRenderParams';
+import { resolveJsInterpolationLength } from '../../utils/jsInterpolation';
+import { mallocOrThrow } from '../../utils/wasmHeap';
 import { wireMasterOutput } from './masterGraph';
 import type { AudioGraphCallbacks, AudioGraphConfig, AudioGraphRefs } from './types';
+
+/** Where the module is before a block renders, tagged with the time that block starts playing. */
+function snapshotPosition(lib: LibOpenMPT, modPtr: number, blockTime: number): WorkletPositionInput {
+  return {
+    order: lib._openmpt_module_get_current_order(modPtr),
+    row: lib._openmpt_module_get_current_row(modPtr),
+    positionSeconds: lib._openmpt_module_get_position_seconds(modPtr),
+    workletTime: blockTime,
+    bpm: lib._openmpt_module_get_current_estimated_bpm(modPtr),
+    speed: lib._openmpt_module_get_current_speed(modPtr),
+  };
+}
 
 /**
  * Tear down a failed JS worklet node and start ScriptProcessorNode fallback
@@ -37,15 +49,27 @@ export async function runScriptProcessorFallback(
   const modPtr = refs.currentModulePtr.current;
   if (lib && modPtr) {
     const SP_BUFFER = 4096;
+    let leftPtr: number;
+    let rightPtr: number;
+    try {
+      // Reuse buffers a previous fallback start left (stopMusic frees them).
+      leftPtr = refs.spLeftBufPtr.current || mallocOrThrow(lib, 4 * SP_BUFFER, 'ScriptProcessor buffer');
+      refs.spLeftBufPtr.current = leftPtr;
+      rightPtr = refs.spRightBufPtr.current || mallocOrThrow(lib, 4 * SP_BUFFER, 'ScriptProcessor buffer');
+      refs.spRightBufPtr.current = rightPtr;
+    } catch (err) {
+      console.error('[PLAY] ScriptProcessor fallback could not allocate its buffers:', err);
+      callbacks.setStatus('Error: out of memory for the ScriptProcessor fallback');
+      callbacks.setIsPlaying(false);
+      return;
+    }
     const spNode = ctx.createScriptProcessor(SP_BUFFER, 0, 2);
-    const leftPtr  = lib._malloc(4 * SP_BUFFER);
-    const rightPtr = lib._malloc(4 * SP_BUFFER);
-    refs.spLeftBufPtr.current  = leftPtr;
-    refs.spRightBufPtr.current = rightPtr;
+    // The same filter the worklet renders with (?interp= / localStorage, default Sinc+LP), so the
+    // fallback does not change the sound.
     lib._openmpt_module_set_render_param(
       modPtr,
       OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH,
-      INTERPOLATION_CUBIC,
+      resolveJsInterpolationLength(),
     );
 
     // Cached heap views — recreate only when Emscripten grows HEAPF32.
@@ -63,11 +87,21 @@ export async function runScriptProcessorFallback(
       // row. Pause latency here is one SPN buffer (4096 frames), unlike the worklet's one quantum.
       if (refs.isPausedRef.current) { outL.fill(0); outR.fill(0); return; }
 
+      // Position is sampled BEFORE rendering, like the worklet's pre-render snapshot: it is where
+      // this block starts, and the block starts playing at `playbackTime`. Sampled after the
+      // render it described the block's end (4096 frames, ~85 ms later), so the playhead led the
+      // audio by a whole buffer.
+      // The worklet tags its snapshot with `currentTime` inside process(), i.e. the time the quantum
+      // it is about to render plays; a ScriptProcessor block plays at `playbackTime`, not now.
+      const playbackTime = audioEvt.playbackTime;
+      const blockTime = Number.isFinite(playbackTime) && playbackTime > 0 ? playbackTime : ctx.currentTime;
+      let snapshot = snapshotPosition(mLib, mPtr, blockTime);
       let written = mLib._openmpt_module_read_float_stereo(
         mPtr, ctx.sampleRate, SP_BUFFER, leftPtr, rightPtr
       );
       if (written === 0 && config.isLooping) {
         mLib._openmpt_module_set_position_order_row(mPtr, 0, 0);
+        snapshot = snapshotPosition(mLib, mPtr, blockTime);
         written = mLib._openmpt_module_read_float_stereo(
           mPtr, ctx.sampleRate, SP_BUFFER, leftPtr, rightPtr
         );
@@ -88,15 +122,7 @@ export async function runScriptProcessorFallback(
         outL.fill(0); outR.fill(0);
       }
 
-      const spTime = ctx.currentTime;
-      applyWorkletPositionSample(refs, {
-        order: mLib._openmpt_module_get_current_order(mPtr),
-        row: mLib._openmpt_module_get_current_row(mPtr),
-        positionSeconds: mLib._openmpt_module_get_position_seconds(mPtr),
-        workletTime: spTime,
-        bpm: mLib._openmpt_module_get_current_estimated_bpm(mPtr),
-        speed: mLib._openmpt_module_get_current_speed(mPtr),
-      });
+      applyWorkletPositionSample(refs, snapshot);
     };
 
     spNode.connect(refs.masterInputRef.current!);
@@ -107,7 +133,7 @@ export async function runScriptProcessorFallback(
       // Started (e.g. after a worklet fault) while paused: the callback above already renders silence.
       callbacks.setStatus("Paused.");
     } else {
-      refs.isPlayingRef.current = true;
+      // Reported, not written: isPlayingRef is a view of the transport FSM (pitfall 17).
       callbacks.setIsPlaying(true);
       callbacks.setStatus("Playing (ScriptProcessor fallback)...");
     }

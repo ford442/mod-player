@@ -1,5 +1,6 @@
 import type { LibOpenMPT } from '../types';
 import { EXPORT_SAMPLE_RATE } from './wavEncoder';
+import { copyToHeap, mallocOrThrow } from './wasmHeap';
 import {
   applyChannelMuteMask,
   createExtModuleFromMemory,
@@ -75,8 +76,7 @@ export function renderModuleOffline(
   request: OfflineRenderRequest,
 ): OfflineRenderResult {
   const sampleRate = request.sampleRate ?? EXPORT_SAMPLE_RATE;
-  const filePtr = lib._malloc(request.fileData.byteLength);
-  lib.HEAPU8.set(request.fileData, filePtr);
+  const filePtr = copyToHeap(lib, request.fileData);
 
   let extHandle: OpenMPTExtModule | null = null;
   let modPtr = 0;
@@ -122,8 +122,14 @@ export function renderModuleOffline(
       lib._openmpt_module_set_position_seconds(modPtr, startSeconds);
     }
 
-    const leftPtr = lib._malloc(4 * CHUNK_FRAMES);
-    const rightPtr = lib._malloc(4 * CHUNK_FRAMES);
+    const leftPtr = mallocOrThrow(lib, 4 * CHUNK_FRAMES, 'offline render buffer');
+    let rightPtr: number;
+    try {
+      rightPtr = mallocOrThrow(lib, 4 * CHUNK_FRAMES, 'offline render buffer');
+    } catch (err) {
+      lib._free(leftPtr);
+      throw err;
+    }
 
     const leftChunks: Float32Array[] = [];
     const rightChunks: Float32Array[] = [];

@@ -6,9 +6,9 @@
  *
  * The flags that used to be duplicated — and disagree — are views here, so they cannot drift:
  *
- *   isPlayingRef / isPausedRef  read the transport FSM. The start paths still assign them (for their
- *                               plain-ref tests); those writes are ignored, and the paired
- *                               `callbacks.setIsPlaying(...)` is what moves the FSM.
+ *   isPlayingRef / isPausedRef  read the transport FSM. Nothing assigns them (writes would be
+ *                               ignored): the start paths report `callbacks.setIsPlaying(...)`,
+ *                               which is what moves the FSM.
  *   seekAcknowledgedRef         `pendingSeekRef.current === null`; writing `true` clears the seek.
  *   spFallbackTriggered         `playbackEngineRef.current === 'scriptprocessor'`.
  *   workletLoadedRef            `addModule` resolved on *this* AudioContext — a module loaded into a

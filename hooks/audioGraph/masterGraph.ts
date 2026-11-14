@@ -36,14 +36,6 @@ export function wireMasterOutput(
   applyMasterLevels(graph, volume, pan);
 }
 
-/** Exact module bytes for worklet load — safe when Uint8Array is a subarray. */
-export function moduleBytesFromFileData(fileData: Uint8Array | null): ArrayBuffer | null {
-  if (!fileData || fileData.byteLength === 0) return null;
-  const copy = new Uint8Array(fileData.byteLength);
-  copy.set(fileData);
-  return copy.buffer;
-}
-
 /** Create or refresh the master-graph nodes (input, direct, analyser, panner, gain). */
 export function ensureCommonMasterNodes(
   ctx: AudioContext,

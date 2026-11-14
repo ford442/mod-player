@@ -21,6 +21,7 @@
  */
 import type { LibOpenMPT } from '../types';
 import { EffectCommand, PatternCommand } from './openmptCommands';
+import { createModuleFromBytes } from './wasmHeap';
 import {
   ORDER_PATTERN_END,
   ORDER_PATTERN_SKIP,
@@ -265,10 +266,7 @@ export function readSongStructureFromBytes(
   fileData: Uint8Array,
   options: ReadSongStructureOptions = {},
 ): SongStructure {
-  const ptr = lib._malloc(fileData.byteLength);
-  lib.HEAPU8.set(fileData, ptr);
-  const modPtr = lib._openmpt_module_create_from_memory2(ptr, fileData.byteLength, 0, 0, 0, 0, 0, 0, 0);
-  lib._free(ptr);
+  const modPtr = createModuleFromBytes(lib, fileData);
   if (modPtr === 0) throw new Error('Failed to load module (invalid format?)');
   try {
     return readSongStructure(lib, modPtr, options);

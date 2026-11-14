@@ -138,20 +138,35 @@ export function createWorkerReadyFor(node: AudioWorkletNode): boolean {
   return host != null && host.ready && host.node === node;
 }
 
+/** A copy of `fileData` in an ArrayBuffer of its own, for a transfer. */
+function ownedCopy(fileData: Uint8Array): ArrayBuffer {
+  const copy = new Uint8Array(fileData.byteLength);
+  copy.set(fileData);
+  return copy.buffer;
+}
+
 /**
  * Send a module to `node`: to the create worker when it serves this node, else to the worklet.
  * Either way the worklet answers with `loaded` or `error`, so callers don't care which ran.
- * The bytes are copied, not transferred, so a dying worker's loads can still be re-sent.
+ *
+ * `fileData` is the caller's (the engine's `fileDataRef`) and is never detached: each send copies
+ * it ONCE and transfers that copy (no second, structured-clone copy). A dying worker's unanswered
+ * loads are re-sent to the worklet from `fileData` again, which nobody mutates.
  */
-export function postModuleLoad(node: AudioWorkletNode, moduleData: ArrayBuffer): void {
+export function postModuleLoad(node: AudioWorkletNode, fileData: Uint8Array): void {
   const h = host;
   if (!h || !h.ready || h.node !== node) {
-    node.port.postMessage(postLoad(moduleData));
+    const moduleData = ownedCopy(fileData);
+    node.port.postMessage(postLoad(moduleData), [moduleData]);
     return;
   }
   const seq = ++h.seq;
-  h.inflight.set(seq, () => node.port.postMessage(postLoad(moduleData)));
-  h.worker.postMessage({ type: CREATE_WORKER.create, seq, moduleData });
+  h.inflight.set(seq, () => {
+    const resend = ownedCopy(fileData);
+    node.port.postMessage(postLoad(resend), [resend]);
+  });
+  const moduleData = ownedCopy(fileData);
+  h.worker.postMessage({ type: CREATE_WORKER.create, seq, moduleData }, [moduleData]);
 }
 
 /** Tear the worker down (tests). The worklet's next loads create in-worklet. */
