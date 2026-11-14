@@ -69,7 +69,10 @@ const MIN_WASM_BYTES = 64 * 1024;
 
 /**
  * C exports the app relies on. The build exports the WHOLE libopenmpt C API; this list is the
- * regression floor (main thread, parser worker, JS worklet, offline render, ext mute).
+ * regression floor (main thread, parser worker, JS worklet, offline render, ext mute, song
+ * structure). It is exactly the `_openmpt_*` names the app / worker / worklet sources reference
+ * (plus _malloc / _free) — tests/unit/requiredCExports.test.ts scans them, so a new call site
+ * must be added here and a dropped one removed.
  */
 export const REQUIRED_C_EXPORTS = Object.freeze([
   '_malloc',
@@ -88,19 +91,20 @@ export const REQUIRED_C_EXPORTS = Object.freeze([
   '_openmpt_module_get_current_playing_channels',
   '_openmpt_module_get_current_row',
   '_openmpt_module_get_current_speed',
+  '_openmpt_module_get_current_tempo2',
   '_openmpt_module_get_duration_seconds',
   '_openmpt_module_get_instrument_name',
   '_openmpt_module_get_metadata',
   '_openmpt_module_get_num_channels',
   '_openmpt_module_get_num_instruments',
   '_openmpt_module_get_num_orders',
+  '_openmpt_module_get_num_patterns',
   '_openmpt_module_get_num_samples',
   '_openmpt_module_get_order_pattern',
   '_openmpt_module_get_pattern_num_rows',
   '_openmpt_module_get_pattern_row_channel_command',
   '_openmpt_module_get_position_seconds',
   '_openmpt_module_get_sample_name',
-  '_openmpt_module_get_time_at_position',
   '_openmpt_module_read_float_stereo',
   '_openmpt_module_set_position_order_row',
   '_openmpt_module_set_position_seconds',
