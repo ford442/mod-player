@@ -1,8 +1,8 @@
 import type { PatternMatrix } from '../../types';
-import { backfillPatternMatrices } from '../../utils/parseModuleWithLib';
+import type { OpenModuleParse } from '../../utils/parseModuleWithLib';
 import { createModuleFromBytes } from '../../utils/wasmHeap';
 import { parserLog } from '../../utils/parserDebug';
-import { createParserWorker, PARSER_SLOW_HINT_MS } from '../../utils/parserWorker';
+import { createParserWorkerClient, PARSER_SLOW_HINT_MS } from '../../utils/parserWorker';
 import { rowsPerSecondFromBpm } from '../../utils/playheadPrediction';
 import {
   createPlayheadLagTracker,
@@ -157,19 +157,14 @@ export function createProcessModuleData(deps: ModuleActionsDeps) {
 
     const useWorkerParse = !isLibReadyForParse(lib);
     if (useWorkerParse && !workerRef.current && parserWorkerHealthyRef.current) {
-      try {
-        workerRef.current = createParserWorker((message) => {
+      // One warm worker for the session: it keeps its libopenmpt between parses. The client
+      // replaces a worker that crashes or hangs; a broken worker *script* turns workers off.
+      workerRef.current = createParserWorkerClient({
+        onFatalError: (message) => {
           parserWorkerHealthyRef.current = false;
-          if (workerRef.current) {
-            try { workerRef.current.terminate(); } catch { /* ignore */ }
-            workerRef.current = null;
-          }
-          console.error(`[Parser] worker unhealthy (${fileName}):`, message);
-        });
-      } catch (workerErr) {
-        parserWorkerHealthyRef.current = false;
-        console.warn(`[processModuleData] Failed to create parser worker (${fileName}):`, workerErr);
-      }
+          console.error('[Parser] worker unhealthy:', message);
+        },
+      });
     }
 
     setStatus(`Parsing "${fileName}"…`);
@@ -190,13 +185,14 @@ export function createProcessModuleData(deps: ModuleActionsDeps) {
     let patternMatrices: PatternMatrix[];
     let metadata: import('../../types').WorkerParseResponse['metadata'];
     let loadedInstrumentTable = emptyInstrumentTable();
+    // The main-thread parse's module handle, kept open for the backfill. Owned here until handed to
+    // the backfill: every return before that point must dispose it.
+    let openModule: OpenModuleParse | null = null;
 
     try {
       const parsed = await resolveParsedModule(
         lib,
         useWorkerParse && parserWorkerHealthyRef.current ? workerRef.current : null,
-        workerRef,
-        fileData,
         fileDataCopy,
         fileName,
         onParseProgress,
@@ -204,6 +200,7 @@ export function createProcessModuleData(deps: ModuleActionsDeps) {
       patternMatrices = parsed.patternMatrices;
       metadata = parsed.metadata;
       loadedInstrumentTable = parsed.instrumentTable ?? emptyInstrumentTable();
+      openModule = parsed.openModule ?? null;
     } catch (err) {
       if (superseded()) return;
       const message = err instanceof Error ? err.message : 'Module parse failed';
@@ -216,10 +213,12 @@ export function createProcessModuleData(deps: ModuleActionsDeps) {
     }
 
     if (superseded()) {
+      openModule?.dispose();
       log.log(`processModuleData: "${fileName}" superseded by a newer load — dropping its result`);
       return;
     }
     if (!patternMatrices.length || !metadata.numOrders) {
+      openModule?.dispose();
       setStatus('Error: No pattern data in module');
       console.error('[Parser] empty patternMatrices after parse');
       transport.send('loadFailed');
@@ -235,17 +234,14 @@ export function createProcessModuleData(deps: ModuleActionsDeps) {
     patternMatricesRef.current = matrices;
 
     const patternsComplete = patternMatrices.length >= metadata.numOrders;
-    if (!patternsComplete && isLibReadyForParse(lib)) {
+    if (!patternsComplete && openModule) {
       const backfillAbort = new AbortController();
       patternBackfillAbortRef.current = backfillAbort;
       const backfillFileName = fileName;
-      void backfillPatternMatrices(
-        lib,
-        fileDataCopy,
-        metadata.numOrders,
-        matrices,
-        { startOrder: patternMatrices.length, signal: backfillAbort.signal },
-      )
+      // Same handle as the order-0 parse (no second create); the backfill destroys it when done.
+      const parse = openModule;
+      openModule = null;
+      void parse.backfill(matrices, { startOrder: patternMatrices.length, signal: backfillAbort.signal })
         .then(() => {
           if (backfillAbort.signal.aborted) return;
           log.log(
@@ -260,6 +256,9 @@ export function createProcessModuleData(deps: ModuleActionsDeps) {
           }
         });
     }
+    // Nothing left to backfill (or no handle to do it with): release the parse's module now.
+    openModule?.dispose();
+    openModule = null;
 
     workletBpmRef.current = metadata.initialBpm || 125;
 

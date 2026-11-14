@@ -16,6 +16,8 @@ const LIB_FETCH_TIMEOUT_MS = 12_000;
 
 interface ParseRequest {
   type: 'parse';
+  /** Mirrors WorkerParseRequest.id (types.ts): echoed on every reply to this request. */
+  id?: number;
   fileData: Uint8Array;
   fileName: string;
   /** Mirrors WorkerParseRequest.debug (types.ts). */
@@ -24,6 +26,7 @@ interface ParseRequest {
 
 interface ParseResponse {
   type: 'parsed';
+  id?: number;
   patternMatrices: ReturnType<typeof parseModuleWithLib>['patternMatrices'];
   metadata: ReturnType<typeof parseModuleWithLib>['metadata'];
   instrumentTable: InstrumentTable;
@@ -31,12 +34,18 @@ interface ParseResponse {
 
 interface ParseError {
   type: 'error';
+  id?: number;
   message: string;
 }
 
+type ProgressStage = 'fetch' | 'wasm' | 'patterns' | 'instruments';
+
 type IncomingMessage = ParseRequest | SongStructureRequest;
 
-/** One libopenmpt per worker: a song-structure worker serves every load of the page session. */
+/**
+ * One libopenmpt per worker: a song-structure worker serves every load of the page session, and so
+ * does the (warm) parse worker — libopenmpt is fetched and compiled once, not once per parse.
+ */
 let libPromise: Promise<LibOpenMPT> | null = null;
 function getLib(): Promise<LibOpenMPT> {
   libPromise ??= loadLibOpenMPT().catch((err: unknown) => {
@@ -118,8 +127,13 @@ async function loadLibOpenMPT(): Promise<LibOpenMPT> {
   return lib as LibOpenMPT;
 }
 
-function postError(message: string): void {
-  self.postMessage({ type: 'error', message } satisfies ParseError);
+/** An error reply; without `id` it is a worker-level failure for every request in flight. */
+function postError(message: string, id?: number): void {
+  self.postMessage((id === undefined ? { type: 'error', message } : { type: 'error', id, message }) satisfies ParseError);
+}
+
+function postProgress(stage: ProgressStage, id: number | undefined): void {
+  self.postMessage(id === undefined ? { type: 'progress', stage } : { type: 'progress', id, stage });
 }
 
 /**
@@ -143,24 +157,24 @@ async function handleMessage(data: IncomingMessage): Promise<void> {
     await handleStructure(data);
     return;
   }
-  const { type, fileData, fileName, debug } = data;
+  const { type, id, fileData, fileName, debug } = data;
 
   if (type !== 'parse') {
-    postError(`Unknown worker message type: ${String(type)}`);
+    postError(`Unknown worker message type: ${String(type)}`, id);
     return;
   }
 
   setParserDebugFromMainThread(debug === true);
 
   parserLog('worker parse start', fileName, fileData.byteLength);
-  self.postMessage({ type: 'progress', stage: 'fetch' } satisfies { type: 'progress'; stage: 'fetch' });
+  postProgress('fetch', id);
 
   try {
-    self.postMessage({ type: 'progress', stage: 'wasm' } satisfies { type: 'progress'; stage: 'wasm' });
+    postProgress('wasm', id);
     const lib = await getLib();
-    self.postMessage({ type: 'progress', stage: 'patterns' } satisfies { type: 'progress'; stage: 'patterns' });
+    postProgress('patterns', id);
     const { patternMatrices, metadata } = parseModuleWithLib(lib, fileData, fileName);
-    self.postMessage({ type: 'progress', stage: 'instruments' } satisfies { type: 'progress'; stage: 'instruments' });
+    postProgress('instruments', id);
     const instrumentTable = mergeLibInstrumentNames(
       extractInstrumentTable(fileData, fileName),
       metadata.instruments,
@@ -177,6 +191,7 @@ async function handleMessage(data: IncomingMessage): Promise<void> {
 
     const response: ParseResponse = {
       type: 'parsed',
+      ...(id === undefined ? {} : { id }),
       patternMatrices,
       metadata,
       instrumentTable,
@@ -184,7 +199,7 @@ async function handleMessage(data: IncomingMessage): Promise<void> {
     self.postMessage(response);
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown worker parse error';
-    postError(message);
+    postError(message, id);
   }
 }
 
@@ -192,7 +207,7 @@ self.onmessage = (e: MessageEvent<IncomingMessage>) => {
   void handleMessage(e.data).catch((err) => {
     const message = err instanceof Error ? err.message : 'Unknown parse error';
     console.error('[Parser worker]', message, err);
-    postError(message);
+    postError(message, e.data?.type === 'parse' ? e.data.id : undefined);
   });
 };
 

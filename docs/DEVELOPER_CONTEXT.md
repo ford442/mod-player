@@ -119,7 +119,7 @@ Unit tests run via **Vitest** (`npm test`). Suites live under `tests/*.test.ts` 
 
 **PackedA/PackedB bit-layout changes** must update `tests/unit/gpuPacking.test.ts` (pack→unpack round-trip) and the duration parity assertions in `tests/unit/durationParity.test.ts`. These are the invariants that #318 (WGSL includes) and #307 (GPU lifecycle) must not break.
 
-The former ad-hoc Node scripts under `utils/__debug__/*.test.cjs` have all been ported to Vitest (`tests/unit/shaderRegistry.test.ts`, `libraryStore`, `folderImport`, `parserPromise`, `modMetadata`) and the directory removed; there are no unported test scripts left.
+The former ad-hoc Node scripts under `utils/__debug__/*.test.cjs` have all been ported to Vitest (`tests/unit/shaderRegistry.test.ts`, `libraryStore`, `folderImport`, `modMetadata`) and the directory removed; there are no unported test scripts left.
 
 ---
 

@@ -10,15 +10,16 @@ export interface ParsedModuleData {
 export interface ParseModuleOptions {
   /**
    * Extract at most this many orders (1 = first order only).
-   * Metadata still reflects the full module. Use with `backfillPatternMatrices`
+   * Metadata still reflects the full module. Use `parseModuleWithLibOpen(…).backfill()`
    * to load remaining orders without blocking playback start.
    */
   maxOrders?: number;
 }
 
 export interface BackfillPatternOptions {
+  /** First order to fill (default: the first one the parse did not extract). */
   startOrder?: number;
-  /** Yield to the main thread every N orders (keeps UI + audio responsive). */
+  /** Yield to the main thread every N extracted patterns (keeps UI + audio responsive). */
   yieldEvery?: number;
   signal?: AbortSignal;
 }
@@ -116,6 +117,103 @@ function readModuleMetadata(
 }
 
 /**
+ * Extracted patterns by pattern index. An order list plays the same pattern many times; each order
+ * gets its own PatternMatrix (its `order` differs) over the SAME `rows`, extracted once. Matrices
+ * are immutable once built — edits clone them (utils/patternEdit.ts) — so sharing rows is safe,
+ * and a structured clone (the parser worker's reply) keeps the sharing.
+ */
+type PatternCache = Map<number, PatternMatrix>;
+
+/** The matrix for `order`, extracting its pattern only on first use. `extracted` says whether WASM work ran. */
+function matrixForOrder(
+  lib: LibOpenMPT,
+  modPtr: number,
+  order: number,
+  cache: PatternCache,
+): { matrix: PatternMatrix; extracted: boolean } {
+  const patIdx = lib._openmpt_module_get_order_pattern(modPtr, order);
+  const hit = cache.get(patIdx);
+  if (hit) return { matrix: hit.order === order ? hit : { ...hit, order }, extracted: false };
+  const matrix = getPatternMatrix(lib, modPtr, patIdx, order);
+  cache.set(patIdx, matrix);
+  return { matrix, extracted: true };
+}
+
+/** A parse whose module handle is still open, for the pattern backfill. The caller owns the handle. */
+export interface OpenModuleParse extends ParsedModuleData {
+  /**
+   * Fill `target` (sparse, indexed by order) from the orders after the parsed ones, on the SAME
+   * module handle the parse created (no second create), yielding to the main thread every
+   * `yieldEvery` extracted patterns. Destroys the handle when it ends, finishes or is aborted.
+   */
+  backfill(target: (PatternMatrix | null)[], options?: BackfillPatternOptions): Promise<void>;
+  /** Destroy the module handle without backfilling. Idempotent; a running backfill stops. */
+  dispose(): void;
+}
+
+/**
+ * Parse an in-memory module and keep its handle open for `backfill()` (main thread: order 0 now,
+ * the rest after playback starts). The caller must call `backfill()` or `dispose()`.
+ */
+export function parseModuleWithLibOpen(
+  lib: LibOpenMPT,
+  fileData: Uint8Array,
+  fileName: string,
+  options?: ParseModuleOptions,
+): OpenModuleParse {
+  const modPtr = createModulePtr(lib, fileData);
+  let live = true;
+  const dispose = () => {
+    if (!live) return;
+    live = false;
+    lib._openmpt_module_destroy(modPtr);
+  };
+  const cache: PatternCache = new Map();
+
+  let metadata: WorkerParseMetadata;
+  const patternMatrices: PatternMatrix[] = [];
+  try {
+    metadata = readModuleMetadata(lib, modPtr, fileName);
+    const ordersToExtract = Math.min(
+      metadata.numOrders,
+      options?.maxOrders ?? metadata.numOrders,
+    );
+    for (let i = 0; i < ordersToExtract; i++) {
+      patternMatrices.push(matrixForOrder(lib, modPtr, i, cache).matrix);
+    }
+  } catch (err) {
+    dispose();
+    throw err;
+  }
+  const numOrders = metadata.numOrders;
+
+  return {
+    patternMatrices,
+    metadata,
+    dispose,
+    async backfill(target, backfillOptions) {
+      const startOrder = backfillOptions?.startOrder ?? patternMatrices.length;
+      const yieldEvery = backfillOptions?.yieldEvery ?? 2;
+      const signal = backfillOptions?.signal;
+      let extractedCount = 0;
+      try {
+        for (let i = startOrder; i < numOrders; i++) {
+          if (!live || signal?.aborted) return;
+          if (target[i]) continue;
+          const { matrix, extracted } = matrixForOrder(lib, modPtr, i, cache);
+          target[i] = matrix;
+          if (extracted && yieldEvery > 0 && ++extractedCount % yieldEvery === 0) {
+            await yieldToMainThread();
+          }
+        }
+      } finally {
+        dispose();
+      }
+    },
+  };
+}
+
+/**
  * Parse tracker pattern data from an in-memory module using an initialized libopenmpt instance.
  * Creates a temporary module handle and destroys it before returning.
  */
@@ -125,60 +223,7 @@ export function parseModuleWithLib(
   fileName: string,
   options?: ParseModuleOptions,
 ): ParsedModuleData {
-  const modPtr = createModulePtr(lib, fileData);
-
-  try {
-    const metadata = readModuleMetadata(lib, modPtr, fileName);
-    const ordersToExtract = Math.min(
-      metadata.numOrders,
-      options?.maxOrders ?? metadata.numOrders,
-    );
-
-    const patternMatrices: PatternMatrix[] = [];
-    for (let i = 0; i < ordersToExtract; i++) {
-      const patIdx = lib._openmpt_module_get_order_pattern(modPtr, i);
-      patternMatrices.push(getPatternMatrix(lib, modPtr, patIdx, i));
-    }
-
-    return { patternMatrices, metadata };
-  } finally {
-    lib._openmpt_module_destroy(modPtr);
-  }
-}
-
-/**
- * Fill remaining order slots in `target` (sparse array indexed by order).
- * Re-opens the module once and yields periodically so XM backfill does not
- * block audio startup or resize handling.
- */
-export async function backfillPatternMatrices(
-  lib: LibOpenMPT,
-  fileData: Uint8Array,
-  numOrders: number,
-  target: (PatternMatrix | null)[],
-  options?: BackfillPatternOptions,
-): Promise<void> {
-  const startOrder = options?.startOrder ?? 0;
-  const yieldEvery = options?.yieldEvery ?? 2;
-  const signal = options?.signal;
-
-  if (startOrder >= numOrders) return;
-
-  const modPtr = createModulePtr(lib, fileData);
-  try {
-    for (let i = startOrder; i < numOrders; i++) {
-      if (signal?.aborted) return;
-      if (target[i]) continue;
-
-      const patIdx = lib._openmpt_module_get_order_pattern(modPtr, i);
-      target[i] = getPatternMatrix(lib, modPtr, patIdx, i);
-
-      const ordersDone = i - startOrder + 1;
-      if (yieldEvery > 0 && ordersDone % yieldEvery === 0) {
-        await yieldToMainThread();
-      }
-    }
-  } finally {
-    lib._openmpt_module_destroy(modPtr);
-  }
+  const open = parseModuleWithLibOpen(lib, fileData, fileName, options);
+  open.dispose();
+  return { patternMatrices: open.patternMatrices, metadata: open.metadata };
 }
