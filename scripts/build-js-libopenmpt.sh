@@ -351,6 +351,11 @@ if [[ "$WRITE_MANIFEST" -eq 1 ]]; then
     node "$SCRIPT_DIR/verify-js-libopenmpt.mjs" --write \
         --emcc "$EMCC_VERSION" --eh "$EH_MODE" --simd "$SIMD" --libopenmpt "$LIBOPENMPT_VERSION" \
         --variant "$VARIANT" --artifact "$([[ "$PLAYBACK" -eq 1 ]] && echo playback || echo shared)"
+    # The accepted module extensions come from the release (shared) pair's
+    # openmpt_get_supported_extensions(): regenerate them with it (tests/wasm/moduleFormats.test.ts).
+    if [[ "$PLAYBACK" -eq 0 ]]; then
+        node "$SCRIPT_DIR/gen-module-formats.mjs"
+    fi
 else
     echo "ℹ️  Custom OUT_DIR/OUT_BASENAME — manifest not written (A/B build)."
 fi

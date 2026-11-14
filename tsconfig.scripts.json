@@ -22,6 +22,7 @@
   },
   "include": [
     "scripts/build-js-worklet.mjs",
+    "scripts/gen-module-formats.mjs",
     "scripts/jsEngineArtifacts.mjs",
     "scripts/sync-shaders.mjs",
     "scripts/verify-build.mjs",

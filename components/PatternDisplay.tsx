@@ -12,6 +12,7 @@ import { getWebGPUHardFailStage, getWebGPUHardFailStatus } from '../utils/webgpu
 import { PatternHTMLFallback } from '../src/renderers/html/PatternHTMLFallback';
 import { setCurrentPatternRenderer } from '../src/renderers/global';
 import { BloomPostProcessor } from '../utils/bloomPostProcessor';
+import { MODULE_FILE_ACCEPT } from '../utils/moduleFormats';
 import {
   WEBGL_HYBRID_SHADERS,
   supportsStepsLength,
@@ -384,7 +385,7 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
       className={`pattern-display relative ${padTopChannel && !usesBareCanvasChrome(shaderFile) ? 'p-8 rounded-xl bg-[#18181a] shadow-2xl border border-[#333]' : ''}`}
       style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}
     >
-      <input type="file" ref={fileInputRef} onChange={handleFileChange} className="hidden" accept=".mod,.xm,.it,.s3m,.mptm" />
+      <input type="file" ref={fileInputRef} onChange={handleFileChange} className="hidden" accept={MODULE_FILE_ACCEPT} />
       {padTopChannel && (
         <>
           <div className="absolute top-0 bottom-0 left-0 w-8 bg-[#111] border-r border-[#000] flex flex-col justify-between py-4 items-center rounded-l-xl">

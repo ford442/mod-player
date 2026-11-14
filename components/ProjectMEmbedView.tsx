@@ -1,6 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { SeekBar } from './SeekBar';
 import { PlayIcon, StopIcon, UploadIcon, LoopIcon } from './icons';
+import { MODULE_FILE_ACCEPT } from '../utils/moduleFormats';
 
 /**
  * Compact, audio-only transport UI for Project-M embed mode (?projectm=1).
@@ -150,7 +151,7 @@ export const ProjectMEmbedView: React.FC<ProjectMEmbedViewProps> = ({
           <input
             ref={fileInputRef}
             type="file"
-            accept=".mod,.xm,.it,.s3m,.mptm,.mtm,.umx,.mo3,.stm,.669,.med,.far,.okt,.ptm,.dbm,.amf,.psm"
+            accept={MODULE_FILE_ACCEPT}
             className="hidden"
             onChange={onFileChange}
           />
