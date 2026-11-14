@@ -1,7 +1,8 @@
-import { useMemo } from 'react';
+import { useLayoutEffect, useMemo, useRef } from 'react';
 import type { PlayerFeaturesValue } from '../context/PlayerFeaturesContext';
 import type { MediaItem } from '../types';
-import type { SongSaveRequest } from '../utils/storageApi';
+import type { RemoteSong, SongSaveRequest } from '../utils/storageApi';
+import type { LibraryEntry } from '../types/localLibrary';
 import type { PatternEditField } from '../utils/patternEdit';
 import type { useMidiControls } from '../hooks/useMidiControls';
 import type { OfflineExportState } from '../hooks/useOfflineExport';
@@ -74,144 +75,157 @@ export interface UsePlayerFeaturesValueParams {
 }
 
 export function usePlayerFeaturesValue(params: UsePlayerFeaturesValueParams): PlayerFeaturesValue {
+  // Callbacks go through the latest params, so their identities never change: App's handlers,
+  // the query / mutation results and the hook return objects (playlist, localLibrary,
+  // patternEdit, …) are new objects on most renders, and with them in the dependency list the
+  // memo below was rebuilt on every App render — every order change — and so re-rendered every
+  // context consumer. Only the data fields below decide when the value changes.
+  const latest = useRef(params);
+  useLayoutEffect(() => {
+    latest.current = params;
+  });
+  const actions = useMemo(() => {
+    const p = () => latest.current;
+    return {
+      setIs3DMode: (v: boolean) => p().setIs3DMode(v),
+      onCopyShareLink: () => { void p().copyShareLink(); },
+      setMediaVisible: (v: boolean) => p().setMediaVisible(v),
+      setMediaItem: (item: MediaItem | null) => p().setMediaItem(item),
+      onMediaRemove: (id: string) => p().handleMediaRemove(id),
+      onMediaFadesChange: ((value) => p().setMediaFades(value)) as UsePlayerFeaturesValueParams['setMediaFades'],
+      handleMediaAdd: (file: File) => p().handleMediaAdd(file),
+      handleRemoteMediaSelect: (item: MediaItem) => p().handleRemoteMediaSelect(item),
+      handleFileSelected: (file: File) => p().handleFileSelected(file),
+      onRateShader: async (shaderId: string, score: number) => {
+        await p().rateShaderMutation.mutateAsync({ id: shaderId, score });
+      },
+      onLocalLibraryImportFolder: () => { void p().localLibrary.importFolder(); },
+      onLocalLibraryImportWebkit: (files: FileList) => { void p().localLibrary.importWebkitFiles(files); },
+      onLocalLibraryRescanRoot: (rootId: string) => { void p().localLibrary.rescanRoot(rootId); },
+      onLocalLibraryRemoveRoot: (rootId: string) => { void p().localLibrary.removeRoot(rootId); },
+      onLocalLibraryCancelImport: () => p().localLibrary.cancelImport(),
+      onLocalLibraryPlay: (entry: LibraryEntry) => p().handleLocalLibraryPlay(entry),
+      onPlaylistSelect: (index: number) => p().handlePlaylistSelect(index),
+      onPlaylistRemove: (index: number) => p().playlist.remove(index),
+      onPlaylistClear: () => p().playlist.clear(),
+      onPlaylistPrev: () => p().handlePlaylistPrev(),
+      onPlaylistNext: () => p().handlePlaylistNext(),
+      onPlaylistShuffleToggle: () => p().playlist.toggleShuffle(),
+      onPlaylistRepeatCycle: () => p().playlist.cycleRepeat(),
+      onPlaylistFilesAdded: (files: FileList) => p().handlePlaylistFilesAdded(files),
+      onRefreshLibrary: () => { void p().songsQuery.refetch(); },
+      handleLibrarySongLoad: (song: RemoteSong) => p().handleLibrarySongLoad(song),
+      onSyncLibrary: async () => { await p().syncLibraryMutation.mutateAsync(); },
+      onSaveModule: async (req: SongSaveRequest) => { await p().saveSongMutation.mutateAsync(req); },
+      onPatternUndo: () => p().patternEdit.undo(),
+      onPatternRedo: () => p().patternEdit.redo(),
+      onPatternRevert: () => p().handlePatternRevert(),
+      onPatternCellEdit: (row: number, channel: number, field: PatternEditField) => p().handlePatternCellEdit(row, channel, field),
+      onPatternCellPatch: (row: number, channel: number, patch: Parameters<PatternEdit['editCell']>[2]) =>
+        p().handlePatternCellPatch(row, channel, patch),
+      onPatternCellClear: (row: number, channel: number) => p().handlePatternCellClear(row, channel),
+      onSequencerCellEdit: (row: number, channel: number) => p().handleSequencerCellEdit(row, channel),
+      onExportPatternDump: () => p().handleExportPatternDump(),
+      onExportWav: (sampleRate: ExportSampleRate) => p().handleExportWav(sampleRate),
+      onStartCapture: () => p().handleStartCapture(),
+      onStopCapture: () => p().stopCapture(),
+      getRendererBackend: () => window.currentPatternRenderer?.backend ?? null,
+    };
+  }, []);
+
   const {
-    setIs3DMode,
-    copyShareLink,
     mediaItem,
     mediaVisible,
     mediaFades,
     currentModuleFileName,
-    setMediaVisible,
-    setMediaItem,
-    handleMediaRemove,
-    setMediaFades,
-    handleMediaAdd,
-    handleRemoteMediaSelect,
-    handleFileSelected,
     shadersQuery,
     shaderCatalogErrorMessage,
     rateShaderMutation,
     localLibrary,
     activeLibraryEntryId,
-    handleLocalLibraryPlay,
     playlist,
-    handlePlaylistSelect,
-    handlePlaylistPrev,
-    handlePlaylistNext,
-    handlePlaylistFilesAdded,
     songsQuery,
     libraryErrorMessage,
-    handleLibrarySongLoad,
     syncLibraryMutation,
     syncLibraryErrorMessage,
     activeModuleForSave,
     saveSongMutation,
     saveSongErrorMessage,
     patternEdit,
-    handlePatternRevert,
-    handlePatternCellEdit,
-    handlePatternCellPatch,
-    handlePatternCellClear,
-    handleSequencerCellEdit,
-    handleExportPatternDump,
     midiControls,
-    handleExportWav,
-    handleStartCapture,
-    stopCapture,
     offlineExportState,
     isExporting,
     captureState,
     isRecording,
   } = params;
 
+  const shaderCatalog = shadersQuery.data;
+  const shaderCatalogLoading = shadersQuery.isLoading || shadersQuery.isFetching;
+  const ratingInFlightShaderId = rateShaderMutation.isPending ? rateShaderMutation.variables?.id ?? null : null;
+  const songsData = songsQuery.data;
+  const songsLoading = songsQuery.isLoading;
+  const songsRefreshing = songsQuery.isFetching && !songsQuery.isLoading;
+  const syncPending = syncLibraryMutation.isPending;
+  const savePending = saveSongMutation.isPending;
+  const {
+    roots: localLibraryRoots,
+    isLoading: localLibraryLoading,
+    isImporting: localLibraryImporting,
+    importProgress: localLibraryImportProgress,
+    importError: localLibraryImportError,
+    fsAccessSupported: localLibraryFsAccessSupported,
+  } = localLibrary;
+  const { isDirty: patternEditDirty, canUndo: canPatternUndo, canRedo: canPatternRedo } = patternEdit;
+
   return useMemo((): PlayerFeaturesValue => ({
-    setIs3DMode,
-    onCopyShareLink: () => { void copyShareLink(); },
+    ...actions,
     mediaItem,
     mediaVisible,
     mediaFades,
     moduleMediaFileName: currentModuleFileName,
-    setMediaVisible,
-    setMediaItem,
-    onMediaRemove: handleMediaRemove,
-    onMediaFadesChange: setMediaFades,
-    handleMediaAdd,
-    handleRemoteMediaSelect,
-    handleFileSelected,
-    shaderCatalog: shadersQuery.data ?? [],
-    shaderCatalogLoading: shadersQuery.isLoading || shadersQuery.isFetching,
+    shaderCatalog: shaderCatalog ?? EMPTY_CATALOG,
+    shaderCatalogLoading,
     shaderCatalogError: shaderCatalogErrorMessage,
-    onRateShader: async (shaderId, score) => { await rateShaderMutation.mutateAsync({ id: shaderId, score }); },
-    ratingInFlightShaderId: rateShaderMutation.isPending ? rateShaderMutation.variables?.id ?? null : null,
-    localLibraryRoots: localLibrary.roots,
-    localLibraryLoading: localLibrary.isLoading,
-    localLibraryImporting: localLibrary.isImporting,
-    localLibraryImportProgress: localLibrary.importProgress,
-    localLibraryImportError: localLibrary.importError,
-    localLibraryFsAccessSupported: localLibrary.fsAccessSupported,
+    ratingInFlightShaderId,
+    localLibraryRoots,
+    localLibraryLoading,
+    localLibraryImporting,
+    localLibraryImportProgress,
+    localLibraryImportError,
+    localLibraryFsAccessSupported,
     activeLibraryEntryId,
-    onLocalLibraryImportFolder: () => { void localLibrary.importFolder(); },
-    onLocalLibraryImportWebkit: (files) => { void localLibrary.importWebkitFiles(files); },
-    onLocalLibraryRescanRoot: (rootId) => { void localLibrary.rescanRoot(rootId); },
-    onLocalLibraryRemoveRoot: (rootId) => { void localLibrary.removeRoot(rootId); },
-    onLocalLibraryCancelImport: localLibrary.cancelImport,
-    onLocalLibraryPlay: handleLocalLibraryPlay,
     playlistItems: playlist.items,
     playlistCurrentIndex: playlist.currentIndex,
     playlistShuffle: playlist.shuffle,
     playlistRepeat: playlist.repeat,
-    onPlaylistSelect: handlePlaylistSelect,
-    onPlaylistRemove: playlist.remove,
-    onPlaylistClear: playlist.clear,
-    onPlaylistPrev: handlePlaylistPrev,
-    onPlaylistNext: handlePlaylistNext,
-    onPlaylistShuffleToggle: playlist.toggleShuffle,
-    onPlaylistRepeatCycle: playlist.cycleRepeat,
-    onPlaylistFilesAdded: handlePlaylistFilesAdded,
-    songsData: songsQuery.data,
-    songsLoading: songsQuery.isLoading,
-    songsRefreshing: songsQuery.isFetching && !songsQuery.isLoading,
+    songsData,
+    songsLoading,
+    songsRefreshing,
     libraryErrorMessage,
-    onRefreshLibrary: () => { void songsQuery.refetch(); },
-    handleLibrarySongLoad,
-    onSyncLibrary: async () => { await syncLibraryMutation.mutateAsync(); },
-    syncPending: syncLibraryMutation.isPending,
+    syncPending,
     syncLibraryErrorMessage,
     activeModuleForSave,
-    onSaveModule: async (req) => { await saveSongMutation.mutateAsync(req); },
-    savePending: saveSongMutation.isPending,
+    savePending,
     saveSongErrorMessage,
-    patternEditDirty: patternEdit.isDirty,
-    canPatternUndo: patternEdit.canUndo,
-    canPatternRedo: patternEdit.canRedo,
-    onPatternUndo: patternEdit.undo,
-    onPatternRedo: patternEdit.redo,
-    onPatternRevert: handlePatternRevert,
-    onPatternCellEdit: handlePatternCellEdit,
-    onPatternCellPatch: handlePatternCellPatch,
-    onPatternCellClear: handlePatternCellClear,
-    onSequencerCellEdit: handleSequencerCellEdit,
-    onExportPatternDump: handleExportPatternDump,
+    patternEditDirty,
+    canPatternUndo,
+    canPatternRedo,
     midiControls,
-    onExportWav: handleExportWav,
-    onStartCapture: handleStartCapture,
-    onStopCapture: stopCapture,
     offlineExportState,
     isExporting,
     captureState,
     isRecording,
-    getRendererBackend: () => window.currentPatternRenderer?.backend ?? null,
   }), [
-    setIs3DMode, copyShareLink, mediaItem, mediaVisible, mediaFades, currentModuleFileName,
-    handleMediaRemove, handleMediaAdd, handleRemoteMediaSelect, handleFileSelected,
-    shadersQuery.data, shadersQuery.isLoading, shadersQuery.isFetching, shaderCatalogErrorMessage,
-    rateShaderMutation, localLibrary, activeLibraryEntryId,
-    handleLocalLibraryPlay, playlist, handlePlaylistSelect, handlePlaylistPrev,
-    handlePlaylistNext, handlePlaylistFilesAdded, songsQuery, libraryErrorMessage,
-    handleLibrarySongLoad, syncLibraryMutation, syncLibraryErrorMessage, activeModuleForSave, saveSongMutation,
-    saveSongErrorMessage, patternEdit, handlePatternCellEdit, handlePatternCellPatch,
-    handlePatternCellClear, handleSequencerCellEdit, handlePatternRevert, handleExportPatternDump,
-    midiControls, handleExportWav, handleStartCapture, stopCapture, offlineExportState,
-    isExporting, captureState, isRecording, setMediaVisible, setMediaItem, setMediaFades,
+    actions, mediaItem, mediaVisible, mediaFades, currentModuleFileName,
+    shaderCatalog, shaderCatalogLoading, shaderCatalogErrorMessage, ratingInFlightShaderId,
+    localLibraryRoots, localLibraryLoading, localLibraryImporting, localLibraryImportProgress,
+    localLibraryImportError, localLibraryFsAccessSupported, activeLibraryEntryId,
+    playlist.items, playlist.currentIndex, playlist.shuffle, playlist.repeat,
+    songsData, songsLoading, songsRefreshing, libraryErrorMessage, syncPending, syncLibraryErrorMessage,
+    activeModuleForSave, savePending, saveSongErrorMessage,
+    patternEditDirty, canPatternUndo, canPatternRedo, midiControls,
+    offlineExportState, isExporting, captureState, isRecording,
   ]);
 }
+
+const EMPTY_CATALOG: NonNullable<PlayerFeaturesValue['shaderCatalog']> = [];

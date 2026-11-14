@@ -1,3 +1,4 @@
+import { useShallow } from 'zustand/react/shallow';
 import { Header } from './Header';
 import { GlobalControlsBar } from './GlobalControlsBar';
 import { PerformanceStage } from './PerformanceStage';
@@ -21,7 +22,7 @@ export interface ChromeLayoutProps {
 export function ChromeLayout({ studioDisplayHost = null }: ChromeLayoutProps = {}) {
   const status = usePlayerEngine((s) => s.status);
   const isModuleLoaded = usePlayerEngine((s) => s.isModuleLoaded);
-  const { stageMode } = usePlayerUiStore();
+  const { stageMode } = usePlayerUiStore(useShallow((s) => ({ stageMode: s.stageMode })));
 
   return (
     <div className="w-full max-w-[1280px]">

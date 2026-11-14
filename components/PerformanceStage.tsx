@@ -1,3 +1,4 @@
+import { useShallow } from 'zustand/react/shallow';
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Controls } from './Controls';
@@ -42,7 +43,18 @@ export function PerformanceStage({ studioDisplayHost = null }: PerformanceStageP
     editMode,
     selectedInstrumentIndex,
     toggleStageMode,
-  } = usePlayerUiStore();
+  } = usePlayerUiStore(
+    useShallow((s) => ({
+      liteMode: s.liteMode,
+      chassisDark: s.chassisDark,
+      debugPanelOpen: s.debugPanelOpen,
+      setDebugPanelOpen: s.setDebugPanelOpen,
+      reactiveMode: s.reactiveMode,
+      editMode: s.editMode,
+      selectedInstrumentIndex: s.selectedInstrumentIndex,
+      toggleStageMode: s.toggleStageMode,
+    })),
+    );
   const {
     colorPalette,
     paletteMode,
@@ -54,7 +66,20 @@ export function PerformanceStage({ studioDisplayHost = null }: PerformanceStageP
     reducedMotion,
     highContrast,
     cvdPalette,
-  } = useShaderPrefsStore();
+  } = useShaderPrefsStore(
+    useShallow((s) => ({
+      colorPalette: s.colorPalette,
+      paletteMode: s.paletteMode,
+      stepsLength: s.stepsLength,
+      setStepsLength: s.setStepsLength,
+      bloomPreset: s.bloomPreset,
+      nightModeEnabled: s.nightModeEnabled,
+      crtEnabled: s.crtEnabled,
+      reducedMotion: s.reducedMotion,
+      highContrast: s.highContrast,
+      cvdPalette: s.cvdPalette,
+    })),
+    );
 
   const showDevSurface = !IS_PUBLIC_MODE;
   // The stage feeds PatternDisplay the playhead, so it re-renders per row by design — on its own now,

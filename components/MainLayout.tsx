@@ -1,3 +1,4 @@
+import { useShallow } from 'zustand/react/shallow';
 import { KeyboardShortcutHelp } from './KeyboardShortcutHelp';
 import { ChromeLayout } from './ChromeLayout';
 import { cn } from '../utils/cn';
@@ -14,7 +15,13 @@ export interface MainLayoutProps {
 }
 
 export function MainLayout({ studioDisplayHost }: MainLayoutProps = {}) {
-  const { stageMode, cheatsheetOpen, setCheatsheetOpen } = usePlayerUiStore();
+  const { stageMode, cheatsheetOpen, setCheatsheetOpen } = usePlayerUiStore(
+    useShallow((s) => ({
+      stageMode: s.stageMode,
+      cheatsheetOpen: s.cheatsheetOpen,
+      setCheatsheetOpen: s.setCheatsheetOpen,
+    })),
+    );
 
   return (
     <div
