@@ -32,17 +32,17 @@ function concat(parts) {
 }
 
 /**
- * One XM: header, `patterns` (each `{ rows, cells }`, cells = rows × channels × 5 raw XM bytes:
+ * One XM: header (with the song's restart position: the order a loop goes back to), `patterns` (each `{ rows, cells }`, cells = rows × channels × 5 raw XM bytes:
  * note, instrument, volume column, effect, parameter) and a single looped 16-bit saw+sine
  * instrument.
  */
-function buildXm(title, channels, patterns, orders = patterns.map((_, i) => i)) {
+function buildXm(title, channels, patterns, orders = patterns.map((_, i) => i), restartPosition = 0) {
   const numPatterns = patterns.length;
   const parts = [];
   parts.push(str('Extended Module: ', 17), str(title, 20), Uint8Array.of(0x1a), str('bench', 20), u16(0x0104));
   const order = new Uint8Array(256);
   orders.forEach((pattern, i) => { order[i] = pattern; });
-  parts.push(u32(276), u16(orders.length), u16(0), u16(channels), u16(numPatterns), u16(1), u16(1), u16(6), u16(125), order);
+  parts.push(u32(276), u16(orders.length), u16(restartPosition), u16(channels), u16(numPatterns), u16(1), u16(1), u16(6), u16(125), order);
 
   for (const { rows, cells } of patterns) {
     parts.push(u32(9), Uint8Array.of(0), u16(rows), u16(cells.length), cells);
@@ -199,6 +199,28 @@ export function synthJumpXm() {
  * Tiny S3M for the `SCx` note cut (CMD_S3MCMDEX): 2 channels, 1 pattern, no instruments.
  *   row 0  C-4 01 v32 A07    row 1  --- -- --- SC3    row 2  --- -- --- G00 (unmapped here)
  */
+/**
+ * 4 orders (patterns 0..3, 8 rows each, 2 channels, a note on every row) with the XM restart
+ * position at `restartPosition`: a song that loops (repeat count -1) goes back to that order,
+ * not to order 0. For the native-looping test (tests/wasm/nativeLoop.integration.test.ts).
+ */
+export function synthRestartXm(restartPosition) {
+  const rows = 8;
+  const channels = 2;
+  const patterns = [];
+  for (let p = 0; p < 4; p++) {
+    const cells = new Uint8Array(rows * channels * 5);
+    for (let r = 0; r < rows; r++) {
+      const o = r * channels * 5;
+      cells[o] = 37 + p * 4 + (r % 4); // note: a different pitch per pattern
+      cells[o + 1] = 1; // instrument
+      cells[o + 2] = 0x50; // volume column: set volume 32
+    }
+    patterns.push({ rows, cells });
+  }
+  return buildXm('restart', channels, patterns, [0, 1, 2, 3], restartPosition);
+}
+
 export function synthCommandTestS3m() {
   const rows = 64;
   const pat = [];

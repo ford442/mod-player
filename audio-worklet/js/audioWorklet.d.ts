@@ -133,6 +133,7 @@ interface LibOpenMPT {
   ): number;
   _openmpt_module_get_current_channel_vu_mono(modulePtr: number, channel: number): number;
   _openmpt_module_set_position_order_row(modulePtr: number, order: number, row: number): number;
+  _openmpt_module_set_repeat_count(modulePtr: number, count: number): number;
   _openmpt_module_ctl_set_text?: (modulePtr: number, keyPtr: number, valuePtr: number) => number;
 }
 

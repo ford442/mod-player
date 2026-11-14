@@ -81,6 +81,12 @@ export interface AudioGraphCallbacks {
   setSequencerMatrix: StateSetter<PatternMatrix | null>;
   stopMusic:         (destroy?: boolean) => void;
   seekToStepWrapper: (step: number) => void;
+  /**
+   * The song played to its end with the loop off (the worklet's `ended`, or the ScriptProcessor
+   * rendering nothing more). PlayerEngine stops the transport and tells its song-ended listeners
+   * (playlist auto-advance). Never called while looping: libopenmpt loops natively then.
+   */
+  songEnded:         () => void;
   updateUI:          () => void;
   /**
    * The start path acquired the context — after resume, before any engine is connected. PlayerEngine
@@ -93,7 +99,7 @@ export interface AudioGraphCallbacks {
 
 /**
  * Start-path configuration. PlayerEngine hands over an object whose fields are getters onto its live
- * state, so a handler installed at start (the worklet's `ended`, the ScriptProcessor's loop check)
+ * state, so a handler installed at start (the worklet's `ended`, the ScriptProcessor's end check)
  * sees a loop toggle made during playback instead of the value captured when play() was called.
  */
 export interface AudioGraphConfig {

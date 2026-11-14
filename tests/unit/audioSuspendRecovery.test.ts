@@ -170,6 +170,7 @@ describe('AudioContext suspend recovery on the next user gesture (useAudioGraph)
       setSequencerMatrix: vi.fn(),
       stopMusic: vi.fn(),
       seekToStepWrapper: vi.fn(),
+      songEnded: vi.fn(),
       updateUI: vi.fn(),
     } as unknown as AudioGraphCallbacks & { setStatus: ReturnType<typeof vi.fn> };
   }

@@ -22,3 +22,6 @@ export function synthSongMapXm(): Uint8Array;
 
 /** 4 × 16-row XM: order 0 breaks to order 1 row 10, order 1 jumps to order 3 (order 2 unreached). */
 export function synthJumpXm(): Uint8Array;
+
+/** 4 orders × 8 rows, 2 channels, XM restart position `restartPosition` (where a loop goes back to). */
+export function synthRestartXm(restartPosition: number): Uint8Array;

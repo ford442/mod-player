@@ -1,6 +1,6 @@
 import type { LibOpenMPT } from '../../types';
 import { applyWorkletPositionSample, type WorkletPositionInput } from '../../utils/playheadPrediction';
-import { postPause } from '../../audio-worklet/protocol';
+import { postPause, repeatCountFor } from '../../audio-worklet/protocol';
 import { OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH } from '../../utils/openmptRenderParams';
 import { resolveJsInterpolationLength } from '../../utils/jsInterpolation';
 import { mallocOrThrow } from '../../utils/wasmHeap';
@@ -76,6 +76,12 @@ export async function runScriptProcessorFallback(
     let spHeapBuf: ArrayBuffer | null = null;
     let spLeftView: Float32Array | null = null;
     let spRightView: Float32Array | null = null;
+    // Native looping, as in the worklet: libopenmpt loops at the song's own restart point. The count
+    // is (re)applied whenever the loop toggle or the main-thread module changes (create resets it).
+    let repeatModPtr = 0;
+    let repeatCount = NaN;
+    // `songEnded` is reported once per run-out; rendering again (a seek, a new module) re-arms it.
+    let endReported = false;
 
     spNode.onaudioprocess = (audioEvt: AudioProcessingEvent) => {
       const outL = audioEvt.outputBuffer.getChannelData(0);
@@ -95,11 +101,19 @@ export async function runScriptProcessorFallback(
       // it is about to render plays; a ScriptProcessor block plays at `playbackTime`, not now.
       const playbackTime = audioEvt.playbackTime;
       const blockTime = Number.isFinite(playbackTime) && playbackTime > 0 ? playbackTime : ctx.currentTime;
+      const wantedRepeat = repeatCountFor(config.isLooping);
+      if (repeatModPtr !== mPtr || repeatCount !== wantedRepeat) {
+        mLib._openmpt_module_set_repeat_count(mPtr, wantedRepeat);
+        repeatModPtr = mPtr;
+        repeatCount = wantedRepeat;
+      }
       let snapshot = snapshotPosition(mLib, mPtr, blockTime);
       let written = mLib._openmpt_module_read_float_stereo(
         mPtr, ctx.sampleRate, SP_BUFFER, leftPtr, rightPtr
       );
       if (written === 0 && config.isLooping) {
+        // Looping never runs out; this one ran out before a loop toggle landed (a finished module
+        // does not restart on its own), so start it over — the worklet's `ended` race does the same.
         mLib._openmpt_module_set_position_order_row(mPtr, 0, 0);
         snapshot = snapshotPosition(mLib, mPtr, blockTime);
         written = mLib._openmpt_module_read_float_stereo(
@@ -118,8 +132,16 @@ export async function runScriptProcessorFallback(
           outR[i] = spRightView[i]!;
         }
         if (written < SP_BUFFER) { outL.fill(0, written); outR.fill(0, written); }
+        endReported = false;
       } else {
         outL.fill(0); outR.fill(0);
+        if (!endReported) {
+          endReported = true;
+          // Not from inside the callback: songEnded stops the transport, which tears this node down.
+          setTimeout(() => {
+            if (refs.scriptProcessorRef.current === spNode) callbacks.songEnded();
+          }, 0);
+        }
       }
 
       applyWorkletPositionSample(refs, snapshot);

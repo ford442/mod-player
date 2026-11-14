@@ -22,7 +22,12 @@
     /** Shared position/VU ring (audio-worklet/positionRing.ts); replaces `position` messages when sent. */
     setPositionRing: "setPositionRing",
     /** Hands the worklet its end of the create-worker channel (#513). */
-    attachCreatePort: "attachCreatePort"
+    attachCreatePort: "attachCreatePort",
+    /**
+     * libopenmpt repeat count for the playing module and every module configured after it:
+     * -1 loops forever at the song's own restart point (no `ended`), 0 plays once.
+     */
+    setRepeat: "setRepeat"
   };
   var WORKLET_TO_MAIN = {
     position: "position",
@@ -63,7 +68,9 @@
     [MAIN_TO_WORKLET.ctlSetText]: { fields: { key: req("string"), value: req("string") } },
     [MAIN_TO_WORKLET.returnPcmBuffer]: { fields: { buffer: req("float32Array") } },
     [MAIN_TO_WORKLET.setPositionRing]: { fields: { buffer: req("sharedArrayBuffer") } },
-    [MAIN_TO_WORKLET.attachCreatePort]: { fields: { port: req("messagePort") } }
+    [MAIN_TO_WORKLET.attachCreatePort]: { fields: { port: req("messagePort") } },
+    /** Any finite number; the worklet clamps it to libopenmpt's range (< 0 → -1, else truncated). */
+    [MAIN_TO_WORKLET.setRepeat]: { fields: { count: req("finite") } }
   };
   var LEGACY_LOAD_SPEC = { fields: { moduleData: req("modulePayload") } };
   var WORKLET_TO_MAIN_SPEC = {
@@ -693,6 +700,11 @@
               lib._free(valuePtr);
             }
           }
+        } else if (type === MT.setRepeat) {
+          this._repeatCount = msg.count < 0 ? -1 : Math.trunc(msg.count);
+          if (this.modulePtr && this.lib) {
+            this.lib._openmpt_module_set_repeat_count(this.modulePtr, this._repeatCount);
+          }
         } else if (type === MT.attachCreatePort) {
           this._attachCreatePort(msg.port);
         } else if (!type) {
@@ -710,6 +722,7 @@
       this._audioLite = false;
       this._audioLiteExplicit = false;
       this._interpolationLength = DEFAULT_INTERPOLATION_LENGTH;
+      this._repeatCount = 0;
       this._audioDiag = false;
       this._resetAudioDiag();
       this._channelVuArr = [];
@@ -998,6 +1011,7 @@
         OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH,
         this._interpolationLength
       );
+      lib._openmpt_module_set_repeat_count(modulePtr, this._repeatCount);
       const numCh = lib._openmpt_module_get_num_channels(modulePtr);
       if (numCh > 16 && !this._audioLiteExplicit) {
         this._audioLite = true;
