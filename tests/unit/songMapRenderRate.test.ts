@@ -36,7 +36,7 @@ function structure(orders: number): SongStructure {
     index: i, pattern: i % 3, rows: ROWS, startSeconds: i * 2, durationSeconds: 2,
     entryRow: 0, exitRow: ROWS - 1, isSkip: false, isEnd: false, reachable: true,
   }));
-  return { orders: list, tempoEvents: [], totalSeconds: orders * 2, playOrder: list.map((o) => o.index), approximate: false };
+  return { orders: list, jumps: [], tempoEvents: [], totalSeconds: orders * 2, playOrder: list.map((o) => o.index), approximate: false };
 }
 
 describe('SongMap render rate', () => {

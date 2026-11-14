@@ -41,6 +41,9 @@ describe('registerEngineCommands', () => {
     playerCommands.dispatch('volume.set', 'midi', { value: 0.5 });
     playerCommands.dispatch('pan.set', 'midi', { value: -0.5 });
     playerCommands.dispatch('loop.toggle', 'keyboard');
+    playerCommands.dispatch('loop.markStart', 'keyboard');
+    playerCommands.dispatch('loop.markEnd', 'keyboard');
+    playerCommands.dispatch('loop.clearRegion', 'keyboard');
     playerCommands.dispatch('mute.toggle', 'keyboard');
     expect(engine.commands).toEqual([
       { type: 'togglePlayPause' },
@@ -58,6 +61,9 @@ describe('registerEngineCommands', () => {
       { type: 'setVolume', value: 0.5 },
       { type: 'setPan', value: -0.5 },
       { type: 'toggleLoop' },
+      { type: 'markLoopEdge', edge: 'start' },
+      { type: 'markLoopEdge', edge: 'end' },
+      { type: 'clearLoopRegion' },
       { type: 'toggleMute' },
     ]);
     expect(engine.commands).toHaveLength(ENGINE_COMMAND_IDS.length);

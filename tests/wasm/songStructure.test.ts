@@ -198,6 +198,13 @@ describe('readSongStructure — pattern break and position jump (XM)', () => {
     ]);
   });
 
+  it('reports both as jumps: the Dxx into the next order, and the Bxx that skips order 2 (#537 phase 2)', () => {
+    expect(s.jumps).toEqual([
+      { kind: 'break', fromOrder: 0, fromRow: 8, toOrder: 1, toRow: 10, loops: false },
+      { kind: 'jump', fromOrder: 1, fromRow: 12, toOrder: 3, toRow: 0, loops: false },
+    ]);
+  });
+
   it('matches libopenmpt\'s clock at each entry, and the durations add up to the song', () => {
     expect(Math.abs(s.orders[1]!.startSeconds - libStart(bytes, 1, 10))).toBeLessThan(0.001);
     expect(Math.abs(s.orders[3]!.startSeconds - libStart(bytes, 3))).toBeLessThan(0.001);

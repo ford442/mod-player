@@ -29,6 +29,11 @@ export interface SongSession {
   channelMask?: number[];
   /** Last known transport position ("resume this song"). */
   lastPosition: SongPosition | null;
+  /**
+   * The song map's loop region (#537): first / last order of the span. Absent / null = none. Written
+   * by `utils/songStructureSession.ts`, validated against the song's own order list on restore.
+   */
+  loopRegion?: { start: number; end: number } | null;
   /** The one-time copy from the legacy 16-byte-prefix localStorage key has run. */
   legacyShaderMigrated: boolean;
 }

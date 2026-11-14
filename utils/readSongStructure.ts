@@ -16,13 +16,15 @@
  *      `budgetMs` the remaining starts are extrapolated from the tick clock and the result is flagged
  *      `approximate`.
  *
- * Phase 1 reads the selected subsong only (subsong 0 until #526).
+ * The walk also reports the jumps / breaks it followed (`SongStructure.jumps`, phase 2). Phase 1
+ * reads the selected subsong only (subsong 0 until #526).
  */
 import type { LibOpenMPT } from '../types';
 import { EffectCommand, PatternCommand } from './openmptCommands';
 import {
   ORDER_PATTERN_END,
   ORDER_PATTERN_SKIP,
+  type SongJump,
   type SongOrder,
   type SongStructure,
   type SongTempoEvent,
@@ -50,6 +52,10 @@ interface Visit {
   simStart: number;
   simDuration: number;
   events: Array<{ row: number; simOffset: number; bpm: number; speed: number }>;
+  /** How the order was left, when a Bxx / Dxx did it (the target after skipping `+++` orders). */
+  exit: { kind: 'jump' | 'break'; toOrder: number; toRow: number } | null;
+  /** The walk stopped here because the order playback moved on to was already played. */
+  loopTarget: number | null;
 }
 
 function readFlow(lib: LibOpenMPT, modPtr: number, numOrders: number): Visit[] {
@@ -68,19 +74,24 @@ function readFlow(lib: LibOpenMPT, modPtr: number, numOrders: number): Visit[] {
   let sim = 0;
   let first = true;
 
-  while (order < numOrders && visits.length < numOrders) {
+  while (order < numOrders) {
     const pattern = lib._openmpt_module_get_order_pattern(modPtr, order);
     if (pattern === ORDER_PATTERN_SKIP) {
       order += 1;
       row = 0;
       continue;
     }
-    if (pattern === ORDER_PATTERN_END || pattern >= numPatterns || visited.has(order)) break;
+    if (pattern === ORDER_PATTERN_END || pattern >= numPatterns) break;
+    if (visited.has(order)) {
+      const last = visits[visits.length - 1];
+      if (last) last.loopTarget = order;
+      break;
+    }
     visited.add(order);
 
     const rows = lib._openmpt_module_get_pattern_num_rows(modPtr, pattern);
     if (row >= rows) row = 0;
-    const visit: Visit = { order, entryRow: row, exitRow: Math.max(row, rows - 1), simStart: sim, simDuration: 0, events: [] };
+    const visit: Visit = { order, entryRow: row, exitRow: Math.max(row, rows - 1), simStart: sim, simDuration: 0, events: [], exit: null, loopTarget: null };
     if (first) {
       visit.events.push({ row, simOffset: 0, bpm: tempo, speed });
       first = false;
@@ -89,6 +100,7 @@ function readFlow(lib: LibOpenMPT, modPtr: number, numOrders: number): Visit[] {
     let nextOrder = order + 1;
     let nextRow = 0;
     let r = row;
+    let exit: Visit['exit'] = null;
     for (; r < rows; r++) {
       let jumpTo = -1;
       let breakTo = -1;
@@ -129,11 +141,22 @@ function readFlow(lib: LibOpenMPT, modPtr: number, numOrders: number): Visit[] {
       if (jumpTo >= 0 || breakTo >= 0) {
         if (jumpTo >= 0) nextOrder = jumpTo;
         nextRow = Math.max(0, breakTo);
+        exit = { kind: jumpTo >= 0 ? 'jump' : 'break', toOrder: nextOrder, toRow: nextRow };
         break;
       }
     }
     visit.exitRow = Math.min(r, rows - 1);
     visit.simDuration = sim - visit.simStart;
+    if (exit) {
+      // The walk passes `+++` orders (and drops the row); the arc should end where playback lands.
+      let landed = exit.toOrder;
+      while (landed < numOrders && lib._openmpt_module_get_order_pattern(modPtr, landed) === ORDER_PATTERN_SKIP) landed += 1;
+      // A target past the order list (or an end marker) is the song ending, not a place on the map.
+      const targetPattern = landed < numOrders ? lib._openmpt_module_get_order_pattern(modPtr, landed) : ORDER_PATTERN_END;
+      if (targetPattern !== ORDER_PATTERN_END) {
+        visit.exit = { kind: exit.kind, toOrder: landed, toRow: landed === exit.toOrder ? exit.toRow : 0 };
+      }
+    }
     visits.push(visit);
     order = nextOrder;
     row = nextRow;
@@ -216,8 +239,19 @@ export function readSongStructure(
     }
   }
 
+  const jumps: SongJump[] = [];
+  for (const v of visits) {
+    const loops = v.loopTarget !== null;
+    if (v.exit) {
+      jumps.push({ kind: v.exit.kind, fromOrder: v.order, fromRow: v.exitRow, toOrder: v.exit.toOrder, toRow: v.exit.toRow, loops });
+    } else if (v.loopTarget !== null) {
+      jumps.push({ kind: 'flow', fromOrder: v.order, fromRow: v.exitRow, toOrder: v.loopTarget, toRow: 0, loops: true });
+    }
+  }
+
   return {
     orders,
+    jumps,
     tempoEvents,
     totalSeconds,
     playOrder: visits.map((v) => v.order),

@@ -15,6 +15,8 @@ const SHORTCUTS: Array<[string, string]> = [
   ['Shift + ArrowUp', 'Volume +5%'],
   ['Shift + ArrowDown', 'Volume −5%'],
   ['[ / ]', 'Previous / next order (song map; starts playback when stopped)'],
+  ['Shift + [ / Shift + ]', 'Loop region in / out at the current order (song map; Shift+click or drag the chips too)'],
+  ['\\', 'Clear the loop region'],
   ['1 – 9', 'Jump to order 0–8'],
   ['L', 'Toggle loop'],
   ['M', 'Mute / unmute'],

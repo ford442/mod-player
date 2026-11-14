@@ -40,9 +40,15 @@ export function useKeyboardShortcuts() {
         return;
       }
 
-      // Song map (#537): [ / ] step through the order list. Shift+[ / Shift+] stay free for loop in / out.
-      if ((e.code === 'BracketLeft' || e.code === 'BracketRight') && !e.shiftKey && !e.altKey) {
-        dispatch(e.code === 'BracketLeft' ? 'seek.prevOrder' : 'seek.nextOrder');
+      // Song map (#537): [ / ] step through the order list; Shift+[ / Shift+] mark the loop region's
+      // in / out at the current order; \ clears it.
+      if ((e.code === 'BracketLeft' || e.code === 'BracketRight') && !e.altKey) {
+        if (e.shiftKey) dispatch(e.code === 'BracketLeft' ? 'loop.markStart' : 'loop.markEnd');
+        else dispatch(e.code === 'BracketLeft' ? 'seek.prevOrder' : 'seek.nextOrder');
+        return;
+      }
+      if (e.code === 'Backslash' && !e.shiftKey && !e.altKey) {
+        dispatch('loop.clearRegion');
         return;
       }
 

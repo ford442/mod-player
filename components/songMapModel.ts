@@ -7,7 +7,14 @@
  * leaf with its own selector (`selectSongMapPlayhead`) — pitfall 17.
  */
 import type { PlayerSnapshot } from '../audio/engine/PlayerEngine';
-import { rowFractionInOrder, type SongStructure } from '../utils/songStructure';
+import type { LoopRegion } from '../utils/songStructureLoop';
+import {
+  jumpShape,
+  rowFractionInOrder,
+  type SongJump,
+  type SongJumpShape,
+  type SongStructure,
+} from '../utils/songStructure';
 
 export interface ChipLayout {
   /** Percent of the map's width. */
@@ -48,13 +55,46 @@ export function formatClock(seconds: number): string {
 export interface SongMapView {
   structure: SongStructure | null;
   order: number;
+  loopRegion: LoopRegion | null;
 }
 
-/** SongMap: the structure (once per load) and the current order (a few per second at most). */
+/**
+ * SongMap: the structure (once per load), the current order (a few per second at most) and the loop
+ * region (when the user changes it). The snapshot keeps the region object stable between changes.
+ */
 export const selectSongMap = (s: PlayerSnapshot): SongMapView => ({
   structure: s.songStructure,
   order: s.moduleInfo.order,
+  loopRegion: s.loopRegion,
 });
+
+/**
+ * The order whose chip holds `percent` of the map's width (clamped to the ends) — the drag's hit
+ * test. Null for an empty map.
+ */
+export function orderAtPercent(layout: readonly ChipLayout[], percent: number): number | null {
+  if (layout.length === 0 || !Number.isFinite(percent)) return null;
+  let lo = 0;
+  let hi = layout.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1;
+    if (layout[mid]!.left <= percent) lo = mid;
+    else hi = mid - 1;
+  }
+  return lo;
+}
+
+/** The loop region's band over the chips, percent of the map's width; null without a region / chips. */
+export function loopBand(
+  layout: readonly ChipLayout[],
+  region: LoopRegion | null,
+): { left: number; width: number } | null {
+  if (!region) return null;
+  const first = layout[region.start];
+  const last = layout[region.end];
+  if (!first || !last) return null;
+  return { left: first.left, width: last.left + last.width - first.left };
+}
 
 /** The playhead leaf: order + fractional row — row rate. */
 export const selectSongMapPlayhead = (s: PlayerSnapshot): { order: number; row: number } => ({
@@ -73,4 +113,51 @@ export function playheadPercent(
   const entry = structure.orders[order];
   if (!chip || !entry) return null;
   return chip.left + rowFractionInOrder(entry, row) * chip.width;
+}
+
+/** A jump placed on the map: x positions in percent of the map's width. */
+export interface JumpMark {
+  readonly jump: SongJump;
+  readonly shape: SongJumpShape;
+  /** Where playback leaves (the end of the row the command sits on). */
+  readonly fromX: number;
+  /** Where it lands (the start of the target row). */
+  readonly toX: number;
+}
+
+/**
+ * Place every jump of the structure on the chip layout. The leave point is the end of the exit row
+ * and the landing point the start of the target row, so a jump to the next row of the same order
+ * would not look like a jump at all.
+ */
+export function layoutJumps(structure: SongStructure, layout: readonly ChipLayout[]): JumpMark[] {
+  const marks: JumpMark[] = [];
+  for (const jump of structure.jumps) {
+    const from = structure.orders[jump.fromOrder];
+    const to = structure.orders[jump.toOrder];
+    const fromChip = layout[jump.fromOrder];
+    const toChip = layout[jump.toOrder];
+    if (!from || !to || !fromChip || !toChip) continue;
+    marks.push({
+      jump,
+      shape: jumpShape(structure, jump),
+      fromX: fromChip.left + rowFractionInOrder(from, jump.fromRow + 1) * fromChip.width,
+      toX: toChip.left + rowFractionInOrder(to, jump.toRow) * toChip.width,
+    });
+  }
+  return marks;
+}
+
+/** Quadratic-curve SVG path for an arc strip `height` units tall (the arc rises from y = height). */
+export function arcPath(fromX: number, toX: number, height: number): string {
+  const span = Math.abs(toX - fromX);
+  const rise = Math.min(height - 1, 3 + span * 0.5);
+  const control = height - 2 * rise;
+  return `M ${fromX.toFixed(3)} ${height} Q ${((fromX + toX) / 2).toFixed(3)} ${control.toFixed(3)} ${toX.toFixed(3)} ${height}`;
+}
+
+export function jumpLabel(j: SongJump): string {
+  const what = j.kind === 'jump' ? 'Position jump' : j.kind === 'break' ? 'Pattern break' : 'Runs into';
+  const to = `order ${j.toOrder}${j.toRow > 0 ? ` row ${j.toRow}` : ''}`;
+  return `${what}: order ${j.fromOrder} row ${j.fromRow} → ${to}${j.loops ? ' (song loops)' : ''}`;
 }

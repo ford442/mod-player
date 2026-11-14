@@ -4,7 +4,8 @@
  * events. Pure — no libopenmpt, no DOM. `utils/readSongStructure.ts` fills it from a module (in the
  * parser worker); `components/SongMap.tsx` draws it; #518 (frame-accurate seek) reuses the seconds.
  *
- * Phase 1 leaves `jumps` (position-jump / pattern-loop arcs) and the loop region for phase 2.
+ * Phase 2 adds `jumps` (the position jumps / pattern breaks the walk followed) and the loop-region
+ * model (utils/songStructureLoop.ts).
  */
 
 /** `openmpt_module_get_order_pattern` for a skip (`+++`) order (libopenmpt PATTERNINDEX_SKIP). */
@@ -48,8 +49,33 @@ export interface SongTempoEvent {
   readonly speed: number;
 }
 
+/**
+ * How playback left an order: `jump` = a position jump (`Bxx`, with or without a `Dxx` on the same
+ * row), `break` = a pattern break (`Dxx`) alone, `flow` = it ran on into an order it had already
+ * played (no command involved).
+ */
+export type SongJumpKind = 'jump' | 'break' | 'flow';
+
+/** One way out of an order that the order-flow walk followed (first pass only, like the rest). */
+export interface SongJump {
+  readonly kind: SongJumpKind;
+  readonly fromOrder: number;
+  /** The row the jump / break sits on (the last row the order plays). */
+  readonly fromRow: number;
+  readonly toOrder: number;
+  readonly toRow: number;
+  /**
+   * The target is an order playback already played: the song loops here (the walk stops). Only a
+   * jump the walk followed is reported — the implicit end-of-song restart is not (libopenmpt's C API
+   * does not expose the restart position).
+   */
+  readonly loops: boolean;
+}
+
 export interface SongStructure {
   readonly orders: readonly SongOrder[];
+  /** The jumps / breaks the walk followed, in play order (at most one per visited order). */
+  readonly jumps: readonly SongJump[];
   /** In play order. The first event is the song's initial tempo / speed at order 0's entry. */
   readonly tempoEvents: readonly SongTempoEvent[];
   /** libopenmpt's `get_duration_seconds` (the selected subsong). */
@@ -65,6 +91,7 @@ export interface SongStructure {
 
 export const EMPTY_SONG_STRUCTURE: SongStructure = {
   orders: [],
+  jumps: [],
   tempoEvents: [],
   totalSeconds: 0,
   playOrder: [],
@@ -122,4 +149,39 @@ export function tempoAtSeconds(structure: SongStructure, seconds: number): SongT
     current = event;
   }
   return current ?? structure.tempoEvents[0] ?? null;
+}
+
+/**
+ * The shape of a jump on the map: `sequential` ends up at the next order that plays anyway (a
+ * pattern break cutting a pattern short — a tick on the chip, not an arc), `forward` skips orders,
+ * `back` goes to an earlier order, `self` stays in the same order.
+ */
+export type SongJumpShape = 'sequential' | 'forward' | 'back' | 'self';
+
+export function jumpShape(structure: SongStructure, jump: SongJump): SongJumpShape {
+  if (jump.toOrder === jump.fromOrder) return 'self';
+  if (jump.toOrder < jump.fromOrder) return 'back';
+  for (let o = jump.fromOrder + 1; o < jump.toOrder; o++) {
+    if (!structure.orders[o]?.isSkip) return 'forward';
+  }
+  return 'sequential';
+}
+
+/**
+ * The orders playback can go to when it leaves `order` on its own: the next reached order in play
+ * order, the target of a jump out of it, and — for the last order played — the first (the song
+ * looping). The loop region uses it to tell playback running out of its end from a seek.
+ */
+export function successorsOf(structure: SongStructure, order: number): ReadonlySet<number> {
+  const out = new Set<number>();
+  const { playOrder } = structure;
+  const at = playOrder.indexOf(order);
+  if (at >= 0) {
+    out.add(playOrder[at + 1] ?? playOrder[0]!);
+  } else if (structure.orders[order]) {
+    // Not on the first pass (a revisited / unreached order): any later order is a natural next.
+    out.add(order + 1);
+  }
+  for (const j of structure.jumps) if (j.fromOrder === order) out.add(j.toOrder);
+  return out;
 }
