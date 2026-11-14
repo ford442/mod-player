@@ -187,3 +187,52 @@ describe('fxStore (#453)', () => {
     expect(useFxStore.getState().exportSnapshot()?.modules.room.enabled).toBe(false);
   });
 });
+
+describe('fxStore flushes a pending save on pagehide', () => {
+  const win = window as unknown as Record<string, unknown>;
+  let target: EventTarget;
+  let added = 0;
+  let removed = 0;
+  let saved: Record<string, unknown>;
+
+  beforeEach(() => {
+    // Forget a listener an earlier test's module instance registered on another fake window.
+    delete (globalThis as Record<string, unknown>).__xasm1FxPersistFlush;
+    target = new EventTarget();
+    added = 0;
+    removed = 0;
+    saved = {
+      addEventListener: win.addEventListener,
+      removeEventListener: win.removeEventListener,
+    };
+    win.addEventListener = (type: string, fn: EventListener) => {
+      if (type === 'pagehide') added += 1;
+      target.addEventListener(type, fn);
+    };
+    win.removeEventListener = (type: string, fn: EventListener) => {
+      if (type === 'pagehide') removed += 1;
+      target.removeEventListener(type, fn);
+    };
+  });
+
+  afterEach(() => {
+    Object.assign(win, saved);
+  });
+
+  it('writes an edit made inside the debounce window when the page is hidden', async () => {
+    const { useFxStore, FX_STORAGE_KEY } = await loadStore();
+    useFxStore.getState().setParam('character', 'drive', 0.42);
+    expect(storage.has(FX_STORAGE_KEY)).toBe(false); // still debounced
+    target.dispatchEvent(new Event('pagehide'));
+    expect(storage.has(FX_STORAGE_KEY)).toBe(true);
+    const reloaded = (await loadStore()).useFxStore.getState();
+    expect(reloaded.effective.modules.character.params.drive).toBe(0.42);
+  });
+
+  it('keeps one listener when the module is evaluated again (HMR / resetModules)', async () => {
+    await loadStore();
+    await loadStore();
+    await loadStore();
+    expect(added - removed).toBe(1);
+  });
+});
