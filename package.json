@@ -20,6 +20,8 @@
     "build:public": "npm run build:go:verify",
     "build:js-libopenmpt": "bash scripts/build-js-libopenmpt.sh",
     "verify:js-libopenmpt": "node scripts/verify-js-libopenmpt.mjs --smoke",
+    "gen:module-formats": "node scripts/gen-module-formats.mjs",
+    "verify:module-formats": "node scripts/gen-module-formats.mjs --check",
     "bench:js-libopenmpt": "node scripts/bench-js-libopenmpt.mjs",
     "verify:wasm": "node scripts/verify-wasm-assets.mjs",
     "verify:build": "node scripts/verify-build.mjs",

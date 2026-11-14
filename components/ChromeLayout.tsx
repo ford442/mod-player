@@ -6,6 +6,7 @@ import { TransportBar } from './TransportBar';
 import { SidePanelGrid } from './SidePanelGrid';
 import { PatternEditorSection } from './PatternEditorSection';
 import { LibraryAndPlaylistSection } from './LibraryAndPlaylistSection';
+import { moduleFormatsSummary } from '../utils/moduleFormats';
 import { usePlayerEngine } from '../hooks/usePlayerEngine';
 import { usePlayerUiStore } from '../store/playerUiStore';
 
@@ -39,7 +40,7 @@ export function ChromeLayout({ studioDisplayHost = null }: ChromeLayoutProps = {
         <PatternEditorSection />
         <LibraryAndPlaylistSection />
         <div className="mt-8 text-center text-xs opacity-50">
-          <p>Supports .mod, .xm, .s3m, .it files.</p>
+          <p>{moduleFormatsSummary()}</p>
           <p>WebGPU required for visualization.</p>
         </div>
       </div>

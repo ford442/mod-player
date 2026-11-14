@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { scrollContainerToNearest } from '../utils/scrollContainer';
+import { MODULE_FILE_ACCEPT, supportedModuleFileList } from '../utils/moduleFormats';
 
 export interface PlaylistItem {
   id: string;
@@ -53,8 +54,10 @@ export const Playlist: React.FC<PlaylistProps> = ({
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     setIsDragOver(false);
-    if (e.dataTransfer.files.length) {
-      onFilesAdded(e.dataTransfer.files);
+    // A drop is not filtered by `accept`: keep only files libopenmpt loads.
+    const modules = supportedModuleFileList(e.dataTransfer.files);
+    if (modules.length) {
+      onFilesAdded(modules);
     }
   }, [onFilesAdded]);
 
@@ -127,9 +130,15 @@ export const Playlist: React.FC<PlaylistProps> = ({
         ref={fileInputRef}
         type="file"
         multiple
-        accept=".mod,.xm,.s3m,.it,.mptm,.stm,.669,.amf,.ams,.dbm,.dmf,.dsm,.far,.mdl,.med,.mtm,.okt,.psm,.ptm,.ult,.umx,.mt2,.gdm,.mo3,.j2b"
+        accept={MODULE_FILE_ACCEPT}
         className="hidden"
-        onChange={(e) => { if (e.target.files) onFilesAdded(e.target.files); e.target.value = ''; }}
+        onChange={(e) => {
+          if (e.target.files) {
+            const modules = supportedModuleFileList(e.target.files);
+            if (modules.length) onFilesAdded(modules);
+          }
+          e.target.value = '';
+        }}
       />
 
       {/* List */}

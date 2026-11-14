@@ -82,6 +82,8 @@ export function useShaderCanvasHitTest(params: UseShaderCanvasHitTestParams) {
   const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
     if (selectedFile) onFileSelected?.(selectedFile);
+    // Reset so picking the same file again fires onChange.
+    e.target.value = '';
   }, [onFileSelected]);
 
   return {

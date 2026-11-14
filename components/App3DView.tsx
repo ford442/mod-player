@@ -1,4 +1,5 @@
 import { cn } from '../utils/cn';
+import { DEMO_REMOTE_MEDIA_LIST } from '../utils/videoPatternSource';
 import { Studio3D } from './Studio3D';
 import { Header } from './Header';
 import { Controls } from './Controls';
@@ -153,9 +154,7 @@ export function App3DView({
               setPan={setPan}
               onMediaAdd={handleMediaAdd}
               onRemoteMediaSelect={handleRemoteMediaSelect}
-              remoteMediaList={[
-                { id: '1', kind: 'video', url: 'clouds.mp4', fileName: 'Clouds Demo (MP4)', mimeType: 'video/mp4' }
-              ]}
+              remoteMediaList={DEMO_REMOTE_MEDIA_LIST}
               bloomPreset={bloomPreset}
               onBloomPresetChange={setBloomPreset}
               colorScheme={colorScheme}

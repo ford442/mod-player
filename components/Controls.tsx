@@ -3,6 +3,7 @@ import { UploadIcon } from './icons';
 import type { MediaItem } from '../types';
 import { BLOOM_PRESETS, COLOR_SCHEMES, NIGHT_PRESET_OPTIONS, type BloomPreset, type ColorScheme, type NightPreset } from '../types/bloomPresets';
 import { cn } from '../utils/cn';
+import { MODULE_FILE_ACCEPT } from '../utils/moduleFormats';
 
 interface ControlsProps {
   isReady: boolean;
@@ -89,6 +90,8 @@ export const Controls: React.FC<ControlsProps> = ({
     if (file) {
       onFileSelected(file);
     }
+    // Reset so picking the same file again fires onChange.
+    event.target.value = '';
   };
 
   const handleMediaFile = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -96,6 +99,7 @@ export const Controls: React.FC<ControlsProps> = ({
     if (file && onMediaAdd) {
       onMediaAdd(file);
     }
+    event.target.value = '';
   };
 
   return (
@@ -108,7 +112,7 @@ export const Controls: React.FC<ControlsProps> = ({
           className="text-sm text-gray-300 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 disabled:opacity-50"
           disabled={!isReady}
           onChange={handleFileChange}
-          accept=".mod,.s3m,.it,.xm,.mo3"
+          accept={MODULE_FILE_ACCEPT}
         />
       </div>
 

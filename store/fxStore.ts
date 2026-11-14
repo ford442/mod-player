@@ -163,6 +163,33 @@ export function flushFxPersist(): void {
   } satisfies PersistedFx);
 }
 
+/**
+ * Write a pending (debounced) save when the page is hidden or unloaded, so an
+ * edit in the last FX_PERSIST_DEBOUNCE_MS is not lost. One listener per page:
+ * a re-evaluated module (HMR, tests' resetModules) replaces the previous one.
+ */
+const PAGE_HIDE_FLUSH_KEY = '__xasm1FxPersistFlush';
+
+function onPageHidden(event: Event): void {
+  if (event.type === 'visibilitychange' && document.visibilityState !== 'hidden') return;
+  flushFxPersist();
+}
+
+function installPageHideFlush(): void {
+  if (typeof window === 'undefined' || typeof window.addEventListener !== 'function') return;
+  const slot = globalThis as unknown as Record<string, ((event: Event) => void) | undefined>;
+  const previous = slot[PAGE_HIDE_FLUSH_KEY];
+  if (previous) {
+    window.removeEventListener('pagehide', previous);
+    if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', previous);
+  }
+  slot[PAGE_HIDE_FLUSH_KEY] = onPageHidden;
+  window.addEventListener('pagehide', onPageHidden);
+  if (typeof document !== 'undefined') document.addEventListener('visibilitychange', onPageHidden);
+}
+
+installPageHideFlush();
+
 type Derived = Pick<FxStoreState, 'effective' | 'scope' | 'effectivePresetId'>;
 
 function derive(s: PersistedFx & { songFingerprint: string | null }, prev?: Derived): Derived {
