@@ -146,6 +146,7 @@ function App() {
     loadFileWithHash,
     setModuleSourceUrl,
     localLibrary,
+    patternEditDirtyRef,
   });
 
   const midiControls = useMidiControls();

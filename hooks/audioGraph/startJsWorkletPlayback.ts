@@ -20,6 +20,8 @@ import {
   postSetPositionRing,
   postSetProjectmPcm,
   postSetRenderParam,
+  postSetRepeat,
+  repeatCountFor,
 } from '../../audio-worklet/protocol';
 import { canUsePositionRing, createPositionRingBuffer } from '../../audio-worklet/positionRing';
 import { createPositionRingConsumer } from '../../utils/positionRingConsumer';
@@ -323,11 +325,15 @@ export async function startJsWorkletPlayback(
           break;
 
         case 'ended':
-          log.log('Worklet reported module ended');
+          // With the loop on the worklet loops natively (repeat count -1) and never posts `ended`.
+          // One that arrives anyway raced a loop toggle: the module had already run out before
+          // the new count landed, and a finished module does not restart on its own.
           if (config.isLooping) {
+            log.log('Worklet ended while looping (toggle race): restarting from the top');
             callbacks.seekToStepWrapper(0);
           } else {
-            callbacks.stopMusic(false);
+            log.log('Worklet reported module ended');
+            callbacks.songEnded();
           }
           break;
 
@@ -438,6 +444,11 @@ export async function startJsWorkletPlayback(
       }
     });
     node.port.postMessage(postSetAudioDiag(isAudioDiagEnabled()));
+    // Native looping: libopenmpt loops at the song's own restart point (XM restart position, MOD
+    // restart byte, Bxx), sample-accurately, and never posts `ended`. The worklet applies the count
+    // to every module it configures, so it must reach the node before the load. A loop toggle
+    // during playback re-sends it (PlayerEngine.setLooping).
+    node.port.postMessage(postSetRepeat(repeatCountFor(config.isLooping)));
     seedPatternDiag();
 
     // Position + VU through shared memory when the page is crossOriginIsolated (#492): no message,

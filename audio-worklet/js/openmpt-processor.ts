@@ -386,6 +386,11 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
   declare _audioLiteExplicit: boolean;
   /** Interpolation filter length; re-applied after every module create (which resets render params). */
   declare _interpolationLength: number;
+  /**
+   * libopenmpt repeat count (MT.setRepeat): -1 loops at the song's own restart point, sample-
+   * accurately and without `ended`; 0 plays once. Re-applied after every module create.
+   */
+  declare _repeatCount: number;
   // ?audioDiag=1 — per-quantum process() timing, correlated with row wraps.
   declare _audioDiag: boolean;
   /** Reused channel VU snapshot (length grows once to numChannels, then stable). */
@@ -599,6 +604,11 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
             lib._free(valuePtr);
           }
         }
+      } else if (type === MT.setRepeat) {
+        this._repeatCount = msg.count < 0 ? -1 : Math.trunc(msg.count);
+        if (this.modulePtr && this.lib) {
+          this.lib._openmpt_module_set_repeat_count(this.modulePtr, this._repeatCount);
+        }
       } else if (type === MT.attachCreatePort) {
         // The shared protocol type is structural (no DOM lib in this project); the port is a MessagePort.
         this._attachCreatePort(msg.port as WorkletMessagePort);
@@ -620,6 +630,7 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
     this._audioLite = false;
     this._audioLiteExplicit = false;
     this._interpolationLength = DEFAULT_INTERPOLATION_LENGTH;
+    this._repeatCount = 0;
     this._audioDiag = false;
     this._resetAudioDiag();
     this._channelVuArr = [];
@@ -937,6 +948,8 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
       OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH,
       this._interpolationLength,
     );
+    // Create resets the repeat count to 0 as well.
+    lib._openmpt_module_set_repeat_count(modulePtr, this._repeatCount);
     const numCh = lib._openmpt_module_get_num_channels(modulePtr);
     // Heavy XM/IT modules: full-band audio-reactive scan at 60 Hz still tips
     // process() over budget at pattern starts — auto-lite unless host opted in.

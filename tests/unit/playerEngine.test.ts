@@ -189,6 +189,51 @@ describe('PlayerEngine (headless)', () => {
     expect(config.volume).toBe(0.25);
   });
 
+  it('sends a loop toggle to the worklet as a native repeat count (-1 forever, 0 once)', async () => {
+    const f = setup();
+    await playing(f);
+    f.engine.dispatch({ type: 'toggleLoop' });
+    f.engine.dispatch({ type: 'setLooping', value: false }); // no change: nothing sent
+    f.engine.dispatch({ type: 'toggleLoop' });
+    const repeats = f.sent().filter((m) => m.type === MAIN_TO_WORKLET.setRepeat);
+    expect(repeats).toEqual([
+      { type: MAIN_TO_WORKLET.setRepeat, count: 0 },
+      { type: MAIN_TO_WORKLET.setRepeat, count: -1 },
+    ]);
+  });
+
+  it('a song that plays out stops the transport, then tells onSongEnded listeners', async () => {
+    const f = setup();
+    await playing(f);
+    const phases: string[] = [];
+    const listener = vi.fn(() => { phases.push(f.engine.transport.phase); });
+    const off = f.engine.onSongEnded(listener);
+    f.calls[0]!.callbacks.songEnded();
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(phases).toEqual(['stopped']); // a listener can load + play the next song right away
+    expect(f.engine.getSnapshot().isPlaying).toBe(false);
+
+    // Not playing any more: a second (raced) report has nothing to end.
+    f.calls[0]!.callbacks.songEnded();
+    expect(listener).toHaveBeenCalledTimes(1);
+
+    off();
+    await playing(f);
+    f.calls[f.calls.length - 1]!.callbacks.songEnded();
+    expect(listener).toHaveBeenCalledTimes(1);
+  });
+
+  it('a throwing song-ended listener does not stop the others', async () => {
+    const f = setup();
+    await playing(f);
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const second = vi.fn();
+    f.engine.onSongEnded(() => { throw new Error('boom'); });
+    f.engine.onSongEnded(second);
+    f.calls[0]!.callbacks.songEnded();
+    expect(second).toHaveBeenCalledTimes(1);
+  });
+
   it('owns master volume / pan / mute: clamped, in the snapshot and on the master nodes only', async () => {
     const f = setup();
     await playing(f);

@@ -32,6 +32,11 @@ export const MAIN_TO_WORKLET = {
   setPositionRing: 'setPositionRing',
   /** Hands the worklet its end of the create-worker channel (#513). */
   attachCreatePort: 'attachCreatePort',
+  /**
+   * libopenmpt repeat count for the playing module and every module configured after it:
+   * -1 loops forever at the song's own restart point (no `ended`), 0 plays once.
+   */
+  setRepeat: 'setRepeat',
 } as const;
 
 /** AudioWorklet processor → main thread */
@@ -132,6 +137,8 @@ export const MAIN_TO_WORKLET_SPEC = {
   [MAIN_TO_WORKLET.returnPcmBuffer]: { fields: { buffer: req('float32Array') } },
   [MAIN_TO_WORKLET.setPositionRing]: { fields: { buffer: req('sharedArrayBuffer') } },
   [MAIN_TO_WORKLET.attachCreatePort]: { fields: { port: req('messagePort') } },
+  /** Any finite number; the worklet clamps it to libopenmpt's range (< 0 → -1, else truncated). */
+  [MAIN_TO_WORKLET.setRepeat]: { fields: { count: req('finite') } },
 } as const satisfies Record<MainToWorkletType, MessageSpec>;
 
 /** The pre-`type` load shim some callers still send: `{ moduleData }`. */

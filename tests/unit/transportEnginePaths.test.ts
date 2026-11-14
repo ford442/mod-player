@@ -44,6 +44,7 @@ function makeCallbacks() {
     setSequencerMatrix: vi.fn(),
     stopMusic: vi.fn(),
     seekToStepWrapper: vi.fn(),
+    songEnded: vi.fn(),
     updateUI: vi.fn(),
   };
 }
@@ -150,6 +151,7 @@ describe('ScriptProcessor fallback', () => {
       _openmpt_module_set_render_param: vi.fn(),
       _openmpt_module_read_float_stereo: vi.fn(() => BUFFER),
       _openmpt_module_set_position_order_row: vi.fn(),
+      _openmpt_module_set_repeat_count: vi.fn(),
       _openmpt_module_get_current_order: vi.fn(() => 0),
       _openmpt_module_get_current_row: vi.fn(() => 0),
       _openmpt_module_get_position_seconds: vi.fn(() => 0),
@@ -188,9 +190,11 @@ describe('ScriptProcessor fallback', () => {
       patternMatricesRef: ref([]),
     } as unknown as AudioGraphRefs;
     const callbacks = makeCallbacks();
+    // Live, like PlayerEngine's getter-backed audioConfig: a loop toggle is seen by the next block.
+    const config = { volume: 1, panValue: 0, isLooping: false };
     const start = () =>
       runScriptProcessorFallback(
-        refs, callbacks as unknown as AudioGraphCallbacks, { volume: 1, panValue: 0, isLooping: false }, ctx,
+        refs, callbacks as unknown as AudioGraphCallbacks, config, ctx,
         workletNode as unknown as AudioWorkletNode,
       );
     const render = (playbackTime?: number) => {
@@ -202,8 +206,85 @@ describe('ScriptProcessor fallback', () => {
       });
       return { outL, outR };
     };
-    return { refs, callbacks, lib, ctx, start, render };
+    return { refs, callbacks, lib, ctx, config, spNode, start, render };
   }
+
+  it('loops natively like the worklet: applies the repeat count, re-applied on toggle and module change', async () => {
+    const { refs, lib, config, start, render } = setup(false);
+    await start();
+    render();
+    expect(lib._openmpt_module_set_repeat_count).toHaveBeenCalledTimes(1);
+    expect(lib._openmpt_module_set_repeat_count).toHaveBeenLastCalledWith(1234, 0);
+    render();
+    expect(lib._openmpt_module_set_repeat_count).toHaveBeenCalledTimes(1); // not per block
+
+    config.isLooping = true;
+    render();
+    expect(lib._openmpt_module_set_repeat_count).toHaveBeenLastCalledWith(1234, -1);
+
+    refs.currentModulePtr.current = 5678; // a new main-thread module: create reset its count
+    render();
+    expect(lib._openmpt_module_set_repeat_count).toHaveBeenLastCalledWith(5678, -1);
+    expect(lib._openmpt_module_set_repeat_count).toHaveBeenCalledTimes(3);
+    // Looping is libopenmpt's job now: no seek back to order 0 while the module keeps rendering.
+    expect(lib._openmpt_module_set_position_order_row).not.toHaveBeenCalled();
+  });
+
+  it('reports songEnded once when the module runs out with the loop off', async () => {
+    vi.useFakeTimers();
+    try {
+      const { callbacks, lib, start, render } = setup(false);
+      await start();
+      lib._openmpt_module_read_float_stereo.mockReturnValue(0);
+      const { outL } = render();
+      expect(outL.every((v) => v === 0)).toBe(true);
+      render();
+      // Deferred: songEnded stops the transport, which tears this node down — not from its own callback.
+      expect(callbacks.songEnded).not.toHaveBeenCalled();
+      vi.runAllTimers();
+      expect(callbacks.songEnded).toHaveBeenCalledTimes(1);
+
+      // Rendering again (a seek back in) re-arms it.
+      lib._openmpt_module_read_float_stereo.mockReturnValueOnce(BUFFER).mockReturnValue(0);
+      render();
+      render();
+      vi.runAllTimers();
+      expect(callbacks.songEnded).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('drops an end report once the node is no longer the playing one', async () => {
+    vi.useFakeTimers();
+    try {
+      const { refs, callbacks, lib, start, render } = setup(false);
+      await start();
+      lib._openmpt_module_read_float_stereo.mockReturnValue(0);
+      render();
+      refs.scriptProcessorRef.current = null; // stopped meanwhile
+      vi.runAllTimers();
+      expect(callbacks.songEnded).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('restarts a module that ran out just before a loop toggle landed (no songEnded)', async () => {
+    vi.useFakeTimers();
+    try {
+      const { callbacks, lib, config, start, render } = setup(false);
+      await start();
+      config.isLooping = true;
+      lib._openmpt_module_read_float_stereo.mockReturnValueOnce(0).mockReturnValue(BUFFER);
+      render();
+      vi.runAllTimers();
+      expect(lib._openmpt_module_set_position_order_row).toHaveBeenCalledWith(1234, 0, 0);
+      expect(callbacks.songEnded).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 
   it('reports the position the block STARTS at, tagged with its playbackTime (like the worklet)', async () => {
     const { refs, lib, start, render } = setup(false);

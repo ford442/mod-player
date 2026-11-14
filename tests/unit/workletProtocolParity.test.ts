@@ -40,6 +40,7 @@ import {
   postSetPositionRing,
   postSetProjectmPcm,
   postSetRenderParam,
+  postSetRepeat,
 } from '../../audio-worklet/protocol';
 import { AUDIO_SAB_BYTES } from '../../utils/audioReactive';
 
@@ -222,6 +223,8 @@ describe('worklet protocol: zod and the worklet guard agree (one table, #492)', 
       postReturnPcmBuffer(new Float32Array(new ArrayBuffer(16))),
       postSetPositionRing(new SharedArrayBuffer(64)),
       postAttachCreatePort(new MessageChannel().port1),
+      postSetRepeat(-1),
+      postSetRepeat(0),
     ];
     expect(new Set(outbound.map((m) => m.type)).size).toBe(Object.keys(MAIN_TO_WORKLET_SPEC).length);
     for (const message of outbound) {

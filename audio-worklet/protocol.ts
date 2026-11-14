@@ -249,6 +249,16 @@ export function postAttachCreatePort(port: MessagePort): MainToWorkletMessage {
   return { type: MAIN_TO_WORKLET.attachCreatePort, port };
 }
 
+/** Loop the song natively (`-1`, at its own restart point, no `ended`) or play it once (`0`). */
+export function postSetRepeat(count: number): MainToWorkletMessage {
+  return { type: MAIN_TO_WORKLET.setRepeat, count };
+}
+
+/** The repeat count for the loop toggle: forever, or once. */
+export function repeatCountFor(isLooping: boolean): number {
+  return isLooping ? -1 : 0;
+}
+
 export function postSetPositionRing(buffer: SharedArrayBuffer): MainToWorkletMessage {
   return { type: MAIN_TO_WORKLET.setPositionRing, buffer };
 }

@@ -424,6 +424,7 @@ describe('the real start path (hooks/useAudioGraph.ts) prepares the context befo
       setSequencerMatrix: vi.fn(),
       stopMusic: vi.fn(),
       seekToStepWrapper: vi.fn(),
+      songEnded: vi.fn(),
       updateUI: vi.fn(),
       prepareAudioContext: (ctx) => {
         events.push(`prepare:${ctx.state}`);

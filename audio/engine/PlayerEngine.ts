@@ -49,7 +49,7 @@ import {
 import { cleanupLibOpenMPT, runLibOpenMPTInit } from '../../hooks/libOpenMPT/runInit';
 import { DEFAULT_MODULE_URL, WORKLET_URL } from '../../hooks/libOpenMPT/constants';
 import type { LibOpenMPTRefs, LibOpenMPTSetters } from '../../hooks/libOpenMPT/types';
-import { postPause, postSetAudioLite } from '../../audio-worklet/protocol';
+import { postPause, postSetAudioLite, postSetRepeat, repeatCountFor } from '../../audio-worklet/protocol';
 import { applyMasterLevels } from '../../utils/audioMasterGraph';
 import { resetAudioHeardTime } from '../../utils/playheadPrediction';
 import { hasShareModuleIntent } from '../../utils/shareState';
@@ -288,6 +288,8 @@ export class PlayerEngine {
   /** Per load: the user set / cleared the region, so a stored one must not overwrite it. */
   private loopTouched = false;
   private offSongFingerprint: (() => void) | null = null;
+  /** `onSongEnded` subscribers (playlist auto-advance). */
+  private readonly songEndedListeners = new Set<() => void>();
 
   private readonly stopFn: (destroy?: boolean) => void;
   private readonly pauseFn: () => void;
@@ -402,6 +404,7 @@ export class PlayerEngine {
       setSequencerMatrix: this.setters.setSequencerMatrix,
       stopMusic: (destroy) => this.stopFn(destroy),
       seekToStepWrapper: (step) => this.seekFn(step),
+      songEnded: () => this.handleSongEnded(),
       updateUI: () => this.updateUIFn(),
       prepareAudioContext: (ctx) => this.output.attach(ctx),
     };
@@ -534,6 +537,30 @@ export class PlayerEngine {
 
   seekToStep(step: number): void {
     this.seekFn(step);
+  }
+
+  /**
+   * Called when a song plays to its end on its own (loop off). Not called while looping —
+   * libopenmpt loops natively then — nor for stop, pause or a load. The transport is already
+   * stopped when listeners run, so a listener may load and play the next song straight away.
+   * Returns the unsubscribe function.
+   */
+  onSongEnded(listener: () => void): () => void {
+    this.songEndedListeners.add(listener);
+    return () => { this.songEndedListeners.delete(listener); };
+  }
+
+  private handleSongEnded(): void {
+    // An end report that raced a stop / pause / fault has nothing left to end.
+    if (!this.transport.isPlaying) return;
+    this.stop(false);
+    for (const listener of [...this.songEndedListeners]) {
+      try {
+        listener();
+      } catch (err) {
+        console.error('[Engine] song-ended listener failed:', err);
+      }
+    }
   }
 
   /** Global step of the first row of `order` (orders can have different pattern lengths). */
@@ -698,7 +725,12 @@ export class PlayerEngine {
     const previous = this.store.getSnapshot().isLooping;
     const next = typeof action === 'function' ? action(previous) : action;
     this.store.patch({ isLooping: next });
-    // The JS worklet's `ended` handler and the ScriptProcessor read the live value (audioConfig).
+    if (next === previous) return;
+    // The worklet loops natively (libopenmpt repeat count); the ScriptProcessor fallback reads the
+    // live value (audioConfig) before each block, as does the worklet's `ended` race handler.
+    try {
+      this.refs.audioWorkletNodeRef.current?.port.postMessage(postSetRepeat(repeatCountFor(next)));
+    } catch { /* node torn down — the next start sends the count */ }
   }
 
   private applyLevels(): void {
