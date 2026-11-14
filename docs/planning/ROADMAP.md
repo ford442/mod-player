@@ -70,7 +70,7 @@ Landed by `8175cc9` (`fix(stage): URL ?stage= preference, toggle/exit commands, 
 |----------|-------|---------|
 | **P0, current focus** | CI red since run 721 (fold into [#535](https://github.com/ford442/mod-player/issues/535)) | Chrome 155 → 156 on the runner image. Pin the smokes to Playwright's bundled Chromium, find the 1-ulp node, and keep the null at `== 0`. Then the rest of #535: Vitest projects with honest timeouts, and lint 7 → 0. |
 | P1 | [#535](https://github.com/ford442/mod-player/issues/535) | Same session as the P0 row. #523 closed 2026-11-07 (landed by #532). |
-| P1, decoupled | [#537](https://github.com/ford442/mod-player/issues/537) phase 1 | Song map: `SongStructure` from the parser worker, a read-only order strip, and `seekOrder`. Loop region / worklet / export are phase 2. Drafted 2026-11-06. |
+| P1, decoupled | [#537](https://github.com/ford442/mod-player/issues/537) phases 1–2 | Song map: `SongStructure` from the parser worker, the order strip, `seekOrder`; phase 2 adds jump arcs and a loop region (shift-click / drag, seek back at B's end through the pending-seek path, remembered per song). A sample-exact loop (worklet-side), tempo lane and export are still open. Drafted 2026-11-06. |
 | Owner | Deploy | `python3 deploy.py` once `main` is green. Live is 7 weeks stale. |
 | P1 (next) | [#512](https://github.com/ford442/mod-player/issues/512) | JS-engine mixer. Unblocked now that #507 and #523 have landed. |
 | P1 | [#526](https://github.com/ford442/mod-player/issues/526), [#527](https://github.com/ford442/mod-player/issues/527) | One render-settings value; WebGL context options. Both are unblocked (#507 merged). |
