@@ -1,5 +1,6 @@
 import type { LibOpenMPT, PatternMatrix, WorkerParseMetadata } from '../types';
 import { getPatternMatrix } from './patternExtractor';
+import { createModuleFromBytes, readMetadataString } from './wasmHeap';
 
 export interface ParsedModuleData {
   patternMatrices: PatternMatrix[];
@@ -35,23 +36,7 @@ export async function yieldToMainThread(): Promise<void> {
 }
 
 function createModulePtr(lib: LibOpenMPT, fileData: Uint8Array): number {
-  const bufferSize = fileData.byteLength;
-  const bufferPtr = lib._malloc(bufferSize);
-  lib.HEAPU8.set(fileData, bufferPtr);
-
-  const modPtr = lib._openmpt_module_create_from_memory2(
-    bufferPtr,
-    bufferSize,
-    0,
-    0,
-    0,
-    0,
-    0,
-    0,
-    0,
-  );
-  lib._free(bufferPtr);
-
+  const modPtr = createModuleFromBytes(lib, fileData);
   if (modPtr === 0) {
     throw new Error('Failed to load module (invalid format?)');
   }
@@ -80,15 +65,10 @@ function readModuleMetadata(
   modPtr: number,
   fileName: string,
 ): WorkerParseMetadata {
-  const titlePtr = lib._openmpt_module_get_metadata(modPtr, lib.stringToUTF8('title'));
-  const title = lib.UTF8ToString(titlePtr);
-  lib._openmpt_free_string(titlePtr);
-  const commentsPtr = lib._openmpt_module_get_metadata(modPtr, lib.stringToUTF8('message'));
-  const comments = lib.UTF8ToString(commentsPtr);
-  lib._openmpt_free_string(commentsPtr);
-  const formatPtr = lib._openmpt_module_get_metadata(modPtr, lib.stringToUTF8('type'));
-  const format = lib.UTF8ToString(formatPtr);
-  lib._openmpt_free_string(formatPtr);
+  // The key C strings are freed again (they used to leak three mallocs per parse).
+  const title = readMetadataString(lib, modPtr, 'title');
+  const comments = readMetadataString(lib, modPtr, 'message');
+  const format = readMetadataString(lib, modPtr, 'type');
 
   const numOrders = lib._openmpt_module_get_num_orders(modPtr);
   const numChannels = lib._openmpt_module_get_num_channels(modPtr);

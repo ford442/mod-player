@@ -1,5 +1,6 @@
 import type { PatternMatrix } from '../../types';
 import { backfillPatternMatrices } from '../../utils/parseModuleWithLib';
+import { createModuleFromBytes } from '../../utils/wasmHeap';
 import { parserLog } from '../../utils/parserDebug';
 import { createParserWorker, PARSER_SLOW_HINT_MS } from '../../utils/parserWorker';
 import { rowsPerSecondFromBpm } from '../../utils/playheadPrediction';
@@ -44,13 +45,13 @@ export function createEnsureMainThreadModule(refs: LibOpenMPTRefs) {
     }
     if (refs.currentModulePtr.current !== 0) return;
 
-    const bufferSize = data.byteLength;
-    const bufferPtr = lib._malloc(bufferSize);
-    lib.HEAPU8.set(data, bufferPtr);
-    const modPtr = lib._openmpt_module_create_from_memory2(
-      bufferPtr, bufferSize, 0, 0, 0, 0, 0, 0, 0,
-    );
-    lib._free(bufferPtr);
+    let modPtr: number;
+    try {
+      modPtr = createModuleFromBytes(lib, data);
+    } catch (err) {
+      console.error('[ensureMainThreadModule] Failed to create main-thread module:', err);
+      return;
+    }
 
     if (modPtr !== 0) {
       refs.currentModulePtr.current = modPtr;

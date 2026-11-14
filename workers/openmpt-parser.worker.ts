@@ -5,6 +5,7 @@ import {
 } from '../utils/libopenmptAssets';
 import { waitForRuntimeInitialized } from '../audio-worklet/libRuntimeReady';
 import { parseModuleWithLib } from '../utils/parseModuleWithLib';
+import { mallocOrThrow } from '../utils/wasmHeap';
 import { extractInstrumentTable, mergeLibInstrumentNames } from '../utils/sampleExtract';
 import { parserLog, setParserDebugFromMainThread } from '../utils/parserDebug';
 import type { InstrumentTable } from '../types/instruments';
@@ -103,7 +104,7 @@ async function loadLibOpenMPT(): Promise<LibOpenMPT> {
   if (!lib.stringToUTF8) {
     lib.stringToUTF8 = (jsString: string) => {
       const length = (jsString.length << 2) + 1;
-      const ptr = lib._malloc(length);
+      const ptr = mallocOrThrow(lib, length, 'C string');
       const heap = lib.HEAPU8 as Uint8Array;
       let i = 0;
       let j = 0;
