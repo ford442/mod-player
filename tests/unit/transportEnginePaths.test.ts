@@ -9,7 +9,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('../../hooks/audioGraph/masterGraph', () => ({
   wireMasterOutput: vi.fn(),
   ensureCommonMasterNodes: vi.fn(),
-  moduleBytesFromFileData: vi.fn(),
 }));
 
 import { MAIN_TO_WORKLET } from '../../audio-worklet/workletProtocolConstants';

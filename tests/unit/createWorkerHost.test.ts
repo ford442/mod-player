@@ -19,18 +19,21 @@ interface Sent { type: string; [k: string]: unknown }
 class FakeWorker {
   static instances: FakeWorker[] = [];
   sent: Sent[] = [];
+  transfers: Transferable[][] = [];
   terminated = false;
   onmessage: ((e: { data: unknown }) => void) | null = null;
   onerror: ((e: { message: string }) => void) | null = null;
   constructor() { FakeWorker.instances.push(this); }
-  postMessage(m: Sent) { this.sent.push(m); }
+  postMessage(m: Sent, transfer: Transferable[] = []) { this.sent.push(m); this.transfers.push(transfer); }
   terminate() { this.terminated = true; }
   reply(data: unknown) { this.onmessage?.({ data }); }
 }
 
 function fakeNode() {
   const sent: Sent[] = [];
-  return { node: { port: { postMessage: (m: Sent) => { sent.push(m); } } } as unknown as AudioWorkletNode, sent };
+  const transfers: Transferable[][] = [];
+  const port = { postMessage: (m: Sent, transfer: Transferable[] = []) => { sent.push(m); transfers.push(transfer); } };
+  return { node: { port } as unknown as AudioWorkletNode, sent, transfers };
 }
 
 const heap = (memory: WebAssembly.Memory, heapId = 7): WorkletCreateHeapMessage => ({
@@ -76,14 +79,14 @@ describe('createWorkerHost (#513)', () => {
     await flush();
     const w = FakeWorker.instances[0]!;
 
-    postModuleLoad(node, new ArrayBuffer(8));
+    postModuleLoad(node, new Uint8Array(8));
     expect(sent.at(-1)!.type).toBe(MT.load);
     expect(createWorkerReadyFor(node)).toBe(false);
 
     w.reply({ type: CREATE_WORKER_REPLY.ready });
     expect(createWorkerReadyFor(node)).toBe(true);
     const workletLoads = sent.filter((m) => m.type === MT.load).length;
-    postModuleLoad(node, new ArrayBuffer(8));
+    postModuleLoad(node, new Uint8Array(8));
     expect(w.sent.at(-1)!.type).toBe(CREATE_WORKER.create);
     expect(sent.filter((m) => m.type === MT.load).length).toBe(workletLoads);
   });
@@ -104,7 +107,7 @@ describe('createWorkerHost (#513)', () => {
     expect(second.sent.map((m) => m.type)).toEqual([MT.attachCreatePort]);
     expect(createWorkerReadyFor(second.node)).toBe(true);
     expect(createWorkerReadyFor(first.node)).toBe(false);
-    postModuleLoad(first.node, new ArrayBuffer(8));
+    postModuleLoad(first.node, new Uint8Array(8));
     expect(first.sent.at(-1)!.type).toBe(MT.load);
   });
 
@@ -116,8 +119,8 @@ describe('createWorkerHost (#513)', () => {
     const w = FakeWorker.instances[0]!;
     w.reply({ type: CREATE_WORKER_REPLY.ready });
 
-    const answered = new ArrayBuffer(4);
-    const lost = new ArrayBuffer(16);
+    const answered = new Uint8Array(4);
+    const lost = new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
     postModuleLoad(node, answered);
     postModuleLoad(node, lost);
     const seq1 = w.sent.filter((m) => m.type === CREATE_WORKER.create)[0]!.seq;
@@ -128,10 +131,36 @@ describe('createWorkerHost (#513)', () => {
     expect(w.terminated).toBe(true);
     const resent = sent.filter((m) => m.type === MT.load);
     expect(resent.length).toBe(1);
-    expect(resent[0]!.moduleData).toBe(lost);
+    // Re-sent from the caller's bytes (the copy the worker got was transferred away).
+    expect(new Uint8Array(resent[0]!.moduleData as ArrayBuffer)).toEqual(lost);
     expect(createWorkerReadyFor(node)).toBe(false);
-    postModuleLoad(node, new ArrayBuffer(2));
+    postModuleLoad(node, new Uint8Array(2));
     expect(sent.at(-1)!.type).toBe(MT.load);
+  });
+
+  it('each send copies the bytes once and TRANSFERS the copy; the caller’s bytes stay attached', async () => {
+    prepareCreateWorker(assets());
+    const { node, sent, transfers } = fakeNode();
+    attachCreateWorker(node, heap(memory));
+    await flush();
+    const w = FakeWorker.instances[0]!;
+    const fileData = new Uint8Array([9, 8, 7, 6]);
+
+    // To the worklet (worker not ready yet).
+    postModuleLoad(node, fileData);
+    const toWorklet = sent.at(-1)!.moduleData as ArrayBuffer;
+    expect(transfers.at(-1)).toEqual([toWorklet]);
+    expect(toWorklet).not.toBe(fileData.buffer);
+    expect(new Uint8Array(toWorklet)).toEqual(fileData);
+
+    // To the create worker.
+    w.reply({ type: CREATE_WORKER_REPLY.ready });
+    postModuleLoad(node, fileData);
+    const toWorker = w.sent.at(-1)!.moduleData as ArrayBuffer;
+    expect(w.transfers.at(-1)).toEqual([toWorker]);
+    expect(toWorker).not.toBe(fileData.buffer);
+    expect(new Uint8Array(toWorker)).toEqual(fileData);
+    expect(fileData.buffer).not.toBe(toWorklet);
   });
 
   it('a worker that fails to boot leaves loads in the worklet', async () => {
@@ -141,7 +170,7 @@ describe('createWorkerHost (#513)', () => {
     await flush();
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     FakeWorker.instances[0]!.reply({ type: CREATE_WORKER_REPLY.initFailed, message: 'no threads' });
-    postModuleLoad(node, new ArrayBuffer(8));
+    postModuleLoad(node, new Uint8Array(8));
     expect(sent.at(-1)!.type).toBe(MT.load);
   });
 

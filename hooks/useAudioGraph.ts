@@ -12,7 +12,6 @@ import {
 } from '../utils/workletAudioLifecycle';
 import {
   ensureCommonMasterNodes,
-  moduleBytesFromFileData,
   wireMasterOutput,
 } from './audioGraph/masterGraph';
 import { startJsWorkletPlayback } from './audioGraph/startJsWorkletPlayback';
@@ -152,11 +151,11 @@ export async function startAudioPlayback(
     // `loaded` ack can flip it back before loadModule's play() runs — never skip
     // posting `load` when the module token advanced.
     if (moduleNeedsWorkletLoad) {
-      const moduleBuf = moduleBytesFromFileData(refs.fileDataRef.current);
-      if (moduleBuf) {
-        log.log('Hot reload while playing — posting load to worklet:', moduleBuf.byteLength, 'bytes');
+      const moduleBytes = refs.fileDataRef.current;
+      if (moduleBytes && moduleBytes.byteLength > 0) {
+        log.log('Hot reload while playing — posting load to worklet:', moduleBytes.byteLength, 'bytes');
         refs.lastWorkletModuleTokenSentRef.current = moduleToken;
-        postModuleLoad(refs.audioWorkletNodeRef.current, moduleBuf);
+        postModuleLoad(refs.audioWorkletNodeRef.current, moduleBytes);
         callbacks.setStatus('Loading audio engine...');
       }
       return 'nudged';
