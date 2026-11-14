@@ -100,8 +100,32 @@ export function createCombinedCaptureStream(
       } catch {
         /* already disconnected */
       }
+      // The canvas capture track keeps rendering frames (and the destination's track keeps
+      // pulling audio) until stopped; disconnecting alone left a 30 fps capture running.
+      for (const track of [...videoStream.getTracks(), ...combined.getTracks()]) track.stop();
     },
   };
+}
+
+/** The part of MediaRecorder `finishRecording` drives (a fake in tests). */
+export type StoppableRecorder = Pick<MediaRecorder, 'state' | 'stop' | 'addEventListener'>;
+
+/**
+ * Stops `recorder`, waits for its final `dataavailable` / `stop`, and only then releases the
+ * capture (audio tap + tracks). Releasing first cut the recording's tail: the recorder flushes
+ * what it has buffered when it stops, and a disconnected tap has nothing left to give it.
+ */
+export async function finishRecording(recorder: StoppableRecorder, release: () => void): Promise<void> {
+  try {
+    if (recorder.state !== 'inactive') {
+      await new Promise<void>((resolve) => {
+        recorder.addEventListener('stop', () => resolve(), { once: true });
+        recorder.stop();
+      });
+    }
+  } finally {
+    release();
+  }
 }
 
 /** Resolve a recordable canvas, preferring WebGL2 when WebGPU capture is unreliable. */

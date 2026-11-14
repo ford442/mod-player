@@ -1,10 +1,11 @@
 import { useMemo, useEffect } from 'react';
 import type { MediaItem } from '../types';
 import { SchemaMismatchError } from '../utils/storageApi';
-import { buildShareUrl } from '../utils/shareState';
+import { buildShareUrl, shareableMediaUrl } from '../utils/shareState';
 import { usePlayerEngine } from '../hooks/usePlayerEngine';
 import { usePlayerUiStore } from '../store/playerUiStore';
 import { useShaderPrefsStore } from '../store/shaderPrefsStore';
+import { captureShaderThumbnail } from '../utils/shaderThumbnails';
 
 export interface UseAppDerivedStateParams {
   songsQueryError: unknown;
@@ -30,8 +31,9 @@ export function useAppDerivedState(params: UseAppDerivedStateParams) {
   } = params;
 
   const shaderFile = useShaderPrefsStore((s) => s.storedShader);
-  const shaderThumbnails = useShaderPrefsStore((s) => s.shaderThumbnails);
-  const setShaderThumbnails = useShaderPrefsStore((s) => s.setShaderThumbnails);
+  const hasThumbnail = useShaderPrefsStore((s) => s.shaderThumbnails[s.storedShader] !== undefined);
+  const addShaderThumbnail = useShaderPrefsStore((s) => s.addShaderThumbnail);
+  const hydrateShaderThumbnails = useShaderPrefsStore((s) => s.hydrateShaderThumbnails);
   const paletteMode = useShaderPrefsStore((s) => s.paletteMode);
   const colorPalette = useShaderPrefsStore((s) => s.colorPalette);
   const liteMode = usePlayerUiStore((s) => s.liteMode);
@@ -48,21 +50,30 @@ export function useAppDerivedState(params: UseAppDerivedStateParams) {
   }, [moduleFileName, clearInstrumentSelection]);
 
   useEffect(() => {
+    void hydrateShaderThumbnails();
+  }, [hydrateShaderThumbnails]);
+
+  // One small capture per shader (utils/shaderThumbnails.ts), stored in IndexedDB — not a
+  // full-size PNG data URL in localStorage, which filled the quota and broke every other pref write.
+  useEffect(() => {
     const canvas = document.querySelector<HTMLCanvasElement>('canvas[data-shader-preview-source="true"]');
     if (!canvas) return;
-    if (shaderThumbnails[shaderFile]) return;
+    if (hasThumbnail) return;
+    let cancelled = false;
     const timer = window.setTimeout(() => {
-      try {
-        const dataUrl = canvas.toDataURL('image/png');
-        if (dataUrl.startsWith('data:image/png')) {
-          setShaderThumbnails(previous => ({ ...previous, [shaderFile]: dataUrl }));
-        }
-      } catch {
-        // Ignore capture/security errors
-      }
+      captureShaderThumbnail(canvas)
+        .then((blob) => {
+          if (blob && !cancelled) addShaderThumbnail(shaderFile, blob);
+        })
+        .catch(() => {
+          // Ignore capture/security errors
+        });
     }, 500);
-    return () => window.clearTimeout(timer);
-  }, [setShaderThumbnails, shaderFile, shaderThumbnails]);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [addShaderThumbnail, shaderFile, hasThumbnail]);
 
   const libraryErrorMessage = useMemo(() => {
     const error = songsQueryError;
@@ -101,7 +112,8 @@ export function useAppDerivedState(params: UseAppDerivedStateParams) {
       colorPalette,
     };
     if (moduleSourceUrl) shareState.mod = moduleSourceUrl;
-    if (mediaItem && !mediaItem.isObjectUrl) shareState.media = mediaItem.url;
+    const media = shareableMediaUrl(mediaItem);
+    if (media) shareState.media = media;
     return buildShareUrl(shareState);
   }, [isModuleLoaded, moduleSourceUrl, shaderFile, moduleOrder, paletteMode, liteMode, colorPalette, mediaItem]);
 

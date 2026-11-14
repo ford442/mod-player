@@ -27,6 +27,12 @@ export interface PatternMatrix {
   numRows: number;
   numChannels: number;
   rows: PatternCell[][];
+  /**
+   * Content revision: 0 / absent for a matrix as parsed, bumped by every edit
+   * (`PlayerEngine.replacePatternMatrix`). GPU caches key on it, since an edit keeps the
+   * pattern index and dimensions.
+   */
+  revision?: number;
 }
 
 export interface ChannelShadowState {

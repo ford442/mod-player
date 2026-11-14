@@ -72,6 +72,9 @@ export function PerformanceStage({ studioDisplayHost = null }: PerformanceStageP
   const sequencerMatrix = usePlayerEngine((s) => s.sequencerMatrix);
   const channelStates = usePlayerEngine((s) => s.channelStates);
   const beatPhase = usePlayerEngine((s) => s.beatPhase);
+  // The live tempo (moduleInfo.bpm follows the song's tempo changes), rounded so a fractional
+  // drift does not re-render the stage; the chassis shaders draw it as digits.
+  const bpm = usePlayerEngine((s) => Math.round(s.moduleInfo.bpm));
   const volume = usePlayerEngine((s) => s.volume);
   const pan = usePlayerEngine((s) => s.pan);
   const syncDebug = usePlayerEngine((s) => s.syncDebug);
@@ -125,7 +128,7 @@ export function PerformanceStage({ studioDisplayHost = null }: PerformanceStageP
           matrix={sequencerMatrix}
           playheadRow={playbackRowFraction}
           isPlaying={isPlaying}
-          bpm={120}
+          bpm={bpm}
           timeSec={playbackSeconds}
           tickOffset={playbackRowFraction % 1}
           channels={channelStates}

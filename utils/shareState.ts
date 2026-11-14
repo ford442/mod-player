@@ -38,10 +38,12 @@ const ShareStateSchema = z.object({
   colorPalette: z.number().int().min(0).max(5).optional(),
 });
 
+// Wrapped shapes first: every ShareStateSchema field is optional, so the bare schema matches any
+// object (stripping `state` / `payload`) and, listed first, turned a wrapped response into {}.
 const ShareCodeResponseSchema = z.union([
-  ShareStateSchema,
   z.object({ state: ShareStateSchema }),
   z.object({ payload: ShareStateSchema }),
+  ShareStateSchema,
 ]);
 
 function normalizeShaderId(raw: string): string {
@@ -133,14 +135,9 @@ export function parseShareParams(search?: string): ShareParseResult {
 
   const mediaRaw = params.get('media');
   if (mediaRaw) {
-    const media = sanitizeRemoteUrl(mediaRaw);
-    if (!media) {
-      warnings.push('Media URL is invalid — overlay skipped');
-    } else if (!isAllowedModuleHost(media) && !isSameOriginMedia(media)) {
-      warnings.push('Media host is not allowed — overlay skipped');
-    } else {
-      state.media = media;
-    }
+    const media = validateShareMediaUrl(mediaRaw);
+    if (media.ok) state.media = media.url;
+    else warnings.push(media.warning);
   }
 
   if (code) {
@@ -157,6 +154,34 @@ function isSameOriginMedia(url: string): boolean {
   } catch {
     return false;
   }
+}
+
+export type ShareMediaValidation = { ok: true; url: string } | { ok: false; warning: string };
+
+/**
+ * The one gate for a shared media overlay URL, whether it came from `?media=` or a share code's
+ * stored state: http(s) only, no credentials, and an allowed module host or this page's origin.
+ * (The share-code path used to trust the server's `media`, which zod's `.url()` accepts for any
+ * scheme or host.)
+ */
+export function validateShareMediaUrl(raw: string): ShareMediaValidation {
+  const media = sanitizeRemoteUrl(raw);
+  if (!media) return { ok: false, warning: 'Media URL is invalid — overlay skipped' };
+  if (!isAllowedModuleHost(media) && !isSameOriginMedia(media)) {
+    return { ok: false, warning: 'Media host is not allowed — overlay skipped' };
+  }
+  return { ok: true, url: media };
+}
+
+/**
+ * The media URL a share link may carry, or `undefined`. A local file's `blob:` URL (or any
+ * object / data URL) only exists in this tab, so it never goes into og:url, a copied link or a
+ * share-code POST.
+ */
+export function shareableMediaUrl(item: { url: string; isObjectUrl?: boolean } | null | undefined): string | undefined {
+  if (!item || item.isObjectUrl) return undefined;
+  if (/^(blob|data):/i.test(item.url.trim())) return undefined;
+  return item.url;
 }
 
 export function hasShareModuleIntent(search?: string): boolean {
@@ -227,7 +252,10 @@ export async function resolveShareCode(code: string): Promise<PlayerShareState |
     if (normalized.row !== undefined) result.row = normalized.row;
     if (normalized.palette !== undefined) result.palette = normalized.palette;
     if (normalized.lite !== undefined) result.lite = normalized.lite;
-    if (normalized.media !== undefined) result.media = normalized.media;
+    if (normalized.media !== undefined) {
+      const media = validateShareMediaUrl(normalized.media);
+      if (media.ok) result.media = media.url;
+    }
     if (normalized.colorPalette !== undefined) result.colorPalette = normalized.colorPalette;
     return result;
   } catch {

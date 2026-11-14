@@ -94,8 +94,39 @@ const KEYBOARD_BLOCKED_COMMANDS_WHEN_CHEATSHEET = new Set<PlayerCommandId>([
   'stage.toggle',
 ]);
 
+/**
+ * One layer of the keyboard keymap stack. Every `keydown` on the window is offered to the layers
+ * from the highest priority down (most recently pushed first among equals); the first layer whose
+ * `onKeyDown` returns `true` consumes it and the layers below never see it. The global shortcuts
+ * are the bottom layer (`KEYMAP_PRIORITY.global`); a focused editor pushes a layer above them, so
+ * a note key typed into the pattern editor never also toggles stage mode, mute or the debug panel.
+ */
+export interface KeymapLayer {
+  /** For debugging and tests. */
+  id: string;
+  priority: number;
+  /** Return `true` when this layer consumed the event. */
+  onKeyDown: (event: KeyboardEvent) => boolean;
+}
+
+export const KEYMAP_PRIORITY = {
+  global: 0,
+  editor: 10,
+} as const;
+
+interface KeymapEntry {
+  layer: KeymapLayer;
+  seq: number;
+}
+
 class PlayerCommandBus {
   private handlers = new Map<PlayerCommandId, AnyHandler>();
+  private layers: KeymapEntry[] = [];
+  private layerSeq = 0;
+  private keyTarget: Pick<Window, 'addEventListener' | 'removeEventListener'> | null = null;
+  private readonly onWindowKeyDown = (event: KeyboardEvent): void => {
+    this.routeKeyDown(event);
+  };
   private state: CommandBusState = {
     cheatsheetOpen: false,
     inputFocused: false,
@@ -146,8 +177,52 @@ class PlayerCommandBus {
     return { handled: true, blocked: false };
   }
 
+  /**
+   * Adds a keymap layer and returns its removal function. The bus listens on `window` (one
+   * listener) while at least one layer exists.
+   */
+  pushKeymapLayer(layer: KeymapLayer): () => void {
+    const entry: KeymapEntry = { layer, seq: ++this.layerSeq };
+    this.layers.push(entry);
+    this.layers.sort((a, b) => b.layer.priority - a.layer.priority || b.seq - a.seq);
+    this.syncKeyListener();
+    return () => {
+      const index = this.layers.indexOf(entry);
+      if (index < 0) return;
+      this.layers.splice(index, 1);
+      this.syncKeyListener();
+    };
+  }
+
+  /** Offers `event` to the layers top-down; `true` when one of them consumed it. */
+  routeKeyDown(event: KeyboardEvent): boolean {
+    // Snapshot: a handler may push / pop layers.
+    for (const { layer } of this.layers.slice()) {
+      if (layer.onKeyDown(event)) return true;
+    }
+    return false;
+  }
+
+  /** Layer ids, top first (tests / debug). */
+  keymapLayerIds(): string[] {
+    return this.layers.map((entry) => entry.layer.id);
+  }
+
+  private syncKeyListener(): void {
+    const target = typeof window !== 'undefined' && typeof window.addEventListener === 'function' ? window : null;
+    if (this.layers.length > 0 && target && !this.keyTarget) {
+      target.addEventListener('keydown', this.onWindowKeyDown);
+      this.keyTarget = target;
+    } else if (this.layers.length === 0 && this.keyTarget) {
+      this.keyTarget.removeEventListener('keydown', this.onWindowKeyDown);
+      this.keyTarget = null;
+    }
+  }
+
   clear(): void {
     this.handlers.clear();
+    this.layers = [];
+    this.syncKeyListener();
   }
 }
 
