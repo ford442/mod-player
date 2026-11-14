@@ -3,21 +3,93 @@
  * width ∝ how long it plays, hue by pattern, `+++` / `---` markers as such. Click a chip to play
  * from that order (EngineCommand `seekOrder`, which also starts a stopped transport).
  *
- * Read-only half of #537: no loop region, jump arcs or tempo lane yet. Re-renders on load and on
+ * Phase 2 draws the jumps; there is no tempo lane yet. Re-renders on load and on
  * order change only; the row-rate playhead is `SongMapPlayhead` (pitfall 17).
  */
 import { memo, useMemo } from 'react';
 import { shallowEqual, usePlayerEngine, usePlayerEngineInstance } from '../hooks/usePlayerEngine';
 import type { SongOrder, SongStructure } from '../utils/songStructure';
 import {
+  arcPath,
   formatClock,
+  jumpLabel,
+  layoutJumps,
   layoutSongMap,
   patternHue,
   playheadPercent,
   selectSongMap,
   selectSongMapPlayhead,
   type ChipLayout,
+  type JumpMark,
 } from './songMapModel';
+
+/** Height of the arc strip above the chips, in SVG units (= px: the strip is h-3). */
+const ARC_STRIP = 12;
+
+/**
+ * Jumps over the chips: a curve from where playback leaves to where it lands (position jumps /
+ * pattern breaks that skip or go back), amber and dashed when the jump is the song looping. A pattern
+ * break to the next order is no arc — it is a tick on the chip it cuts short (`BreakTick`).
+ */
+const JumpArcs = memo(function JumpArcs({ marks }: { marks: readonly JumpMark[] }) {
+  const arcs = marks.filter((m) => m.shape !== 'sequential');
+  if (arcs.length === 0) return null;
+  return (
+    <div className="relative h-3" data-testid="song-map-jumps">
+      <svg
+        className="absolute inset-0 h-full w-full overflow-visible"
+        viewBox={`0 0 100 ${ARC_STRIP}`}
+        preserveAspectRatio="none"
+        role="img"
+        aria-label={`${arcs.length} jump${arcs.length === 1 ? '' : 's'}`}
+      >
+        {arcs.map((m, i) => (
+          <path
+            key={i}
+            d={arcPath(m.fromX, m.toX, ARC_STRIP)}
+            fill="none"
+            vectorEffect="non-scaling-stroke"
+            strokeWidth={1.25}
+            strokeDasharray={m.jump.loops ? '3 2' : undefined}
+            className={m.jump.loops ? 'stroke-amber-400' : 'stroke-cyan-300/80'}
+            data-loop={m.jump.loops ? 'true' : undefined}
+          >
+            <title>{jumpLabel(m.jump)}</title>
+          </path>
+        ))}
+      </svg>
+      {arcs.map((m, i) => (
+        <span
+          key={i}
+          aria-hidden="true"
+          className={`pointer-events-none absolute bottom-0 -translate-x-1/2 text-[8px] leading-none ${m.jump.loops ? 'text-amber-400' : 'text-cyan-300'}`}
+          style={{ left: `${m.toX}%` }}
+        >
+          ▾
+        </span>
+      ))}
+    </div>
+  );
+});
+
+/** Pattern breaks that cut a pattern short and fall into the next order: a tick where they leave. */
+const BreakTicks = memo(function BreakTicks({ marks }: { marks: readonly JumpMark[] }) {
+  return (
+    <>
+      {marks
+        .filter((m) => m.shape === 'sequential')
+        .map((m, i) => (
+          <div
+            key={i}
+            className="pointer-events-none absolute bottom-0 h-2 w-px bg-white/80"
+            style={{ left: `${m.fromX}%` }}
+            title={jumpLabel(m.jump)}
+            data-testid="song-map-break"
+          />
+        ))}
+    </>
+  );
+});
 
 function chipLabel(o: SongOrder): string {
   if (o.isSkip) return '+++';
@@ -96,6 +168,7 @@ export function SongMap() {
   const engine = usePlayerEngineInstance();
   const { structure, order } = usePlayerEngine(selectSongMap, shallowEqual);
   const layout = useMemo(() => (structure ? layoutSongMap(structure) : []), [structure]);
+  const marks = useMemo(() => (structure ? layoutJumps(structure, layout) : []), [structure, layout]);
   const onSelect = useMemo(
     () => (target: number) => engine.dispatch({ type: 'seekOrder', order: target }),
     [engine],
@@ -109,15 +182,19 @@ export function SongMap() {
 
   return (
     <nav aria-label="Song map — order list" className="select-none">
+      <JumpArcs marks={marks} />
       <div className="relative h-6 overflow-hidden rounded bg-panel-inset">
         {structure.orders.map((entry, i) => (
           <Chip key={i} entry={entry} chip={layout[i]!} active={i === order} onSelect={onSelect} />
         ))}
+        <BreakTicks marks={marks} />
         <SongMapPlayhead structure={structure} layout={layout} />
       </div>
       <div className="mt-0.5 flex justify-between font-mono text-[9px] text-gray-500">
         <span>
-          {structure.orders.length} orders{structure.approximate ? ' · ≈ timing' : ''}
+          {structure.orders.length} orders
+          {structure.jumps.length > 0 ? ` · ${structure.jumps.length} jump${structure.jumps.length === 1 ? '' : 's'}` : ''}
+          {structure.approximate ? ' · ≈ timing' : ''}
         </span>
         <span>[ / ] order</span>
       </div>
