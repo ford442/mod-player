@@ -42,7 +42,7 @@ describe('#511 guards', () => {
 
   it('session I/O is not imported by render-loop / frame code', () => {
     const importers = files.filter((f) => SESSION_IMPORT.test(readFileSync(join(ROOT, f), 'utf8')));
-    expect(importers.sort()).toEqual(['store/shaderPrefsStore.ts', 'utils/songSession.ts', 'utils/songSessionIdb.ts', 'utils/songSessionListeners.ts']);
+    expect(importers.sort()).toEqual(['store/shaderPrefsStore.ts', 'utils/songSession.ts', 'utils/songSessionIdb.ts', 'utils/songSessionListeners.ts', 'utils/songStructureSession.ts']);
     for (const f of importers) {
       expect(code(f)).not.toMatch(/requestAnimationFrame|AudioWorkletProcessor/);
     }

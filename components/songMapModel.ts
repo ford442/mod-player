@@ -7,6 +7,7 @@
  * leaf with its own selector (`selectSongMapPlayhead`) — pitfall 17.
  */
 import type { PlayerSnapshot } from '../audio/engine/PlayerEngine';
+import type { LoopRegion } from '../utils/songStructureLoop';
 import {
   jumpShape,
   rowFractionInOrder,
@@ -54,13 +55,46 @@ export function formatClock(seconds: number): string {
 export interface SongMapView {
   structure: SongStructure | null;
   order: number;
+  loopRegion: LoopRegion | null;
 }
 
-/** SongMap: the structure (once per load) and the current order (a few per second at most). */
+/**
+ * SongMap: the structure (once per load), the current order (a few per second at most) and the loop
+ * region (when the user changes it). The snapshot keeps the region object stable between changes.
+ */
 export const selectSongMap = (s: PlayerSnapshot): SongMapView => ({
   structure: s.songStructure,
   order: s.moduleInfo.order,
+  loopRegion: s.loopRegion,
 });
+
+/**
+ * The order whose chip holds `percent` of the map's width (clamped to the ends) — the drag's hit
+ * test. Null for an empty map.
+ */
+export function orderAtPercent(layout: readonly ChipLayout[], percent: number): number | null {
+  if (layout.length === 0 || !Number.isFinite(percent)) return null;
+  let lo = 0;
+  let hi = layout.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1;
+    if (layout[mid]!.left <= percent) lo = mid;
+    else hi = mid - 1;
+  }
+  return lo;
+}
+
+/** The loop region's band over the chips, percent of the map's width; null without a region / chips. */
+export function loopBand(
+  layout: readonly ChipLayout[],
+  region: LoopRegion | null,
+): { left: number; width: number } | null {
+  if (!region) return null;
+  const first = layout[region.start];
+  const last = layout[region.end];
+  if (!first || !last) return null;
+  return { left: first.left, width: last.left + last.width - first.left };
+}
 
 /** The playhead leaf: order + fractional row — row rate. */
 export const selectSongMapPlayhead = (s: PlayerSnapshot): { order: number; row: number } => ({

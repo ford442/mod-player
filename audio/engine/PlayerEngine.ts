@@ -58,6 +58,18 @@ import { createLogger } from '../../utils/log';
 import { readSongStructureFromBytes } from '../../utils/readSongStructure';
 import type { SongStructure } from '../../utils/songStructure';
 import {
+  LOOP_TRACKER_IDLE,
+  makeLoopRegion,
+  parseLoopRegion,
+  sameLoopRegion,
+  setLoopEdge,
+  stepLoop,
+  type LoopRegion,
+  type LoopTracker,
+} from '../../utils/songStructureLoop';
+import { sessionLoopRegionStore, type LoopRegionStore } from '../../utils/songStructureSession';
+import { getSongFingerprint, subscribeSongFingerprint } from '../../utils/songIdentity';
+import {
   createSongStructureClient,
   SupersededError,
   type SongStructureClient,
@@ -123,6 +135,11 @@ export interface PlayerSnapshot extends OutputDeviceState {
    * the parse — null until the read (in a worker) lands, and for a module whose read failed.
    */
   readonly songStructure: SongStructure | null;
+  /**
+   * The song map's loop region (#537 phase 2): playback that runs out of its last order seeks back to
+   * its first. Null = none. Cleared by every load; restored from the song's SongSession.
+   */
+  readonly loopRegion: LoopRegion | null;
 }
 
 /** Commands the command bus, MIDI, mediaSession and the UI send (`dispatch`). */
@@ -137,6 +154,11 @@ export type EngineCommand =
   | { type: 'jumpToOrder'; order: number }
   /** Go to `row` of `order` and play from there (starts a stopped / ready transport; a pause stays paused). */
   | { type: 'seekOrder'; order: number; row?: number }
+  /** Loop orders `start`…`end` (either way round; pulled in to playable orders). Needs the song map's structure. */
+  | { type: 'setLoopRegion'; start: number; end: number }
+  | { type: 'clearLoopRegion' }
+  /** Loop in / out at the current order (the keyboard's Shift+[ / Shift+]). */
+  | { type: 'markLoopEdge'; edge: 'start' | 'end' }
   | { type: 'setVolume'; value: number }
   | { type: 'nudgeVolume'; delta: number }
   | { type: 'setPan'; value: number }
@@ -165,6 +187,8 @@ export interface PlayerEngineOptions {
    * workers. `null` turns the song map's read off.
    */
   songStructureSource?: SongStructureSource | null;
+  /** Where the loop region is remembered per song (#537). Default: the SongSession store; `null` = nowhere. */
+  loopRegionStore?: LoopRegionStore | null;
 }
 
 /** Budget of the main-thread fallback read: past it the starts are extrapolated (readSongStructure). */
@@ -226,6 +250,7 @@ function createInitialSnapshot(volume: number, output: OutputDeviceState): Playe
     workletLoadError: null,
     analyserNode: null,
     songStructure: null,
+    loopRegion: null,
   };
 }
 
@@ -253,6 +278,14 @@ export class PlayerEngine {
    * not a transport flag; cleared by the next load and by stop.
    */
   private pendingStartStep: number | null = null;
+  /** The loop region's crossing detector (utils/songStructureLoop.ts) — a position, not a transport flag. */
+  private loopTracker: LoopTracker = LOOP_TRACKER_IDLE;
+  private readonly loopRegionStore: LoopRegionStore | null;
+  /** Per load: the stored region was looked up (or the user's own choice made that unnecessary). */
+  private loopRestoreDone = false;
+  /** Per load: the user set / cleared the region, so a stored one must not overwrite it. */
+  private loopTouched = false;
+  private offSongFingerprint: (() => void) | null = null;
 
   private readonly stopFn: (destroy?: boolean) => void;
   private readonly pauseFn: () => void;
@@ -280,6 +313,7 @@ export class PlayerEngine {
     this.preMuteVolume = this.store.getSnapshot().volume;
     this.startAudio = options.startAudioPlayback ?? startAudioPlayback;
     this.songStructureSourceOption = options.songStructureSource;
+    this.loopRegionStore = options.loopRegionStore === undefined ? sessionLoopRegionStore : options.loopRegionStore;
 
     this.transport.subscribe(() => {
       const t = this.transport;
@@ -342,12 +376,17 @@ export class PlayerEngine {
     this.loadModuleFn = createLoadModule(this.refs, this.setters.setStatus, this.processModuleDataFn);
     this.refs.ensureMainThreadModuleRef.current = createEnsureMainThreadModule(this.refs);
 
-    this.updateUIFn = createUpdateUI({
+    const updateUIFrame = createUpdateUI({
       refs: this.refs,
       setters: this.setters,
       kickTrigger: 0,
       grooveAmount: 0,
     });
+    // The loop region looks at the position the UI loop just drained (the shared ring is read there).
+    this.updateUIFn = () => {
+      updateUIFrame();
+      this.stepLoopRegion();
+    };
     this.refs.updateUIRef.current = this.updateUIFn;
     this.refs.playRef.current = (playOptions) => this.play(playOptions);
 
@@ -392,6 +431,8 @@ export class PlayerEngine {
   async init(): Promise<void> {
     const generation = ++this.generation;
     const isCancelled = () => generation !== this.generation;
+    this.offSongFingerprint?.();
+    this.offSongFingerprint = subscribeSongFingerprint(() => this.restoreLoopRegion());
     await runLibOpenMPTInit({
       refs: this.refs,
       setters: this.setters,
@@ -412,6 +453,9 @@ export class PlayerEngine {
     this.songStructureClient?.dispose();
     this.songStructureClient = null;
     this.pendingStartStep = null;
+    this.offSongFingerprint?.();
+    this.offSongFingerprint = null;
+    this.loopTracker = LOOP_TRACKER_IDLE;
     this.stopFn(false);
     this.output.detach();
     cleanupLibOpenMPT(this.refs);
@@ -482,6 +526,7 @@ export class PlayerEngine {
 
   stop(destroy = false): void {
     this.pendingStartStep = null;
+    this.loopTracker = LOOP_TRACKER_IDLE;
     this.stopFn(destroy);
   }
 
@@ -540,6 +585,83 @@ export class PlayerEngine {
 
   seekOrders(delta: number): void {
     this.seekOrder(this.refs.playbackStateRef.current.currentOrder + delta, 0);
+  }
+
+  // ── loop region (#537 phase 2) ─────────────────────────────────────────────────────────────────
+
+  /**
+   * Loop orders `region.start`…`region.end`, or clear it with null. The region is validated against
+   * the song map's structure (pulled in to playable orders), so it waits for that read: until it
+   * lands this does nothing. Remembered per song once the song's fingerprint is known.
+   */
+  setLoopRegion(region: LoopRegion | null): void {
+    const structure = this.store.getSnapshot().songStructure;
+    if (region && !structure) return;
+    const next = region && structure ? makeLoopRegion(structure, region.start, region.end) : null;
+    this.loopTouched = true;
+    if (sameLoopRegion(next, this.store.getSnapshot().loopRegion)) return;
+    this.loopTracker = LOOP_TRACKER_IDLE;
+    this.store.patch({ loopRegion: next });
+    const fingerprint = getSongFingerprint();
+    if (fingerprint && this.loopRegionStore) {
+      this.loopRegionStore.save(fingerprint, next).catch((err: unknown) => {
+        console.warn('[Engine] loop region not saved:', err);
+      });
+    }
+  }
+
+  /** Loop in / out at the order on screen. */
+  markLoopEdge(edge: 'start' | 'end'): void {
+    const { songStructure, loopRegion, moduleInfo } = this.store.getSnapshot();
+    if (!songStructure) return;
+    this.setLoopRegion(setLoopEdge(songStructure, loopRegion, edge, moduleInfo.order));
+  }
+
+  /**
+   * One position report per UI frame: when playback has run out of the region, seek back to its
+   * start through the pending-seek path (`seekFn`) — no worklet message. The order is the *rendered*
+   * one (the worklet's latest report, ahead of what is heard), so the loop reacts as early as the
+   * main thread can. It is still a main-thread decision: the next order's first audio can already be
+   * rendered (up to a position report plus the seek's trip to the worklet; not measured) and the
+   * check stops with the UI loop (a hidden tab). Sample-exact looping would need the worklet to loop
+   * itself — a protocol change, left out.
+   */
+  private stepLoopRegion(): void {
+    const { loopRegion, songStructure } = this.store.getSnapshot();
+    if (!loopRegion || !songStructure || !this.transport.isPlaying) return;
+    const order = this.refs.audioWorkletNodeRef.current
+      ? this.refs.workletOrderRef.current
+      : this.refs.playbackStateRef.current.currentOrder;
+    const step = stepLoop(songStructure, loopRegion, this.loopTracker, order);
+    this.loopTracker = step.tracker;
+    if (step.seekTo !== null) this.seekFn(this.stepOfOrder(step.seekTo));
+  }
+
+  /**
+   * Look the song's stored region up, once per load, when both the structure and the fingerprint are
+   * there (they land in either order). A region the user already chose is saved instead of replaced.
+   */
+  private restoreLoopRegion(): void {
+    const store = this.loopRegionStore;
+    const fingerprint = getSongFingerprint();
+    const { songStructure: structure, loopRegion } = this.store.getSnapshot();
+    if (!store || !fingerprint || !structure || this.loopRestoreDone) return;
+    this.loopRestoreDone = true;
+    if (this.loopTouched) {
+      store.save(fingerprint, loopRegion).catch((err: unknown) => console.warn('[Engine] loop region not saved:', err));
+      return;
+    }
+    const token = this.songStructureToken;
+    store.load(fingerprint).then(
+      (raw) => {
+        if (token !== this.songStructureToken || this.loopTouched) return;
+        const restored = parseLoopRegion(structure, raw);
+        if (!restored) return;
+        this.loopTracker = LOOP_TRACKER_IDLE;
+        this.store.patch({ loopRegion: restored });
+      },
+      (err: unknown) => console.warn('[Engine] loop region not restored:', err),
+    );
   }
 
   // ── master levels (the GainNode owns volume — pitfall 16) ─────────────────────────────────────
@@ -702,6 +824,9 @@ export class PlayerEngine {
       case 'seekOrders': this.seekOrders(command.delta); return;
       case 'jumpToOrder': this.jumpToOrder(command.order); return;
       case 'seekOrder': this.seekOrder(command.order, command.row ?? 0); return;
+      case 'setLoopRegion': this.setLoopRegion({ start: command.start, end: command.end }); return;
+      case 'clearLoopRegion': this.setLoopRegion(null); return;
+      case 'markLoopEdge': this.markLoopEdge(command.edge); return;
       case 'setVolume': this.setMasterVolume(command.value); return;
       case 'nudgeVolume': this.setMasterVolume((v) => v + command.delta); return;
       case 'setPan': this.setMasterPan(command.value); return;
@@ -770,11 +895,16 @@ export class PlayerEngine {
   private onModuleParsed(fileData: Uint8Array): void {
     this.pendingStartStep = null;
     const token = ++this.songStructureToken;
-    this.store.patch({ songStructure: null });
+    this.loopTracker = LOOP_TRACKER_IDLE;
+    this.loopRestoreDone = false;
+    this.loopTouched = false;
+    this.store.patch({ songStructure: null, loopRegion: null });
     const read = this.resolveSongStructureSource();
     if (!read) return;
     const land = (structure: SongStructure) => {
-      if (token === this.songStructureToken) this.store.patch({ songStructure: structure });
+      if (token !== this.songStructureToken) return;
+      this.store.patch({ songStructure: structure });
+      this.restoreLoopRegion();
     };
     const viaWorker = read === this.songStructureClient?.read;
     read(fileData)

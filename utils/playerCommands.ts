@@ -21,6 +21,9 @@ export type PlayerCommandId =
   | 'volume.set'
   | 'pan.set'
   | 'loop.toggle'
+  | 'loop.markStart'
+  | 'loop.markEnd'
+  | 'loop.clearRegion'
   | 'mute.toggle'
   | 'fullscreen.toggle'
   | 'debug.toggle'
@@ -80,6 +83,9 @@ const KEYBOARD_BLOCKED_COMMANDS_WHEN_CHEATSHEET = new Set<PlayerCommandId>([
   'volume.set',
   'pan.set',
   'loop.toggle',
+  'loop.markStart',
+  'loop.markEnd',
+  'loop.clearRegion',
   'mute.toggle',
   'fullscreen.toggle',
   'debug.toggle',
@@ -163,6 +169,9 @@ export const COMMAND_LABELS: Record<PlayerCommandId, string> = {
   'volume.set': 'Set volume',
   'pan.set': 'Set pan',
   'loop.toggle': 'Toggle loop',
+  'loop.markStart': 'Loop region: start here',
+  'loop.markEnd': 'Loop region: end here',
+  'loop.clearRegion': 'Loop region: clear',
   'mute.toggle': 'Mute / unmute',
   'fullscreen.toggle': 'Toggle fullscreen',
   'debug.toggle': 'Toggle debug panel',

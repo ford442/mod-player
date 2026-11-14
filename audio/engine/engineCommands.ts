@@ -47,6 +47,10 @@ export const ENGINE_COMMANDS = {
     return value === null ? null : { type: 'setPan', value };
   },
   'loop.toggle': () => ({ type: 'toggleLoop' }),
+  // Song map loop region (#537 phase 2): in / out at the current order, and clear.
+  'loop.markStart': () => ({ type: 'markLoopEdge', edge: 'start' }),
+  'loop.markEnd': () => ({ type: 'markLoopEdge', edge: 'end' }),
+  'loop.clearRegion': () => ({ type: 'clearLoopRegion' }),
   'mute.toggle': () => ({ type: 'toggleMute' }),
 } satisfies Partial<Record<PlayerCommandId, (payload: unknown) => EngineCommand | null>>;
 
