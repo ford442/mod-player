@@ -5,17 +5,17 @@
   "variant": "eh-wasm",
   "exceptions": "wasm",
   "simd": false,
-  "version": "4e155589de",
+  "version": "4eae35f6bd",
   "sharedMemory": false,
   "glue": {
     "file": "libopenmpt-worklet.js",
-    "bytes": 49922,
-    "integrity": "sha384-0DLaCuQGUZlY7bQgDOAMs3vb413U15hz5llUvUj1eqEBADLNHukhjXreYTXOVX0M"
+    "bytes": 51143,
+    "integrity": "sha384-Sf/OSa8mnGv6VfGpmF2V1CeKIWRAZSm2vULG4JQBUobi2gWhD+zIa3QD3qzvaYM5"
   },
   "wasm": {
     "file": "libopenmpt-worklet.wasm",
-    "bytes": 1376401,
-    "integrity": "sha384-AFsnsWr/e8bvv+kTggy196a7G9M5oIQcIB2hViDHgj+0GYVLToaKDwJkN0dAbN4Y"
+    "bytes": 1381839,
+    "integrity": "sha384-OaND6f17csiYU21sUaHnSrFQm9ppBCFYgGUkQ9MS5jUdYnYdbEsXdW8w4tNj676U"
   },
   "cExportCount": 113
 }

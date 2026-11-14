@@ -13,6 +13,11 @@ export const JS_ENGINE_ARTIFACTS: Readonly<Record<JsEngineArtifact, {
 }>>;
 export const PLAYBACK_C_EXPORTS: readonly string[];
 export const REQUIRED_C_EXPORTS: readonly string[];
+/** The xasm_* inspection shim's exports (shared pair only; never the playback heap). */
+export const INSPECT_C_EXPORTS: readonly string[];
+export const INSPECT_SOURCE_REL: string;
+/** XASM_INSPECT_ABI_VERSION as wasm/xasm_inspect.cpp defines it. */
+export function inspectAbiVersion(root?: string): number;
 export const REQUIRED_RUNTIME_MEMBERS: readonly string[];
 export const FORBIDDEN_RUNTIME_MEMBERS: readonly string[];
 

@@ -32,17 +32,49 @@ export function copyToHeap(lib: CopyLib, bytes: Uint8Array, what = 'module data'
 /**
  * Create a libopenmpt module from in-memory file bytes. The heap copy of the file is freed on
  * every path (libopenmpt copies what it keeps). Returns 0 when libopenmpt rejects the file;
- * throws when the heap cannot hold the copy.
+ * throws when the heap cannot hold the copy. `ctls` are initial ctls (e.g. `load.skip_samples`),
+ * which need `stringToUTF8`.
  */
 export function createModuleFromBytes(
-  lib: CopyLib & Pick<LibOpenMPT, '_openmpt_module_create_from_memory2'>,
+  lib: CopyLib & Pick<LibOpenMPT, '_openmpt_module_create_from_memory2'> & Partial<StringLib>,
   bytes: Uint8Array,
+  ctls?: Readonly<Record<string, string>>,
 ): number {
-  const ptr = copyToHeap(lib, bytes);
+  const entries = ctls ? Object.entries(ctls) : [];
+  if (entries.length === 0) {
+    const ptr = copyToHeap(lib, bytes);
+    try {
+      return lib._openmpt_module_create_from_memory2(ptr, bytes.byteLength, 0, 0, 0, 0, 0, 0, 0);
+    } finally {
+      lib._free(ptr);
+    }
+  }
+  // Initial ctls: a NULL-terminated array of `openmpt_module_initial_ctl { const char *ctl, *value }`
+  // (two wasm32 pointers each), applied by libopenmpt before it loads the file.
+  const toFree: number[] = [];
   try {
-    return lib._openmpt_module_create_from_memory2(ptr, bytes.byteLength, 0, 0, 0, 0, 0, 0, 0);
+    const cstr = (s: string) => {
+      const p = lib.stringToUTF8?.(s) ?? 0;
+      if (!p) throw new Error(`could not allocate the ctl string "${s}" – out of WASM heap memory`);
+      toFree.push(p);
+      return p;
+    };
+    const pairs = entries.map(([k, v]) => [cstr(k), cstr(v)] as const);
+    const table = mallocOrThrow(lib, 8 * (pairs.length + 1), 'initial ctls');
+    toFree.push(table);
+    const data = copyToHeap(lib, bytes);
+    toFree.push(data);
+    // A fresh view after every allocation (the heap may have grown).
+    const view = new DataView(lib.HEAPU8.buffer);
+    pairs.forEach(([k, v], i) => {
+      view.setUint32(table + 8 * i, k, true);
+      view.setUint32(table + 8 * i + 4, v, true);
+    });
+    view.setUint32(table + 8 * pairs.length, 0, true);
+    view.setUint32(table + 8 * pairs.length + 4, 0, true);
+    return lib._openmpt_module_create_from_memory2(data, bytes.byteLength, 0, 0, 0, 0, 0, 0, table);
   } finally {
-    lib._free(ptr);
+    for (const p of toFree) lib._free(p);
   }
 }
 

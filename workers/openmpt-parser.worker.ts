@@ -6,9 +6,8 @@ import {
 import { waitForRuntimeInitialized } from '../audio-worklet/libRuntimeReady';
 import { parseModuleWithLib } from '../utils/parseModuleWithLib';
 import { mallocOrThrow } from '../utils/wasmHeap';
-import { extractInstrumentTable, mergeLibInstrumentNames } from '../utils/sampleExtract';
 import { parserLog, setParserDebugFromMainThread } from '../utils/parserDebug';
-import type { InstrumentTable } from '../types/instruments';
+import { instrumentTableTransferables, type InstrumentTable } from '../types/instruments';
 import { readSongStructureFromBytes } from '../utils/readSongStructure';
 import type { SongStructureRequest, SongStructureResponse } from '../utils/songStructureWorker';
 
@@ -173,12 +172,10 @@ async function handleMessage(data: IncomingMessage): Promise<void> {
     postProgress('wasm', id);
     const lib = await getLib();
     postProgress('patterns', id);
-    const { patternMatrices, metadata } = parseModuleWithLib(lib, fileData, fileName);
+    // One libopenmpt parse serves patterns AND the instrument table (utils/moduleInspect.ts); the
+    // 'instruments' stage now only marks the hand-off.
+    const { patternMatrices, metadata, instrumentTable } = parseModuleWithLib(lib, fileData, fileName);
     postProgress('instruments', id);
-    const instrumentTable = mergeLibInstrumentNames(
-      extractInstrumentTable(fileData, fileName),
-      metadata.instruments,
-    );
     parserLog(
       'worker parse done',
       metadata.numOrders,
@@ -196,7 +193,8 @@ async function handleMessage(data: IncomingMessage): Promise<void> {
       metadata,
       instrumentTable,
     };
-    self.postMessage(response);
+    // Waveform peaks / keymaps are typed arrays: transfer them instead of copying.
+    self.postMessage(response, { transfer: instrumentTableTransferables(instrumentTable) });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown worker parse error';
     postError(message, id);
