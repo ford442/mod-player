@@ -29,7 +29,7 @@ class FakeVideo {
   paused = false;
   seeking = false;
   frameCallbacks: Array<() => void> = [];
-  requestVideoFrameCallback?: (cb: () => void) => number = (cb) => {
+  requestVideoFrameCallback: ((cb: () => void) => number) | undefined = (cb) => {
     this.frameCallbacks.push(cb);
     return this.frameCallbacks.length;
   };
