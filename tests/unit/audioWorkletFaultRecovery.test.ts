@@ -94,7 +94,6 @@ describe('handleWorkletFault (JS worklet crash recovery)', () => {
     expect(state.restartAttempts).toBe(1);
 
     // isPlaying goes false immediately — the caller's next render can't show "Playing".
-    expect(refs.isPlayingRef.current).toBe(false);
     expect(callbacks.setIsPlaying).toHaveBeenCalledWith(false);
     for (const call of callbacks.setStatus.mock.calls) {
       expect(call[0]).not.toBe('Playing...');

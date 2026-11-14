@@ -75,7 +75,7 @@ export async function handleWorkletFault(
 ): Promise<void> {
   const attempt = noteAudioRestartAttempt();
   setAudioFaulted(reason, message);
-  refs.isPlayingRef.current = false;
+  // Reported, not written: isPlayingRef is a view of the transport FSM (pitfall 17).
   callbacks.setIsPlaying(false);
 
   console.error(`[PLAY] Worklet faulted (${reason}, attempt ${attempt}): ${message}`);
@@ -140,7 +140,6 @@ export async function acceptWorkletLoaded(
   }
 
   log.log('Worklet loaded module – starting animation');
-  refs.isPlayingRef.current = true;
   callbacks.setIsPlaying(true);
   callbacks.setStatus('Playing...');
   if (ctx.state === 'suspended') {

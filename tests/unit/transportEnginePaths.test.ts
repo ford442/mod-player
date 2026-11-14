@@ -18,8 +18,23 @@ import type { LibOpenMPTRefs } from '../../hooks/libOpenMPT/types';
 import { runScriptProcessorFallback } from '../../hooks/audioGraph/scriptProcessorFallback';
 import { acceptWorkletLoaded } from '../../hooks/audioGraph/startJsWorkletPlayback';
 import type { AudioGraphCallbacks, AudioGraphRefs } from '../../hooks/audioGraph/types';
+import { resolveJsInterpolationLength } from '../../utils/jsInterpolation';
+import {
+  INTERPOLATION_SINC_LP,
+  OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH,
+} from '../../utils/openmptRenderParams';
 
 const ref = <T,>(current: T) => ({ current });
+
+/**
+ * isPlayingRef as PlayerEngine has it: a read-only view of the transport FSM (pitfall 17). A start
+ * path reports through `callbacks.setIsPlaying`; writing the ref is the bug this throws on.
+ */
+const readOnlyPlayingRef = (playing = false) =>
+  Object.defineProperty({} as { current: boolean }, 'current', {
+    get: () => playing,
+    set: () => { throw new Error('isPlayingRef is a view of the transport FSM — report via setIsPlaying'); },
+  });
 
 function makeCallbacks() {
   return {
@@ -47,7 +62,7 @@ describe('acceptWorkletLoaded (JS worklet `loaded` ack)', () => {
 
   function setup(paused: boolean) {
     const refs = {
-      isPlayingRef: ref(false),
+      isPlayingRef: readOnlyPlayingRef(),
       isPausedRef: ref(paused),
       gainNodeRef: ref({ gain: { value: 0 } }),
       stereoPannerRef: ref({ pan: { value: 0 } }),
@@ -67,9 +82,8 @@ describe('acceptWorkletLoaded (JS worklet `loaded` ack)', () => {
     node.port.postMessage.mock.calls.map((c) => (c[0] as { type: string }).type);
 
   it('starts playing when not paused', async () => {
-    const { refs, callbacks, node, run } = setup(false);
+    const { callbacks, node, run } = setup(false);
     await run();
-    expect(refs.isPlayingRef.current).toBe(true);
     expect(callbacks.setIsPlaying).toHaveBeenCalledWith(true);
     expect(callbacks.setStatus).toHaveBeenLastCalledWith('Playing...');
     expect(sent(node)).toEqual([MAIN_TO_WORKLET.play]);
@@ -77,9 +91,8 @@ describe('acceptWorkletLoaded (JS worklet `loaded` ack)', () => {
   });
 
   it('comes up paused, not playing, when the transport is paused', async () => {
-    const { refs, callbacks, node, run } = setup(true);
+    const { callbacks, node, run } = setup(true);
     await run();
-    expect(refs.isPlayingRef.current).toBe(false);
     expect(callbacks.setIsPlaying).not.toHaveBeenCalled();
     expect(callbacks.setStatus).toHaveBeenLastCalledWith('Paused.');
     // Never un-silences the processor...
@@ -159,7 +172,7 @@ describe('ScriptProcessor fallback', () => {
       spRightBufPtr: ref(0),
       masterInputRef: ref({}),
       scriptProcessorRef: ref(null),
-      isPlayingRef: ref(false),
+      isPlayingRef: readOnlyPlayingRef(),
       isPausedRef: ref(paused),
       playbackEngineRef: ref(null),
       animationFrameHandle: ref(0),
@@ -181,22 +194,76 @@ describe('ScriptProcessor fallback', () => {
         refs, callbacks as unknown as AudioGraphCallbacks, { volume: 1, panValue: 0, isLooping: false }, ctx,
         workletNode as unknown as AudioWorkletNode,
       );
-    const render = () => {
+    const render = (playbackTime?: number) => {
       const outL = new Float32Array(BUFFER).fill(0.5);
       const outR = new Float32Array(BUFFER).fill(0.5);
       spNode.onaudioprocess?.({
         outputBuffer: { getChannelData: (c: number) => (c === 0 ? outL : outR) },
+        ...(playbackTime === undefined ? {} : { playbackTime }),
       });
       return { outL, outR };
     };
-    return { refs, callbacks, lib, start, render };
+    return { refs, callbacks, lib, ctx, start, render };
   }
+
+  it('reports the position the block STARTS at, tagged with its playbackTime (like the worklet)', async () => {
+    const { refs, lib, start, render } = setup(false);
+    // Each 4096-frame render moves the module on (16 rows here), as libopenmpt would.
+    let row = 4;
+    let seconds = 0.5;
+    lib._openmpt_module_get_current_row.mockImplementation(() => row);
+    lib._openmpt_module_get_position_seconds.mockImplementation(() => seconds);
+    lib._openmpt_module_read_float_stereo.mockImplementation(() => {
+      row += 16;
+      seconds += BUFFER / 48000;
+      return BUFFER;
+    });
+    await start();
+    render(1.25);
+    const sample = (refs as unknown as { workletPositionSampleRef: { current: { rowInt: number; positionSeconds: number; workletTime: number } } })
+      .workletPositionSampleRef.current;
+    expect(sample.rowInt).toBe(4); // not 20: that is where the block ENDS, ~85 ms of audio later
+    expect(sample.positionSeconds).toBe(0.5);
+    expect(sample.workletTime).toBe(1.25);
+  });
+
+  it('falls back to currentTime when the event has no playbackTime', async () => {
+    const { refs, ctx, start, render } = setup(false);
+    (ctx as unknown as { currentTime: number }).currentTime = 3;
+    await start();
+    render();
+    const sample = (refs as unknown as { workletPositionSampleRef: { current: { workletTime: number } } })
+      .workletPositionSampleRef.current;
+    expect(sample.workletTime).toBe(3);
+  });
+
+  it('renders with the same interpolation filter as the worklet (resolveJsInterpolationLength)', async () => {
+    const { lib, start } = setup(false);
+    await start();
+    expect(lib._openmpt_module_set_render_param).toHaveBeenCalledWith(
+      1234,
+      OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH,
+      resolveJsInterpolationLength(),
+    );
+    expect(resolveJsInterpolationLength()).toBe(INTERPOLATION_SINC_LP); // the default, not cubic
+  });
+
+  it('a failed buffer allocation reports a fault instead of rendering into address 0', async () => {
+    const { refs, callbacks, lib, ctx, start } = setup(false);
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    lib._malloc.mockReturnValue(0);
+    await start();
+    expect((ctx as unknown as { createScriptProcessor: ReturnType<typeof vi.fn> }).createScriptProcessor).not.toHaveBeenCalled();
+    expect(lib._openmpt_module_read_float_stereo).not.toHaveBeenCalled();
+    expect(callbacks.setIsPlaying).toHaveBeenCalledWith(false);
+    expect(callbacks.setIsPlaying).not.toHaveBeenCalledWith(true);
+    expect(refs.spLeftBufPtr.current).toBe(0);
+  });
 
   it('renders the module while playing, and records itself as the playing engine', async () => {
     const { refs, callbacks, lib, start, render } = setup(false);
     await start();
     expect(refs.playbackEngineRef.current).toBe('scriptprocessor');
-    expect(refs.isPlayingRef.current).toBe(true);
     expect(callbacks.setIsPlaying).toHaveBeenCalledWith(true);
     render();
     expect(lib._openmpt_module_read_float_stereo).toHaveBeenCalledTimes(1);
@@ -220,9 +287,8 @@ describe('ScriptProcessor fallback', () => {
   });
 
   it('started while paused (e.g. after a worklet fault) stays paused', async () => {
-    const { refs, callbacks, lib, start, render } = setup(true);
+    const { callbacks, lib, start, render } = setup(true);
     await start();
-    expect(refs.isPlayingRef.current).toBe(false);
     expect(callbacks.setIsPlaying).not.toHaveBeenCalled();
     expect(callbacks.setStatus).toHaveBeenLastCalledWith('Paused.');
     render();

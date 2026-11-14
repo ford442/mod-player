@@ -58,9 +58,11 @@ describe('libopenmpt interpolation filter (Sinc+LP)', () => {
     expect(start.indexOf('postSetRenderParam(')).toBeLessThan(start.indexOf('postModuleLoad(node'));
   });
 
-  it('ScriptProcessor fallback stays cubic on param 3 (main-thread callback budget)', () => {
+  it('ScriptProcessor fallback renders with the worklet’s filter on param 3 (no hard-coded cubic)', () => {
+    // Falling back must not change the sound: same resolved length (?interp=4 still opts down).
     expect(scriptProcessor).toContain('OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH');
-    expect(scriptProcessor).toContain('INTERPOLATION_CUBIC');
+    expect(scriptProcessor).toContain('resolveJsInterpolationLength()');
+    expect(scriptProcessor).not.toContain('INTERPOLATION_CUBIC');
     expect(scriptProcessor).not.toMatch(/_openmpt_module_set_render_param\([^)]*,\s*2\s*,/);
   });
 });
