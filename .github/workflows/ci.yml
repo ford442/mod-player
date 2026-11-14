@@ -305,7 +305,7 @@ jobs:
         # whenever the runner image updates.
         run: |
           command -v shellcheck >/dev/null || { echo "❌ shellcheck is not installed on this runner"; exit 1; }
-          for f in scripts/*.sh scripts/lib/*.sh; do
+          for f in scripts/*.sh scripts/lib/*.sh scripts/ci/*.sh; do
             shellcheck --severity=warning -x --source-path=SCRIPTDIR "$f"
             bash -n "$f"
             echo "✅ $f clean"
@@ -318,9 +318,11 @@ jobs:
           echo "✅ Tracked JS worklet intact"
 
   # Rebuild the committed real-WASM libopenmpt pair (JS engine) with the pinned emsdk and fail on
-  # drift. The build is byte-reproducible (verified from a clean tree: identical sha256, no absolute
-  # paths embedded), so committed artifacts must equal a fresh build — same contract as the
-  # generated JS worklet (#435). Path-filtered: only runs when its inputs change.
+  # drift. The build is byte-reproducible across machines and checkout paths (the link names the
+  # static lib by a relative path: an absolute one leaked into ThinLTO's input order and gave
+  # path-dependent playback wasms), so committed artifacts must equal a fresh build — same
+  # contract as the generated JS worklet (#435). Path-filtered: only runs when its inputs change.
+  # .github/workflows/wasm-reproducibility.yml rebuilds cold (no caches) weekly, at two paths.
   js-libopenmpt-rebuild:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -340,6 +342,7 @@ jobs:
               - 'scripts/build-js-libopenmpt.sh'
               - 'scripts/lib/wasm-flags.sh'
               - 'scripts/lib/libopenmpt-source.sh'
+              - 'scripts/ci/setup-emsdk.sh'
               - 'scripts/jsEngineArtifacts.mjs'
               - 'scripts/verify-js-libopenmpt.mjs'
               - 'scripts/verify-wasm-features.mjs'
@@ -354,11 +357,17 @@ jobs:
               - 'audio-worklet/js/libopenmpt-playback.generated.json'
               - '.github/workflows/ci.yml'
 
-      - name: Setup Emscripten
+      # emsdk scripts pinned to a commit (scripts/lib/wasm-flags.sh), not emsdk's HEAD.zip.
+      - name: Cache emsdk
         if: steps.filter.outputs.jsengine == 'true'
-        uses: mymindstorm/setup-emsdk@v14
+        uses: actions/cache@v6
         with:
-          version: '3.1.51'
+          path: ${{ runner.temp }}/emsdk
+          key: emsdk-${{ runner.os }}-${{ hashFiles('scripts/lib/wasm-flags.sh', 'scripts/ci/setup-emsdk.sh') }}
+
+      - name: Setup Emscripten (pinned)
+        if: steps.filter.outputs.jsengine == 'true'
+        run: bash scripts/ci/setup-emsdk.sh "$RUNNER_TEMP/emsdk"
 
       - name: Setup Node.js
         if: steps.filter.outputs.jsengine == 'true'
@@ -380,7 +389,9 @@ jobs:
             vendor/libopenmpt-0.8.9+release-jsengine-eh-wasm-playback-emsdk3.1.51
             vendor/libopenmpt-0.8.9+release-jsengine-eh-wasm-debug-emsdk3.1.51
             vendor/libopenmpt-0.8.9+release-jsengine-eh-wasm-playback-debug-emsdk3.1.51
-          key: libopenmpt-js-engine-${{ runner.os }}-emsdk-3.1.51-v0.8.9-${{ hashFiles('scripts/build-js-libopenmpt.sh', 'scripts/lib/wasm-flags.sh', 'scripts/lib/libopenmpt-source.sh') }}
+          # The committed binaries are in the key too: a commit that changes them is checked
+          # against objects compiled from scratch, never against a cache that predates it.
+          key: libopenmpt-js-engine-${{ runner.os }}-emsdk-3.1.51-v0.8.9-${{ hashFiles('scripts/build-js-libopenmpt.sh', 'scripts/lib/wasm-flags.sh', 'scripts/lib/libopenmpt-source.sh', 'public/worklets/libopenmpt-worklet.wasm', 'public/worklets/libopenmpt-playback.wasm') }}
 
       - name: Rebuild libopenmpt-worklet.{js,wasm} (emsdk 3.1.51)
         if: steps.filter.outputs.jsengine == 'true'

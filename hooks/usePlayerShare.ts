@@ -8,6 +8,7 @@ import {
   paletteModeFromShare,
   parseShareParams,
   resolveShareCode,
+  shareableMediaUrl,
   sharePaletteFromMode,
   type PlayerShareState,
 } from '../utils/shareState';
@@ -133,10 +134,6 @@ export function usePlayerShare({
         setModuleSourceUrl(modUrl);
         loadFileWithHash(fileData, fileName);
 
-        if (state?.media && !code) {
-          setMediaItem(createRemoteMediaItem(state.media));
-          setMediaVisible(true);
-        }
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Failed to load shared module';
         showToast(message, 'warning');
@@ -190,14 +187,9 @@ export function usePlayerShare({
       order: moduleInfo.order,
       row: moduleInfo.row,
     };
-    if (moduleSourceUrl) {
-      state.mod = moduleSourceUrl;
-    } else if (mediaItem && !mediaItem.isObjectUrl) {
-      state.media = mediaItem.url;
-    }
-    if (mediaItem && !mediaItem.isObjectUrl && moduleSourceUrl) {
-      state.media = mediaItem.url;
-    }
+    if (moduleSourceUrl) state.mod = moduleSourceUrl;
+    const media = shareableMediaUrl(mediaItem);
+    if (media) state.media = media;
 
     let url = buildShareUrl(state);
     if (!state.mod) {

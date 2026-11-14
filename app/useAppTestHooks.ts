@@ -62,8 +62,8 @@ export function useAppTestHooks(): void {
       getIsPlaying: () => engine.getSnapshot().isPlaying,
       getTransportState: () => engine.getSnapshot().transportState,
       getAudioContextState: () => engine.getAudioContext()?.state ?? 'none',
-      // #411 acceptance: a JS play and an ?engine=native play in the same tab
-      // must report the same state and rate — there is one context per session.
+      // #411: one AudioContext per page session (pitfall 12) — every play in the
+      // tab reports the same context state and the locked 48 kHz rate.
       getAudioContextSampleRate: () => engine.getAudioContext()?.sampleRate ?? 0,
       getAudioPlaybackStats: () => {
         const stats = (engine.getAudioContext() as (AudioContext & {

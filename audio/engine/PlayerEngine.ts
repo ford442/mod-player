@@ -265,6 +265,8 @@ export class PlayerEngine {
   private readonly output: OutputDeviceController;
   /** Bumped by dispose(): an init still awaiting when it is disposed stops at its next await. */
   private generation = 0;
+  /** Last revision stamped by replacePatternMatrix (monotonic for the engine's lifetime). */
+  private patternRevision = 0;
   /** Volume to restore on unmute. */
   private preMuteVolume = DEFAULT_VOLUME;
   /** Song-map structure reads: the injected source, or the lazily created worker client. */
@@ -749,7 +751,14 @@ export class PlayerEngine {
   }
 
   /** Swap an edited pattern into the engine's matrices and the snapshot. */
-  replacePatternMatrix(matrix: PatternMatrix): void {
+  /**
+   * Installs an edited matrix. Each call stamps a new `revision`, so renderers that cache packed
+   * cells by pattern (WebGPURenderer's cells LRU) see a different key for the same
+   * pattern / rows / channels and repack instead of drawing the pre-edit cells.
+   */
+  replacePatternMatrix(edited: PatternMatrix): void {
+    this.patternRevision += 1;
+    const matrix: PatternMatrix = { ...edited, revision: this.patternRevision };
     const order = matrix.order;
     const matrices = this.refs.patternMatricesRef.current;
     if (order >= 0 && order < matrices.length) {

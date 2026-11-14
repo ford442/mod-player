@@ -1,3 +1,4 @@
+import { useShallow } from 'zustand/react/shallow';
 import { Header } from './Header';
 import { GlobalControlsBar } from './GlobalControlsBar';
 import { PerformanceStage } from './PerformanceStage';
@@ -5,6 +6,7 @@ import { TransportBar } from './TransportBar';
 import { SidePanelGrid } from './SidePanelGrid';
 import { PatternEditorSection } from './PatternEditorSection';
 import { LibraryAndPlaylistSection } from './LibraryAndPlaylistSection';
+import { moduleFormatsSummary } from '../utils/moduleFormats';
 import { usePlayerEngine } from '../hooks/usePlayerEngine';
 import { usePlayerUiStore } from '../store/playerUiStore';
 
@@ -21,7 +23,7 @@ export interface ChromeLayoutProps {
 export function ChromeLayout({ studioDisplayHost = null }: ChromeLayoutProps = {}) {
   const status = usePlayerEngine((s) => s.status);
   const isModuleLoaded = usePlayerEngine((s) => s.isModuleLoaded);
-  const { stageMode } = usePlayerUiStore();
+  const { stageMode } = usePlayerUiStore(useShallow((s) => ({ stageMode: s.stageMode })));
 
   return (
     <div className="w-full max-w-[1280px]">
@@ -38,7 +40,7 @@ export function ChromeLayout({ studioDisplayHost = null }: ChromeLayoutProps = {
         <PatternEditorSection />
         <LibraryAndPlaylistSection />
         <div className="mt-8 text-center text-xs opacity-50">
-          <p>Supports .mod, .xm, .s3m, .it files.</p>
+          <p>{moduleFormatsSummary()}</p>
           <p>WebGPU required for visualization.</p>
         </div>
       </div>

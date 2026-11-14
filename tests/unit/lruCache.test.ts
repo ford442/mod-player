@@ -66,3 +66,50 @@ describe('LruCache', () => {
     expect(cache.get('b')).toBe(2);
   });
 });
+
+describe('LruCache byte budget', () => {
+  it('evicts least-recently-used entries until the byte total fits', () => {
+    const evicted: string[] = [];
+    const cache = new LruCache<string, number>(100, (key) => evicted.push(key), 100);
+    cache.set('a', 1, 40);
+    cache.set('b', 2, 40);
+    cache.touch('a');
+    cache.set('c', 3, 40); // 120 > 100 — 'b' is the LRU entry
+    expect(evicted).toEqual(['b']);
+    expect(cache.bytes).toBe(80);
+    expect(cache.size).toBe(2);
+  });
+
+  it('setBytes() charges a pending entry later and evicts over budget', () => {
+    const evicted: string[] = [];
+    const cache = new LruCache<string, number>(100, (key) => evicted.push(key), 100);
+    cache.set('a', 1, 60);
+    cache.set('b', 2); // pending: costs 0
+    expect(evicted).toEqual([]);
+    cache.setBytes('b', 60);
+    expect(evicted).toEqual(['a']);
+    expect(cache.bytes).toBe(60);
+  });
+
+  it('does not keep a single entry larger than the budget', () => {
+    const cache = new LruCache<string, number>(100, undefined, 100);
+    cache.set('small', 1, 10);
+    cache.set('huge', 2, 500);
+    expect(cache.has('huge')).toBe(false);
+    expect(cache.has('small')).toBe(false); // evicted first, oldest-first
+    expect(cache.bytes).toBe(0);
+  });
+
+  it('re-set and delete keep the byte total exact', () => {
+    const cache = new LruCache<string, number>(10, undefined, 1000);
+    cache.set('a', 1, 100);
+    cache.set('a', 2, 30);
+    expect(cache.bytes).toBe(30);
+    expect(cache.delete('a')).toBe(true);
+    expect(cache.delete('a')).toBe(false);
+    expect(cache.bytes).toBe(0);
+    cache.set('b', 1, 5);
+    cache.clear();
+    expect(cache.bytes).toBe(0);
+  });
+});

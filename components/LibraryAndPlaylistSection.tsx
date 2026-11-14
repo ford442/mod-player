@@ -1,3 +1,4 @@
+import { useShallow } from 'zustand/react/shallow';
 import { Panel } from './Panel';
 import { Playlist } from './Playlist';
 import { MediaPanel } from './MediaPanel';
@@ -12,7 +13,14 @@ import { useModuleMediaHintText } from '../hooks/usePlayerView';
 /** Playlist, media overlay panel, cloud library, and local library sections (chrome mode only). */
 export function LibraryAndPlaylistSection() {
   const features = usePlayerFeatures();
-  const { theme, showPlaylist, showLibraryBrowser, showLocalLibrary } = usePlayerUiStore();
+  const { theme, showPlaylist, showLibraryBrowser, showLocalLibrary } = usePlayerUiStore(
+    useShallow((s) => ({
+      theme: s.theme,
+      showPlaylist: s.showPlaylist,
+      showLibraryBrowser: s.showLibraryBrowser,
+      showLocalLibrary: s.showLocalLibrary,
+    })),
+    );
   const isPlaying = usePlayerEngine((s) => s.isPlaying);
   const moduleMediaHintText = useModuleMediaHintText();
 

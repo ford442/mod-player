@@ -10,6 +10,7 @@ import type { InstrumentTable } from '../../types/instruments';
 import type { Ref, StateSetter } from '../../audio/engine/store';
 import type { TransportMachine } from '../../audio/engine/transport';
 import type { WorkletPositionSample } from '../../utils/playheadPrediction';
+import type { ParserWorkerClient } from '../../utils/parserWorker';
 import type { PositionRingConsumer } from '../../utils/positionRingConsumer';
 import type { PauseClock } from '../../utils/transportClock';
 import type {
@@ -45,7 +46,8 @@ export interface LibOpenMPTRefs {
   gainNodeRef: Ref<GainNode | null>;
   analyserRef: Ref<AnalyserNode | null>;
   fileDataRef: Ref<Uint8Array | null>;
-  workerRef: Ref<Worker | null>;
+  /** The warm parser worker (utils/parserWorker.ts), created on the first worker parse. */
+  workerRef: Ref<ParserWorkerClient | null>;
   parserWorkerHealthyRef: Ref<boolean>;
   ensureMainThreadModuleRef: Ref<((data: Uint8Array) => Promise<void>) | null>;
   animationFrameHandle: Ref<number>;

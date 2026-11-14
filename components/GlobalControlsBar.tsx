@@ -1,3 +1,4 @@
+import { useShallow } from 'zustand/react/shallow';
 import { ShaderSelectorPanel } from './ShaderSelectorPanel';
 import { AccessibilityPanel } from './AccessibilityPanel';
 import { OutputDevicePicker } from './OutputDevicePicker';
@@ -25,7 +26,20 @@ export function GlobalControlsBar() {
     toggleEditMode,
     stageMode,
     toggleStageMode,
-  } = usePlayerUiStore();
+  } = usePlayerUiStore(
+    useShallow((s) => ({
+      theme: s.theme,
+      setTheme: s.setTheme,
+      liteMode: s.liteMode,
+      setLiteMode: s.setLiteMode,
+      reactiveMode: s.reactiveMode,
+      setReactiveMode: s.setReactiveMode,
+      editMode: s.editMode,
+      toggleEditMode: s.toggleEditMode,
+      stageMode: s.stageMode,
+      toggleStageMode: s.toggleStageMode,
+    })),
+    );
   const {
     storedShader: shaderFile,
     selectShader: setShaderFile,
@@ -38,7 +52,21 @@ export function GlobalControlsBar() {
     setPaletteMode,
     stepsLength,
     setStepsLength,
-  } = useShaderPrefsStore();
+  } = useShaderPrefsStore(
+    useShallow((s) => ({
+      storedShader: s.storedShader,
+      selectShader: s.selectShader,
+      randomizeShader: s.randomizeShader,
+      shaderThumbnails: s.shaderThumbnails,
+      toggleShaderFavorite: s.toggleShaderFavorite,
+      colorPalette: s.colorPalette,
+      setColorPalette: s.setColorPalette,
+      paletteMode: s.paletteMode,
+      setPaletteMode: s.setPaletteMode,
+      stepsLength: s.stepsLength,
+      setStepsLength: s.setStepsLength,
+    })),
+    );
 
   const isDarkMode = !LIGHT_THEMES.has(theme);
   const showDevSurface = !IS_PUBLIC_MODE;

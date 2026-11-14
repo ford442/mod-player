@@ -144,6 +144,108 @@ export interface VideoTextureState {
   textureResources: BindGroupTextureResources | null;
 }
 
+/**
+ * What was last copied into a pattern texture. Keyed by the GPUTexture, so a
+ * recreated texture (resize, shader re-init) starts with no record and is
+ * filled on its first frame.
+ */
+interface UploadRecord {
+  source: HTMLVideoElement | HTMLImageElement;
+  /** Image: the URL it showed. Video: the URL it was playing. */
+  src: string;
+  /** Video only: `currentTime` at the upload (catches seeks while paused). */
+  time: number;
+}
+
+const lastUpload = new WeakMap<GPUTexture, UploadRecord>();
+
+/**
+ * Per-video `requestVideoFrameCallback` bookkeeping: at most one callback is
+ * outstanding per element (re-armed from the render loop), and `fresh` says a
+ * frame was presented since the last upload.
+ */
+interface VideoFrameWatch {
+  pending: boolean;
+  fresh: boolean;
+}
+
+const videoFrameWatches = new WeakMap<HTMLVideoElement, VideoFrameWatch>();
+
+type FrameCallbackVideo = HTMLVideoElement & {
+  requestVideoFrameCallback?: (cb: () => void) => number;
+};
+
+function isVideoSource(source: HTMLVideoElement | HTMLImageElement): source is HTMLVideoElement {
+  return typeof HTMLVideoElement !== 'undefined' && source instanceof HTMLVideoElement;
+}
+
+function isImageSource(source: HTMLVideoElement | HTMLImageElement): source is HTMLImageElement {
+  return typeof HTMLImageElement !== 'undefined' && source instanceof HTMLImageElement;
+}
+
+function mediaSrc(source: HTMLVideoElement | HTMLImageElement): string {
+  return source.currentSrc || source.src || '';
+}
+
+/**
+ * Arms one `requestVideoFrameCallback` for `video` (if supported and none is
+ * outstanding) and reports whether a frame was presented since the last call
+ * that consumed it. Returns `null` when the browser has no rVFC.
+ */
+function consumeVideoFrame(video: HTMLVideoElement): boolean | null {
+  const rvfc = (video as FrameCallbackVideo).requestVideoFrameCallback;
+  if (typeof rvfc !== 'function') return null;
+  let watch = videoFrameWatches.get(video);
+  if (!watch) {
+    watch = { pending: false, fresh: false };
+    videoFrameWatches.set(video, watch);
+  }
+  const fresh = watch.fresh;
+  watch.fresh = false;
+  if (!watch.pending) {
+    watch.pending = true;
+    const w = watch;
+    rvfc.call(video, () => {
+      w.pending = false;
+      w.fresh = true;
+    });
+  }
+  return fresh;
+}
+
+/**
+ * Whether `source` must be copied into `texture` this frame. Images upload
+ * once per (texture, element, URL); videos upload when a new frame was
+ * presented (`requestVideoFrameCallback`), or — without rVFC — while playing,
+ * plus whenever `currentTime` moved (a seek or loop while paused).
+ */
+export function needsTextureUpload(
+  texture: GPUTexture,
+  source: HTMLVideoElement | HTMLImageElement,
+): boolean {
+  const prev = lastUpload.get(texture);
+  const src = mediaSrc(source);
+  const sameSource = prev !== undefined && prev.source === source && prev.src === src;
+  if (!isVideoSource(source)) return !sameSource;
+
+  // Always arm / drain the frame callback so `fresh` reflects frames since the last check.
+  const freshFrame = consumeVideoFrame(source);
+  if (!sameSource) return true;
+  // Mid-seek the element still shows the old frame; the moved currentTime uploads it once settled.
+  if (source.seeking) return false;
+  if (source.currentTime !== prev.time && (source.paused || freshFrame === null)) return true;
+  if (freshFrame === null) return !source.paused;
+  return freshFrame;
+}
+
+function recordUpload(texture: GPUTexture, source: HTMLVideoElement | HTMLImageElement): void {
+  lastUpload.set(texture, {
+    source,
+    src: mediaSrc(source),
+    time: isVideoSource(source) ? source.currentTime : 0,
+  });
+}
+
 export function updateVideoTexture(
   device: GPUDevice,
   pool: GpuResourcePool,
@@ -157,11 +259,11 @@ export function updateVideoTexture(
   let sourceWidth = 0;
   let sourceHeight = 0;
   let sourceReady = false;
-  if (source instanceof HTMLVideoElement && source.readyState >= 2) {
+  if (isVideoSource(source) && source.readyState >= 2) {
     sourceWidth = source.videoWidth;
     sourceHeight = source.videoHeight;
     sourceReady = true;
-  } else if (source instanceof HTMLImageElement && source.complete) {
+  } else if (isImageSource(source) && source.complete) {
     sourceWidth = source.naturalWidth;
     sourceHeight = source.naturalHeight;
     sourceReady = true;
@@ -189,15 +291,16 @@ export function updateVideoTexture(
     onResourcesChanged();
   }
 
+  const texture = state.videoTexture;
+  if (!texture || !needsTextureUpload(texture, source)) return;
   try {
-    if (state.videoTexture) {
-      device.queue.copyExternalImageToTexture(
-        { source, flipY: true },
-        { texture: state.videoTexture },
-        [sourceWidth, sourceHeight, 1],
-      );
-    }
+    device.queue.copyExternalImageToTexture(
+      { source, flipY: true },
+      { texture },
+      [sourceWidth, sourceHeight, 1],
+    );
+    recordUpload(texture, source);
   } catch {
-    /* ignore */
+    /* ignore — retried next frame (no upload recorded) */
   }
 }

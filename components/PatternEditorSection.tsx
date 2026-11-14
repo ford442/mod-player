@@ -1,3 +1,4 @@
+import { useShallow } from 'zustand/react/shallow';
 import { Panel } from './Panel';
 import { PatternEditor } from './PatternEditor';
 import { IS_PUBLIC_MODE } from '../appConfig';
@@ -9,7 +10,12 @@ import { usePlayerUiStore } from '../store/playerUiStore';
 /** Pattern editor overlay, shown only while `editMode` is on (chrome mode only). */
 export function PatternEditorSection() {
   const features = usePlayerFeatures();
-  const { editMode, selectedInstrumentIndex } = usePlayerUiStore();
+  const { editMode, selectedInstrumentIndex } = usePlayerUiStore(
+    useShallow((s) => ({
+      editMode: s.editMode,
+      selectedInstrumentIndex: s.selectedInstrumentIndex,
+    })),
+    );
 
   const showDevSurface = !IS_PUBLIC_MODE;
   const visible = showDevSurface && editMode;

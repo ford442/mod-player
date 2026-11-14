@@ -135,6 +135,19 @@ interface BuiltShaderPipelines {
 /** Max distinct patterns to keep GPU buffers resident for (see WebGPURenderer.cellsCache). */
 const CELLS_CACHE_LIMIT = 12;
 
+/**
+ * Key of a packed-cells GPU buffer in the renderer's LRU. It includes the matrix's edit revision:
+ * an edit keeps the pattern index, rows and channels, so without it the cache handed back the
+ * pre-edit cells until a shader switch or module load.
+ */
+export function patternCellsCacheKey(
+  matrix: Pick<PatternMatrix, 'patternIndex' | 'revision'> | null | undefined,
+  numRows: number,
+  numChannels: number,
+): string {
+  return `${matrix?.patternIndex ?? -1}:${numRows}:${numChannels}:r${matrix?.revision ?? 0}`;
+}
+
 export class WebGPURenderer {
   device: GPUDevice | null = null;
   context: GPUCanvasContext | null = null;
@@ -999,7 +1012,7 @@ export class WebGPURenderer {
     const numChannels = params.padTopChannel ? rawChannels + 1 : rawChannels;
     if (numChannels <= 0) return;
     const numRows = matrix?.numRows ?? DEFAULT_ROWS;
-    const cellsKey = `${matrix?.patternIndex ?? -1}:${numRows}:${numChannels}`;
+    const cellsKey = patternCellsCacheKey(matrix, numRows, numChannels);
     if (this.cellsBuffer && this.lastCellsKey === cellsKey) {
       return;
     }

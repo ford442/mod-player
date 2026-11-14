@@ -1,11 +1,13 @@
-import { useState, useCallback, useRef } from 'react';
+import { useMemo } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import type { PlaylistItem } from '../components/Playlist';
+import { usePlaylistStore, type PlaylistRepeat } from '../store/playlistStore';
 
-interface UsePlaylistReturn {
+export interface UsePlaylistReturn {
   items: PlaylistItem[];
   currentIndex: number;
   shuffle: boolean;
-  repeat: 'none' | 'all' | 'one';
+  repeat: PlaylistRepeat;
   addFiles: (files: FileList) => void;
   addItem: (item: PlaylistItem) => void;
   select: (index: number) => PlaylistItem | null;
@@ -19,161 +21,42 @@ interface UsePlaylistReturn {
   onTrackEnded: () => PlaylistItem | null;
 }
 
+function addFilesReported(files: FileList): void {
+  usePlaylistStore.getState().addFiles(files).catch((err: unknown) => {
+    // An unreadable file rejects the whole batch; report it rather than leaving an unhandled rejection.
+    console.error('Failed to read playlist files:', err);
+  });
+}
+
+/**
+ * React view of `store/playlistStore.ts`. The actions are the store's own (stable identities,
+ * synchronous reads), so a caller can use the item `select` / `next` / `prev` return right away.
+ * The returned object only changes when the playlist state does.
+ */
 export function usePlaylist(): UsePlaylistReturn {
-  const [items, setItems] = useState<PlaylistItem[]>([]);
-  const [currentIndex, setCurrentIndex] = useState(-1);
-  const [shuffle, setShuffle] = useState(false);
-  const [repeat, setRepeat] = useState<'none' | 'all' | 'one'>('none');
-  const shuffleHistoryRef = useRef<number[]>([]);
-
-  const addFiles = useCallback((files: FileList) => {
-    const newItems: PlaylistItem[] = [];
-    const readers: Promise<void>[] = [];
-
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
-      if (!file) continue;
-      readers.push(
-        file.arrayBuffer().then(buf => {
-          newItems.push({
-            id: `${Date.now()}-${i}-${Math.random().toString(36).slice(2)}`,
-            fileName: file.name,
-            fileData: new Uint8Array(buf),
-          });
-        })
-      );
-    }
-
-    Promise.all(readers)
-      .then(() => {
-        setItems(prev => [...prev, ...newItems]);
-      })
-      .catch((err: unknown) => {
-        // An unreadable file rejects the whole batch; report it rather than leaving an unhandled rejection.
-        console.error('Failed to read playlist files:', err);
-      });
-  }, []);
-
-  const addItem = useCallback((item: PlaylistItem) => {
-    setItems(prev => [...prev, item]);
-  }, []);
-
-  const select = useCallback((index: number): PlaylistItem | null => {
-    if (index < 0) return null;
-    setCurrentIndex(index);
-    // Read from current items state
-    let result: PlaylistItem | null = null;
-    setItems(prev => {
-      result = prev[index] ?? null;
-      return prev;
-    });
-    return result;
-  }, []);
-
-  const remove = useCallback((index: number) => {
-    setItems(prev => {
-      const next = [...prev];
-      next.splice(index, 1);
-      // Adjust currentIndex based on the new array length
-      setCurrentIndex(ci => {
-        if (index < ci) return ci - 1;
-        if (index === ci) return Math.min(ci, next.length - 1);
-        return ci;
-      });
-      return next;
-    });
-  }, []);
-
-  const clear = useCallback(() => {
-    setItems([]);
-    setCurrentIndex(-1);
-    shuffleHistoryRef.current = [];
-  }, []);
-
-  const getRandomIndex = useCallback((exclude: number, total: number): number => {
-    if (total <= 1) return 0;
-    let next: number;
-    do {
-      next = Math.floor(Math.random() * total);
-    } while (next === exclude && total > 1);
-    return next;
-  }, []);
-
-  const next = useCallback((): PlaylistItem | null => {
-    let result: PlaylistItem | null = null;
-    setItems(prev => {
-      if (prev.length === 0) return prev;
-      let nextIdx: number;
-      if (shuffle) {
-        nextIdx = getRandomIndex(currentIndex, prev.length);
-      } else {
-        nextIdx = currentIndex + 1;
-        if (nextIdx >= prev.length) {
-          if (repeat === 'all') nextIdx = 0;
-          else return prev; // no more tracks
-        }
-      }
-      setCurrentIndex(nextIdx);
-      result = prev[nextIdx] ?? null;
-      return prev;
-    });
-    return result;
-  }, [currentIndex, shuffle, repeat, getRandomIndex]);
-
-  const prev = useCallback((): PlaylistItem | null => {
-    let result: PlaylistItem | null = null;
-    setItems(prev => {
-      if (prev.length === 0) return prev;
-      let prevIdx: number;
-      if (shuffle) {
-        prevIdx = getRandomIndex(currentIndex, prev.length);
-      } else {
-        prevIdx = currentIndex - 1;
-        if (prevIdx < 0) {
-          if (repeat === 'all') prevIdx = prev.length - 1;
-          else return prev;
-        }
-      }
-      setCurrentIndex(prevIdx);
-      result = prev[prevIdx] ?? null;
-      return prev;
-    });
-    return result;
-  }, [currentIndex, shuffle, repeat, getRandomIndex]);
-
-  const toggleShuffle = useCallback(() => setShuffle(s => !s), []);
-
-  const cycleRepeat = useCallback(() => {
-    setRepeat(r => r === 'none' ? 'all' : r === 'all' ? 'one' : 'none');
-  }, []);
-
-  const onTrackEnded = useCallback((): PlaylistItem | null => {
-    if (repeat === 'one') {
-      // Replay current
-      let result: PlaylistItem | null = null;
-      setItems(prev => {
-        result = prev[currentIndex] ?? null;
-        return prev;
-      });
-      return result;
-    }
-    return next();
-  }, [repeat, currentIndex, next]);
-
-  return {
-    items,
-    currentIndex,
-    shuffle,
-    repeat,
-    addFiles,
-    addItem,
-    select,
-    remove,
-    clear,
-    prev,
-    next,
-    toggleShuffle,
-    cycleRepeat,
-    onTrackEnded,
-  };
+  const { items, currentIndex, shuffle, repeat } = usePlaylistStore(useShallow((s) => ({
+    items: s.items,
+    currentIndex: s.currentIndex,
+    shuffle: s.shuffle,
+    repeat: s.repeat,
+  })));
+  return useMemo((): UsePlaylistReturn => {
+    const s = usePlaylistStore.getState();
+    return {
+      items,
+      currentIndex,
+      shuffle,
+      repeat,
+      addFiles: addFilesReported,
+      addItem: s.addItem,
+      select: s.select,
+      remove: s.remove,
+      clear: s.clear,
+      prev: s.prev,
+      next: s.next,
+      toggleShuffle: s.toggleShuffle,
+      cycleRepeat: s.cycleRepeat,
+      onTrackEnded: s.onTrackEnded,
+    };
+  }, [items, currentIndex, shuffle, repeat]);
 }

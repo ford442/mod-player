@@ -900,10 +900,23 @@
         stackSize: stack.stackSize
       });
     }
+    /**
+     * The stereo render buffers live as long as the node: allocated once, here, and never freed.
+     * (A load used to free them before create and re-allocate only on success, so a failed load
+     * followed by a staged swap rendered into address 0.) Every path that makes a module renderable
+     * calls this; once both exist it is a no-op, so `_adoptStaged` stays malloc-free in practice.
+     * Returns false when the heap could not provide them — the module must not render then.
+     */
     _ensureRenderBuffers(lib) {
+      if (this.leftBufPtr && this.rightBufPtr) return true;
       if (!this.leftBufPtr) this.leftBufPtr = lib._malloc(4 * this.maxFrames);
       if (!this.rightBufPtr) this.rightBufPtr = lib._malloc(4 * this.maxFrames);
       this._heapBuffer = null;
+      this._leftHeapView = null;
+      this._rightHeapView = null;
+      if (this.leftBufPtr && this.rightBufPtr) return true;
+      error("could not allocate the render buffers (_malloc returned 0)");
+      return false;
     }
     _attachCreatePort(port) {
       if (this._createPort && this._createPort !== port) this._createPort.onmessage = null;
@@ -955,6 +968,10 @@
       this.hasEnded = false;
       this._fracRowInt = -1;
       this._rowStartPosSec = 0;
+      if (!this._ensureRenderBuffers(lib)) {
+        this.faulted = true;
+        this.port.postMessage({ type: WT.error, message: "render buffer allocation failed" });
+      }
       this._configureLoadedModule(lib, next);
       this._fadeTarget = 1;
       if (previous) this._retireModule(previous);
@@ -1024,14 +1041,7 @@
           this.modulePtr = 0;
         }
         this.faulted = false;
-        if (this.leftBufPtr) {
-          lib._free(this.leftBufPtr);
-          this.leftBufPtr = 0;
-        }
-        if (this.rightBufPtr) {
-          lib._free(this.rightBufPtr);
-          this.rightBufPtr = 0;
-        }
+        if (!this._ensureRenderBuffers(lib)) throw new Error("_malloc returned 0 for the render buffers");
         const filePtr = lib._malloc(bytes.byteLength);
         if (!filePtr) throw new Error("_malloc returned 0 \u2013 out of WASM heap memory");
         heapU8(lib).set(bytes, filePtr);
@@ -1052,11 +1062,6 @@
         if (this.modulePtr === 0) {
           throw new Error("openmpt_module_create_from_memory returned 0 (invalid format?)");
         }
-        this.leftBufPtr = lib._malloc(4 * this.maxFrames);
-        this.rightBufPtr = lib._malloc(4 * this.maxFrames);
-        this._heapBuffer = null;
-        this._leftHeapView = null;
-        this._rightHeapView = null;
         this._fracRowInt = -1;
         this._rowStartPosSec = 0;
         this._configureLoadedModule(lib, this.modulePtr);
@@ -1118,6 +1123,11 @@
     /** The actual per-quantum render + reporting work. Isolated so process() can wrap it in one try/catch. */
     _renderQuantum(outL, outR) {
       if (!this.modulePtr || !this.lib) return;
+      if (!this.leftBufPtr || !this.rightBufPtr) {
+        outL.fill(0);
+        outR.fill(0);
+        return;
+      }
       const numSamples = outL.length;
       const framesToRead = Math.min(numSamples, this.maxFrames);
       const lib = this.lib;

@@ -2,6 +2,7 @@ import { useCallback, useRef, useState } from 'react';
 import { downloadBlob } from '../utils/downloadBlob';
 import {
   createCombinedCaptureStream,
+  finishRecording,
   pickRecorderMimeType,
   probeCanvasCaptureSupport,
   resolveCaptureCanvas,
@@ -53,17 +54,17 @@ export function usePerformanceCapture() {
     clearTimer();
     const recorder = recorderRef.current;
     recorderRef.current = null;
-
-    cleanupRef.current?.();
+    const release = cleanupRef.current ?? (() => {});
     cleanupRef.current = null;
 
     if (!recorder || recorder.state === 'inactive') {
+      release();
       setState(INITIAL);
       return;
     }
 
     if (!save) {
-      recorder.stop();
+      await finishRecording(recorder, release);
       chunksRef.current = [];
       setState(INITIAL);
       return;
@@ -71,10 +72,8 @@ export function usePerformanceCapture() {
 
     setState((prev) => ({ ...prev, stage: 'saving', message: 'Finalizing recording…' }));
 
-    await new Promise<void>((resolve) => {
-      recorder.addEventListener('stop', () => resolve(), { once: true });
-      recorder.stop();
-    });
+    // Stop first, release the audio tap and capture tracks after the recorder's final flush.
+    await finishRecording(recorder, release);
 
     const blob = new Blob(chunksRef.current, { type: recorder.mimeType || 'video/webm' });
     chunksRef.current = [];

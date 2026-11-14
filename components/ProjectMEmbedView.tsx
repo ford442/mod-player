@@ -1,6 +1,7 @@
 import React, { useEffect, useRef } from 'react';
-import { SeekBar } from './SeekBar';
-import { PlayIcon, StopIcon, UploadIcon, LoopIcon } from './icons';
+import { LiveSeekBar } from './LiveSeekBar';
+import { PauseIcon, PlayIcon, StopIcon, UploadIcon, LoopIcon } from './icons';
+import { MODULE_FILE_ACCEPT } from '../utils/moduleFormats';
 
 /**
  * Compact, audio-only transport UI for Project-M embed mode (?projectm=1).
@@ -20,14 +21,14 @@ interface ProjectMEmbedViewProps {
   isReady: boolean;
   isModuleLoaded: boolean;
   isPlaying: boolean;
+  /** Paused (silent, position kept): play resumes (pitfall 15). */
+  isPaused: boolean;
   isLooping: boolean;
-  playbackSeconds: number;
-  playbackRow: number;
-  totalRows: number;
   moduleTitle: string | null;
   play: () => void;
-  stopMusic: (resetPosition?: boolean) => void;
-  seekToStep: (row: number) => void;
+  pause: () => void;
+  /** Stop and rewind; the module stays loaded. */
+  stop: () => void;
   setIsLooping: (looping: boolean) => void;
   handleFileSelected: (file: File) => void | Promise<void>;
 }
@@ -37,14 +38,12 @@ export const ProjectMEmbedView: React.FC<ProjectMEmbedViewProps> = ({
   isReady,
   isModuleLoaded,
   isPlaying,
+  isPaused,
   isLooping,
-  playbackSeconds,
-  playbackRow,
-  totalRows,
   moduleTitle,
   play,
-  stopMusic,
-  seekToStep,
+  pause,
+  stop,
   setIsLooping,
   handleFileSelected,
 }) => {
@@ -60,7 +59,7 @@ export const ProjectMEmbedView: React.FC<ProjectMEmbedViewProps> = ({
   const togglePlay = () => {
     if (!isModuleLoaded) return;
     if (isPlaying) {
-      stopMusic(false);
+      pause();
     } else {
       play();
     }
@@ -94,14 +93,7 @@ export const ProjectMEmbedView: React.FC<ProjectMEmbedViewProps> = ({
         </div>
 
         {/* Seek bar */}
-        <SeekBar
-          currentSeconds={playbackSeconds}
-          durationSeconds={0}
-          currentRow={playbackRow}
-          totalRows={totalRows}
-          isPlaying={isPlaying}
-          onSeekRow={seekToStep}
-        />
+        <LiveSeekBar />
 
         {/* Transport controls */}
         <div className="flex items-center gap-2">
@@ -109,16 +101,16 @@ export const ProjectMEmbedView: React.FC<ProjectMEmbedViewProps> = ({
             type="button"
             onClick={togglePlay}
             disabled={!isModuleLoaded}
-            aria-label={isPlaying ? 'Pause' : 'Play'}
+            aria-label={isPlaying ? 'Pause' : isPaused ? 'Resume' : 'Play'}
             className="flex items-center justify-center w-11 h-11 rounded-full bg-cyan-600 hover:bg-cyan-500 disabled:opacity-40 disabled:cursor-not-allowed text-white transition-colors"
           >
-            {isPlaying ? <StopIcon className="w-5 h-5" /> : <PlayIcon className="w-5 h-5" />}
+            {isPlaying ? <PauseIcon className="w-5 h-5" /> : <PlayIcon className="w-5 h-5" />}
           </button>
 
           <button
             type="button"
-            onClick={() => stopMusic(true)}
-            disabled={!isModuleLoaded}
+            onClick={stop}
+            disabled={!isModuleLoaded || (!isPlaying && !isPaused)}
             aria-label="Stop"
             className="flex items-center justify-center w-9 h-9 rounded-full bg-gray-700 hover:bg-gray-600 disabled:opacity-40 disabled:cursor-not-allowed text-gray-200 transition-colors"
           >
@@ -150,7 +142,7 @@ export const ProjectMEmbedView: React.FC<ProjectMEmbedViewProps> = ({
           <input
             ref={fileInputRef}
             type="file"
-            accept=".mod,.xm,.it,.s3m,.mptm,.mtm,.umx,.mo3,.stm,.669,.med,.far,.okt,.ptm,.dbm,.amf,.psm"
+            accept={MODULE_FILE_ACCEPT}
             className="hidden"
             onChange={onFileChange}
           />

@@ -5,7 +5,7 @@
   "variant": "eh-wasm",
   "exceptions": "wasm",
   "simd": false,
-  "version": "9a732b4f4f",
+  "version": "4e155589de",
   "sharedMemory": false,
   "glue": {
     "file": "libopenmpt-worklet.js",
@@ -15,7 +15,7 @@
   "wasm": {
     "file": "libopenmpt-worklet.wasm",
     "bytes": 1376401,
-    "integrity": "sha384-XdgD7HcFzTgfxmiOJvcgmaXKUdQnsSPmAqdGTeBcl6UspsPamAsc75glTmtlZj1J"
+    "integrity": "sha384-AFsnsWr/e8bvv+kTggy196a7G9M5oIQcIB2hViDHgj+0GYVLToaKDwJkN0dAbN4Y"
   },
   "cExportCount": 113
 }

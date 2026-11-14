@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   loadMidiEnabled,
   loadMidiMappings,
@@ -162,12 +162,15 @@ export function useMidiControls() {
     accessRef.current = null;
   }, [detachInputs]);
 
-  return {
+  // Memoized: the features context depends on this object, so a fresh one per render would
+  // re-render every consumer. `mappings` is read from the ref when the state changes.
+  const mappings = mappingsRef.current;
+  return useMemo(() => ({
     ...state,
-    mappings: mappingsRef.current,
+    mappings,
     requestAccess,
     setEnabled,
     setMappings,
     restoreDefaultMappings,
-  };
+  }), [state, mappings, requestAccess, setEnabled, setMappings, restoreDefaultMappings]);
 }

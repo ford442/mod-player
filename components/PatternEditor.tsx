@@ -1,16 +1,18 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { PatternCell, PatternMatrix } from '../types';
 import { scrollContainerToCenter } from '../utils/scrollContainer';
 import { formatEffect, formatInstrument, formatNote, formatVolume } from '../utils/patternCellFormat';
 import {
   FIELD_ORDER,
   applyHexDigit,
+  isEditorPassThroughKey,
   nextEditField,
   noteFromKeyboard,
   parseHexDigit,
   type PatternCellPatch,
   type PatternEditField,
 } from '../utils/patternEdit';
+import { KEYMAP_PRIORITY, playerCommands } from '../utils/playerCommands';
 
 interface PatternEditorProps {
   matrix: PatternMatrix | null;
@@ -163,12 +165,27 @@ export const PatternEditor: React.FC<PatternEditorProps> = ({
     return { start, end };
   }, [matrix, currentRow]);
 
-  const handleKeyDown = useCallback((event: KeyboardEvent) => {
-    if (!canEdit || !matrix || !selection) return;
+  /**
+   * The editor's keymap layer: while a cell is selected in edit mode it consumes every plain key
+   * (returns true), so note / hex / arrow keys never reach the global shortcuts below it (s / d / m /
+   * f, digits, arrows). Space (play / pause), Escape and `?` fall through, as do modified keys
+   * (undo / redo live in useAppPatternEdit).
+   */
+  const handleKeyDown = (event: KeyboardEvent): boolean => {
+    if (!canEdit || !matrix || !selection) return false;
+    if (event.defaultPrevented || event.isComposing) return false;
+    if (event.ctrlKey || event.metaKey || event.altKey) return false;
+    if (isEditorPassThroughKey(event)) return false;
     const target = event.target as HTMLElement | null;
-    if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
-      return;
+    if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.isContentEditable)) {
+      return false;
     }
+    editorKeyDown(event);
+    return true;
+  };
+
+  const editorKeyDown = (event: KeyboardEvent): void => {
+    if (!matrix || !selection) return;
 
     const { row, channel, field } = selection;
     if (event.key === 'Delete' || event.key === 'Backspace') {
@@ -234,13 +251,22 @@ export const PatternEditor: React.FC<PatternEditorProps> = ({
         onCellPatch(row, channel, result.patch);
       }
     }
-  }, [canEdit, matrix, selection, displayChannels, hexBuffer, onCellClear, onSeek, onCellPatch]);
+  };
+  // The layer reads the latest closure through a ref, so it is pushed once per edit session
+  // instead of being popped and re-pushed on every keystroke's state change.
+  const handleKeyDownRef = useRef(handleKeyDown);
+  useLayoutEffect(() => {
+    handleKeyDownRef.current = handleKeyDown;
+  });
 
   useEffect(() => {
     if (!canEdit) return;
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [canEdit, handleKeyDown]);
+    return playerCommands.pushKeymapLayer({
+      id: 'pattern-editor',
+      priority: KEYMAP_PRIORITY.editor,
+      onKeyDown: (event) => handleKeyDownRef.current(event),
+    });
+  }, [canEdit]);
 
   if (!matrix) {
     return (

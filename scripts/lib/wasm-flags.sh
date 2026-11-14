@@ -13,6 +13,12 @@
 # shellcheck disable=SC2034  # consumed by the sourcing script
 WASM_EMSDK_PIN="3.1.51"
 
+# The emsdk *scripts* (the emsdk repository, which also picks the node that emcc runs on — 24.19.0
+# at this commit) are pinned too: CI used to fetch emsdk's HEAD.zip on every run, so only the 3.1.51
+# toolchain was fixed. scripts/ci/setup-emsdk.sh checks this commit out.
+# shellcheck disable=SC2034
+WASM_EMSDK_SCRIPTS_COMMIT="708dcbcc9ee23bc7d2dad44fc90db377e38b771c"
+
 # Post-MVP features every browser with AudioWorklet has (bulk memory is the newest: Chrome 75,
 # Firefox 79, Safari 15). LLVM 17 (emsdk 3.1.51) only enables sign-ext (and mutable-globals) by
 # default, so without these libopenmpt's float→int conversions compile to trapping i32.trunc_*

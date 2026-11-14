@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { detectRuntimeBase } from '../src/lib/paths';
 import { getLocalCatalogSongs, getLocalShaderCatalog } from './localCatalog';
+import { isSupportedModuleFileName, isSupportedModuleUrl } from './moduleFormats';
 
 /** Production library API (storage_manager on Contabo). Dev uses Vite proxy when unset. */
 const PRODUCTION_STORAGE_API = 'https://storage.noahcohn.com';
@@ -190,9 +191,6 @@ async function fetchJsonGraceful(url: string, label: string): Promise<unknown | 
   }
 }
 
-const TRACKER_EXT_RE =
-  /\.(mod|xm|s3m|it|mptm|stm|669|amf|ams|dbm|dmf|dsm|far|gdm|j2b|mdl|med|mtm|okt|psm|ptm|ult|umx|mt2|mo3)(?:[?#].*)?$/i;
-
 const MODS_DOWNLOAD_RE = /\/api\/mods\/[^/]+\/download(?:[?#]|$)/i;
 
 /** Endpoints that list tracker modules. `/api/songs` (no type) is the flac_player library. */
@@ -206,7 +204,7 @@ function unwrapSongList(parsed: z.infer<typeof SongListSchema>): z.infer<typeof 
 }
 
 export function isTrackerLibrarySong(song: RemoteSong): boolean {
-  if (TRACKER_EXT_RE.test(song.fileName) || TRACKER_EXT_RE.test(song.downloadUrl)) {
+  if (isSupportedModuleFileName(song.fileName) || isSupportedModuleUrl(song.downloadUrl)) {
     return true;
   }
   return MODS_DOWNLOAD_RE.test(song.downloadUrl);

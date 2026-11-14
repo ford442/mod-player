@@ -1,9 +1,10 @@
 import { useEffect, useLayoutEffect } from 'react';
-import { playerCommands, trackInputFocusForCommands } from '../utils/playerCommands';
+import { KEYMAP_PRIORITY, playerCommands, trackInputFocusForCommands } from '../utils/playerCommands';
 import { usePlayerUiStore } from '../store/playerUiStore';
 
 /**
- * Keyboard → command bus. (The OS media keys and `mediaSession.playbackState` follow the engine
+ * Keyboard → command bus: the bottom (`global`) layer of the bus's keymap stack. Layers above it
+ * (the pattern editor while a cell is selected) consume their keys first. (The OS media keys and `mediaSession.playbackState` follow the engine
  * directly since #492 — audio/engine/mediaSession.ts.)
  */
 export function useKeyboardShortcuts() {
@@ -16,25 +17,10 @@ export function useKeyboardShortcuts() {
   useEffect(() => trackInputFocusForCommands(), []);
 
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.isComposing || e.keyCode === 229) return;
-      const target = e.target as HTMLElement | null;
-      const tag = target?.tagName ?? '';
-      if ((e.key === ' ' || e.key === 'Enter') && tag === 'BUTTON') return;
-      if ((e.ctrlKey || e.metaKey) && e.key !== 'Escape') return;
-
-      if (cheatsheetOpen && e.key !== 'Escape') {
-        e.preventDefault();
-        return;
-      }
-
-      const dispatch = (id: Parameters<typeof playerCommands.dispatch>[0], payload?: never) => {
-        const result = playerCommands.dispatch(id, 'keyboard', payload);
-        if (result.handled || result.blocked) {
-          e.preventDefault();
-        }
-      };
-
+    const route = (
+      e: KeyboardEvent,
+      dispatch: (id: Parameters<typeof playerCommands.dispatch>[0], payload?: never) => void,
+    ): void => {
       if (e.code === 'Space') {
         dispatch('transport.playPause');
         return;
@@ -115,9 +101,34 @@ export function useKeyboardShortcuts() {
       }
     };
 
-    window.addEventListener('keydown', handleKeyDown);
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
+
+    const handleKeyDown = (e: KeyboardEvent): boolean => {
+      if (e.defaultPrevented) return false;
+      if (e.isComposing || e.keyCode === 229) return false;
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName ?? '';
+      if ((e.key === ' ' || e.key === 'Enter') && tag === 'BUTTON') return false;
+      if ((e.ctrlKey || e.metaKey) && e.key !== 'Escape') return false;
+
+      if (cheatsheetOpen && e.key !== 'Escape') {
+        e.preventDefault();
+        return true;
+      }
+
+      const dispatch = (id: Parameters<typeof playerCommands.dispatch>[0], payload?: never) => {
+        const result = playerCommands.dispatch(id, 'keyboard', payload);
+        if (result.handled || result.blocked) {
+          e.preventDefault();
+        }
+      };
+      route(e, dispatch);
+      return e.defaultPrevented;
     };
+
+    return playerCommands.pushKeymapLayer({
+      id: 'global',
+      priority: KEYMAP_PRIORITY.global,
+      onKeyDown: handleKeyDown,
+    });
   }, [cheatsheetOpen]);
 }

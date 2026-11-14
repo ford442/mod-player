@@ -36,7 +36,7 @@ import {
 import { seedPatternDiag } from '../../utils/patternBoundaryDiag';
 import { dispatchWorkletToMainMessage } from '../../audio-worklet/jsWorkletDispatch';
 import { silenceChannelStates } from '../../utils/transportClock';
-import { moduleBytesFromFileData, wireMasterOutput } from './masterGraph';
+import { wireMasterOutput } from './masterGraph';
 import { runScriptProcessorFallback } from './scriptProcessorFallback';
 import {
   attachCreateWorker,
@@ -75,7 +75,7 @@ export async function handleWorkletFault(
 ): Promise<void> {
   const attempt = noteAudioRestartAttempt();
   setAudioFaulted(reason, message);
-  refs.isPlayingRef.current = false;
+  // Reported, not written: isPlayingRef is a view of the transport FSM (pitfall 17).
   callbacks.setIsPlaying(false);
 
   console.error(`[PLAY] Worklet faulted (${reason}, attempt ${attempt}): ${message}`);
@@ -140,7 +140,6 @@ export async function acceptWorkletLoaded(
   }
 
   log.log('Worklet loaded module – starting animation');
-  refs.isPlayingRef.current = true;
   callbacks.setIsPlaying(true);
   callbacks.setStatus('Playing...');
   if (ctx.state === 'suspended') {
@@ -455,15 +454,15 @@ export async function startJsWorkletPlayback(
       refs.positionRingRef.current = null;
     }
 
-    const moduleBuf = moduleBytesFromFileData(refs.fileDataRef.current);
-    if (moduleBuf) {
-      log.log('Sending module data to worklet:', moduleBuf.byteLength, 'bytes');
+    const moduleBytes = refs.fileDataRef.current;
+    if (moduleBytes && moduleBytes.byteLength > 0) {
+      log.log('Sending module data to worklet:', moduleBytes.byteLength, 'bytes');
       refs.lastWorkletModuleTokenSentRef.current = refs.workletModuleTokenRef.current;
       // A fresh processor renders as soon as its module loads (isPlaying defaults to true and load
       // never touches it), so when we are paused the pause must reach it BEFORE the load — acting on
       // the `loaded` ack instead would leak a few quanta of audio.
       if (refs.isPausedRef.current) node.port.postMessage(postPause());
-      postModuleLoad(node, moduleBuf);
+      postModuleLoad(node, moduleBytes);
     } else {
       console.error("[PLAY] No buffer to send to worklet!");
     }

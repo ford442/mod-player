@@ -8,6 +8,7 @@ import type { LibOpenMPTRefs, LibOpenMPTSetters } from './types';
 import { WORKLET_URL } from './constants';
 import { setPcmDemandListener } from '../../utils/pcmBus';
 import { createLogger } from '../../utils/log';
+import { mallocOrThrow } from '../../utils/wasmHeap';
 
 const log = createLogger('INIT');
 
@@ -51,7 +52,7 @@ function polyfillLibStrings(lib: import('../../types').LibOpenMPT) {
   if (!lib.stringToUTF8) {
     lib.stringToUTF8 = (jsString) => {
       const length = (jsString.length << 2) + 1;
-      const ptr = lib._malloc(length);
+      const ptr = mallocOrThrow(lib, length, 'C string');
       const heap = lib.HEAPU8;
       let i = 0;
       let j = 0;

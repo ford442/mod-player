@@ -1,4 +1,5 @@
 import type { LibOpenMPT } from '../types';
+import { createModuleFromBytes, readMetadataString } from './wasmHeap';
 
 /** Standard libopenmpt metadata keys probed on every module. */
 const METADATA_KEYS = ['title', 'artist', 'type', 'container', 'message'] as const;
@@ -36,16 +37,6 @@ export function titleFromFileName(fileName: string): string {
 
 export function resolveModuleTitle(rawTitle: string, fileName?: string): string {
   return emptyToUndefined(rawTitle) ?? (fileName ? titleFromFileName(fileName) : 'Unknown');
-}
-
-function readMetadataKey(lib: LibOpenMPT, modPtr: number, key: string): string {
-  const keyPtr = lib.stringToUTF8(key);
-  const valPtr = lib._openmpt_module_get_metadata(modPtr, keyPtr);
-  const value = valPtr ? lib.UTF8ToString(valPtr) : '';
-  if (valPtr) {
-    lib._openmpt_free_string(valPtr);
-  }
-  return value;
 }
 
 function buildMetadataRecord(
@@ -95,22 +86,12 @@ export function extractModuleMetadataWithLib(
     return fallbackMetadata(options.fileName, 'libopenmpt module API not ready');
   }
 
-  const bufferSize = fileData.byteLength;
-  const bufferPtr = lib._malloc(bufferSize);
-  lib.HEAPU8.set(fileData, bufferPtr);
-
-  const modPtr = lib._openmpt_module_create_from_memory2(
-    bufferPtr,
-    bufferSize,
-    0,
-    0,
-    0,
-    0,
-    0,
-    0,
-    0,
-  );
-  lib._free(bufferPtr);
+  let modPtr: number;
+  try {
+    modPtr = createModuleFromBytes(lib, fileData);
+  } catch (err) {
+    return fallbackMetadata(options.fileName, err instanceof Error ? err.message : String(err));
+  }
 
   if (modPtr === 0) {
     return fallbackMetadata(options.fileName, 'Failed to load module (invalid or unsupported format)');
@@ -119,7 +100,7 @@ export function extractModuleMetadataWithLib(
   try {
     const raw: Partial<Record<ModuleMetadataKey, string>> = {};
     for (const key of METADATA_KEYS) {
-      raw[key] = readMetadataKey(lib, modPtr, key);
+      raw[key] = readMetadataString(lib, modPtr, key);
     }
     return buildMetadataRecord(raw, options.fileName);
   } catch (err) {

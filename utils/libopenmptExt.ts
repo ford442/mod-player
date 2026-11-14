@@ -1,4 +1,5 @@
 import type { LibOpenMPT } from '../types';
+import { mallocOrThrow, withCString } from './wasmHeap';
 
 /** Byte offset of set_channel_mute_status in openmpt_module_ext_interface_interactive. */
 const INTERACTIVE_MUTE_FN_OFFSET = 10 * 4;
@@ -72,10 +73,23 @@ export function createExtModuleFromMemory(
     throw new Error('openmpt_module_ext_get_module returned 0');
   }
 
-  const interfacePtr = lib._malloc(INTERACTIVE_INTERFACE_SIZE);
-  const interfaceIdPtr = lib.stringToUTF8('interactive');
-  const ok = getInterface(modExtPtr, interfaceIdPtr, interfacePtr, INTERACTIVE_INTERFACE_SIZE);
-  lib._free(interfaceIdPtr);
+  let interfacePtr: number;
+  try {
+    interfacePtr = mallocOrThrow(lib, INTERACTIVE_INTERFACE_SIZE, 'ext interface');
+  } catch (err) {
+    extLib._openmpt_module_ext_destroy?.(modExtPtr);
+    throw err;
+  }
+  let ok: number;
+  try {
+    ok = withCString(lib, 'interactive', (interfaceIdPtr) =>
+      getInterface(modExtPtr, interfaceIdPtr, interfacePtr, INTERACTIVE_INTERFACE_SIZE),
+    );
+  } catch (err) {
+    lib._free(interfacePtr);
+    extLib._openmpt_module_ext_destroy?.(modExtPtr);
+    throw err;
+  }
 
   if (!ok) {
     lib._free(interfacePtr);

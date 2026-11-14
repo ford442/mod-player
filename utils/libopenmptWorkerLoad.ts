@@ -1,6 +1,7 @@
 import type { LibOpenMPT } from '../types';
 import { waitForRuntimeInitialized } from '../audio-worklet/libRuntimeReady';
 import { createLibOpenMPTLocateFile, getLibOpenMPTJsUrl } from './libopenmptAssets';
+import { mallocOrThrow } from './wasmHeap';
 
 const LIB_FETCH_TIMEOUT_MS = 30_000;
 const RUNTIME_INIT_TIMEOUT_MS = 30_000;
@@ -71,7 +72,7 @@ export async function loadLibOpenMPTInWorker(): Promise<LibOpenMPT> {
     const encoder = new TextEncoder();
     lib.stringToUTF8 = (str: string) => {
       const bytes = encoder.encode(str + '\0');
-      const ptr = lib._malloc(bytes.length);
+      const ptr = mallocOrThrow(lib, bytes.length, 'C string');
       lib.HEAPU8.set(bytes, ptr);
       return ptr;
     };

@@ -831,10 +831,23 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
     });
   }
 
-  _ensureRenderBuffers(lib: LibOpenMPT): void {
+  /**
+   * The stereo render buffers live as long as the node: allocated once, here, and never freed.
+   * (A load used to free them before create and re-allocate only on success, so a failed load
+   * followed by a staged swap rendered into address 0.) Every path that makes a module renderable
+   * calls this; once both exist it is a no-op, so `_adoptStaged` stays malloc-free in practice.
+   * Returns false when the heap could not provide them — the module must not render then.
+   */
+  _ensureRenderBuffers(lib: LibOpenMPT): boolean {
+    if (this.leftBufPtr && this.rightBufPtr) return true;
     if (!this.leftBufPtr) this.leftBufPtr = lib._malloc(4 * this.maxFrames);
     if (!this.rightBufPtr) this.rightBufPtr = lib._malloc(4 * this.maxFrames);
     this._heapBuffer = null;
+    this._leftHeapView = null;
+    this._rightHeapView = null;
+    if (this.leftBufPtr && this.rightBufPtr) return true;
+    error('could not allocate the render buffers (_malloc returned 0)');
+    return false;
   }
 
   _attachCreatePort(port: WorkletMessagePort): void {
@@ -890,6 +903,12 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
     this.hasEnded = false;
     this._fracRowInt = -1;
     this._rowStartPosSec = 0;
+    // Normally allocated already (_announceCreateHeap), so a no-op. Without buffers the module must
+    // not render: _renderQuantum would hand read_float_stereo a null pointer.
+    if (!this._ensureRenderBuffers(lib)) {
+      this.faulted = true;
+      this.port.postMessage({ type: WT.error, message: 'render buffer allocation failed' });
+    }
     this._configureLoadedModule(lib, next);
     this._fadeTarget = 1;
     if (previous) this._retireModule(previous);
@@ -982,8 +1001,8 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
       }
       // A fresh load is the recovery path for a faulted node — give it a real chance.
       this.faulted = false;
-      if (this.leftBufPtr) { lib._free(this.leftBufPtr); this.leftBufPtr = 0; }
-      if (this.rightBufPtr) { lib._free(this.rightBufPtr); this.rightBufPtr = 0; }
+      // The render buffers survive loads (never freed here, see _ensureRenderBuffers).
+      if (!this._ensureRenderBuffers(lib)) throw new Error('_malloc returned 0 for the render buffers');
 
       // Copy file data into WASM heap
       const filePtr = lib._malloc(bytes.byteLength);
@@ -1001,12 +1020,6 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
         throw new Error('openmpt_module_create_from_memory returned 0 (invalid format?)');
       }
 
-      // Allocate persistent stereo output buffers in WASM heap
-      this.leftBufPtr = lib._malloc(4 * this.maxFrames);
-      this.rightBufPtr = lib._malloc(4 * this.maxFrames);
-      this._heapBuffer = null;
-      this._leftHeapView = null;
-      this._rightHeapView = null;
       this._fracRowInt = -1;
       this._rowStartPosSec = 0;
 
@@ -1088,6 +1101,12 @@ class XMPlayerProcessor extends AudioWorkletProcessor {
     // re-checked here only to re-establish TS narrowing inside this method
     // (narrowing from the caller's guard doesn't cross the method boundary).
     if (!this.modulePtr || !this.lib) return;
+    // Never render into a null buffer: read_float_stereo would scribble over low heap memory.
+    if (!this.leftBufPtr || !this.rightBufPtr) {
+      outL.fill(0);
+      outR.fill(0);
+      return;
+    }
 
     const numSamples = outL.length;
     const framesToRead = Math.min(numSamples, this.maxFrames);

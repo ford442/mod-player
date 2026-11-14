@@ -1,7 +1,7 @@
 import { useEffect, useCallback, useRef } from 'react';
 import type { MutableRefObject } from 'react';
 import { usePatternEdit } from '../hooks/usePatternEdit';
-import { patchFromFieldCycle, type PatternEditField } from '../utils/patternEdit';
+import { patchFromFieldCycle, patternUndoRedoAction, type PatternEditField } from '../utils/patternEdit';
 import { downloadPatternDump } from '../utils/patternDump';
 import type { PatternMatrix } from '../types';
 import { usePlayerEngine, usePlayerEngineInstance } from '../hooks/usePlayerEngine';
@@ -88,15 +88,11 @@ export function useAppPatternEdit(params: UseAppPatternEditParams) {
   useEffect(() => {
     if (!editMode || isExporting) return;
     const onKeyDown = (event: KeyboardEvent) => {
-      const mod = event.metaKey || event.ctrlKey;
-      if (!mod) return;
-      if (event.key === 'z' && !event.shiftKey) {
-        event.preventDefault();
-        undoEdit();
-      } else if ((event.key === 'z' && event.shiftKey) || event.key === 'y') {
-        event.preventDefault();
-        redoEdit();
-      }
+      const action = patternUndoRedoAction(event);
+      if (!action) return;
+      event.preventDefault();
+      if (action === 'undo') undoEdit();
+      else redoEdit();
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);

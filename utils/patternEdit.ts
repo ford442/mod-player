@@ -272,3 +272,32 @@ export function matricesEqual(a: PatternMatrix | null, b: PatternMatrix | null):
   }
   return true;
 }
+
+/** Keys the pattern editor leaves to the global shortcuts even while a cell is selected. */
+export function isEditorPassThroughKey(event: Pick<KeyboardEvent, 'key' | 'code'>): boolean {
+  return event.code === 'Space' || event.key === 'Escape' || event.key === '?';
+}
+
+/**
+ * Undo / redo chord of a keydown, or `null`. Ctrl/⌘+Z undoes, Ctrl/⌘+Shift+Z and Ctrl/⌘+Y redo.
+ * With Shift held `key` is `'Z'`, so the letter is compared case-insensitively (the old check
+ * `key === 'z' && shiftKey` could never match). A chord typed into a text field is left to the
+ * field's own undo.
+ */
+export function patternUndoRedoAction(
+  event: Pick<KeyboardEvent, 'key' | 'shiftKey' | 'ctrlKey' | 'metaKey' | 'altKey' | 'target'>,
+): 'undo' | 'redo' | null {
+  if (!(event.ctrlKey || event.metaKey) || event.altKey) return null;
+  if (isTextEntryTarget(event.target)) return null;
+  const key = event.key.toLowerCase();
+  if (key === 'z') return event.shiftKey ? 'redo' : 'undo';
+  if (key === 'y' && !event.shiftKey) return 'redo';
+  return null;
+}
+
+function isTextEntryTarget(target: EventTarget | null): boolean {
+  if (!target || typeof target !== 'object') return false;
+  const el = target as { tagName?: unknown; isContentEditable?: unknown };
+  const tag = typeof el.tagName === 'string' ? el.tagName : '';
+  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el.isContentEditable === true;
+}

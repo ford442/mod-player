@@ -1,3 +1,4 @@
+import { useShallow } from 'zustand/react/shallow';
 import { ChannelMeters } from './ChannelMeters';
 import { MetadataPanel } from './MetadataPanel';
 import { Panel } from './Panel';
@@ -56,8 +57,16 @@ function LiveChannelMeters() {
 /** Side panels: FX rack (left, wide); Module Info, Instruments, VU Meters, MIDI/Hardware, Export (right). */
 export function SidePanelGrid() {
   const features = usePlayerFeatures();
-  const { theme, showMetadata, showInstruments, showChannelMeters, showFxRack } = usePlayerUiStore();
-  const { storedShader: shaderFile } = useShaderPrefsStore();
+  const { theme, showMetadata, showInstruments, showChannelMeters, showFxRack } = usePlayerUiStore(
+    useShallow((s) => ({
+      theme: s.theme,
+      showMetadata: s.showMetadata,
+      showInstruments: s.showInstruments,
+      showChannelMeters: s.showChannelMeters,
+      showFxRack: s.showFxRack,
+    })),
+    );
+  const { storedShader: shaderFile } = useShaderPrefsStore(useShallow((s) => ({ storedShader: s.storedShader })));
 
   const isDarkMode = !LIGHT_THEMES.has(theme);
   const showDevSurface = !IS_PUBLIC_MODE;

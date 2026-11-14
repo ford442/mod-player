@@ -18,6 +18,11 @@ import {
   type NightPreset,
 } from '../types/bloomPresets';
 import { readLocalStorage, writeLocalStorage } from '../utils/localStorageIO';
+import {
+  clearLegacyThumbnailStorage,
+  loadShaderThumbnailRecords,
+  saveShaderThumbnailRecord,
+} from '../utils/shaderThumbnails';
 import { getLegacyModuleKey, getSongFingerprint, subscribeSongFingerprint } from '../utils/songIdentity';
 import { readSongSession, updateSongSession, type SongSession } from '../utils/songSession';
 
@@ -95,7 +100,13 @@ export interface ShaderPrefsState {
   selectShader: (shader: string) => void;
   toggleShaderFavorite: (shader: string) => void;
   randomizeShader: () => void;
-  setShaderThumbnails: (updater: Record<string, string> | ((prev: Record<string, string>) => Record<string, string>)) => void;
+  /**
+   * Stores a captured thumbnail (utils/shaderThumbnails.ts: ≤160 px WebP in IndexedDB) and shows
+   * it through an object URL. Replaces any earlier one for the shader.
+   */
+  addShaderThumbnail: (shaderId: string, blob: Blob) => void;
+  /** Loads the stored thumbnails once per page and drops the old localStorage map. */
+  hydrateShaderThumbnails: () => Promise<void>;
   setBloomPreset: (preset: BloomPreset) => void;
   setColorScheme: (scheme: ColorScheme) => void;
   setColorPalette: (palette: number) => void;
@@ -110,6 +121,9 @@ export interface ShaderPrefsState {
   markSkipModuleShaderRestore: () => void;
 }
 
+/** The one hydration of the stored thumbnails (per page). */
+let thumbnailsHydration: Promise<void> | null = null;
+
 /** Bumped by every pick and song change: a restore that finishes late must not undo either. */
 let shaderEpoch = 0;
 /** A shader picked while the new song was still hashing; saved to it once the fingerprint lands. */
@@ -119,7 +133,8 @@ export const useShaderPrefsStore = create<ShaderPrefsState>((set, get) => ({
   storedShader: initialStoredShader(),
   shaderFavorites: readLocalStorage<string[]>('xasm1-shader-favorites', []),
   shaderRecents: readLocalStorage<string[]>('xasm1-shader-recents', []),
-  shaderThumbnails: readLocalStorage<Record<string, string>>('xasm1-shader-thumbnails', {}),
+  /** Shader id → object URL of its live thumbnail (session only; the blobs live in IndexedDB). */
+  shaderThumbnails: {},
   songFingerprint: getSongFingerprint(),
   skipNextModuleShaderRestore: false,
   bloomPreset: DEFAULT_BLOOM_PRESET,
@@ -204,12 +219,34 @@ export const useShaderPrefsStore = create<ShaderPrefsState>((set, get) => ({
     const pick = pool[Math.floor(Math.random() * pool.length)];
     if (pick) get().selectShader(pick.id);
   },
-  setShaderThumbnails: (updater) => {
-    set((state) => {
-      const shaderThumbnails = typeof updater === 'function' ? updater(state.shaderThumbnails) : updater;
-      writeLocalStorage('xasm1-shader-thumbnails', shaderThumbnails);
-      return { shaderThumbnails };
+  addShaderThumbnail: (shaderId, blob) => {
+    const url = URL.createObjectURL(blob);
+    const previous = get().shaderThumbnails[shaderId];
+    set((state) => ({ shaderThumbnails: { ...state.shaderThumbnails, [shaderId]: url } }));
+    if (previous) URL.revokeObjectURL(previous);
+    saveShaderThumbnailRecord({ id: shaderId, blob, capturedAt: Date.now() }).catch((err: unknown) => {
+      console.warn('[ShaderPrefs] Could not store shader thumbnail', err);
     });
+  },
+  hydrateShaderThumbnails: async () => {
+    if (thumbnailsHydration) return thumbnailsHydration;
+    clearLegacyThumbnailStorage();
+    thumbnailsHydration = loadShaderThumbnailRecords()
+      .then((records) => {
+        if (records.length === 0) return;
+        set((state) => {
+          const loaded: Record<string, string> = {};
+          for (const record of records) {
+            // A capture made while loading wins over the stored one.
+            if (state.shaderThumbnails[record.id] === undefined) loaded[record.id] = URL.createObjectURL(record.blob);
+          }
+          return { shaderThumbnails: { ...loaded, ...state.shaderThumbnails } };
+        });
+      })
+      .catch((err: unknown) => {
+        console.warn('[ShaderPrefs] Could not load shader thumbnails', err);
+      });
+    return thumbnailsHydration;
   },
   setBloomPreset: (bloomPreset) => set({ bloomPreset }),
   setColorScheme: (colorScheme) => set({ colorScheme }),

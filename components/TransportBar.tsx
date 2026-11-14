@@ -1,7 +1,9 @@
+import { useShallow } from 'zustand/react/shallow';
 import { Controls } from './Controls';
 import { LiveSeekBar } from './LiveSeekBar';
 import { SongMapLazy } from './SongMapLazy';
 import { cn } from '../utils/cn';
+import { DEMO_REMOTE_MEDIA_LIST } from '../utils/videoPatternSource';
 import { FX_RACK_ENABLED, IS_PUBLIC_MODE, LIGHT_THEMES } from '../appConfig';
 import { usePlayerEngine } from '../hooks/usePlayerEngine';
 import { useDisplayShader, usePlayerActions } from '../hooks/usePlayerView';
@@ -32,7 +34,29 @@ export function TransportBar() {
     setShowFxRack,
     showSongMap,
     setShowSongMap,
-  } = usePlayerUiStore();
+  } = usePlayerUiStore(
+    useShallow((s) => ({
+      theme: s.theme,
+      chassisDark: s.chassisDark,
+      setChassisDark: s.setChassisDark,
+      showChannelMeters: s.showChannelMeters,
+      setShowChannelMeters: s.setShowChannelMeters,
+      showMetadata: s.showMetadata,
+      setShowMetadata: s.setShowMetadata,
+      showInstruments: s.showInstruments,
+      setShowInstruments: s.setShowInstruments,
+      showPlaylist: s.showPlaylist,
+      setShowPlaylist: s.setShowPlaylist,
+      showLibraryBrowser: s.showLibraryBrowser,
+      setShowLibraryBrowser: s.setShowLibraryBrowser,
+      showLocalLibrary: s.showLocalLibrary,
+      setShowLocalLibrary: s.setShowLocalLibrary,
+      showFxRack: s.showFxRack,
+      setShowFxRack: s.setShowFxRack,
+      showSongMap: s.showSongMap,
+      setShowSongMap: s.setShowSongMap,
+    })),
+    );
   const {
     bloomPreset,
     setBloomPreset,
@@ -44,7 +68,20 @@ export function TransportBar() {
     setNightModePreset,
     crtEnabled,
     setCrtEnabled,
-  } = useShaderPrefsStore();
+  } = useShaderPrefsStore(
+    useShallow((s) => ({
+      bloomPreset: s.bloomPreset,
+      setBloomPreset: s.setBloomPreset,
+      colorScheme: s.colorScheme,
+      setColorScheme: s.setColorScheme,
+      nightModeEnabled: s.nightModeEnabled,
+      setNightModeEnabled: s.setNightModeEnabled,
+      nightModePreset: s.nightModePreset,
+      setNightModePreset: s.setNightModePreset,
+      crtEnabled: s.crtEnabled,
+      setCrtEnabled: s.setCrtEnabled,
+    })),
+    );
 
   const isDarkMode = !LIGHT_THEMES.has(theme);
   const showDevSurface = !IS_PUBLIC_MODE;
@@ -81,9 +118,7 @@ export function TransportBar() {
         {...(showDevSurface ? {
           onMediaAdd: handleMediaAdd,
           onRemoteMediaSelect: handleRemoteMediaSelect,
-          remoteMediaList: [
-            { id: '1', kind: 'video', url: 'clouds.mp4', fileName: 'Clouds Demo (MP4)', mimeType: 'video/mp4' },
-          ],
+          remoteMediaList: DEMO_REMOTE_MEDIA_LIST,
           bloomPreset,
           onBloomPresetChange: setBloomPreset,
           colorScheme,

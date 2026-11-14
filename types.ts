@@ -27,6 +27,12 @@ export interface PatternMatrix {
   numRows: number;
   numChannels: number;
   rows: PatternCell[][];
+  /**
+   * Content revision: 0 / absent for a matrix as parsed, bumped by every edit
+   * (`PlayerEngine.replacePatternMatrix`). GPU caches key on it, since an edit keeps the
+   * pattern index and dimensions.
+   */
+  revision?: number;
 }
 
 export interface ChannelShadowState {
@@ -131,14 +137,18 @@ export interface LibOpenMPT {
   HEAPF32: Float32Array;
 }
 
-// Web Worker parse protocol
+// Web Worker parse protocol. One warm worker serves every parse of a page session, so each request
+// carries an id and every reply (progress, parsed, error) echoes it. A reply with no id is a
+// worker-level failure that concerns every request in flight.
 export interface WorkerParseRequest {
   type: 'parse';
+  /** Set by the parser client (utils/parserWorker.ts); echoed on every reply to this request. */
+  id?: number;
   fileData: Uint8Array;
   fileName: string;
   /**
-   * Set by parseInWorker when parser logging is on (`?debug=parser`). The worker cannot read the
-   * page URL or localStorage, so the main thread has to tell it.
+   * Set by the parser client when parser logging is on (`?debug=parser`). The worker cannot read
+   * the page URL or localStorage, so the main thread has to tell it.
    */
   debug?: boolean;
 }
@@ -161,6 +171,7 @@ export interface WorkerParseMetadata {
 
 export interface WorkerParseResponse {
   type: 'parsed';
+  id?: number;
   patternMatrices: PatternMatrix[];
   metadata: WorkerParseMetadata;
   instrumentTable?: InstrumentTable;
@@ -168,11 +179,13 @@ export interface WorkerParseResponse {
 
 export interface WorkerParseError {
   type: 'error';
+  id?: number;
   message: string;
 }
 
 export interface WorkerParseProgress {
   type: 'progress';
+  id?: number;
   stage: 'fetch' | 'wasm' | 'patterns' | 'instruments';
 }
 

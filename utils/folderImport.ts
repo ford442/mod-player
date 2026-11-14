@@ -2,24 +2,11 @@ import type { LibOpenMPT } from '../types';
 import type { LibraryEntry, LibraryImportProgress, LibraryRoot, LibraryScanResult } from '../types/localLibrary';
 import { extractModuleMetadataWithLib } from './modMetadata';
 import { makeEntryId } from './localLibraryDb';
+import { isSupportedModuleFileName } from './moduleFormats';
 
-/** Tracker module extensions accepted by the local library importer. */
-export const MODULE_EXTENSIONS = new Set([
-  '.mod',
-  '.xm',
-  '.it',
-  '.s3m',
-  '.mptm',
-  '.669',
-  '.amf',
-  '.stm',
-  '.mtm',
-]);
-
+/** Whether the local library importer takes this file: any format the shipped libopenmpt loads. */
 export function isModuleFileName(fileName: string): boolean {
-  const dot = fileName.lastIndexOf('.');
-  if (dot < 0) return false;
-  return MODULE_EXTENSIONS.has(fileName.slice(dot).toLowerCase());
+  return isSupportedModuleFileName(fileName);
 }
 
 export function formatFromFileName(fileName: string): string {
