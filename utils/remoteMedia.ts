@@ -2,15 +2,38 @@ import type { MediaItem } from '../types';
 import { withBase } from '../src/lib/paths';
 import { assertAllowedModuleUrl } from './remoteModuleSecurity';
 import { emitToast } from './toastBus';
+import { LruCache } from './lruCache';
 
 // Adjust this path to match where you drop your files on the FTP
 const REMOTE_MEDIA_BASE_URL = withBase('media/');
-const moduleFetchCache = new Map<string, Promise<Uint8Array>>();
-const MAX_MODULE_CACHE_ENTRIES = 64;
 
-// Parallel LRU cache for media availability probes (mirrors moduleFetchCache).
-const mediaAvailabilityCache = new Map<string, Promise<boolean>>();
+/**
+ * Downloaded module bytes, least-recently-used first out. Bounded by entry
+ * count *and* total bytes: a few large ITs must not pin hundreds of MB. A
+ * pending download costs 0 until it resolves; a module larger than the byte
+ * budget on its own is handed to its caller but not kept.
+ */
+export const MAX_MODULE_CACHE_ENTRIES = 64;
+export const MAX_MODULE_CACHE_BYTES = 64 * 1024 * 1024;
+const moduleFetchCache = new LruCache<string, Promise<Uint8Array>>(
+  MAX_MODULE_CACHE_ENTRIES,
+  undefined,
+  MAX_MODULE_CACHE_BYTES,
+);
+
+/**
+ * Media availability probes (LRU). A positive result is kept until evicted; a
+ * negative one only for `MEDIA_NEGATIVE_TTL_MS`, so a file uploaded (or a
+ * network blip that failed the probe) is picked up on a later check.
+ */
+interface AvailabilityEntry {
+  result: Promise<boolean>;
+  /** Set once the probe resolved `false`: `Date.now()` after which it is re-probed. */
+  expiresAt?: number;
+}
 const MAX_MEDIA_CACHE_ENTRIES = 64;
+export const MEDIA_NEGATIVE_TTL_MS = 60_000;
+const mediaAvailabilityCache = new LruCache<string, AvailabilityEntry>(MAX_MEDIA_CACHE_ENTRIES);
 
 const MEDIA_EXTENSIONS = ['jpg', 'png', 'gif', 'webp', 'mp4', 'webm'] as const;
 const EXPLICIT_MEDIA_URL_RE = /\bhttps?:\/\/\S+\.(?:jpe?g|png|gif|webp|mp4|webm)\b/i;
@@ -82,11 +105,12 @@ export function deriveMediaCandidates(modFilename: string, hintText?: string): s
  */
 export function checkMediaAvailability(url: string): Promise<boolean> {
   const cached = mediaAvailabilityCache.get(url);
-  if (cached) return cached;
-
-  if (mediaAvailabilityCache.size >= MAX_MEDIA_CACHE_ENTRIES) {
-    const oldestKey = mediaAvailabilityCache.keys().next().value;
-    if (oldestKey) mediaAvailabilityCache.delete(oldestKey);
+  if (cached) {
+    if (cached.expiresAt === undefined || Date.now() < cached.expiresAt) {
+      mediaAvailabilityCache.touch(url);
+      return cached.result;
+    }
+    mediaAvailabilityCache.delete(url);
   }
 
   const pending = (async (): Promise<boolean> => {
@@ -106,7 +130,11 @@ export function checkMediaAvailability(url: string): Promise<boolean> {
     }
   })().catch(() => false);
 
-  mediaAvailabilityCache.set(url, pending);
+  const entry: AvailabilityEntry = { result: pending };
+  mediaAvailabilityCache.set(url, entry);
+  void pending.then((ok) => {
+    if (!ok) entry.expiresAt = Date.now() + MEDIA_NEGATIVE_TTL_MS;
+  });
   return pending;
 }
 
@@ -162,51 +190,6 @@ export function createRemoteMediaItem(url: string): MediaItem {
   };
 }
 
-export const fetchRemoteMedia = async (): Promise<MediaItem[]> => {
-  try {
-    const response = await fetch(REMOTE_MEDIA_BASE_URL);
-    if (!response.ok) throw new Error('Failed to access media folder');
-    
-    const text = await response.text();
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(text, 'text/html');
-    
-    const mediaItems: MediaItem[] = [];
-    const mediaRegex = /\.(mp4|webm|mkv|mov|gif|png|jpg|jpeg)$/i;
-    const videoRegex = /\.(mp4|webm|mkv|mov)$/i;
-    const gifRegex = /\.gif$/i;
-
-    const anchors = doc.querySelectorAll('a');
-    for (const a of anchors) {
-      const href = a.getAttribute('href');
-      
-      if (href && mediaRegex.test(href)) {
-        // Handle Nginx/Apache differences where href might include the path
-        const cleanName = href.split('/').pop() || href;
-        const isVideo = videoRegex.test(cleanName);
-        const isGif = gifRegex.test(cleanName);
-
-        mediaItems.push({
-          id: `remote-${cleanName}`,
-          url: `${REMOTE_MEDIA_BASE_URL}${cleanName}`, // Construct full URL
-          fileName: decodeURIComponent(cleanName),
-          kind: isVideo ? 'video' : (isGif ? 'gif' : 'image'),
-          mimeType: isVideo ? 'video/mp4' : 'image/jpeg', // Approximation
-          muted: true,
-          loop: isGif,
-          fit: 'contain',
-          isObjectUrl: false
-        });
-      }
-    }
-
-    return mediaItems;
-  } catch (e) {
-    console.error("Could not fetch remote media:", e);
-    return [];
-  }
-};
-
 export function inferFileNameFromUrl(downloadUrl: string): string {
   try {
     const base = typeof window !== 'undefined' ? window.location.href : 'http://localhost/';
@@ -228,24 +211,20 @@ export async function fetchRemoteModule(downloadUrl: string): Promise<Uint8Array
   const safeUrl = assertAllowedModuleUrl(downloadUrl);
   const cached = moduleFetchCache.get(safeUrl);
   if (cached) {
+    moduleFetchCache.touch(safeUrl);
     return cached;
   }
 
-  if (moduleFetchCache.size >= MAX_MODULE_CACHE_ENTRIES) {
-    const oldestKey = moduleFetchCache.keys().next().value;
-    if (oldestKey) {
-      moduleFetchCache.delete(oldestKey);
-    }
-  }
-
-  const pending = fetch(safeUrl).then(async response => {
+  const pending: Promise<Uint8Array> = fetch(safeUrl).then(async response => {
     if (!response.ok) {
       throw new Error(`failed to download remote module (${response.status})`);
     }
-    const data = await response.arrayBuffer();
-    return new Uint8Array(data);
+    const data = new Uint8Array(await response.arrayBuffer());
+    // Charge the bytes to this entry (if it is still the cached one), evicting LRU entries over budget.
+    if (moduleFetchCache.get(safeUrl) === pending) moduleFetchCache.setBytes(safeUrl, data.byteLength);
+    return data;
   }).catch(error => {
-    moduleFetchCache.delete(safeUrl);
+    if (moduleFetchCache.get(safeUrl) === pending) moduleFetchCache.delete(safeUrl);
     throw error;
   });
 
