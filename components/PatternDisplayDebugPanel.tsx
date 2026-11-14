@@ -2,6 +2,7 @@ import type { SyncDebugInfo } from '../types';
 import type { DebugInfo } from '../src/renderers/params';
 import type { PatternRendererBackend } from '../src/renderers/types';
 import { setRendererOverride } from '../src/renderers/rendererSelection';
+import { DiagnosticsActions } from './DiagnosticsActions';
 
 export interface PatternDisplayDebugPanelProps {
   debugPanelOpen: boolean;
@@ -154,6 +155,7 @@ export function PatternDisplayDebugPanel({
               )}
             </div>
           )}
+          <DiagnosticsActions />
         </div>
       )}
 

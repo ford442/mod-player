@@ -30,6 +30,7 @@ import { useShaderCanvasHitTest } from '../src/renderers/hooks/useShaderCanvasHi
 import { usePatternRenderLoop } from '../src/renderers/hooks/usePatternRenderLoop';
 import { useThrottledDebugInfo } from '../src/renderers/hooks/useThrottledDebugInfo';
 import { useBackendDebugInfo } from '../src/renderers/hooks/useBackendDebugInfo';
+import { registerFaultContext } from '../utils/faultReport';
 
 const DEFAULT_CHANNELS = 4;
 
@@ -204,6 +205,11 @@ export const PatternDisplay: React.FC<PatternDisplayProps> = ({
     ? (getWebGL2OptIn()?.reason ?? 'opt-in')
     : useHTML ? 'explicit' : (getWebGPUHardFailStatus() ?? 'default');
   const backendDebugInfo = useBackendDebugInfo(setDebugInfo, activeBackend, backendReason);
+  // Every fault report names the renderer in use and why (utils/faultReport.ts).
+  useEffect(
+    () => registerFaultContext('renderer', () => ({ backend: activeBackend, reason: backendReason, shaderFile })),
+    [activeBackend, backendReason, shaderFile],
+  );
 
   // The one-and-only activation warn (module-guarded: StrictMode / shader-switch remounts can't repeat it).
   useEffect(() => {

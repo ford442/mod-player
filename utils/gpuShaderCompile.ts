@@ -1,3 +1,5 @@
+import { recordFault } from './faultReport';
+
 /** Throw if a GPUShaderModule reported WGSL compile errors. */
 export async function assertShaderModuleCompiled(
   module: GPUShaderModule,
@@ -82,6 +84,7 @@ export function attachUncapturedErrorHandler(
     const kind = error?.constructor?.name ?? 'GPUError';
     const message = `${GPU_ERROR_PREFIX}: ${kind}: ${error?.message ?? 'unknown error'}`;
     console.error(`[WebGPU] ${message}`);
+    recordFault({ kind: 'gpu-error', source: 'webgpu', message });
     onError(message);
   };
   device.addEventListener('uncapturederror', handler);

@@ -161,7 +161,8 @@ the app runs it: `OUT_DIR=/tmp/dbg npm run build:js-libopenmpt -- --debug`, then
 `node scripts/verify-js-libopenmpt.mjs --boot /tmp/dbg/libopenmpt-worklet.js`; CI does this for both pairs. Release
 builds write `vendor/symbol-maps/<pair>.<cache key>.symbols`, the function index → name map. The cache key is the
 `?v=` the app loads, so a `wasm-function[N]` frame from production can be decoded; CI uploads the maps as the
-`libopenmpt-symbol-maps` artifact.
+`libopenmpt-symbol-maps` artifact. Fault reports record the key (`docs/FAULT_REPORTS.md`), and
+`node scripts/symbolicate.mjs report.json [--maps <dir>]` decodes them.
 
 **SIMD is rejected, not an untested production mode:** `--simd` (`-msimd128`) was rebuilt and benched against the shipped
 wasm on 2026-10-25 (emsdk 3.1.51, `npm run bench:js-libopenmpt`, 4-channel MOD and a 64-channel IT, cubic and sinc-8,
