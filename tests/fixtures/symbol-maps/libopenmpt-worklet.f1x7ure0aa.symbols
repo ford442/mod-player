@@ -1,0 +1,16 @@
+0:invoke_vi
+1:invoke_iii
+2:__cxa_throw
+3:emscripten_resize_heap
+4:fd_write
+5:__wasm_call_ctors
+6:openmpt_module_create_from_memory2
+7:openmpt_module_read_interleaved_float_stereo
+8:OpenMPT::CSoundFile::Read(unsigned int, OpenMPT::IAudioTarget&, OpenMPT::IAudioSource&, std::__2::optional<std::__2::reference_wrapper<OpenMPT::IMonitorOutput>>, std::__2::optional<std::__2::reference_wrapper<OpenMPT::IMonitorInput>>)
+9:OpenMPT::CSoundFile::ReadNote()
+10:OpenMPT::CSoundFile::ProcessRow()
+11:OpenMPT::CSoundFile::ReadIT(OpenMPT::FileReader&, OpenMPT::CSoundFile::ModLoadingFlags)
+12:OpenMPT::ITDecompression::ITDecompression(OpenMPT::FileReader&, OpenMPT::ModSample&, bool, bool, unsigned int)
+13:openmpt::module_impl::read(int, unsigned long, float*)
+14:malloc
+15:free

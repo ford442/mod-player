@@ -83,10 +83,14 @@ import {
   type OutputDeviceState,
 } from './outputDevice';
 import { SnapshotStore, type Ref, type SetStateAction } from './store';
-import { TransportMachine, type TransportPhase } from './transport';
+import { TransportMachine, type TransportPhase, type TransportTransition } from './transport';
+import { registerFaultContext } from '../../utils/faultReport';
 import { isAudioWorkletSupported, verifyWorkletFile } from './workletUrls';
 
 const log = createLogger('Engine');
+
+/** Transitions kept for fault reports (the observability design asks for the last 30). */
+const TRANSPORT_HISTORY_SIZE = 30;
 
 /**
  * Everything React (or any other observer) may read. Immutable; replaced on every change. The
@@ -288,6 +292,9 @@ export class PlayerEngine {
   /** Per load: the user set / cleared the region, so a stored one must not overwrite it. */
   private loopTouched = false;
   private offSongFingerprint: (() => void) | null = null;
+  /** The last TRANSPORT_HISTORY_SIZE transitions, for fault reports (utils/faultReport.ts). */
+  private readonly transportHistory: Array<TransportTransition & { atMs: number }> = [];
+  private offFaultContext: (() => void) | null = null;
   /** `onSongEnded` subscribers (playlist auto-advance). */
   private readonly songEndedListeners = new Set<() => void>();
 
@@ -319,7 +326,9 @@ export class PlayerEngine {
     this.songStructureSourceOption = options.songStructureSource;
     this.loopRegionStore = options.loopRegionStore === undefined ? sessionLoopRegionStore : options.loopRegionStore;
 
-    this.transport.subscribe(() => {
+    this.transport.subscribe((transition) => {
+      this.transportHistory.push({ ...transition, atMs: Math.round(performance.now()) });
+      if (this.transportHistory.length > TRANSPORT_HISTORY_SIZE) this.transportHistory.shift();
       const t = this.transport;
       this.store.patch({
         phase: t.phase,
@@ -438,6 +447,8 @@ export class PlayerEngine {
     const isCancelled = () => generation !== this.generation;
     this.offSongFingerprint?.();
     this.offSongFingerprint = subscribeSongFingerprint(() => this.restoreLoopRegion());
+    this.offFaultContext?.();
+    this.offFaultContext = registerFaultContext('transport', () => this.faultContext());
     await runLibOpenMPTInit({
       refs: this.refs,
       setters: this.setters,
@@ -451,6 +462,18 @@ export class PlayerEngine {
     }
   }
 
+  /** The `transport` section of a fault report: phase, engine and the recent transitions. */
+  private faultContext(): Record<string, unknown> {
+    const snap = this.store.getSnapshot();
+    return {
+      phase: this.transport.phase,
+      holdPaused: this.transport.holdPaused,
+      engine: this.refs.playbackEngineRef.current,
+      moduleFormat: snap.moduleFormat,
+      history: [...this.transportHistory],
+    };
+  }
+
   /** Tear everything down (unmount). The engine can be init()ed again afterwards (StrictMode, HMR). */
   dispose(): void {
     this.generation += 1;
@@ -460,6 +483,8 @@ export class PlayerEngine {
     this.pendingStartStep = null;
     this.offSongFingerprint?.();
     this.offSongFingerprint = null;
+    this.offFaultContext?.();
+    this.offFaultContext = null;
     this.loopTracker = LOOP_TRACKER_IDLE;
     this.stopFn(false);
     this.output.detach();

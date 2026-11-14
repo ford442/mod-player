@@ -8,6 +8,7 @@ import {
 } from '../../utils/pcmBus';
 import { shouldPostInitLib } from '../../utils/workletAudioLifecycle';
 import { fetchWorkletLibAssets } from '../../utils/workletLibAssets';
+import { recordFault } from '../../utils/faultReport';
 import { resolveJsInterpolationLength } from '../../utils/jsInterpolation';
 import { OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH } from '../../utils/openmptRenderParams';
 import {
@@ -81,6 +82,7 @@ export async function handleWorkletFault(
   callbacks.setIsPlaying(false);
 
   console.error(`[PLAY] Worklet faulted (${reason}, attempt ${attempt}): ${message}`);
+  recordFault({ kind: 'worklet-fault', source: `worklet:${reason}`, message: `${message} (restart attempt ${attempt})` });
 
   // Best-effort teardown — the node is not trusted to respond to anything else.
   try { node.onprocessorerror = null; } catch { /* ignore */ }

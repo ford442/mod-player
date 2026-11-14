@@ -97,6 +97,7 @@ npm run smoke:create-thread # #513: 16 MiB IT loaded while a MOD plays, create w
 npm run smoke:fx:ci  # FX rack on headless Chrome (#453): bypass null, crossfade clicks, parity, character CPU (needs a preview on BASE_URL)
 npm run gen:irs      # Synthesize + Opus-encode the room IRs → public/ir/*.opus + manifest (needs ffmpeg/libopus; outputs committed)
 npm run verify:irs   # IR files match the manifest and the synth spec (no ffmpeg; tests/build/irAssets.test.ts runs it)
+node scripts/symbolicate.mjs report.json # Name the wasm-function[N] frames of a "Copy diagnostics" fault report (docs/FAULT_REPORTS.md)
 python3 deploy.py    # Build + SFTP upload to production server
 ```
 
@@ -413,4 +414,5 @@ All shared canvas layout values live here:
 - **Do not** add a second `new AudioContext` call site — `utils/audioContextFactory.ts` is the only one (see pitfall 12)
 - **Do not** connect an engine node to `analyserRef` or put a bare `disconnect()` on a master node — engines go to `masterInputRef` (see pitfall 16)
 - **Do not** assume WebGPU is available — always check for fallback paths
+- **Do not** put module bytes or unquoted file names into errors / fault-report context — `utils/faultReport.ts` hashes names it can recognise, best effort (docs/FAULT_REPORTS.md)
 - **Do not** commit agent scratch files (`.swarm-state.md`, `weekly_plan.md`) — use `docs/planning/ROADMAP.md` and GitHub issues

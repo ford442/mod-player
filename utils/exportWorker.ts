@@ -6,6 +6,7 @@ import type {
   ExportWorkerResult,
 } from '../workers/openmpt-export.worker';
 import exportWorkerUrl from '../workers/openmpt-export.worker.ts?worker&url';
+import { recordFault } from './faultReport';
 import type { ExportSampleRate } from './wavEncoder';
 
 export const EXPORT_WORKER_TIMEOUT_MS = 10 * 60_000;
@@ -24,6 +25,7 @@ export function createExportWorker(onFatalError?: (message: string) => void): Wo
           ? event.message
           : 'Export worker script error';
     console.error('[Export] worker script error:', message);
+    recordFault({ kind: 'worker-error', source: 'export-worker', message });
     onFatalError?.(message);
   });
   worker.addEventListener('messageerror', () => {

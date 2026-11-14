@@ -8,6 +8,7 @@ import type {
 import { isParserDebugEnabled, parserLog } from './parserDebug';
 import parserWorkerUrl from '../workers/openmpt-parser.worker.ts?worker&url';
 import { createLogger } from './log';
+import { recordFault } from './faultReport';
 
 const log = createLogger('Parser');
 
@@ -46,6 +47,7 @@ export function createParserWorker(onFatalError?: (message: string) => void): Wo
           ? event.message
           : 'Parser worker script error';
     console.error('[Parser] worker script error:', message);
+    recordFault({ kind: 'worker-error', source: 'parser-worker', message });
     onFatalError?.(message);
   });
   worker.addEventListener('messageerror', () => {

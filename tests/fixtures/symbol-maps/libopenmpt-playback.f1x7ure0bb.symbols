@@ -1,0 +1,8 @@
+0:invoke_vi
+1:emscripten_wasm_worker_post_function_v
+2:__cxa_throw
+3:__wasm_call_ctors
+4:openmpt_module_read_interleaved_float_stereo
+5:OpenMPT::CSoundFile::Read(unsigned int, OpenMPT::IAudioTarget&, OpenMPT::IAudioSource&, std::__2::optional<std::__2::reference_wrapper<OpenMPT::IMonitorOutput>>, std::__2::optional<std::__2::reference_wrapper<OpenMPT::IMonitorInput>>)
+6:OpenMPT::ModChannel::GetVSTVolume()
+7:OpenMPT::CSoundFile::ProcessRamping(OpenMPT::ModChannel&)

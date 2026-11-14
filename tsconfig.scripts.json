@@ -24,6 +24,7 @@
     "scripts/build-js-worklet.mjs",
     "scripts/gen-module-formats.mjs",
     "scripts/jsEngineArtifacts.mjs",
+    "scripts/symbolicate.mjs",
     "scripts/sync-shaders.mjs",
     "scripts/verify-build.mjs",
     "scripts/verify-bundle-budget.mjs",
@@ -35,6 +36,7 @@
     "scripts/lib/audio-smoke-config.mjs",
     "scripts/lib/audio-smoke-counters.mjs",
     "scripts/lib/corrupt-it.mjs",
+    "scripts/lib/symbolicate.mjs",
     "scripts/lib/synth-xm.mjs",
     "scripts/lib/wasm-ops.mjs",
     "scripts/lib/visual-smoke-config.mjs"

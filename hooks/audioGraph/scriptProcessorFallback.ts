@@ -4,6 +4,7 @@ import { postPause, repeatCountFor } from '../../audio-worklet/protocol';
 import { OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH } from '../../utils/openmptRenderParams';
 import { resolveJsInterpolationLength } from '../../utils/jsInterpolation';
 import { mallocOrThrow } from '../../utils/wasmHeap';
+import { recordFault } from '../../utils/faultReport';
 import { wireMasterOutput } from './masterGraph';
 import type { AudioGraphCallbacks, AudioGraphConfig, AudioGraphRefs } from './types';
 
@@ -36,6 +37,7 @@ export async function runScriptProcessorFallback(
   // It stays claimed if the fallback cannot start (no module) — like the guard always did — until stop.
   refs.playbackEngineRef.current = 'scriptprocessor';
   console.warn('[PLAY] Worklet WASM init failed — falling back to ScriptProcessorNode');
+  recordFault({ kind: 'sp-fallback', source: 'worklet', message: 'AudioWorklet engine unavailable — ScriptProcessorNode fallback' });
   try { node.port.postMessage(postPause()); } catch (_e) { /* ignore */ }
   try { node.port.onmessage = null; } catch (_e) { /* ignore */ }
   try { node.disconnect(); } catch (_e) { /* ignore */ }

@@ -44,6 +44,7 @@ import {
   type WebGPUDeviceStatus,
 } from '../../../utils/webgpuDevice';
 import { markWebGPUSessionFailed } from '../../../utils/webgpuProbe';
+import { recordFault } from '../../../utils/faultReport';
 import { AUDIO_REACTIVE_UNIFORM_BYTES, OSC_SAMPLE_COUNT } from '../../../utils/audioReactive';
 import { fetchShaderSource } from './shaderSource';
 import {
@@ -544,6 +545,11 @@ export class WebGPURenderer {
       onLost: (info, intentional) => {
         if (isCancelled() || intentional) return;
         console.error(`[WebGPU] device lost (reason=${info.reason}): ${info.message}`);
+        recordFault({
+          kind: 'gpu-device-lost',
+          source: 'webgpu',
+          message: `device lost (reason=${info.reason}, recovery attempt ${this.recoveryAttempts + 1}): ${info.message}`,
+        });
         this.stopWatchingDisplay();
         this.configuredOutput = null;
         this.callbacks.onGpuReady?.(false);

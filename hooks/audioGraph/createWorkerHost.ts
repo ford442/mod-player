@@ -16,6 +16,7 @@ import {
   type WorkletCreateHeapMessage,
 } from '../../audio-worklet/protocol';
 import { createLogger } from '../../utils/log';
+import { recordFault } from '../../utils/faultReport';
 
 const log = createLogger('CreateWorker');
 
@@ -111,7 +112,10 @@ export function attachCreateWorker(node: AudioWorkletNode, heap: WorkletCreateHe
     const h: CreateWorkerHost = { worker, heapId: heap.heapId, ready: false, node: null, seq: 0, inflight: new Map() };
     host = h;
     worker.onmessage = (e: MessageEvent) => onReply(h, e.data);
-    worker.onerror = (e: ErrorEvent) => fail(h, e.message || 'worker error');
+    worker.onerror = (e: ErrorEvent) => {
+      recordFault({ kind: 'worker-error', source: 'create-worker', message: e.message || 'worker error' });
+      fail(h, e.message || 'worker error');
+    };
     assets.wasmModule.then(
       (wasmModule) => {
         worker.postMessage({
