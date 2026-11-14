@@ -112,6 +112,43 @@ export const REQUIRED_C_EXPORTS = Object.freeze([
   '_openmpt_module_set_repeat_count',
 ]);
 
+/**
+ * The module-inspection shim (wasm/xasm_inspect.cpp → utils/moduleInspect.ts): every `XASM_API`
+ * function, linked into the SHARED pair only. The playback pair must not export any of them (the
+ * audio thread needs none; pitfall 4 / #513). tests/unit/requiredCExports.test.ts holds this list to
+ * the source's XASM_API functions.
+ */
+export const INSPECT_C_EXPORTS = Object.freeze([
+  '_xasm_inspect_abi_version',
+  '_xasm_inspect_create',
+  '_xasm_inspect_destroy',
+  '_xasm_instrument_count',
+  '_xasm_instrument_envelope',
+  '_xasm_instrument_info',
+  '_xasm_module_info',
+  '_xasm_pattern_dump',
+  '_xasm_pattern_num_rows',
+  '_xasm_sample_count',
+  '_xasm_sample_info',
+  '_xasm_sample_map',
+  '_xasm_sample_pcm',
+  '_xasm_sample_pcm_peaks',
+  '_xasm_song_timeline',
+  '_xasm_timeline_summary',
+  '_xasm_timeline_tempo',
+  '_xasm_timeline_visits',
+]);
+
+export const INSPECT_SOURCE_REL = 'wasm/xasm_inspect.cpp';
+
+/** `XASM_INSPECT_ABI_VERSION` as wasm/xasm_inspect.cpp defines it (the wasm must report the same). */
+export function inspectAbiVersion(root = REPO_ROOT) {
+  const src = readFileSync(join(root, INSPECT_SOURCE_REL), 'utf8');
+  const m = src.match(/constexpr\s+std::int32_t\s+XASM_INSPECT_ABI_VERSION\s*=\s*(\d+)\s*;/);
+  if (!m) throw new Error(`XASM_INSPECT_ABI_VERSION not found in ${INSPECT_SOURCE_REL}`);
+  return Number(m[1]);
+}
+
 /** Extra C exports the playback heap needs: the create worker initialises its stack + TLS with it. */
 export const PLAYBACK_C_EXPORTS = Object.freeze(['_emscripten_wasm_worker_initialize']);
 
@@ -351,9 +388,15 @@ export function checkArtifacts({ root = REPO_ROOT, artifact = 'shared' } = {}) {
   const glue = inspectGlue(glueBuf.toString('utf8'), WASM);
   {
     const have = new Set(glue.cExports);
-    const required = spec.sharedMemory ? [...REQUIRED_C_EXPORTS, ...PLAYBACK_C_EXPORTS] : REQUIRED_C_EXPORTS;
+    const required = spec.sharedMemory ? [...REQUIRED_C_EXPORTS, ...PLAYBACK_C_EXPORTS] : [...REQUIRED_C_EXPORTS, ...INSPECT_C_EXPORTS];
     const missing = required.filter((n) => !have.has(n));
     if (missing.length) errors.push(`glue does not export required functions: ${missing.join(', ')}`);
+    if (spec.sharedMemory) {
+      const leaked = glue.cExports.filter((n) => n.startsWith('_xasm_'));
+      if (leaked.length) {
+        errors.push(`${GLUE} exports the inspection shim (${leaked.join(', ')}) — it belongs in the shared pair only, never on the audio thread`);
+      }
+    }
     if (manifest.exceptions === 'wasm' && glue.usesJsExceptionTrampolines) {
       errors.push('manifest says native wasm exceptions but the glue defines JS invoke_* trampolines');
     }
@@ -415,7 +458,7 @@ export async function smokeArtifacts({ root = REPO_ROOT, moduleBytes } = {}) {
       globalThis.WebAssembly = wasmGlobalBefore;
     }
 
-    for (const name of REQUIRED_C_EXPORTS) {
+    for (const name of [...REQUIRED_C_EXPORTS, ...INSPECT_C_EXPORTS]) {
       if (typeof lib[name] !== 'function') errors.push(`Module.${name} is not a function at runtime`);
     }
     for (const m of REQUIRED_RUNTIME_MEMBERS) {
@@ -489,6 +532,46 @@ export async function smokeArtifacts({ root = REPO_ROOT, moduleBytes } = {}) {
     const again = create(modBytes);
     if (!again) errors.push('module creation failed after a corrupt-input attempt (runtime is dead)');
     else lib._openmpt_module_destroy(again);
+
+    // 2c. The inspection shim (shared pair): the ABI the wrapper expects, and corrupt input is a 0
+    //     handle (every entry point catches), on junk and on truncated prefixes of a valid file.
+    if (typeof lib._xasm_inspect_abi_version === 'function') {
+      const want = inspectAbiVersion(root);
+      const got = lib._xasm_inspect_abi_version();
+      if (got !== want) errors.push(`xasm_inspect_abi_version() is ${got}, ${INSPECT_SOURCE_REL} says ${want} (stale wasm?)`);
+      const inspect = (bytes) => {
+        const fp = lib._malloc(Math.max(1, bytes.length));
+        lib.HEAPU8.set(bytes, fp);
+        try {
+          return lib._xasm_inspect_create(fp, bytes.length, 0);
+        } finally {
+          lib._free(fp);
+        }
+      };
+      try {
+        const junk = new Uint8Array(4096);
+        for (let i = 0; i < junk.length; i++) junk[i] = (i * 2654435761) >>> 24;
+        if (inspect(junk) !== 0) errors.push('xasm_inspect_create accepted junk');
+        const it = corruptIt215Sample();
+        for (const cut of [8, 0xc0, 0x100, it.length - 64, it.length]) {
+          const h = inspect(it.subarray(0, cut));
+          if (h) {
+            // Read everything a handle offers: a truncated file must not abort in any of them.
+            const out = lib._malloc(4096);
+            lib._xasm_module_info(h, out);
+            lib._xasm_sample_info(h, 1, out);
+            lib._xasm_sample_pcm_peaks(h, 1, 64, out);
+            lib._xasm_pattern_dump(h, 0, out, 4096);
+            lib._xasm_song_timeline(h, 0, 0);
+            lib._free(out);
+            lib._xasm_inspect_destroy(h);
+          }
+        }
+        if (!inspect(it)) errors.push(`xasm_inspect_create rejected a recoverable truncated IT215 sample: ${TYPED_CATCH_FAILED}`);
+      } catch (e) {
+        errors.push(`the inspection shim threw out of wasm on corrupt input (${e instanceof Error ? e.message : e})`);
+      }
+    }
 
     // 3. Heap growth must refresh the exported views (the processor re-derives its Float32Array
     //    views whenever HEAPF32.buffer changes).
@@ -576,6 +659,9 @@ export async function smokePlaybackArtifacts({ root = REPO_ROOT, largeModuleByte
     }
     for (const name of [...REQUIRED_C_EXPORTS, ...PLAYBACK_C_EXPORTS]) {
       if (typeof lib[name] !== 'function') errors.push(`Module.${name} is not a function at runtime`);
+    }
+    for (const name of INSPECT_C_EXPORTS) {
+      if (lib[name] !== undefined) errors.push(`Module.${name} is exported by the playback heap — the inspection shim is shared-pair only`);
     }
     for (const m of FORBIDDEN_RUNTIME_MEMBERS) {
       if (lib[m] !== undefined) errors.push(`Module.${m} must not be exported (signature clash with the app polyfill)`);

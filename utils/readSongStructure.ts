@@ -10,11 +10,15 @@
  *      (the song looping back) ends it. Speed / tempo (`CMD_SPEED` / `CMD_TEMPO`) and row delays are
  *      tracked on the way, which gives the tempo events and a tick-count clock used only to place
  *      rows *within* an order.
- *   2. Exact starts. For every order the flow visits, `set_position_order_row` + `get_position_seconds`
- *      — libopenmpt's own clock. Each call simulates the song from the start, so the walk is quadratic
- *      in song length (~4 ms for a 30-order XM, seconds for a 250-order 64-channel IT); past
- *      `budgetMs` the remaining starts are extrapolated from the tick clock and the result is flagged
- *      `approximate`.
+ *   2. Exact starts, on libopenmpt's own clock. With a `timeline` (utils/moduleInspect.ts:
+ *      `xasm_song_timeline`, ONE walk of the player's own row/tick code — what
+ *      `readSongStructureFromBytes` uses), each order's first-visit start and the tempo / speed events
+ *      come from that walk: linear in song length (~95 ms for a 250-order 64-channel IT). Without one,
+ *      for every order the flow visits, `set_position_order_row` + `get_position_seconds`; each call
+ *      simulates the song from the start, so that walk is quadratic (~4 ms for a 30-order XM, seconds
+ *      for a 250-order 64-channel IT) and past `budgetMs` the remaining starts are extrapolated from
+ *      the tick clock and the result is flagged `approximate`. It stays as the timeline's test oracle
+ *      and as the path for a glue without the inspection shim.
  *
  * The walk also reports the jumps / breaks it followed (`SongStructure.jumps`, phase 2). Phase 1
  * reads the selected subsong only (subsong 0 until #526).
@@ -22,6 +26,7 @@
 import type { LibOpenMPT } from '../types';
 import { EffectCommand, PatternCommand } from './openmptCommands';
 import { createModuleFromBytes } from './wasmHeap';
+import { firstVisitSeconds, openModuleInspector, type SongTimeline } from './moduleInspect';
 import {
   ORDER_PATTERN_END,
   ORDER_PATTERN_SKIP,
@@ -32,6 +37,11 @@ import {
 } from './songStructure';
 
 export interface ReadSongStructureOptions {
+  /**
+   * The module's `xasm_song_timeline` (same subsong): order starts and tempo events come from it.
+   * Without it, the quadratic `set_position_order_row` pass runs (under `budgetMs`).
+   */
+  timeline?: SongTimeline;
   /** Wall-clock budget for the exact (quadratic) pass, ms. Default 8000. */
   budgetMs?: number;
   /** Clock for the budget (tests). */
@@ -176,15 +186,23 @@ export function readSongStructure(
   const totalSeconds = lib._openmpt_module_get_duration_seconds(modPtr);
 
   const visits = readFlow(lib, modPtr, numOrders);
+  const timeline = options.timeline;
+  const timelineStarts = timeline ? firstVisitSeconds(timeline) : null;
 
-  // Exact starts, in play order, until the budget runs out.
+  // Exact starts, in play order: from the timeline, or (no timeline) until the budget runs out.
   const starts: number[] = [];
   let approximate = false;
   const began = now();
   let lastExact = -1;
   for (let i = 0; i < visits.length; i++) {
     const v = visits[i]!;
-    if (now() - began <= budgetMs) {
+    const fromTimeline = timelineStarts?.get(v.order);
+    if (fromTimeline !== undefined) {
+      starts.push(Math.max(fromTimeline.startSeconds, starts[i - 1] ?? 0));
+      lastExact = i;
+      continue;
+    }
+    if (!timelineStarts && now() - began <= budgetMs) {
       lib._openmpt_module_set_position_order_row(modPtr, v.order, v.entryRow);
       const exact = lib._openmpt_module_get_position_seconds(modPtr);
       starts.push(Math.max(exact, starts[i - 1] ?? 0));
@@ -192,12 +210,14 @@ export function readSongStructure(
       continue;
     }
     approximate = true;
-    // Scale the tick clock to libopenmpt's clock over the exact part.
-    const anchor = visits[lastExact]!;
-    const ratio = anchor.simStart > 0 ? starts[lastExact]! / anchor.simStart : 1;
-    starts.push(starts[lastExact]! + (v.simStart - anchor.simStart) * ratio);
+    // Scale the tick clock to libopenmpt's clock over the exact part (an order the timeline did not
+    // reach — the flow walk and playback disagree — or the budget ran out).
+    const anchor = lastExact >= 0 ? visits[lastExact]! : null;
+    const anchorStart = lastExact >= 0 ? starts[lastExact]! : 0;
+    const ratio = anchor && anchor.simStart > 0 ? anchorStart / anchor.simStart : 1;
+    starts.push(anchorStart + (v.simStart - (anchor?.simStart ?? 0)) * ratio);
   }
-  lib._openmpt_module_set_position_order_row(modPtr, 0, 0);
+  if (!timeline) lib._openmpt_module_set_position_order_row(modPtr, 0, 0);
 
   const byOrder = new Map<number, { start: number; duration: number; visit: Visit }>();
   const tempoEvents: SongTempoEvent[] = [];
@@ -206,11 +226,20 @@ export function readSongStructure(
     const end = i + 1 < visits.length ? starts[i + 1]! : Math.max(totalSeconds, start);
     const duration = Math.max(0, end - start);
     byOrder.set(v.order, { start, duration, visit: v });
+    if (timeline) return;
     const scale = v.simDuration > 0 ? duration / v.simDuration : 0;
     for (const e of v.events) {
       tempoEvents.push({ seconds: start + e.simOffset * scale, order: v.order, row: e.row, bpm: e.bpm, speed: e.speed });
     }
   });
+  if (timeline) {
+    // libopenmpt's own events, on its clock, for the orders the map shows (first pass only).
+    for (const e of timeline.tempoEvents) {
+      const hit = byOrder.get(e.order);
+      if (!hit || e.seconds < hit.start - 1e-9 || e.seconds > hit.start + hit.duration + 1e-9) continue;
+      tempoEvents.push({ seconds: e.seconds, order: e.order, row: e.row, bpm: e.tempo, speed: e.speed });
+    }
+  }
 
   const orders: SongOrder[] = [];
   let layoutEnd = 0;
@@ -260,16 +289,32 @@ export function readSongStructure(
   };
 }
 
-/** Create a scratch module from `fileData`, read its structure, destroy it. */
+/**
+ * Create a scratch module from `fileData`, read its structure, destroy it. With the inspection shim
+ * (the committed shared pair) the order starts come from one `xasm_song_timeline` walk on a
+ * structure-only inspection handle (no sample data), created and destroyed before the C API module
+ * so the two never hold the file at once.
+ */
 export function readSongStructureFromBytes(
   lib: LibOpenMPT,
   fileData: Uint8Array,
   options: ReadSongStructureOptions = {},
 ): SongStructure {
+  let timeline = options.timeline;
+  if (!timeline) {
+    const inspector = openModuleInspector(lib, fileData, { skipSamples: true });
+    if (inspector) {
+      try {
+        timeline = inspector.songTimeline(0);
+      } finally {
+        inspector.destroy();
+      }
+    }
+  }
   const modPtr = createModuleFromBytes(lib, fileData);
   if (modPtr === 0) throw new Error('Failed to load module (invalid format?)');
   try {
-    return readSongStructure(lib, modPtr, options);
+    return readSongStructure(lib, modPtr, timeline ? { ...options, timeline } : options);
   } finally {
     lib._openmpt_module_destroy(modPtr);
   }

@@ -113,7 +113,7 @@ for (const [artifact, manifest] of Object.entries(manifests)) {
 if (smoke) {
   console.log(
     `  smoke [shared]: init ${smoke.initMs.toFixed(0)} ms, peak ${smoke.peak.toFixed(3)}, ` +
-      `corrupt input → NULL, truncated IT recovered, heap grew to ${smoke.heapMiB.toFixed(0)} MiB`,
+      `corrupt input → NULL (C API and xasm_inspect), truncated IT recovered, heap grew to ${smoke.heapMiB.toFixed(0)} MiB`,
   );
 }
 if (playbackSmoke) {

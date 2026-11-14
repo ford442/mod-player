@@ -1,7 +1,6 @@
 import type { LibOpenMPT } from '../../types';
 import type { InstrumentTable } from '../../types/instruments';
 import { emptyInstrumentTable } from '../../types/instruments';
-import { extractInstrumentTable, mergeLibInstrumentNames } from '../../utils/sampleExtract';
 import { parseModuleWithLibOpen, type OpenModuleParse } from '../../utils/parseModuleWithLib';
 import { parserLog } from '../../utils/parserDebug';
 import type { ParseProgressStage, ParserWorkerClient } from '../../utils/parserWorker';
@@ -42,21 +41,11 @@ function parseOnMainThread(
     parsed.metadata.numChannels,
     'channels',
   );
-  let instrumentTable: InstrumentTable;
-  try {
-    instrumentTable = mergeLibInstrumentNames(
-      extractInstrumentTable(fileData, fileName),
-      parsed.metadata.instruments,
-    );
-  } catch (err) {
-    parsed.dispose();
-    throw err;
-  }
   return {
     type: 'parsed',
     patternMatrices: parsed.patternMatrices,
     metadata: parsed.metadata,
-    instrumentTable,
+    instrumentTable: parsed.instrumentTable,
     openModule: parsed,
   };
 }

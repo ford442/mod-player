@@ -1,10 +1,15 @@
 import type { LibOpenMPT, PatternMatrix, WorkerParseMetadata } from '../types';
-import { getPatternMatrix } from './patternExtractor';
+import type { InstrumentTable } from '../types/instruments';
+import { instrumentTableFromNames, readInstrumentTable } from './instrumentTable';
+import { hasModuleInspect, ModuleInspector } from './moduleInspect';
+import { getPatternMatrix, patternMatrixFromDump } from './patternExtractor';
 import { createModuleFromBytes, readMetadataString } from './wasmHeap';
 
 export interface ParsedModuleData {
   patternMatrices: PatternMatrix[];
   metadata: WorkerParseMetadata;
+  /** Samples (header + waveform peaks), instruments (keymap, envelopes) — every format libopenmpt opens. */
+  instrumentTable: InstrumentTable;
 }
 
 export interface ParseModuleOptions {
@@ -36,10 +41,12 @@ export async function yieldToMainThread(): Promise<void> {
   });
 }
 
-function createModulePtr(lib: LibOpenMPT, fileData: Uint8Array): number {
-  const modPtr = createModuleFromBytes(lib, fileData);
+const LOAD_FAILED = 'Failed to load module (invalid format?)';
+
+function createModulePtr(lib: LibOpenMPT, fileData: Uint8Array, ctls?: Record<string, string>): number {
+  const modPtr = createModuleFromBytes(lib, fileData, ctls);
   if (modPtr === 0) {
-    throw new Error('Failed to load module (invalid format?)');
+    throw new Error(LOAD_FAILED);
   }
   return modPtr;
 }
@@ -65,6 +72,7 @@ function readModuleMetadata(
   lib: LibOpenMPT,
   modPtr: number,
   fileName: string,
+  orderPatterns: number[] = [],
 ): WorkerParseMetadata {
   // The key C strings are freed again (they used to leak three mallocs per parse).
   const title = readMetadataString(lib, modPtr, 'title');
@@ -97,6 +105,7 @@ function readModuleMetadata(
   let totalPatternRows = 0;
   for (let i = 0; i < numOrders; i++) {
     const patIdx = lib._openmpt_module_get_order_pattern(modPtr, i);
+    orderPatterns.push(patIdx);
     totalPatternRows += lib._openmpt_module_get_pattern_num_rows(modPtr, patIdx);
   }
 
@@ -124,17 +133,23 @@ function readModuleMetadata(
  */
 type PatternCache = Map<number, PatternMatrix>;
 
+/** Where a parse reads patterns from, and the handle it owns. */
+interface PatternSource {
+  orderPattern(order: number): number;
+  extract(patternIndex: number, order: number): PatternMatrix;
+  destroy(): void;
+}
+
 /** The matrix for `order`, extracting its pattern only on first use. `extracted` says whether WASM work ran. */
 function matrixForOrder(
-  lib: LibOpenMPT,
-  modPtr: number,
+  source: PatternSource,
   order: number,
   cache: PatternCache,
 ): { matrix: PatternMatrix; extracted: boolean } {
-  const patIdx = lib._openmpt_module_get_order_pattern(modPtr, order);
+  const patIdx = source.orderPattern(order);
   const hit = cache.get(patIdx);
   if (hit) return { matrix: hit.order === order ? hit : { ...hit, order }, extracted: false };
-  const matrix = getPatternMatrix(lib, modPtr, patIdx, order);
+  const matrix = source.extract(patIdx, order);
   cache.set(patIdx, matrix);
   return { matrix, extracted: true };
 }
@@ -152,6 +167,79 @@ export interface OpenModuleParse extends ParsedModuleData {
 }
 
 /**
+ * The parse on a glue with the inspection shim (the committed shared pair): ONE inspection handle
+ * serves the patterns (one `xasm_pattern_dump` per pattern instead of six calls per cell), the
+ * instrument table and the backfill. The C API metadata (names, duration, order list) is read from
+ * a short-lived module created with `load.skip_samples` — sample data is the bulk of a load and the
+ * metadata does not need it — and destroyed before this returns.
+ */
+function openInspectSource(
+  lib: LibOpenMPT,
+  fileData: Uint8Array,
+  fileName: string,
+): { source: PatternSource; metadata: WorkerParseMetadata; instrumentTable: InstrumentTable } {
+  if (!hasModuleInspect(lib)) throw new Error('openInspectSource: no inspection shim');
+  const inspector = ModuleInspector.open(lib, fileData);
+  if (!inspector) throw new Error(LOAD_FAILED);
+  try {
+    const orderPatterns: number[] = [];
+    const modPtr = createModulePtr(lib, fileData, { 'load.skip_samples': '1' });
+    let metadata: WorkerParseMetadata;
+    try {
+      metadata = readModuleMetadata(lib, modPtr, fileName, orderPatterns);
+    } finally {
+      lib._openmpt_module_destroy(modPtr);
+    }
+    const instrumentTable = readInstrumentTable(inspector, {
+      format: metadata.format,
+      instrumentNames: metadata.instruments,
+      sampleNames: metadata.samples,
+    });
+    const channels = metadata.numChannels;
+    return {
+      metadata,
+      instrumentTable,
+      source: {
+        orderPattern: (order) => orderPatterns[order] ?? 0xffff,
+        extract: (patIdx, order) => patternMatrixFromDump(inspector.dumpPattern(patIdx, channels), order),
+        destroy: () => inspector.destroy(),
+      },
+    };
+  } catch (err) {
+    inspector.destroy();
+    throw err;
+  }
+}
+
+/** The C-API-only parse (a glue without the shim): metadata, names-only instruments, 6-call cells. */
+function openCApiSource(
+  lib: LibOpenMPT,
+  fileData: Uint8Array,
+  fileName: string,
+): { source: PatternSource; metadata: WorkerParseMetadata; instrumentTable: InstrumentTable } {
+  const modPtr = createModulePtr(lib, fileData);
+  try {
+    const metadata = readModuleMetadata(lib, modPtr, fileName);
+    return {
+      metadata,
+      instrumentTable: instrumentTableFromNames({
+        format: metadata.format,
+        instrumentNames: metadata.instruments,
+        sampleNames: metadata.samples,
+      }),
+      source: {
+        orderPattern: (order) => lib._openmpt_module_get_order_pattern(modPtr, order),
+        extract: (patIdx, order) => getPatternMatrix(lib, modPtr, patIdx, order),
+        destroy: () => lib._openmpt_module_destroy(modPtr),
+      },
+    };
+  } catch (err) {
+    lib._openmpt_module_destroy(modPtr);
+    throw err;
+  }
+}
+
+/**
  * Parse an in-memory module and keep its handle open for `backfill()` (main thread: order 0 now,
  * the rest after playback starts). The caller must call `backfill()` or `dispose()`.
  */
@@ -161,25 +249,25 @@ export function parseModuleWithLibOpen(
   fileName: string,
   options?: ParseModuleOptions,
 ): OpenModuleParse {
-  const modPtr = createModulePtr(lib, fileData);
+  const { source, metadata, instrumentTable } = hasModuleInspect(lib)
+    ? openInspectSource(lib, fileData, fileName)
+    : openCApiSource(lib, fileData, fileName);
   let live = true;
   const dispose = () => {
     if (!live) return;
     live = false;
-    lib._openmpt_module_destroy(modPtr);
+    source.destroy();
   };
   const cache: PatternCache = new Map();
 
-  let metadata: WorkerParseMetadata;
   const patternMatrices: PatternMatrix[] = [];
   try {
-    metadata = readModuleMetadata(lib, modPtr, fileName);
     const ordersToExtract = Math.min(
       metadata.numOrders,
       options?.maxOrders ?? metadata.numOrders,
     );
     for (let i = 0; i < ordersToExtract; i++) {
-      patternMatrices.push(matrixForOrder(lib, modPtr, i, cache).matrix);
+      patternMatrices.push(matrixForOrder(source, i, cache).matrix);
     }
   } catch (err) {
     dispose();
@@ -190,6 +278,7 @@ export function parseModuleWithLibOpen(
   return {
     patternMatrices,
     metadata,
+    instrumentTable,
     dispose,
     async backfill(target, backfillOptions) {
       const startOrder = backfillOptions?.startOrder ?? patternMatrices.length;
@@ -200,7 +289,7 @@ export function parseModuleWithLibOpen(
         for (let i = startOrder; i < numOrders; i++) {
           if (!live || signal?.aborted) return;
           if (target[i]) continue;
-          const { matrix, extracted } = matrixForOrder(lib, modPtr, i, cache);
+          const { matrix, extracted } = matrixForOrder(source, i, cache);
           target[i] = matrix;
           if (extracted && yieldEvery > 0 && ++extractedCount % yieldEvery === 0) {
             await yieldToMainThread();
@@ -225,5 +314,5 @@ export function parseModuleWithLib(
 ): ParsedModuleData {
   const open = parseModuleWithLibOpen(lib, fileData, fileName, options);
   open.dispose();
-  return { patternMatrices: open.patternMatrices, metadata: open.metadata };
+  return { patternMatrices: open.patternMatrices, metadata: open.metadata, instrumentTable: open.instrumentTable };
 }

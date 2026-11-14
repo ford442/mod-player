@@ -340,6 +340,7 @@ jobs:
           filters: |
             jsengine:
               - 'scripts/build-js-libopenmpt.sh'
+              - 'wasm/xasm_inspect.cpp'
               - 'scripts/lib/wasm-flags.sh'
               - 'scripts/lib/libopenmpt-source.sh'
               - 'scripts/ci/setup-emsdk.sh'
@@ -391,7 +392,7 @@ jobs:
             vendor/libopenmpt-0.8.9+release-jsengine-eh-wasm-playback-debug-emsdk3.1.51
           # The committed binaries are in the key too: a commit that changes them is checked
           # against objects compiled from scratch, never against a cache that predates it.
-          key: libopenmpt-js-engine-${{ runner.os }}-emsdk-3.1.51-v0.8.9-${{ hashFiles('scripts/build-js-libopenmpt.sh', 'scripts/lib/wasm-flags.sh', 'scripts/lib/libopenmpt-source.sh', 'public/worklets/libopenmpt-worklet.wasm', 'public/worklets/libopenmpt-playback.wasm') }}
+          key: libopenmpt-js-engine-${{ runner.os }}-emsdk-3.1.51-v0.8.9-${{ hashFiles('scripts/build-js-libopenmpt.sh', 'wasm/xasm_inspect.cpp', 'scripts/lib/wasm-flags.sh', 'scripts/lib/libopenmpt-source.sh', 'public/worklets/libopenmpt-worklet.wasm', 'public/worklets/libopenmpt-playback.wasm') }}
 
       - name: Rebuild libopenmpt-worklet.{js,wasm} (emsdk 3.1.51)
         if: steps.filter.outputs.jsengine == 'true'

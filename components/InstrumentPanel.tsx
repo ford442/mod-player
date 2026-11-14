@@ -5,6 +5,7 @@ import { usePlayerUiStore } from '../store/playerUiStore';
 import { useShaderPrefsStore } from '../store/shaderPrefsStore';
 import { usesInstrumentPalette } from '../utils/shaderVersion';
 import { SampleWaveform } from './SampleWaveform';
+import { EnvelopeLane } from './EnvelopeLane';
 import { cn } from '../utils/cn';
 
 const ROW_HEIGHT = 72;
@@ -46,7 +47,7 @@ export function InstrumentPanel({
   const setPaletteMode = useShaderPrefsStore((s) => s.setPaletteMode);
 
   const instruments = table.instruments;
-  const hasPcm = table.format !== 'unknown' && table.samples.some((s) => s.length > 0);
+  const hasPcm = table.samples.some((s) => s.hasPcm);
 
   const virtualizer = useVirtualizer({
     count: instruments.length,
@@ -59,6 +60,19 @@ export function InstrumentPanel({
     if (selectedSampleIndex == null) return null;
     return table.samples.find((s) => s.index === selectedSampleIndex) ?? null;
   }, [table.samples, selectedSampleIndex]);
+
+  const selectedEnvelopes = useMemo(() => {
+    const envelopes = instruments.find((i) => i.index === selectedInstrumentIndex)?.envelopes;
+    if (!envelopes) return null;
+    const lanes = [
+      { key: 'volume', label: 'Volume', env: envelopes.volume, centred: false },
+      { key: 'panning', label: 'Panning', env: envelopes.panning, centred: true },
+      { key: 'pitch', label: envelopes.pitch.filter ? 'Filter' : 'Pitch', env: envelopes.pitch, centred: !envelopes.pitch.filter },
+    ].filter((l) => l.env.points.length > 0);
+    if (lanes.length === 0) return null;
+    const ticks = Math.max(...lanes.map((l) => l.env.points[l.env.points.length - 1]?.tick ?? 0));
+    return { lanes, ticks };
+  }, [instruments, selectedInstrumentIndex]);
 
   const onSelectInstrument = useCallback(
     (index: number) => {
@@ -91,7 +105,7 @@ export function InstrumentPanel({
     <div className="flex flex-col gap-2 text-xs font-mono">
       {!hasPcm && (
         <p className={cn('px-1', isDarkMode ? 'text-amber-500/80' : 'text-amber-700')}>
-          Sample PCM unavailable for this format — showing names only.
+          No sample PCM in this module — showing names only.
         </p>
       )}
       <div
@@ -148,7 +162,7 @@ export function InstrumentPanel({
                   </div>
                   <div className={cn('text-[10px]', isDarkMode ? 'text-gray-500' : 'text-gray-500')}>
                     {sampleCount} sample{sampleCount === 1 ? '' : 's'}
-                    {preview && preview.length > 0 ? ` · ${formatBytes(preview.length)}` : ''}
+                    {preview && preview.bytes > 0 ? ` · ${formatBytes(preview.bytes)}` : ''}
                     {preview && preview.volume > 0 ? ` · vol ${preview.volume}` : ''}
                   </div>
                 </div>
@@ -171,6 +185,20 @@ export function InstrumentPanel({
 
       {selectedInstrumentIndex != null && (
         <div className={cn('rounded-lg border p-2', isDarkMode ? 'border-white/10' : 'border-gray-300')}>
+          {selectedEnvelopes && (
+            <div className="mb-2 flex flex-col gap-1">
+              {selectedEnvelopes.lanes.map((lane) => (
+                <EnvelopeLane
+                  key={lane.key}
+                  label={lane.label}
+                  envelope={lane.env}
+                  ticks={selectedEnvelopes.ticks}
+                  centred={lane.centred}
+                  isDarkMode={isDarkMode}
+                />
+              ))}
+            </div>
+          )}
           <div className={cn('mb-1 text-[10px] uppercase tracking-wide', isDarkMode ? 'text-gray-500' : 'text-gray-500')}>
             Samples
           </div>
@@ -201,7 +229,7 @@ export function InstrumentPanel({
                       {sample.index.toString(16).toUpperCase().padStart(2, '0')}
                     </span>
                     <span className="flex-1 truncate">{sample.name || '(unnamed)'}</span>
-                    <span className="text-[10px] opacity-60">{formatBytes(sample.length)}</span>
+                    <span className="text-[10px] opacity-60">{formatBytes(sample.bytes)}</span>
                   </button>
                   {active && sample.length > 0 && (
                     <SampleWaveform

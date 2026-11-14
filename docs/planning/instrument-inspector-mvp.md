@@ -81,6 +81,10 @@ export interface InstrumentTable {
 
 ### 1.2 Format parsers — `utils/sampleExtract/`
 
+> **Superseded.** The per-format TypeScript parsers were removed: the table is now read from libopenmpt's own parse
+> through the `xasm_*` inspection shim (`wasm/xasm_inspect.cpp`, `utils/moduleInspect.ts`, `utils/instrumentTable.ts`),
+> which covers every format libopenmpt opens, containers included. The plan below is kept for history.
+
 | Module | Responsibility |
 |--------|----------------|
 | `index.ts` | Sniff magic (`XM`, `IMPM`, `SCRM`, `M.K.`) → delegate |

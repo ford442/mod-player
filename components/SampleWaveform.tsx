@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 
 interface SampleWaveformProps {
   waveform: Float32Array;
-  /** Sample length in bytes (for loop marker mapping). */
+  /** Sample length in frames (loopStart / loopEnd use the same unit). */
   length: number;
   loopStart?: number;
   loopEnd?: number;

@@ -7,7 +7,8 @@ import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { REQUIRED_C_EXPORTS } from '../../scripts/jsEngineArtifacts.mjs';
+import { INSPECT_C_EXPORTS, INSPECT_SOURCE_REL, REQUIRED_C_EXPORTS, inspectAbiVersion } from '../../scripts/jsEngineArtifacts.mjs';
+import { XASM_INSPECT_ABI_VERSION } from '../../utils/moduleInspect';
 
 const ROOT = resolve(fileURLToPath(new URL('../..', import.meta.url)));
 
@@ -78,5 +79,28 @@ describe('REQUIRED_C_EXPORTS matches the real call sites', () => {
   it('keeps _malloc / _free (module bytes are copied into the heap)', () => {
     expect(REQUIRED_C_EXPORTS).toContain('_malloc');
     expect(REQUIRED_C_EXPORTS).toContain('_free');
+  });
+});
+
+describe('INSPECT_C_EXPORTS matches the shim and its wrapper', () => {
+  const cpp = readFileSync(join(ROOT, INSPECT_SOURCE_REL), 'utf8');
+  const shimFunctions = [...cpp.matchAll(/^XASM_API [a-z0-9_:]+ +(xasm_[a-z0-9_]+) *\(/gm)].map((m) => `_${m[1]}`).sort();
+
+  it('is exactly the XASM_API functions of wasm/xasm_inspect.cpp (what the build exports)', () => {
+    expect(shimFunctions.length).toBeGreaterThan(10);
+    expect([...INSPECT_C_EXPORTS].sort()).toEqual(shimFunctions);
+  });
+
+  it('every _xasm_* the app references is exported', () => {
+    const refs = new Set<string>();
+    for (const file of walkSources(ROOT)) {
+      for (const [name] of readCode(file).matchAll(/\b_xasm_[a-z0-9_]+\b/g)) refs.add(name);
+    }
+    expect(refs.has('_xasm_inspect_create')).toBe(true);
+    expect([...refs].filter((n) => !INSPECT_C_EXPORTS.includes(n)).sort()).toEqual([]);
+  });
+
+  it('the wrapper\'s ABI version is the shim\'s', () => {
+    expect(XASM_INSPECT_ABI_VERSION).toBe(inspectAbiVersion(ROOT));
   });
 });

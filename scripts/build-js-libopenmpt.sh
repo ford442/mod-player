@@ -15,7 +15,11 @@
 #   * parser worker  – new Function(glue) + locateFile → the same .wasm
 #   * AudioWorklet   – main thread fetches both files, posts {scriptText, wasmBytes}
 # so nothing replaces globalThis.WebAssembly any more (the wasm2js war is over).
-# It has no WASM_WORKERS, no shared memory, no C++ wrapper: stock openmpt_* C exports only.
+# It has no WASM_WORKERS and no shared memory. Besides the stock openmpt_* C API it links ONE extra
+# translation unit, wasm/xasm_inspect.cpp (the xasm_* module-inspection shim: sample info + PCM
+# peaks, envelopes, keymaps, one-call pattern dumps, the linear song timeline). The shim is copied
+# into the build tree and compiled by libopenmpt's own make rule, so it gets libopenmpt's exact
+# flags; it is never linked into --playback (the audio thread needs none of it).
 #
 # --playback links the AudioWorklet's own heap (#513):
 #   public/worklets/libopenmpt-playback.{js,wasm}
@@ -220,8 +224,38 @@ build_static_lib() {
     echo "$FLAG_STAMP" > "$stamp_file"
 }
 
+# The inspection shim (shared pair only). Copied in as libopenmpt/xasm_inspect.cpp — next to
+# libopenmpt_impl.cpp, whose headers it reads — and built by the tree's own `%.o: %.cpp` rule with
+# the same CXXFLAGS as the library, so its object is ThinLTO bitcode at the audited flags. Relative
+# path: the link below runs inside the tree (path independence, see "Link").
+INSPECT_SRC="$PROJECT_ROOT/wasm/xasm_inspect.cpp"
+INSPECT_OBJ_REL="libopenmpt/xasm_inspect.o"
+build_inspect_shim() {
+    local dest="$JS_TREE/libopenmpt/xasm_inspect.cpp" stamp="$JS_TREE/libopenmpt/.xasm_inspect.stamp" want
+    [[ -f "$INSPECT_SRC" ]] || { echo "❌ $INSPECT_SRC missing" >&2; exit 1; }
+    want="$( { cat "$INSPECT_SRC"; echo "$FLAG_STAMP"; } | sha256sum | cut -c1-16)"
+    if [[ -f "$JS_TREE/$INSPECT_OBJ_REL" && -f "$stamp" && "$(cat "$stamp")" == "$want" ]]; then
+        echo "✅ xasm_inspect.o up to date"
+        return 0
+    fi
+    echo "🔨 Compiling the xasm_inspect shim…"
+    cp "$INSPECT_SRC" "$dest"
+    rm -f "$JS_TREE/$INSPECT_OBJ_REL"
+    pushd "$JS_TREE" >/dev/null
+    make "${LIBOPENMPT_MAKE_FLAGS[@]}" \
+        CXXFLAGS="${COMPILE_FLAGS[*]}" CFLAGS="${CFLAGS_C[*]}" \
+        "$INSPECT_OBJ_REL"
+    popd >/dev/null
+    echo "$want" > "$stamp"
+}
+
 prepare_tree
 build_static_lib
+LINK_INPUTS=()
+if [[ "$PLAYBACK" -eq 0 ]]; then
+    build_inspect_shim
+    LINK_INPUTS=("$INSPECT_OBJ_REL")
+fi
 
 LIB_DIR="$JS_TREE/bin"
 INCLUDE_ROOT="$JS_TREE"
@@ -238,7 +272,16 @@ EXPORT_COUNT="$(echo "$EXPORT_LIST" | tr ',' '\n' | wc -l)"
 if [[ "$EXPORT_COUNT" -lt 100 ]]; then
     echo "❌ Only $EXPORT_COUNT C API exports found — header parse failed" >&2; exit 1
 fi
-EXPORTED_FUNCTIONS="[${EXPORT_LIST},'_malloc','_free']"
+# The inspection shim's entry points (shared pair only): every `XASM_API` function of
+# wasm/xasm_inspect.cpp, read from the source so the export list cannot drift from it.
+INSPECT_EXPORTS=""
+if [[ "$PLAYBACK" -eq 0 ]]; then
+    INSPECT_EXPORTS="$(grep -oE '^XASM_API [a-z0-9_:]+ +(xasm_[a-z0-9_]+) *\(' "$INSPECT_SRC" \
+        | grep -oE 'xasm_[a-z0-9_]+' | sort -u | sed "s/^/'_/; s/\$/'/" | paste -sd, -)"
+    [[ -n "$INSPECT_EXPORTS" ]] || { echo "❌ no XASM_API functions found in $INSPECT_SRC" >&2; exit 1; }
+    INSPECT_EXPORTS=",${INSPECT_EXPORTS}"
+fi
+EXPORTED_FUNCTIONS="[${EXPORT_LIST}${INSPECT_EXPORTS},'_malloc','_free']"
 
 # Runtime helpers on the Module object. DO NOT add stringToUTF8: the app polyfills its own
 # (str) → ptr `stringToUTF8` when absent (hooks/libOpenMPT/runInit.ts), and Emscripten's real
@@ -319,6 +362,7 @@ pushd "$JS_TREE" >/dev/null
 env "${LINK_ENV[@]}" em++ \
     "${COMPILE_FLAGS[@]}" \
     "${EH_LINK_FLAGS[@]}" \
+    "${LINK_INPUTS[@]}" \
     -Lbin -lopenmpt \
     --no-entry \
     -sENVIRONMENT="$ENVIRONMENT" \
