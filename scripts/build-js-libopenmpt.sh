@@ -113,6 +113,9 @@ esac
 
 DEFAULT_BASENAME="$([[ "$PLAYBACK" -eq 1 ]] && echo libopenmpt-playback || echo libopenmpt-worklet)"
 OUT_DIR="${OUT_DIR:-$PROJECT_ROOT/public/worklets}"
+# Absolute: the link runs inside the libopenmpt tree (see "Link" below).
+mkdir -p "$OUT_DIR"
+OUT_DIR="$(cd "$OUT_DIR" && pwd)"
 OUT_BASENAME="${OUT_BASENAME:-$DEFAULT_BASENAME}"
 WRITE_MANIFEST=1
 if [[ "$OUT_DIR" != "$PROJECT_ROOT/public/worklets" || "$OUT_BASENAME" != "$DEFAULT_BASENAME" ]]; then
@@ -304,11 +307,19 @@ rm -f "$GLUE" "$WASM"
 # INITIAL_MEMORY: the old wasm2js glue reserved ~512 MB up front; the JS engine hosts exactly one
 # module (no g_metaModule, no ring buffer), so start small and let it grow (views are refreshed
 # by the glue; the processor already re-derives its HEAPF32 views when the buffer moves).
+#
+# Path independence: the link runs inside the libopenmpt tree and names the archive by a relative
+# path (-Lbin). wasm-ld identifies each ThinLTO input by "<archive path>(<member> at <offset>)", and
+# with an absolute -L that string carried the checkout directory into the LTO backend: the same
+# sources built in /home/runner/work/… (CI) and elsewhere gave playback wasms that differ in a few
+# bytes of code layout (openmpt::version::get_string), so the drift check failed on a correct
+# commit. tests/build/wasmBuildPathIndependence.test.ts guards this line.
 echo "🔗 Linking ${OUT_BASENAME}.{js,wasm} [${VARIANT}]…"
+pushd "$JS_TREE" >/dev/null
 env "${LINK_ENV[@]}" em++ \
     "${COMPILE_FLAGS[@]}" \
     "${EH_LINK_FLAGS[@]}" \
-    -L"$LIB_DIR" -lopenmpt \
+    -Lbin -lopenmpt \
     --no-entry \
     -sENVIRONMENT="$ENVIRONMENT" \
     "${THREAD_LINK_FLAGS[@]}" \
@@ -328,6 +339,7 @@ env "${LINK_ENV[@]}" em++ \
     -sINCOMING_MODULE_JS_API="$INCOMING_MODULE_JS_API" \
     "${LINK_MODE_FLAGS[@]}" \
     -o "$GLUE"
+popd >/dev/null
 
 [[ -f "$GLUE" && -f "$WASM" ]] || { echo "❌ link did not produce ${OUT_BASENAME}.{js,wasm}" >&2; exit 1; }
 rm -f "$OUT_DIR/${OUT_BASENAME}.ww.js"

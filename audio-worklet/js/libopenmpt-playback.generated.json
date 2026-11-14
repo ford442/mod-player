@@ -5,7 +5,7 @@
   "variant": "eh-wasm-playback",
   "exceptions": "wasm",
   "simd": false,
-  "version": "b76f675647",
+  "version": "b08513c59f",
   "sharedMemory": true,
   "glue": {
     "file": "libopenmpt-playback.js",
@@ -15,7 +15,7 @@
   "wasm": {
     "file": "libopenmpt-playback.wasm",
     "bytes": 1377794,
-    "integrity": "sha384-/8fOJg64xpY/D6oPetMHgoiqTr2f43/vREH5CSxIvPNiyRo3y9Ks/Tf3BtQuoSMy"
+    "integrity": "sha384-AzbDa3vaQkPJmy42pzM3psD5izHitJuA8L0laZ+pwoc5HjhClqhAFkOg7e4XzVAh"
   },
   "cExportCount": 113
 }

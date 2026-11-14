@@ -1,0 +1,66 @@
+name: WASM reproducibility
+
+# Weekly cold rebuild of the committed real-WASM libopenmpt pairs: no cache restore at all (emsdk,
+# its system-library cache and libopenmpt's objects are all built from scratch), at two checkout
+# paths. CI's js-libopenmpt-rebuild job is path-filtered and reuses cached objects, which is how a
+# drift went unnoticed for two weeks; this run catches drift that a cache would hide and any
+# return of a path-dependent link.
+
+on:
+  schedule:
+    # Mondays 05:23 UTC
+    - cron: '23 5 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  cold-rebuild:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Setup Emscripten (pinned, uncached)
+        run: bash scripts/ci/setup-emsdk.sh "$RUNNER_TEMP/emsdk"
+
+      - name: Cold rebuild at the checkout path
+        run: |
+          bash scripts/build-js-libopenmpt.sh
+          bash scripts/build-js-libopenmpt.sh --playback
+
+      - name: Committed artifacts must equal the cold build
+        run: |
+          if ! git diff --exit-code --stat -- \
+              public/worklets/libopenmpt-worklet.js public/worklets/libopenmpt-worklet.wasm audio-worklet/js/libopenmpt-worklet.generated.json \
+              public/worklets/libopenmpt-playback.js public/worklets/libopenmpt-playback.wasm audio-worklet/js/libopenmpt-playback.generated.json; then
+            git diff -- audio-worklet/js/libopenmpt-worklet.generated.json audio-worklet/js/libopenmpt-playback.generated.json
+            echo "::error::A cold emsdk 3.1.51 build differs from the committed libopenmpt pairs."
+            exit 1
+          fi
+          echo "✅ cold build equals the committed pairs"
+
+      - name: Cold rebuild at a second path must be identical
+        run: |
+          OTHER="$RUNNER_TEMP/elsewhere/checkout"
+          mkdir -p "$OTHER"
+          git ls-files -z | xargs -0 cp --parents -t "$OTHER"
+          (cd "$OTHER" && bash scripts/build-js-libopenmpt.sh && bash scripts/build-js-libopenmpt.sh --playback)
+          for f in libopenmpt-worklet.js libopenmpt-worklet.wasm libopenmpt-playback.js libopenmpt-playback.wasm; do
+            cmp "public/worklets/$f" "$OTHER/public/worklets/$f" || {
+              echo "::error::public/worklets/$f depends on the checkout path"
+              exit 1
+            }
+          done
+          echo "✅ both pairs are identical when built at another path"
+
+      - name: Verify rebuilt artifacts
+        run: node scripts/verify-js-libopenmpt.mjs --smoke
