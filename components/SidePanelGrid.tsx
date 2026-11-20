@@ -2,7 +2,9 @@ import { useShallow } from 'zustand/react/shallow';
 import { ChannelMeters } from './ChannelMeters';
 import { MetadataPanel } from './MetadataPanel';
 import { Panel } from './Panel';
+import { cn } from '../utils/cn';
 import { MidiControlsPanel } from './MidiControlsPanel';
+import { MidiOutPanelLazy } from './MidiOutPanelLazy';
 import { ExportPanel } from './ExportPanel';
 import { InstrumentPanel } from './InstrumentPanel';
 import { FX_RACK_ENABLED, IS_PUBLIC_MODE, LIGHT_THEMES } from '../appConfig';
@@ -126,6 +128,9 @@ export function SidePanelGrid() {
         {midiControls && showDevSurface && (
           <Panel variant="bezel" title="MIDI / Hardware" titleAccent>
             <MidiControlsPanel midi={midiControls} isDarkMode={isDarkMode} />
+            <div className={cn('mt-3 border-t pt-3 empty:hidden', isDarkMode ? 'border-gray-700' : 'border-gray-300')}>
+              <MidiOutPanelLazy isDarkMode={isDarkMode} />
+            </div>
           </Panel>
         )}
         {showDevSurface && (

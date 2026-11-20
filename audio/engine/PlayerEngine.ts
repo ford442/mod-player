@@ -51,7 +51,11 @@ import { DEFAULT_MODULE_URL, WORKLET_URL } from '../../hooks/libOpenMPT/constant
 import type { LibOpenMPTRefs, LibOpenMPTSetters } from '../../hooks/libOpenMPT/types';
 import { postPause, postSetAudioLite, postSetRepeat, repeatCountFor } from '../../audio-worklet/protocol';
 import { applyMasterLevels } from '../../utils/audioMasterGraph';
-import { resetAudioHeardTime } from '../../utils/playheadPrediction';
+import {
+  resetAudioHeardTime,
+  rowsPerSecondFromBpm,
+  type WorkletPositionSample,
+} from '../../utils/playheadPrediction';
 import { hasShareModuleIntent } from '../../utils/shareState';
 import { playShouldResume, type TransportState } from '../../utils/transportClock';
 import { createLogger } from '../../utils/log';
@@ -170,6 +174,26 @@ export type EngineCommand =
   | { type: 'setLooping'; value: boolean }
   | { type: 'toggleLoop' }
   | { type: 'toggleChannelMute'; channel: number };
+
+/** What `PlayerEngine.pollPosition()` reports (#538: MIDI out reads it on its own timer). */
+export interface EnginePositionPoll {
+  /**
+   * The newest worklet position report, or null before the first one / after a stop. The object is
+   * reused by the shared-ring path — read what you need, do not keep it.
+   */
+  readonly sample: Readonly<WorkletPositionSample> | null;
+  /** Measured rows per second (falls back to the BPM-derived rate before it has settled). */
+  readonly rowsPerSecond: number;
+  /** A seek was issued and the worklet has not reported the new position yet. */
+  readonly seekPending: boolean;
+}
+
+/** A seek the engine just issued (`onSeek`). `step` is the global row index, `order` / `row` where it lands. */
+export interface EngineSeekEvent {
+  readonly step: number;
+  readonly order: number;
+  readonly row: number;
+}
 
 export type StartAudioPlayback = (
   refs: AudioGraphRefs,
@@ -297,6 +321,8 @@ export class PlayerEngine {
   private offFaultContext: (() => void) | null = null;
   /** `onSongEnded` subscribers (playlist auto-advance). */
   private readonly songEndedListeners = new Set<() => void>();
+  /** `onSeek` subscribers (MIDI out's Song Position Pointer). */
+  private readonly seekListeners = new Set<(event: EngineSeekEvent) => void>();
 
   private readonly stopFn: (destroy?: boolean) => void;
   private readonly pauseFn: () => void;
@@ -376,7 +402,11 @@ export class PlayerEngine {
     this.stopFn = createStopMusic(transportDeps);
     this.pauseFn = createPauseMusic(transportDeps);
     this.resumeFn = createResumeMusic(transportDeps);
-    this.seekFn = createSeekToStep(transportDeps);
+    const seekToStep = createSeekToStep(transportDeps);
+    this.seekFn = (step) => {
+      seekToStep(step);
+      this.notifySeek(step);
+    };
     this.requestOscBufferFn = createRequestOscBuffer(this.refs);
 
     this.processModuleDataFn = createProcessModuleData({
@@ -639,6 +669,69 @@ export class PlayerEngine {
 
   seekOrders(delta: number): void {
     this.seekOrder(this.refs.playbackStateRef.current.currentOrder + delta, 0);
+  }
+
+  // ── observers for MIDI out (#538) ──────────────────────────────────────────────────────────────
+
+  /**
+   * The newest worklet position report, read on the caller's own timer. The UI loop drains the shared
+   * position ring too, but only from `requestAnimationFrame`, which stops in a hidden tab — and a DAW
+   * user keeps the DAW in front. Draining here is safe next to it: each report is applied once, by
+   * whichever side gets to it first.
+   */
+  pollPosition(): EnginePositionPoll {
+    this.refs.positionRingRef.current?.drain();
+    const sample = this.refs.workletPositionSampleRef.current;
+    const measured = this.refs.workletRowsPerSecRef.current;
+    return {
+      sample,
+      rowsPerSecond: measured > 0 ? measured : rowsPerSecondFromBpm(sample?.bpm || this.refs.workletBpmRef.current),
+      seekPending: this.refs.pendingSeekRef.current !== null,
+    };
+  }
+
+  /** The parsed pattern played at `order` (all orders, not only the one on screen), or null. */
+  getPatternMatrix(order: number): PatternMatrix | null {
+    return this.refs.patternMatricesRef.current[order] ?? null;
+  }
+
+  /** The tracker channel is muted from the channel meters / the 3D view. */
+  isChannelMuted(channel: number): boolean {
+    return (this.refs.channelStatesRef.current[channel]?.isMuted ?? 0) > 0;
+  }
+
+  /**
+   * A seek was issued — a seek bar drag, the keyboard, MIDI, a loop-region wrap, `seekOrder` — whether
+   * the transport is playing, paused or about to start. Fires right after the seek was posted, before
+   * the worklet reports the new position. Returns the unsubscribe function.
+   */
+  onSeek(listener: (event: EngineSeekEvent) => void): () => void {
+    this.seekListeners.add(listener);
+    return () => { this.seekListeners.delete(listener); };
+  }
+
+  private notifySeek(step: number): void {
+    if (this.seekListeners.size === 0) return;
+    const matrices = this.refs.patternMatricesRef.current;
+    if (matrices.length === 0) return; // the seek itself did nothing
+    // The same walk createSeekToStep does; a step past the last pattern lands on order 0, row 0.
+    let event: EngineSeekEvent = { step: 0, order: 0, row: 0 };
+    let first = 0;
+    for (let order = 0; order < matrices.length; order++) {
+      const rows = matrices[order]?.numRows ?? 64;
+      if (step < first + rows) {
+        event = { step, order, row: step - first };
+        break;
+      }
+      first += rows;
+    }
+    for (const listener of [...this.seekListeners]) {
+      try {
+        listener(event);
+      } catch (err) {
+        console.error('[Engine] seek listener failed:', err);
+      }
+    }
   }
 
   // ── loop region (#537 phase 2) ─────────────────────────────────────────────────────────────────
