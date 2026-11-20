@@ -334,6 +334,103 @@ describe('PlayerEngine (headless)', () => {
     expect(listener).toHaveBeenCalledTimes(1);
   });
 
+  describe('observers for MIDI out (#538)', () => {
+    it('onSeek reports where a seek lands, for every way of seeking, once it was posted to the worklet', async () => {
+      const f = setup();
+      await playing(f);
+      const seen: Array<{ step: number; order: number; row: number }> = [];
+      const posted: number[] = [];
+      f.engine.onSeek((e) => {
+        seen.push(e);
+        posted.push(f.sent().filter((m) => m.type === MAIN_TO_WORKLET.seek).length);
+      });
+      f.engine.dispatch({ type: 'seekToStep', step: 70 }); // order 1 (rows 64..95), row 6
+      f.engine.dispatch({ type: 'seekOrder', order: 2, row: 5 }); // first row of order 2 is step 96
+      f.engine.dispatch({ type: 'seekOrders', delta: -1 });
+      expect(seen[0]).toEqual({ step: 70, order: 1, row: 6 });
+      expect(seen[1]).toEqual({ step: 101, order: 2, row: 5 });
+      expect(seen).toHaveLength(3);
+      // The listener runs after the seek was handed to the worklet, not before.
+      expect(posted).toEqual([1, 2, 3]);
+    });
+
+    it('onSeek lands a step past the end on order 0, like the seek itself, and can be unsubscribed', async () => {
+      const f = setup();
+      await playing(f);
+      const listener = vi.fn();
+      const off = f.engine.onSeek(listener);
+      f.engine.seekToStep(100_000);
+      expect(listener).toHaveBeenCalledWith({ step: 0, order: 0, row: 0 });
+      off();
+      f.engine.seekToStep(3);
+      expect(listener).toHaveBeenCalledTimes(1);
+    });
+
+    it('a throwing onSeek listener does not stop the seek or the other listeners', async () => {
+      const f = setup();
+      await playing(f);
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      const good = vi.fn();
+      f.engine.onSeek(() => { throw new Error('boom'); });
+      f.engine.onSeek(good);
+      f.engine.seekToStep(5);
+      expect(good).toHaveBeenCalledTimes(1);
+      expect(f.sent().some((m) => m.type === MAIN_TO_WORKLET.seek)).toBe(true);
+    });
+
+    it('pollPosition drains the shared ring itself — the UI loop only does it from requestAnimationFrame', async () => {
+      const f = setup();
+      await playing(f);
+      const refs = f.calls[f.calls.length - 1]!.refs;
+      const sample = { order: 1, row: 4.5, rowInt: 4, positionSeconds: 3, workletTime: 12, bpm: 140, speed: 6 };
+      const drain = vi.fn(() => {
+        refs.workletPositionSampleRef.current = sample;
+        return 1;
+      });
+      refs.positionRingRef.current = { drain } as unknown as typeof refs.positionRingRef.current;
+      refs.workletRowsPerSecRef.current = 9.5;
+      const poll = f.engine.pollPosition();
+      expect(drain).toHaveBeenCalledTimes(1);
+      expect(poll.sample).toBe(sample);
+      expect(poll.rowsPerSecond).toBe(9.5);
+      expect(poll.seekPending).toBe(false);
+    });
+
+    it('pollPosition reports a seek the worklet has not acknowledged, and falls back to the BPM rate', async () => {
+      const f = setup();
+      await playing(f);
+      const refs = f.calls[f.calls.length - 1]!.refs;
+      expect(f.engine.pollPosition().sample).toBeNull();
+      f.engine.seekToStep(10);
+      expect(f.engine.pollPosition().seekPending).toBe(true);
+      refs.workletRowsPerSecRef.current = 0;
+      refs.workletPositionSampleRef.current = { order: 0, row: 10, rowInt: 10, positionSeconds: 1, workletTime: 1, bpm: 150, speed: 6 };
+      expect(f.engine.pollPosition().rowsPerSecond).toBeCloseTo(10, 9); // 150 BPM × 4 rows per beat
+    });
+
+    it('getPatternMatrix serves every order, not only the one on screen', async () => {
+      const f = setup();
+      await playing(f);
+      expect(f.engine.getPatternMatrix(1)?.numRows).toBe(32);
+      expect(f.engine.getPatternMatrix(2)?.numRows).toBe(64);
+      expect(f.engine.getPatternMatrix(9)).toBeNull();
+      expect(f.engine.getPatternMatrix(-1)).toBeNull();
+    });
+
+    it('isChannelMuted follows the channel meters', async () => {
+      const f = setup();
+      await playing(f);
+      const refs = f.calls[f.calls.length - 1]!.refs;
+      refs.channelStatesRef.current = [
+        { volume: 0, pan: 0, freq: 0, trigger: 0, noteAge: 0, activeEffect: 0, effectValue: 0, isMuted: 0 },
+        { volume: 0, pan: 0, freq: 0, trigger: 0, noteAge: 0, activeEffect: 0, effectValue: 0, isMuted: 1 },
+      ];
+      expect(f.engine.isChannelMuted(0)).toBe(false);
+      expect(f.engine.isChannelMuted(1)).toBe(true);
+      expect(f.engine.isChannelMuted(7)).toBe(false);
+    });
+  });
+
   it('throws on an illegal transport transition (strict engines: dev builds and tests)', () => {
     const engine = new PlayerEngine({ strictTransport: true, startAudioPlayback: vi.fn() });
     expect(() => engine.transport.send('pause')).toThrow(/'pause' is not legal from 'idle'/);

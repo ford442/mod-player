@@ -55,6 +55,7 @@ mod-player/
 ├── audio/fx/                    # FX rack (#453) — see docs/FX_RACK.md. Main chunk: types, spec/, fxBootstrap, fxHost,
 │                                #   fxVisualState. Lazy chunk: fxRackController, FxRack, FxSlot, modules/, room/, offline/
 │
+├── audio/midi/                  # MIDI out (#538): clock / transport / note-out observer of the PlayerEngine — docs/MIDI_CONTROLS.md
 ├── workers/                     # Parser, export, and module-create (#513) Web Workers
 ├── utils/                       # Pure helpers: shaderRegistry/shaderVersion, gpuPacking, geometryConstants, playheadPrediction, …
 ├── src/renderers/               # Pattern renderer abstraction (webgpu/webgl2/html selection)
@@ -344,6 +345,21 @@ LibOpenMPT     // Function bindings for the libopenmpt WASM module
     Master volume / pan / mute are engine state (`setMasterVolume` — the
     GainNode only, pitfall 16). Start-path config is live (getters), and
     `processModuleData` drops a parse superseded by a newer load.
+
+18. **MIDI out is an observer with its own clock (#538):** `audio/midi/midiOutController.ts` reads the
+    PlayerEngine (transport FSM edges, `onSeek`, `pollPosition`, `getPatternMatrix`) and never writes it
+    or touches `audio-worklet/`. It runs on its own 10 ms `setInterval`, **not** on the rAF UI loop
+    (rAF stops in a hidden tab, and a DAW user keeps the DAW in front): `pollPosition()` drains the shared
+    position ring itself. Messages are stamped from the audio clock through `AudioPerfClock` — a slow
+    average of heard-time readings, because a raw `getOutputTimestamp()` jitters by milliseconds — and
+    handed to `MIDIOutput.send(data, timestamp)` up to 100 ms early. Sent messages cannot be recalled
+    (`MIDIOutput.clear()` is not in Chromium), so `PulseGrid.anchor` waits for the pulses already out
+    instead of overlapping them, and a tempo change is followed from the next pulse not yet handed out,
+    never deferred to a row boundary. Transport bytes follow FSM edges, not React state; the clock tick
+    must stay shorter than the worklet's ~16.7 ms report interval (`pollPosition` returns only the newest
+    report). `tests/unit/midiOutController.test.ts` runs it against a simulated worklet and audio clock.
+    It is a **lazy chunk** (`midiOutController-*`, checked by `verify-bundle-budget`): eager code reaches
+    it only through `hooks/useMidiOutRestore.ts`'s dynamic import and `components/MidiOutPanelLazy.tsx`.
 
 ## Critical Data Flows
 

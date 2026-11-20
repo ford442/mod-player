@@ -5,6 +5,7 @@ import { usePlayerEngine } from './hooks/usePlayerEngine';
 import { useDisplayShader } from './hooks/usePlayerView';
 import { usePlaylist } from './hooks/usePlaylist';
 import { useMidiControls } from './hooks/useMidiControls';
+import { useMidiOutRestore } from './hooks/useMidiOutRestore';
 import { useLibrary, useSaveSong, useSyncLibrary } from './hooks/useLibrary';
 import { useLocalLibrary } from './hooks/useLocalLibrary';
 import { useRateShader } from './hooks/useRateShader';
@@ -150,6 +151,7 @@ function App() {
   });
 
   const midiControls = useMidiControls();
+  useMidiOutRestore();
 
   const { toasts, showToast, dismissToast } = useToast();
 

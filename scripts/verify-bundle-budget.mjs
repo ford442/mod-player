@@ -22,13 +22,19 @@ const MAX_ENTRY_BYTES = Number(process.env.MAX_ENTRY_BYTES || 750 * 1024);
 /**
  * Gzipped size of everything fetched on first load (entry + react-vendor + whatever else the entry
  * statically imports). Units match Vite's reporter (1 kB = 1000 B).
+ *
+ * 261 kB: was 260 kB with the tree at 259.9. MIDI out (#538) is a lazy chunk, but it needs ~0.65 kB of
+ * eager glue — the engine's read-only observers (`pollPosition`, `onSeek`, …), the restore hook and
+ * the lazy panel wrapper — which the 100 B of headroom could not hold.
  */
-const MAX_INITIAL_GZIP_BYTES = Number(process.env.MAX_INITIAL_GZIP_BYTES || 260 * 1000);
+const MAX_INITIAL_GZIP_BYTES = Number(process.env.MAX_INITIAL_GZIP_BYTES || 261 * 1000);
 const THREE_CHUNK_PREFIX = 'three-r3f';
 const REACT_VENDOR_CHUNK_PREFIX = 'react-vendor';
 const LAZY_3D_CHUNK_PREFIX = 'App3DView';
 /** FX rack (#453): the rack graph (FxRack, modules, loaders) loads only once a module is enabled. */
 const LAZY_FX_CHUNK_PREFIX = 'fxRackController';
+/** MIDI out (#538): the controller (clock, notes, ports) loads with the panel or a saved output. */
+const LAZY_MIDI_CHUNK_PREFIX = 'midiOutController';
 /** Opt-in WebGL2 pattern renderer (#492): only `?webgl2=1` / the failure-card button load it. */
 const LAZY_WEBGL2_CHUNK_PREFIX = 'WebGL2PatternRenderer';
 /**
@@ -143,6 +149,11 @@ const webgl2Chunks = jsChunks(LAZY_WEBGL2_CHUNK_PREFIX);
 if (webgl2Chunks.length === 0) {
   errors.push(`no ${LAZY_WEBGL2_CHUNK_PREFIX}-*.js lazy chunk found (opt-in WebGL2 renderer not code-split?)`);
 }
+// MIDI out (#538): opt-in and on the dev surface, so the eager code carries none of it.
+const midiChunks = jsChunks(LAZY_MIDI_CHUNK_PREFIX);
+if (midiChunks.length === 0) {
+  errors.push(`no ${LAZY_MIDI_CHUNK_PREFIX}-*.js lazy chunk found (MIDI out not code-split?)`);
+}
 // Room IRs are fetched on demand from dist/ir/, never bundled.
 {
   const irDir = join(BUILD_DIR, 'ir');
@@ -202,6 +213,9 @@ for (const [rel, { via, code }] of eagerChunks) {
   }
   if (name.startsWith(`${LAZY_WEBGL2_CHUNK_PREFIX}-`)) {
     errors.push(`initial load statically imports ${name}${via ? ` (via ${via})` : ''} — the opt-in WebGL2 renderer is not lazy`);
+  }
+  if (name.startsWith(`${LAZY_MIDI_CHUNK_PREFIX}-`)) {
+    errors.push(`initial load statically imports ${name}${via ? ` (via ${via})` : ''} — MIDI out is not lazy`);
   }
   // Node factory names survive minification, and only the FX rack's modules call them.
   const text = code.toString('utf8');
