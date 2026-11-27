@@ -25,6 +25,46 @@ Both hosts keep the same `/xm-player/` base path.
 > [!WARNING]
 > `dist/` is a single folder. Do **not** use `--no-build` to upload a test-profile `dist/` to `go`, or a go-profile `dist/` to `test`; rebuild for the matching `--site` first.
 
+## Which commit is live (`version.json`)
+
+Every build writes `dist/version.json` (vite-plugins/buildVersion.ts) and a matching
+`<meta name="xasm-build">` tag in `index.html`:
+
+```json
+{ "sha": "<full 40-char commit>", "builtAt": "2026-11-27T13:40:00.000Z", "profile": "test", "base": "/xm-player/", "dirty": false }
+```
+
+```bash
+curl -s https://test.1ink.us/xm-player/version.json     # compare with: git rev-parse HEAD
+```
+
+`deploy.py` **refuses** a build whose `dirty` is true (uncommitted changes — `--allow-dirty` for a throwaway
+deploy), whose `profile` does not match `--site` (`test` for test, `public` for go), or that has no
+`version.json`. `build:xm-player` / `build:go` / `deploy` run from a committed tree: note that the
+prebuild steps rewrite `public/shaders/` and `public/worklets/`, so commit those syncs first.
+
+After the upload `deploy.py` verifies the live site: `version.json`'s SHA and profile must equal the build,
+and every non-hashed file (everything except `assets/<name>-<hash>.<ext>`, HTML and dot-files) must be
+byte-identical to `dist/`. A live site it cannot read counts as a failure (exit 1).
+
+## What is uploaded
+
+Only Vite's content-hashed `assets/` files are skipped when the remote copy has the same size (a changed file
+has a new name). Everything else — `sw.js`, `worklets/*`, `*.wasm`, `shaders/*`, images, `.htaccess` — is
+uploaded every time, because size is not content (#561). The upload service may also skip equal-sized files
+on its side; the post-upload byte comparison above is what proves a same-size change arrived.
+
+## Build output notes
+
+- Vite's 500 kB chunk warning is silenced with a documented `chunkSizeWarningLimit` of 900 kB in
+  `vite.config.ts` (not a silent bump): `three-r3f` (~0.8 MB) is third-party and lazy, `index` (~0.7 MB) is the
+  entry and is gated in gzip bytes by `verify:bundle-budget`. Raise the limit only with a written reason there.
+- No source maps are emitted (Vite default; `build.sourcemap` is not set); wasm frames in fault reports are named by
+  `scripts/symbolicate.mjs` (docs/FAULT_REPORTS.md).
+- `dist/` also carries sample modules (`4-mat_madness.mod`, `libopenmpt-test.mod`, `test.xm`, used by the
+  default load / smokes), `clouds.mp4`, `worklets/README.md` and the Netlify-style `_headers` (ignored by
+  Apache). The two 9.6 MB PWA icons are the bulk of `dist/` (27 MB); shrinking them is Release 4.
+
 ## Audio engine
 
 The JS AudioWorklet (`public/worklets/openmpt-worklet.js`) and its libopenmpt pair (`public/worklets/libopenmpt-worklet.{js,wasm}`) are tracked in git, so every build ships them and a deploy needs no emsdk. The optional native C++ engine (`openmpt-native.*`, `?engine=native`, `--require-native`) was retired — see `docs/ADR-native-engine.md`.
@@ -110,9 +150,10 @@ Safari is never `crossOriginIsolated` and silently takes every fallback (module 
 thread, `postMessage` instead of `SharedArrayBuffer`). Every cross-origin surface was audited for
 `require-corp` — see the runtime-dependencies table below.
 
-`.htaccess` uses `Header always set` for both headers and unsets COEP in both mod_headers tables
-(`Header unset` + `Header always unset`), so a parent vhost's COEP cannot leave a second value
-behind (a duplicated COEP is ignored by browsers). Do not add `Cross-Origin-Resource-Policy`: our
+`.htaccess` uses `Header always set` for both headers and unsets **both** in both mod_headers tables
+(`Header unset` + `Header always unset`), so a parent vhost's value cannot leave a second one
+behind. A duplicated COEP is ignored by browsers; a duplicated COOP turns `crossOriginIsolated` off
+(staging sent COOP twice, #561). Do not add `Cross-Origin-Resource-Policy`: our
 subresources are same-origin, and the parent vhost already sends `CORP: cross-origin`.
 
 `sw.js` replays the cached `index.html` (with whatever COEP it was stored with) offline; bump its

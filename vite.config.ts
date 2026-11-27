@@ -1,6 +1,7 @@
 import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 import { libopenmptHtmlPlugin } from './vite-plugins/libopenmptHtml'
+import { buildVersionPlugin } from './vite-plugins/buildVersion'
 import {
   CROSS_ORIGIN_ISOLATION_HEADERS,
   vendorManualChunk,
@@ -29,7 +30,7 @@ export default defineConfig(({ mode }) => {
   
   return {
     base,
-    plugins: [react(), libopenmptHtmlPlugin(base)],
+    plugins: [react(), libopenmptHtmlPlugin(base), buildVersionPlugin(base)],
     server: {
       // The CodeQL scanner leaves behind a self-referential symlink
       // (_codeql_detected_source_root → .) which causes Vite's chokidar FSWatcher
@@ -63,6 +64,15 @@ export default defineConfig(({ mode }) => {
       // static blocks etc. stay native instead of being lowered to helper calls).
       target: 'es2022',
       cssCodeSplit: true,
+      // Vite warns above 500 kB per chunk. Both chunks over it are accounted for, so the limit is a
+      // documented value (#561), not a silent bump:
+      //  - three-r3f (~0.8 MB): the third-party three.js / R3F ecosystem, lazy (loaded only by the 3D
+      //    view; scripts/verify-bundle-budget.mjs fails if anything eager imports it) and not splittable.
+      //  - index (~0.7 MB): the app entry. react-vendor is already split out; what the first load
+      //    costs is gated in gzip bytes by verify-bundle-budget (MAX_INITIAL_GZIP_BYTES, MAX_ENTRY_BYTES).
+      // 900 kB sits just above the largest chunk today (~823 kB), so any *new* chunk over 500 kB, or
+      // growth of these two past 900 kB, warns again. Raise it only together with a written reason here.
+      chunkSizeWarningLimit: 900,
       rollupOptions: {
         output: {
           // Literal [extname] — typos here (e.g. `.1iss`) corrupt production CSS URLs.

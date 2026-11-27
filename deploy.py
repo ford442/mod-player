@@ -10,6 +10,7 @@ Usage:
   python deploy.py --site go       # build go.1ink.us public-lock profile + validate + upload
   python deploy.py --no-build      # upload existing dist/ only (must already match --site profile)
   python deploy.py --dry-run       # validate locally + probe live COOP/COEP; never upload
+  python deploy.py --allow-dirty   # deploy a build made from an uncommitted tree (refused by default)
 
 This script contacts https://storage.noahcohn.com to upload the dist/ folder
 as a single zip archive. The server extracts it and pushes files over a
@@ -44,6 +45,15 @@ import requests
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "scripts" / "lib"))
 from coi_headers import FAIL, OK, print_probe, probe_live_coi, worst_status  # noqa: E402
+from deploy_plan import (  # noqa: E402
+    check_version_for_deploy,
+    is_content_hashed,
+    is_html,
+    live_mismatches,
+    live_version_problems,
+    load_version,
+    may_skip_upload,
+)
 
 # ============================================================
 # PER-PROJECT CONFIGURATION
@@ -308,9 +318,9 @@ def build_zip(build_path: Path, skip_sizes=None) -> bytes:
             # Size is not a content hash. Vite index.html often keeps the same
             # byte length while hashed JS/CSS filenames inside change. The
             # Contabo extract path also skips equal-sized files, so HTML must
-            # both always be packed and have a distinct payload size.
-            is_html = rel.suffix.lower() in {".html", ".htm"}
-            if is_html:
+            # both always be packed and have a distinct payload size. Other
+            # unhashed files are verified byte-for-byte after upload (verify_live_content).
+            if is_html(rel_s):
                 raw = file.read_bytes()
                 digest = hashlib.sha256(raw).hexdigest()[:16]
                 # Vite 8-char hashes keep the body the same length. A fixed-width
@@ -325,8 +335,11 @@ def build_zip(build_path: Path, skip_sizes=None) -> bytes:
                 zf.writestr(rel_s, stamped)
                 print(f"  + {rel} (stamped {len(stamped)} bytes, sha {digest})")
                 continue
-            if (skip_sizes or {}).get(rel_s) == local_size:
-                print(f"  = {rel} ({local_size} bytes, unchanged)")
+            # Only Vite's content-hashed assets/<name>-<hash>.<ext> may be skipped on equal size
+            # (a changed file has a new name). Everything else ships every time: a same-size edit to
+            # sw.js, a shader, a worklet or a .wasm used to be left out (#561, scripts/lib/deploy_plan.py).
+            if may_skip_upload(rel_s, local_size, (skip_sizes or {}).get(rel_s)):
+                print(f"  = {rel} ({local_size} bytes, content-hashed, unchanged)")
                 continue
             zf.write(file, rel_s)
             print(f"  + {rel}")
@@ -454,6 +467,11 @@ def main() -> None:
         help="Deploy target site: test (test.1ink.us) or go (go.1ink.us). "
         "Default from DEPLOY_TARGET env or 'test'.",
     )
+    parser.add_argument(
+        "--allow-dirty",
+        action="store_true",
+        help="Allow a build made from an uncommitted working tree (version.json dirty=true). Default: refuse.",
+    )
     prune_group = parser.add_mutually_exclusive_group()
     prune_group.add_argument(
         "--prune",
@@ -487,6 +505,17 @@ def main() -> None:
         print(f"ERROR: Build directory '{BUILD_DIR}/' does not exist.")
         print("Run the matching site profile first: `npm run build:xm-player:verify` or `npm run build:go:verify`.")
         sys.exit(1)
+
+    version = load_version(build_path)
+    version_errors = check_version_for_deploy(version, target_site, allow_dirty=args.allow_dirty)
+    if version_errors:
+        label = "WARNING (dry run)" if args.dry_run else "ERROR"
+        for err in version_errors:
+            print(f"{label}: {err}")
+        if not args.dry_run:
+            sys.exit(1)
+    elif version is not None:
+        print(f"Build: {version['sha']} ({version['profile']}, clean={not version['dirty']}, built {version['builtAt']})\n")
 
     validate_build_base_path(build_path)
     print("Validating stylesheet assets...")
@@ -543,8 +572,12 @@ def main() -> None:
     if not success:
         sys.exit(1)
     verify_live_directory_index(build_path, target_site=target_site)
+    live_ok = verify_live_content(build_path, version, host)
     if report_live_coi(host) != OK:
         print("\n✗ Uploaded, but the live site is not cross-origin isolated (COOP same-origin + COEP require-corp).")
+        sys.exit(1)
+    if not live_ok:
+        print("\n✗ Uploaded, but the live site does not serve exactly this build (see above).")
         sys.exit(1)
     sys.exit(0)
 
@@ -555,6 +588,60 @@ def report_live_coi(host: str) -> str:
     results = probe_live_coi(host)
     print_probe(results)
     return worst_status([result for _, result in results])
+
+
+def verify_live_content(build_path: Path, version: Optional[dict], host: str) -> bool:
+    """After an upload: live version.json carries the built SHA and every unhashed file is byte-identical.
+
+    The upload service may skip equal-sized files, so this is the check that proves a same-size
+    change (sw.js, shaders, worklets, .wasm) really arrived. A live site that cannot be read counts
+    as a failure: an upload nobody can confirm is not a deploy.
+    """
+    base = f"https://{host}/{PROJECT_NAME}/"
+    headers = {"User-Agent": "mod-player-deploy-verify", "Cache-Control": "no-cache"}
+    print(f"\nVerifying live content ({base}) ...")
+
+    def fetch(rel: str) -> Optional[bytes]:
+        try:
+            resp = requests.get(base + rel, timeout=60, headers=headers)
+        except Exception as exc:  # noqa: BLE001
+            print(f"  ! {rel}: {exc}")
+            return None
+        return resp.content if resp.status_code == 200 else None
+
+    ok = True
+    if version is not None:
+        raw = fetch("version.json")
+        live: Optional[dict] = None
+        if raw is not None:
+            try:
+                parsed = json.loads(raw.decode("utf-8"))
+                live = parsed if isinstance(parsed, dict) else None
+            except ValueError:
+                live = None
+        problems = live_version_problems(version, live)
+        if problems:
+            ok = False
+            for p in problems:
+                print(f"  ✗ {p}")
+        else:
+            print(f"  ✓ live version.json: sha {live['sha']} ({live['profile']})")  # type: ignore[index]
+
+    files = [
+        str(f.relative_to(build_path)).replace("\\", "/")
+        for f in sorted(build_path.rglob("*"))
+        if f.is_file()
+    ]
+    unhashed = [r for r in files if not is_html(r) and not is_content_hashed(r)]
+    mismatched = live_mismatches(build_path, unhashed, fetch)
+    if mismatched:
+        ok = False
+        print(f"  ✗ {len(mismatched)} file(s) on the live site differ from dist/:")
+        for m in mismatched:
+            print(f"      {m}")
+    else:
+        print(f"  ✓ {len(unhashed)} unhashed file(s) byte-identical to dist/")
+    return ok
 
 
 def verify_live_directory_index(build_path: Path, *, target_site: str = "test") -> None:
