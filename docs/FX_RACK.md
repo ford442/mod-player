@@ -51,7 +51,7 @@ slot:  in ─┬─ dry(G) ─────────────────�
 | `audio-worklet/fxCharacterParams.ts` | Character processor contract (name, AudioParams, latency) | shared |
 | `audio-worklet/js/fx-character-processor.ts`, `js/fx/` | The character worklet + DSP kernels | generated worklet |
 | `components/fx/`, `components/Knob.tsx` | Panel (lazy) and accessible knob | lazy UI chunk |
-| `public/ir/*.opus` | Room IRs (fetched on demand) | asset |
+| `public/ir/*.{opus,wav}` | Room IRs and PCM fallbacks (fetched on demand) | asset |
 
 `FX_RACK_ENABLED` (`appConfig.ts`) is on in dev builds. Public builds opt in
 with `VITE_FX_RACK=1`, pending a soak on Safari (Opus IRs) and mobile CPU. When
@@ -120,13 +120,15 @@ tanh tape + 10 Hz DC block → ×2 down → trim.
 The IRs are synthesized deterministically (`scripts/lib/ir-synth.mjs`): wet-only
 early reflections plus a two-band decaying tail, unit energy. Sizes are small
 0.35 s, medium 0.7 s and large 1.0 s. Each is Opus-encoded at 160 kbps
-(≈ 36 KB total).
+(≈ 36 KB total), with a 16-bit PCM WAV fallback (≈ 350 KB total) for browsers
+that cannot decode Ogg Opus.
 
 - **Loading:** files are fetched only when the room is first enabled, once per
   page. Each context decodes them at its own rate: 48 kHz live and for a default export, 44.1 kHz for a CD-rate export.
-- **Failures:** a decode failure (e.g. Safari without Ogg Opus) marks the room
-  *unavailable*. It reads as off, the panel offers Retry, and export skips it
-  with a warning.
+- **Fallback:** if fetching, decoding or validating Opus fails, the loader
+  retries the same IR from its WAV fallback. Only a failure of both formats
+  marks the room *unavailable*. It reads as off, the panel offers Retry, and
+  export skips it with a warning.
 - **Commands:**
   - `npm run gen:irs` regenerates the files (needs ffmpeg/libopus; it's
     byte-reproducible with the same libopus). The outputs are committed.
@@ -233,7 +235,7 @@ sine (+ DC) toggled on and off:
 
 **Chromium harness** (`npm run smoke:fx:ci`, CI audio-smoke job) runs the same
 null / crossfade / room / parity / export checks on Chrome's nodes. It also
-decodes the real Opus IRs and gates the character CPU (< 5 %).
+decodes the real Opus IRs and WAV fallbacks and gates the character CPU (< 5 %).
 
 **Audio smoke** (`fx-rack` phase) checks the real app:
 - character + EQ mid-playback keeps the counters advancing;
@@ -259,7 +261,6 @@ decodes the real Opus IRs and gates the character CPU (< 5 %).
 - **Fade comb.** The compressor look-ahead / resampler delay combs briefly
   during fades.
 - **Reorder dip.** A live reorder dips to dry for ~30 ms.
-- **Safari.** Opus IR support varies; an AAC fallback set would be a follow-up.
 - **Long exports** need ~28 B/frame. Chunked / streamed FX export is a
   follow-up.
 - **Shader prefs** still key on the 16-byte module hash, which collides for XM

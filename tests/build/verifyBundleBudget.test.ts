@@ -26,13 +26,15 @@ interface Fixture {
   chunks?: Partial<Record<string, string | null>>;
   /** Ship dist/ir/*.opus (default true). */
   irs?: boolean;
+  /** Ship dist/ir/*.wav (default true). */
+  fallbackIrs?: boolean;
 }
 
 /**
  * A minimal dist/ the budget script accepts: entry → react-vendor, 3D view lazily → three-r3f,
  * FX rack lazily (#453), the opt-in WebGL2 renderer lazily (#492), MIDI out lazily (#538), room IRs shipped.
  */
-function makeDist({ preloads = [], chunks = {}, irs = true }: Fixture = {}): string {
+function makeDist({ preloads = [], chunks = {}, irs = true, fallbackIrs = true }: Fixture = {}): string {
   const dir = mkdtempSync(join(tmp, 'dist-'));
   const defaults: Record<string, string> = {
     [ENTRY]: `import{r as e}from"./${VENDOR}";const L=()=>import("./${LAZY}");const F=()=>import("./${FX}");const W=()=>import("./${WEBGL2}");const M=()=>import("./${MIDI}");export{L as lazy3d,F as fx,W as gl,M as midi};`,
@@ -65,6 +67,10 @@ function makeDist({ preloads = [], chunks = {}, irs = true }: Fixture = {}): str
   if (irs) {
     mkdirSync(join(dir, 'ir'), { recursive: true });
     writeFileSync(join(dir, 'ir', 'small.opus'), 'OggS');
+  }
+  if (fallbackIrs) {
+    mkdirSync(join(dir, 'ir'), { recursive: true });
+    writeFileSync(join(dir, 'ir', 'small.wav'), 'RIFF');
   }
   return dir;
 }
@@ -163,6 +169,10 @@ describe('verify-bundle-budget: three.js must stay off the initial load', () => 
     const noIrs = run(makeDist({ irs: false }));
     expect(noIrs.status).toBe(1);
     expect(noIrs.out).toContain('dist/ir/*.opus missing');
+
+    const noFallback = run(makeDist({ fallbackIrs: false }));
+    expect(noFallback.status).toBe(1);
+    expect(noFallback.out).toContain('dist/ir/*.wav missing');
   });
 
   it('fails when the shared react-vendor chunk is missing', () => {

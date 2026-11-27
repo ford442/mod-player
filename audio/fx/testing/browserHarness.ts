@@ -22,7 +22,7 @@ import { buildFxGraph } from '../buildFxGraph';
 import { ensureCharacterWorklet } from '../character/characterWorkletLoader';
 import { FxRack, type FxRackEnv } from '../FxRack';
 import { fxTailSeconds, renderFxOffline } from '../offline/renderFxOffline';
-import { IR_MANIFEST } from '../room/irCatalog';
+import { IR_MANIFEST, irUrl } from '../room/irCatalog';
 import { sharedIrLoader } from '../room/irLoader';
 import { FX_FACTORY_PRESETS } from '../spec/presets';
 import { cloneFxRackState, defaultFxRackState, parseFxRackState } from '../spec/schema';
@@ -266,7 +266,7 @@ async function crossfadeChecks(env: Omit<FxRackEnv, 'mode'>): Promise<HarnessChe
   return out;
 }
 
-// ── Room IRs: real Opus decode + send conformance ────────────────────────────
+// ── Room IRs: real Opus/WAV decode + send conformance ────────────────────────
 
 async function roomChecks(env: Omit<FxRackEnv, 'mode'>): Promise<HarnessCheck[]> {
   const out: HarnessCheck[] = [];
@@ -288,6 +288,23 @@ async function roomChecks(env: Omit<FxRackEnv, 'mode'>): Promise<HarnessCheck[]>
         energyError = Number.POSITIVE_INFINITY;
       }
       out.push(check(`ir ${id} @ ${sampleRate}: Opus decode, rate, length, energy error`, energyError, 0.25, 'below'));
+
+      let fallbackError = Number.POSITIVE_INFINITY;
+      try {
+        const ctx = new OfflineAudioContext(2, 128, sampleRate);
+        const response = await fetch(irUrl(id, 'wav'));
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const fallback = await ctx.decodeAudioData(await response.arrayBuffer());
+        fallbackError =
+          fallback.sampleRate === sampleRate &&
+          fallback.numberOfChannels === 2 &&
+          Math.abs(fallback.duration - IR_MANIFEST[id].durationSeconds) <= 0.001
+            ? 0
+            : Number.POSITIVE_INFINITY;
+      } catch {
+        fallbackError = Number.POSITIVE_INFINITY;
+      }
+      out.push(check(`ir ${id} @ ${sampleRate}: WAV fallback decode, rate, and length`, fallbackError, 0.001, 'below'));
     }
   }
 

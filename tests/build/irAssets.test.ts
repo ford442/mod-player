@@ -10,7 +10,12 @@ import { IR_IDS, IR_SPECS, synthIr } from '../../scripts/lib/ir-synth.mjs';
 const ROOT = resolve(fileURLToPath(new URL('../..', import.meta.url)));
 const manifest = JSON.parse(readFileSync(join(ROOT, 'audio/fx/room/ir-manifest.generated.json'), 'utf8')) as Record<
   string,
-  { file: string; durationSeconds: number; channels: number }
+  {
+    file: string;
+    durationSeconds: number;
+    channels: number;
+    fallback: { format: string; file: string };
+  }
 >;
 
 describe('room IR synth (#453)', () => {
@@ -60,6 +65,12 @@ describe('committed room IRs (#453)', () => {
       expect(manifest[id]!.channels).toBe(2);
       const bytes = readFileSync(join(ROOT, 'public/ir', manifest[id]!.file));
       expect(bytes.byteLength).toBeLessThan(64 * 1024); // small: fetched on demand
+      expect(manifest[id]!.fallback.format).toBe('wav');
+      const fallback = readFileSync(join(ROOT, 'public/ir', manifest[id]!.fallback.file));
+      expect(fallback.subarray(0, 4).toString('latin1')).toBe('RIFF');
+      expect(fallback.readUInt16LE(20)).toBe(1); // PCM
+      expect(fallback.readUInt16LE(34)).toBe(16);
+      expect(fallback.byteLength).toBeLessThan(200 * 1024);
     }
   });
 });

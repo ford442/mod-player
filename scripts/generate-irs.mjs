@@ -3,8 +3,11 @@
  * Room impulse responses for the FX rack (#453).
  *
  *   npm run gen:irs     synthesize (scripts/lib/ir-synth.mjs), encode with
- *                       ffmpeg/libopus → public/ir/{id}.opus, write
+ *                       ffmpeg/libopus → public/ir/{id}.opus and write a
+ *                       16-bit PCM WAV fallback, then write
  *                       audio/fx/room/ir-manifest.generated.json
+ *   node scripts/generate-irs.mjs --fallback-only regenerates just the WAVs
+ *                       and their manifest entries (no ffmpeg required)
  *   npm run verify:irs  (no ffmpeg) every manifest entry's file exists with
  *                       the recorded hash/size, and its sourceHash still
  *                       matches the synth spec — i.e. nobody changed the spec
@@ -59,6 +62,45 @@ function floatWav(channels, sampleRate) {
   return Buffer.concat([header, data]);
 }
 
+/** 16-bit PCM stereo WAV for browsers without Ogg Opus decode support. */
+function pcmWav(channels, sampleRate) {
+  const frames = channels[0].length;
+  const data = Buffer.alloc(frames * channels.length * 2);
+  for (let i = 0; i < frames; i++) {
+    for (let c = 0; c < channels.length; c++) {
+      const sample = Math.max(-1, Math.min(1, channels[c][i]));
+      data.writeInt16LE(Math.round(sample * 32767), (i * channels.length + c) * 2);
+    }
+  }
+  const header = Buffer.alloc(44);
+  header.write('RIFF', 0);
+  header.writeUInt32LE(36 + data.length, 4);
+  header.write('WAVE', 8);
+  header.write('fmt ', 12);
+  header.writeUInt32LE(16, 16);
+  header.writeUInt16LE(1, 20); // PCM
+  header.writeUInt16LE(channels.length, 22);
+  header.writeUInt32LE(sampleRate, 24);
+  header.writeUInt32LE(sampleRate * channels.length * 2, 28);
+  header.writeUInt16LE(channels.length * 2, 32);
+  header.writeUInt16LE(16, 34);
+  header.write('data', 36);
+  header.writeUInt32LE(data.length, 40);
+  return Buffer.concat([header, data]);
+}
+
+function writeFallback(id, channels) {
+  const file = `${id}.wav`;
+  const bytes = pcmWav(channels, SAMPLE_RATE);
+  writeFileSync(join(OUT_DIR, file), bytes);
+  return {
+    format: 'wav',
+    file,
+    version: sha256(bytes).slice(0, 10),
+    bytes: bytes.length,
+  };
+}
+
 function generate() {
   mkdirSync(OUT_DIR, { recursive: true });
   mkdirSync(dirname(MANIFEST), { recursive: true });
@@ -67,8 +109,10 @@ function generate() {
   try {
     for (const id of IR_IDS) {
       const wav = join(tmp, `${id}.wav`);
+      const channels = synthIr(id, SAMPLE_RATE);
       const file = `${id}.opus`;
-      writeFileSync(wav, floatWav(synthIr(id, SAMPLE_RATE), SAMPLE_RATE));
+      writeFileSync(wav, floatWav(channels, SAMPLE_RATE));
+      const fallback = writeFallback(id, channels);
       execFileSync('ffmpeg', [
         '-hide_banner', '-loglevel', 'error', '-y',
         '-i', wav,
@@ -81,15 +125,30 @@ function generate() {
         file,
         version: sha256(bytes).slice(0, 10),
         bytes: bytes.length,
+        fallback,
         durationSeconds: IR_SPECS[id].seconds,
         channels: 2,
         sampleRate: SAMPLE_RATE,
         sourceHash: sourceHash(id),
       };
       console.log(`✅ ${file}: ${bytes.length} bytes (${IR_SPECS[id].seconds} s)`);
+      console.log(`✅ ${fallback.file}: ${fallback.bytes} bytes (PCM fallback)`);
     }
   } finally {
     rmSync(tmp, { recursive: true, force: true });
+  }
+  writeFileSync(MANIFEST, JSON.stringify(manifest, null, 2) + '\n');
+  console.log(`✅ ${MANIFEST.replace(ROOT + '/', '')}`);
+}
+
+function generateFallbacks() {
+  mkdirSync(OUT_DIR, { recursive: true });
+  const manifest = JSON.parse(readFileSync(MANIFEST, 'utf8'));
+  for (const id of IR_IDS) {
+    if (!manifest[id]) throw new Error(`${id}: not in ${MANIFEST}`);
+    const fallback = writeFallback(id, synthIr(id, SAMPLE_RATE));
+    manifest[id].fallback = fallback;
+    console.log(`✅ ${fallback.file}: ${fallback.bytes} bytes (PCM fallback)`);
   }
   writeFileSync(MANIFEST, JSON.stringify(manifest, null, 2) + '\n');
   console.log(`✅ ${MANIFEST.replace(ROOT + '/', '')}`);
@@ -118,6 +177,37 @@ function check() {
     if (bytes.length !== entry.bytes) problems.push(`${id}: size ${bytes.length} ≠ manifest ${entry.bytes}`);
     if (sha256(bytes).slice(0, 10) !== entry.version) problems.push(`${id}: content hash ≠ manifest version`);
     if (bytes.subarray(0, 4).toString('latin1') !== 'OggS') problems.push(`${id}: not an Ogg stream`);
+    const fallback = entry.fallback;
+    if (!fallback || fallback.format !== 'wav') {
+      problems.push(`${id}: missing WAV fallback format in the manifest`);
+      continue;
+    }
+    const fallbackPath = join(OUT_DIR, fallback.file);
+    if (!existsSync(fallbackPath)) {
+      problems.push(`${id}: ${fallback.file} is missing`);
+      continue;
+    }
+    const fallbackBytes = readFileSync(fallbackPath);
+    if (fallbackBytes.length !== fallback.bytes) {
+      problems.push(`${id}: WAV size ${fallbackBytes.length} ≠ manifest ${fallback.bytes}`);
+    }
+    if (sha256(fallbackBytes).slice(0, 10) !== fallback.version) {
+      problems.push(`${id}: WAV content hash ≠ manifest version`);
+    }
+    if (
+      fallbackBytes.length < 44 ||
+      fallbackBytes.subarray(0, 4).toString('latin1') !== 'RIFF' ||
+      fallbackBytes.subarray(8, 12).toString('latin1') !== 'WAVE' ||
+      fallbackBytes.readUInt16LE(20) !== 1 ||
+      fallbackBytes.readUInt16LE(22) !== 2 ||
+      fallbackBytes.readUInt32LE(24) !== SAMPLE_RATE ||
+      fallbackBytes.readUInt32LE(28) !== SAMPLE_RATE * 4 ||
+      fallbackBytes.readUInt16LE(32) !== 4 ||
+      fallbackBytes.readUInt16LE(34) !== 16 ||
+      fallbackBytes.readUInt32LE(40) !== Math.round(IR_SPECS[id].seconds * SAMPLE_RATE) * 4
+    ) {
+      problems.push(`${id}: WAV fallback is not the expected 16-bit PCM stereo format`);
+    }
   }
   for (const id of Object.keys(manifest)) if (!IR_IDS.includes(id)) problems.push(`${id}: in the manifest but not in IR_SPECS`);
   if (problems.length) {
@@ -128,4 +218,5 @@ function check() {
 }
 
 if (process.argv.includes('--check')) check();
+else if (process.argv.includes('--fallback-only')) generateFallbacks();
 else generate();
