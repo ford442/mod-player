@@ -54,11 +54,11 @@ has a new name). Everything else — `sw.js`, `worklets/*`, `*.wasm`, `shaders/*
 considered every time, because size is not content (#561).
 
 The upload service **also skips equal-sized files on its side** (proven live: `sw.js` `mod-player-v8` → `v9` was
-uploaded and left at v8). So for an unhashed file whose size equals the remote copy's, `deploy.py` fetches the live
-bytes first: identical → skipped; a changed text file (js, json, wgsl, css, `.htaccess`, `_headers`) is sent with one
-trailing newline so its size differs; a changed binary (`.wasm`, images) is sent as is and the post-upload byte
-comparison above fails the deploy if the server dropped it. test.1ink.us answers bursts with HTTP 429, so these
-live fetches are paced and retried.
+uploaded and left at v8). So an unhashed file whose size equals the remote copy's is not trusted to arrive: a text
+file (js, json, wgsl, css, `.htaccess`, `_headers`) is sent with one trailing newline so its size differs; a binary
+(`.wasm`, images) is sent as is. The post-upload byte comparison above then proves it landed (trailing whitespace is
+ignored for text) and fails the deploy otherwise. test.1ink.us answers bursts with HTTP 429, so live fetches are
+paced and retried, and the comparison has a 5-minute budget after which unread files count as unverified.
 
 ## Build output notes
 

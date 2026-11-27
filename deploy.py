@@ -47,8 +47,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent / "scripts" / "lib"))
 from coi_headers import FAIL, OK, print_probe, probe_live_coi, worst_status  # noqa: E402
 from deploy_plan import (  # noqa: E402
     check_version_for_deploy,
-    decide_same_size,
     is_content_hashed,
+    is_text_file,
     is_html,
     live_mismatches,
     live_version_problems,
@@ -105,6 +105,8 @@ PRELOAD_RE = re.compile(
     re.IGNORECASE,
 )
 MIN_CSS_BYTES = 10_000
+# Wall-clock budget for the post-upload live byte comparison (seconds).
+VERIFY_BUDGET_SECONDS = 300.0
 
 
 def resolve_asset_href(href: str) -> str:
@@ -278,7 +280,7 @@ def build_inventory(build_path: Path) -> dict[str, object]:
 
 
 
-def polite_get(url: str, *, attempts: int = 6, pause: float = 0.25) -> Optional[bytes]:
+def polite_get(url: str, *, attempts: int = 4, pause: float = 0.25) -> Optional[bytes]:
     """GET `url` for the live content checks; None when it cannot be read.
 
     test.1ink.us answers a burst of requests with HTTP 429, so this paces itself (`pause` between
@@ -303,16 +305,15 @@ def polite_get(url: str, *, attempts: int = 6, pause: float = 0.25) -> Optional[
     return None
 
 
-def plan_same_size_files(build_path: Path, skip_sizes: dict, host: str) -> dict[str, str]:
-    """Decide each unhashed file whose size equals the remote copy's: skip / pad / upload.
+def plan_same_size_files(build_path: Path, skip_sizes: dict) -> dict[str, str]:
+    """Decide each unhashed file whose size equals the remote copy's: "pad" (text) or "upload" (binary).
 
     The upload service leaves equal-sized files alone (proven live in #561: sw.js v8 -> v9 never
-    arrived), so size equality alone says nothing. The live bytes are fetched and compared; see
-    scripts/lib/deploy_plan.py (decide_same_size).
+    arrived), so size equality alone says nothing. There is no live fetch here (test.1ink.us answers
+    bursts with 429): a same-size text file always goes out with one trailing newline, a same-size
+    binary as is, and verify_live_content proves afterwards that the bytes arrived.
     """
-    base = f"https://{host}/{PROJECT_NAME}/"
     decisions: dict[str, str] = {}
-    candidates = []
     for file in sorted(build_path.rglob("*")):
         if not file.is_file():
             continue
@@ -320,11 +321,7 @@ def plan_same_size_files(build_path: Path, skip_sizes: dict, host: str) -> dict[
         if is_html(rel_s) or is_content_hashed(rel_s):
             continue
         if skip_sizes.get(rel_s) == file.stat().st_size:
-            candidates.append((rel_s, file))
-    if candidates:
-        print(f"Comparing {len(candidates)} same-size unhashed file(s) with the live copy...")
-    for rel_s, file in candidates:
-        decisions[rel_s] = decide_same_size(rel_s, file.read_bytes(), polite_get(base + rel_s))
+            decisions[rel_s] = "pad" if is_text_file(rel_s) else "upload"
     return decisions
 
 
@@ -394,9 +391,6 @@ def build_zip(build_path: Path, skip_sizes=None, decisions=None) -> bytes:
                 print(f"  = {rel} ({local_size} bytes, content-hashed, unchanged)")
                 continue
             action = (decisions or {}).get(rel_s, "upload")
-            if action == "skip":
-                print(f"  = {rel} ({local_size} bytes, live copy identical)")
-                continue
             if action == "pad":
                 # Same size, different content: the server would skip it. One trailing newline.
                 zf.writestr(rel_s, pad_for_server(file.read_bytes()))
@@ -433,7 +427,7 @@ def deploy_bundle(build_path: Path, *, clean: bool, target_site: str) -> bool:
     target_site_for_sizes = target_site or globals().get("DEPLOY_TARGET", "test")
     print("Checking remote file sizes...")
     skip_sizes = fetch_remote_sizes(target_folder_for_sizes, target_site_for_sizes)
-    decisions = plan_same_size_files(build_path, skip_sizes, live_host_for_target(target_site))
+    decisions = plan_same_size_files(build_path, skip_sizes)
     zip_bytes = build_zip(build_path, skip_sizes, decisions)
     print(f"Archive size: {len(zip_bytes) / 1024:.1f} KB\n")
 
@@ -662,7 +656,13 @@ def verify_live_content(build_path: Path, version: Optional[dict], host: str) ->
     base = f"https://{host}/{PROJECT_NAME}/"
     print(f"\nVerifying live content ({base}) ...")
 
+    # Live checks share one time budget: past it, remaining files are reported as unverified
+    # (a failure) instead of retrying a throttled host for hours.
+    deadline = time.monotonic() + VERIFY_BUDGET_SECONDS
+
     def fetch(rel: str) -> Optional[bytes]:
+        if time.monotonic() > deadline:
+            return None
         return polite_get(base + rel)
 
     ok = True

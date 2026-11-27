@@ -7,9 +7,8 @@ Why this exists
   never shipped. Only Vite's content-hashed `assets/<name>-<hash>.<ext>` files are safe to skip by
   name + size (a changed file has a new name). Everything else is always uploaded.
 * **The server skips equal-sized files too** (its extract path is not in this repo; proven live: an
-  uploaded `sw.js` 'mod-player-v8' -> 'v9' was left at v8). So a same-size unhashed file is compared
-  with its live bytes first: identical = skip, different text file = uploaded with one trailing newline
-  so its size differs, different binary = uploaded as is (and caught by the post-upload byte check).
+  uploaded `sw.js` 'mod-player-v8' -> 'v9' was left at v8). So a same-size unhashed text file is
+  uploaded with one trailing newline (its size then differs) and a same-size binary as is.
   After the upload the live bytes of every unhashed file are compared with `dist/`, and the live
   `version.json` must carry the SHA that was built.
 * **A deployed build must say which commit it is** (`dist/version.json`, written by
@@ -62,18 +61,6 @@ def same_content(rel: str, local: bytes, live: bytes) -> bool:
     if local == live:
         return True
     return is_text_file(rel) and local.rstrip() == live.rstrip()
-
-
-def decide_same_size(rel: str, local: bytes, live: Optional[bytes]) -> str:
-    """What to do with an unhashed file whose size equals the remote copy's.
-
-    "skip"   live bytes are the local bytes: nothing to ship.
-    "pad"    changed text file: ship it with one trailing newline so the server's size check lets it through.
-    "upload" changed (or unreadable) binary: ship it as is; verify_live_content catches a server-side skip.
-    """
-    if live is not None and same_content(rel, local, live):
-        return "skip"
-    return "pad" if is_text_file(rel) else "upload"
 
 
 def pad_for_server(data: bytes) -> bytes:
