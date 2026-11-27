@@ -9,10 +9,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts" / "lib"))
 
 from deploy_plan import (  # noqa: E402
     check_version_for_deploy,
+    decide_same_size,
     is_content_hashed,
+    is_text_file,
     live_mismatches,
     live_version_problems,
     may_skip_upload,
+    pad_for_server,
+    same_content,
 )
 
 SHA = "a" * 40
@@ -43,6 +47,40 @@ class UploadPlanTest(unittest.TestCase):
         self.assertTrue(may_skip_upload("assets/index-ChYbJfUY.js", 5, 5))
         self.assertFalse(may_skip_upload("assets/index-ChYbJfUY.js", 5, 6))
         self.assertFalse(may_skip_upload("assets/index-ChYbJfUY.js", 5, None))
+
+
+class SameSizeDecisionTest(unittest.TestCase):
+    """The server skips equal-sized files (proven live in #561: sw.js v8 -> v9 never arrived)."""
+
+    def test_text_types(self):
+        for rel in ("sw.js", "version.json", "shaders/patternv0.55.wgsl", ".htaccess", "_headers", "assets/x-AbCdEfGh.css"):
+            self.assertTrue(is_text_file(rel), rel)
+        for rel in ("worklets/libopenmpt-worklet.wasm", "icon-512.png", "ir/hall.opus", "clouds.mp4", "4-mat_madness.mod"):
+            self.assertFalse(is_text_file(rel), rel)
+
+    def test_changed_same_size_text_is_padded_so_the_size_differs(self):
+        local = b"const CACHE_NAME = 'mod-player-v9';\n"
+        live = b"const CACHE_NAME = 'mod-player-v8';\n"
+        self.assertEqual(len(local), len(live))
+        self.assertEqual(decide_same_size("sw.js", local, live), "pad")
+        self.assertNotEqual(len(pad_for_server(local)), len(live))
+
+    def test_identical_live_bytes_are_skipped(self):
+        self.assertEqual(decide_same_size("sw.js", b"abc", b"abc"), "skip")
+        self.assertEqual(decide_same_size("a.wasm", b"\0asm", b"\0asm"), "skip")
+
+    def test_changed_binary_is_uploaded_unmodified(self):
+        self.assertEqual(decide_same_size("a.wasm", b"\0asm1", b"\0asm2"), "upload")
+
+    def test_unreadable_live_copy_is_not_skipped(self):
+        self.assertEqual(decide_same_size("sw.js", b"abc", None), "pad")
+        self.assertEqual(decide_same_size("a.png", b"abc", None), "upload")
+
+    def test_padding_does_not_count_as_a_difference_for_text_only(self):
+        self.assertTrue(same_content("sw.js", b"abc", b"abc\n"))
+        self.assertTrue(same_content("sw.js", pad_for_server(b"abc"), b"abc"))
+        self.assertFalse(same_content("a.wasm", b"abc", b"abc\n"))
+        self.assertFalse(same_content("sw.js", b"abc", b"abd"))
 
 
 class VersionGateTest(unittest.TestCase):

@@ -47,12 +47,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parent / "scripts" / "lib"))
 from coi_headers import FAIL, OK, print_probe, probe_live_coi, worst_status  # noqa: E402
 from deploy_plan import (  # noqa: E402
     check_version_for_deploy,
+    decide_same_size,
     is_content_hashed,
     is_html,
     live_mismatches,
     live_version_problems,
     load_version,
     may_skip_upload,
+    pad_for_server,
 )
 
 # ============================================================
@@ -276,6 +278,56 @@ def build_inventory(build_path: Path) -> dict[str, object]:
 
 
 
+def polite_get(url: str, *, attempts: int = 6, pause: float = 0.25) -> Optional[bytes]:
+    """GET `url` for the live content checks; None when it cannot be read.
+
+    test.1ink.us answers a burst of requests with HTTP 429, so this paces itself (`pause` between
+    calls) and backs off on 429 / 5xx / dropped connections before giving up.
+    """
+    headers = {"User-Agent": "mod-player-deploy-verify", "Cache-Control": "no-cache"}
+    time.sleep(pause)
+    for attempt in range(1, attempts + 1):
+        try:
+            resp = requests.get(url, timeout=60, headers=headers)
+        except Exception:  # noqa: BLE001 - reset / timeout: retry, then report unreadable
+            resp = None
+        if resp is not None:
+            if resp.status_code == 200:
+                return resp.content
+            if resp.status_code not in (429, 500, 502, 503, 504):
+                return None
+        if attempt < attempts:
+            retry_after = resp.headers.get("Retry-After", "") if resp is not None else ""
+            wait = min(float(retry_after), 60.0) if retry_after.replace(".", "", 1).isdigit() else min(2.0 * attempt, 20.0)
+            time.sleep(wait)
+    return None
+
+
+def plan_same_size_files(build_path: Path, skip_sizes: dict, host: str) -> dict[str, str]:
+    """Decide each unhashed file whose size equals the remote copy's: skip / pad / upload.
+
+    The upload service leaves equal-sized files alone (proven live in #561: sw.js v8 -> v9 never
+    arrived), so size equality alone says nothing. The live bytes are fetched and compared; see
+    scripts/lib/deploy_plan.py (decide_same_size).
+    """
+    base = f"https://{host}/{PROJECT_NAME}/"
+    decisions: dict[str, str] = {}
+    candidates = []
+    for file in sorted(build_path.rglob("*")):
+        if not file.is_file():
+            continue
+        rel_s = str(file.relative_to(build_path)).replace("\\", "/")
+        if is_html(rel_s) or is_content_hashed(rel_s):
+            continue
+        if skip_sizes.get(rel_s) == file.stat().st_size:
+            candidates.append((rel_s, file))
+    if candidates:
+        print(f"Comparing {len(candidates)} same-size unhashed file(s) with the live copy...")
+    for rel_s, file in candidates:
+        decisions[rel_s] = decide_same_size(rel_s, file.read_bytes(), polite_get(base + rel_s))
+    return decisions
+
+
 def fetch_remote_sizes(target_folder, target_site="test"):
     """Ask the VPS for {rel_path: bytes} already on the deploy target."""
     base = CONTABO_BASE_URL.rstrip("/")
@@ -299,7 +351,7 @@ def fetch_remote_sizes(target_folder, target_site="test"):
     return {}
 
 
-def build_zip(build_path: Path, skip_sizes=None) -> bytes:
+def build_zip(build_path: Path, skip_sizes=None, decisions=None) -> bytes:
     """Zip the contents of build_path into an in-memory archive."""
     manifest = build_inventory(build_path)
     inventory = manifest["files"]
@@ -341,6 +393,15 @@ def build_zip(build_path: Path, skip_sizes=None) -> bytes:
             if may_skip_upload(rel_s, local_size, (skip_sizes or {}).get(rel_s)):
                 print(f"  = {rel} ({local_size} bytes, content-hashed, unchanged)")
                 continue
+            action = (decisions or {}).get(rel_s, "upload")
+            if action == "skip":
+                print(f"  = {rel} ({local_size} bytes, live copy identical)")
+                continue
+            if action == "pad":
+                # Same size, different content: the server would skip it. One trailing newline.
+                zf.writestr(rel_s, pad_for_server(file.read_bytes()))
+                print(f"  + {rel} (changed, same size as remote: padded +1 byte so it is not skipped)")
+                continue
             zf.write(file, rel_s)
             print(f"  + {rel}")
         zf.writestr(
@@ -372,7 +433,8 @@ def deploy_bundle(build_path: Path, *, clean: bool, target_site: str) -> bool:
     target_site_for_sizes = target_site or globals().get("DEPLOY_TARGET", "test")
     print("Checking remote file sizes...")
     skip_sizes = fetch_remote_sizes(target_folder_for_sizes, target_site_for_sizes)
-    zip_bytes = build_zip(build_path, skip_sizes)
+    decisions = plan_same_size_files(build_path, skip_sizes, live_host_for_target(target_site))
+    zip_bytes = build_zip(build_path, skip_sizes, decisions)
     print(f"Archive size: {len(zip_bytes) / 1024:.1f} KB\n")
 
     with zipfile.ZipFile(io.BytesIO(zip_bytes)) as _zf:
@@ -598,16 +660,10 @@ def verify_live_content(build_path: Path, version: Optional[dict], host: str) ->
     as a failure: an upload nobody can confirm is not a deploy.
     """
     base = f"https://{host}/{PROJECT_NAME}/"
-    headers = {"User-Agent": "mod-player-deploy-verify", "Cache-Control": "no-cache"}
     print(f"\nVerifying live content ({base}) ...")
 
     def fetch(rel: str) -> Optional[bytes]:
-        try:
-            resp = requests.get(base + rel, timeout=60, headers=headers)
-        except Exception as exc:  # noqa: BLE001
-            print(f"  ! {rel}: {exc}")
-            return None
-        return resp.content if resp.status_code == 200 else None
+        return polite_get(base + rel)
 
     ok = True
     if version is not None:

@@ -6,8 +6,11 @@ Why this exists
   remote copy, so a same-size change to `sw.js`, a shader, a worklet, a `.wasm` or `.htaccess`
   never shipped. Only Vite's content-hashed `assets/<name>-<hash>.<ext>` files are safe to skip by
   name + size (a changed file has a new name). Everything else is always uploaded.
-* **The server may skip equal-sized files too** (its extract path is not in this repo), so after an
-  upload the live bytes of every unhashed file are compared with `dist/`, and the live
+* **The server skips equal-sized files too** (its extract path is not in this repo; proven live: an
+  uploaded `sw.js` 'mod-player-v8' -> 'v9' was left at v8). So a same-size unhashed file is compared
+  with its live bytes first: identical = skip, different text file = uploaded with one trailing newline
+  so its size differs, different binary = uploaded as is (and caught by the post-upload byte check).
+  After the upload the live bytes of every unhashed file are compared with `dist/`, and the live
   `version.json` must carry the SHA that was built.
 * **A deployed build must say which commit it is** (`dist/version.json`, written by
   vite-plugins/buildVersion.ts); a dirty tree is refused.
@@ -42,6 +45,40 @@ def is_html(rel: str) -> bool:
 def may_skip_upload(rel: str, local_size: int, remote_size: Optional[int]) -> bool:
     """True only for a content-hashed asset whose remote copy has the same size."""
     return is_content_hashed(rel) and remote_size is not None and remote_size == local_size
+
+
+# Text types that tolerate a trailing newline (JS, JSON, CSS, WGSL, Apache/Netlify config, ...).
+TEXT_SUFFIXES = {".js", ".mjs", ".json", ".css", ".wgsl", ".txt", ".md", ".svg", ".html", ".htm", ".map", ".webmanifest"}
+TEXT_NAMES = {".htaccess", "_headers"}
+
+
+def is_text_file(rel: str) -> bool:
+    name = rel.replace("\\", "/").split("/")[-1].lower()
+    return name in TEXT_NAMES or any(name.endswith(suffix) for suffix in TEXT_SUFFIXES)
+
+
+def same_content(rel: str, local: bytes, live: bytes) -> bool:
+    """Byte-identical, or (text only) identical up to trailing whitespace — the padding decide_same_size adds."""
+    if local == live:
+        return True
+    return is_text_file(rel) and local.rstrip() == live.rstrip()
+
+
+def decide_same_size(rel: str, local: bytes, live: Optional[bytes]) -> str:
+    """What to do with an unhashed file whose size equals the remote copy's.
+
+    "skip"   live bytes are the local bytes: nothing to ship.
+    "pad"    changed text file: ship it with one trailing newline so the server's size check lets it through.
+    "upload" changed (or unreadable) binary: ship it as is; verify_live_content catches a server-side skip.
+    """
+    if live is not None and same_content(rel, local, live):
+        return "skip"
+    return "pad" if is_text_file(rel) else "upload"
+
+
+def pad_for_server(data: bytes) -> bytes:
+    """One extra trailing newline: the padded size differs from the remote copy's (== len(data))."""
+    return data + b"\n"
 
 
 def sha256_bytes(data: bytes) -> str:
@@ -105,7 +142,7 @@ def live_mismatches(
         live = fetch(rel)
         if live is None:
             bad.append(f"{rel} (not readable on the live site)")
-        elif sha256_bytes(live) != sha256_file(build_path / rel):
+        elif not same_content(rel, (build_path / rel).read_bytes(), live):
             bad.append(f"{rel} (live content differs from dist/)")
     return bad
 
