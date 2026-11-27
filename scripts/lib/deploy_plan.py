@@ -57,7 +57,7 @@ def is_text_file(rel: str) -> bool:
 
 
 def same_content(rel: str, local: bytes, live: bytes) -> bool:
-    """Byte-identical, or (text only) identical up to trailing whitespace — the padding decide_same_size adds."""
+    """Byte-identical, or (text only) identical up to trailing whitespace — the padding pad_for_server adds."""
     if local == live:
         return True
     return is_text_file(rel) and local.rstrip() == live.rstrip()
