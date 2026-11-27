@@ -157,4 +157,21 @@ describe('fetchShaders', () => {
     expect(shaders.some((s) => s.id.endsWith('.wgsl'))).toBe(true);
     expect(shaders.every((s) => s.averageRating === null)).toBe(true);
   });
+
+  it('accepts the live response shape: unrated shaders carry rating: null, without a degraded-mode warning', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({
+      shaders: [
+        { id: 'live-a', name: 'Live A', rating: null, original_id: null, params: null, tags: [] },
+        { id: 'live-b', name: 'Live B', rating: 4.5, votes: 3 },
+      ],
+      total: 2, page: 1, per_page: 100, total_pages: 1,
+    })));
+    const shaders = await fetchShaders();
+    expect(warn).not.toHaveBeenCalled();
+    expect(shaders).toEqual([
+      { id: 'live-a', name: 'Live A', averageRating: null, voteCount: null, userRating: null },
+      { id: 'live-b', name: 'Live B', averageRating: 4.5, voteCount: 3, userRating: null },
+    ]);
+  });
 });

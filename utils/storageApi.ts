@@ -27,19 +27,21 @@ const SongSchema = z.object({
   url: z.string().optional(),
 }).passthrough();
 
+// Numeric rating fields are nullish: the live /api/shaders sends `rating: null` for unrated shaders
+// (which z.number().optional() rejected, logging "degraded mode" on every first load, #561).
 const ShaderSchema = z.object({
   id: z.union([z.string(), z.number()]),
   name: z.string().optional(),
   shader_name: z.string().optional(),
-  rating: z.number().optional(),
-  averageRating: z.number().optional(),
-  average_rating: z.number().optional(),
-  score: z.number().optional(),
-  votes: z.number().optional(),
-  voteCount: z.number().optional(),
-  vote_count: z.number().optional(),
-  userRating: z.number().optional(),
-  user_rating: z.number().optional(),
+  rating: z.number().nullish(),
+  averageRating: z.number().nullish(),
+  average_rating: z.number().nullish(),
+  score: z.number().nullish(),
+  votes: z.number().nullish(),
+  voteCount: z.number().nullish(),
+  vote_count: z.number().nullish(),
+  userRating: z.number().nullish(),
+  user_rating: z.number().nullish(),
 }).passthrough();
 
 const SongListSchema = z.union([
