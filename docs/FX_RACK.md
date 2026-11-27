@@ -54,7 +54,8 @@ slot:  in ─┬─ dry(G) ─────────────────�
 | `public/ir/*.{opus,wav}` | Room IRs and PCM fallbacks (fetched on demand) | asset |
 
 `FX_RACK_ENABLED` (`appConfig.ts`) is on in dev builds. Public builds opt in
-with `VITE_FX_RACK=1`, pending a soak on Safari (Opus IRs) and mobile CPU. When
+with `VITE_FX_RACK=1`, pending a soak on Safari (Opus/WAV IR fallback) and
+mobile CPU. When
 it's off, nothing of the rack loads and persisted FX state is ignored.
 
 ## Lifecycle

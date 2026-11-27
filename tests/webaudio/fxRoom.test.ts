@@ -221,7 +221,7 @@ describe('createFetchIrLoader (#453)', () => {
     await expect(loader.load(ctx, 'small')).rejects.toBeInstanceOf(IrUnavailableError);
     status = 200;
     await expect(loader.load(ctx, 'small')).resolves.toBeTruthy();
-    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(fetchImpl).toHaveBeenCalledTimes(3);
     await expect(loader.load(fakeCtx(2), 'medium')).rejects.toThrow(/decoded 2.000 s, expected 0.7 s/);
   });
 
