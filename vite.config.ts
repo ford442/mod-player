@@ -74,6 +74,13 @@ export default defineConfig(({ mode }) => {
       // growth of these two past 900 kB, warns again. Raise it only together with a written reason here.
       chunkSizeWarningLimit: 900,
       rollupOptions: {
+        // zod >= 4.6 puts `@__PURE__` annotations where Rollup cannot interpret them and logs one
+        // INVALID_ANNOTATION per file (regexes.js, util.js). Rollup drops them, which is harmless.
+        // Only that code, only from zod, is silenced: our own and every other warning still print (#561).
+        onwarn(warning, defaultHandler) {
+          if (warning.code === 'INVALID_ANNOTATION' && /[\\/]node_modules[\\/]zod[\\/]/.test(warning.id ?? '')) return
+          defaultHandler(warning)
+        },
         output: {
           // Literal [extname] — typos here (e.g. `.1iss`) corrupt production CSS URLs.
           entryFileNames: 'assets/[name]-[hash].js',
