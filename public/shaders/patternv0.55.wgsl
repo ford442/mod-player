@@ -1,5 +1,5 @@
-// patternv0.51.wgsl
-// Three-Emitter LED Indicator System with Unified Lens Cap + Playhead Arc
+// patternv0.55.wgsl
+// Three-Emitter LED Indicator Caps (Blue / Blue+Note Color) with Unified Lens + Playhead Arc
 // Top: Blue Note-On | Middle: Steady Note Color | Bottom: Amber Control
 // Based on v0.50 (circular layout with padTopChannel=true)
 // Note: Requires padTopChannel=true in PatternDisplay to shift music channels 1-32.
@@ -583,20 +583,11 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
 
     // --- THREE-EMITTER SYSTEM with Amber-vs-Blue differentiation ---
 
-    // EMITTER 1 (TOP): Semantic indicator — Blue for note-on, Amber for expression-only
+    // EMITTER 1 (TOP): Semantic indicator caps — Blue (on) or Blue + Note Color
     let blueColor  = vec3<f32>(0.05, 0.45, 1.0);  // royal blue #0080FF
     let amberColor = vec3<f32>(1.0, 0.55, 0.0);   // warm amber #FFA500
-    var topColor = vec3<f32>(0.0);
-    var topIntensity = calculateTopIntensity(isNoteOn, isExprOnly, isSustain, isMuted, ch.trigger, bloom, beat);
-    if (isNoteOn) {
-      topColor = blueColor;
-    } else if (isExprOnly) {
-      topColor = amberColor;
-    } else if (isSustain) {
-      topColor = blueColor;
-    }
 
-    // EMITTER 2 (MIDDLE): Note color (pitch-class) or dark
+    // Compute note color early so the indicator cap can glow blue mixed with note color
     var noteColor = vec3<f32>(0.051, 0.051, 0.051); // #0D0D0D near-black default
     var midIntensity = 0.02; // Base dim glow for dead/empty cells
 
@@ -625,6 +616,17 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
       noteColor = vec3<f32>(0.051, 0.051, 0.051);
       midIntensity = 0.02;
     }
+
+    var topColor = vec3<f32>(0.0);
+    var topIntensity = calculateTopIntensity(isNoteOn, isExprOnly, isSustain, isMuted, ch.trigger, bloom, beat);
+    if (isNoteOn) {
+      topColor = mix(blueColor, noteColor, 0.45); // blue + note color when on
+    } else if (isExprOnly) {
+      topColor = amberColor;
+    } else if (isSustain) {
+      topColor = mix(blueColor, noteColor, 0.25); // softer blue + note on sustain
+    }
+
     let midColor = noteColor;
 
     // EMITTER 3 (BOTTOM): Control indicator — suppressed for expression-only (amber moved to top)

@@ -252,7 +252,6 @@ fn pitchClassFromPacked(packed: u32) -> f32 {
   return f32(semitone) / 12.0;
 }
 
-const NOTE_MAX: u32 = 119u;
 
 // Octave brightness multiplier: higher octaves glow brighter (0.65 at C-0, 1.0 at B-9).
 fn effectColorFromCode(code: u32, fallback: vec3<f32>) -> vec3<f32> {
