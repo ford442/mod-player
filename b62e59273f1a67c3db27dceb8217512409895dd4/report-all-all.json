@@ -1,0 +1,95 @@
+{
+  "base": "http://127.0.0.1:4173/xm-player/",
+  "browser": "158.0.8127.36",
+  "runs": [
+    {
+      "scenario": "desktop-1440x900",
+      "url": "http://127.0.0.1:4173/xm-player/",
+      "console": [
+        "[warning] A valid external Instance reference no longer exists.",
+        "[error] [WebGPU probe] HARD FAIL (Chrome) stage=canvas: WebGPU canvas presentation failed (swapchain does not composite) ",
+        "[error] [Renderer] WebGPU device init failed (Chrome): WebGPU canvas presentation failed (swapchain does not composite) — viz hard-fail (WebGL2 fallback is opt-in: ?webgl2=1 or the failure-card button)",
+        "[error] [WebGPU probe] HARD FAIL (Chrome) stage=device: WebGPU canvas presentation failed (swapchain does not composite) "
+      ],
+      "pageErrors": [],
+      "failed": [],
+      "http": [],
+      "redirects": [],
+      "retries": {
+        "total": 0,
+        "byStatus": {},
+        "maxWaitMs": 0
+      },
+      "crossOriginIsolated": true,
+      "gpu": "google / swiftshader /",
+      "title": "4-mat's.madness · MOD Player",
+      "valid": true,
+      "buildMeta": "b62e59273f1a67c3db27dceb8217512409895dd4",
+      "screenshot": "desktop-1440x900-default.png"
+    },
+    {
+      "scenario": "desktop-1440x900",
+      "url": "http://127.0.0.1:4173/xm-player/?renderer=html",
+      "console": [],
+      "pageErrors": [],
+      "failed": [],
+      "http": [],
+      "redirects": [],
+      "retries": {
+        "total": 0,
+        "byStatus": {},
+        "maxWaitMs": 0
+      },
+      "crossOriginIsolated": true,
+      "gpu": "google / swiftshader /",
+      "title": "4-mat's.madness · MOD Player",
+      "valid": true,
+      "buildMeta": "b62e59273f1a67c3db27dceb8217512409895dd4",
+      "screenshot": "desktop-1440x900-html.png"
+    },
+    {
+      "scenario": "mobile-390x844",
+      "url": "http://127.0.0.1:4173/xm-player/",
+      "console": [
+        "[error] [WebGPU probe] HARD FAIL (Chrome) stage=canvas: WebGPU canvas presentation failed (swapchain does not composite) ",
+        "[error] [Renderer] WebGPU device init failed (Chrome): WebGPU canvas presentation failed (swapchain does not composite) — viz hard-fail (WebGL2 fallback is opt-in: ?webgl2=1 or the failure-card button)",
+        "[error] [WebGPU probe] HARD FAIL (Chrome) stage=device: WebGPU canvas presentation failed (swapchain does not composite) "
+      ],
+      "pageErrors": [],
+      "failed": [],
+      "http": [],
+      "redirects": [],
+      "retries": {
+        "total": 0,
+        "byStatus": {},
+        "maxWaitMs": 0
+      },
+      "crossOriginIsolated": true,
+      "gpu": "google / swiftshader /",
+      "title": "4-mat's.madness · MOD Player",
+      "valid": true,
+      "buildMeta": "b62e59273f1a67c3db27dceb8217512409895dd4",
+      "screenshot": "mobile-390x844-default.png"
+    },
+    {
+      "scenario": "mobile-390x844",
+      "url": "http://127.0.0.1:4173/xm-player/?renderer=html",
+      "console": [],
+      "pageErrors": [],
+      "failed": [],
+      "http": [],
+      "redirects": [],
+      "retries": {
+        "total": 0,
+        "byStatus": {},
+        "maxWaitMs": 0
+      },
+      "crossOriginIsolated": true,
+      "gpu": "google / swiftshader /",
+      "title": "4-mat's.madness · MOD Player",
+      "valid": true,
+      "buildMeta": "b62e59273f1a67c3db27dceb8217512409895dd4",
+      "screenshot": "mobile-390x844-html.png"
+    }
+  ]
+}
