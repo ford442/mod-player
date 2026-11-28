@@ -52,8 +52,7 @@ describe('one audited WASM flag set (#491, #515)', () => {
   it('the playback link whole-archives libwasm_workers (the main-thread TLS constructor, #515)', () => {
     const src = code(BUILD);
     expect(src).toContain('LINK_ENV=(EMCC_FORCE_STDLIBS=libwasm_workers)');
-    // LINK_ENV is still set on the em++ link, now between MALLOC_ARENA_MAX=1 and the determinism prefix.
-    expect(src).toMatch(/env MALLOC_ARENA_MAX=1 "\$\{LINK_ENV\[@\]\}" "\$\{DET_PREFIX\[@\]\}" em\+\+/);
+    expect(src).toMatch(/env "\$\{LINK_ENV\[@\]\}" em\+\+/);
   });
 
   it('a --debug glue can boot in an AudioWorkletGlobalScope (no window, no importScripts)', () => {
