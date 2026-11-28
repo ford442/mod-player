@@ -226,7 +226,7 @@ build_static_lib() {
 
 # The inspection shim (shared pair only). Copied in as libopenmpt/xasm_inspect.cpp — next to
 # libopenmpt_impl.cpp, whose headers it reads — and built by the tree's own `%.o: %.cpp` rule with
-# the same CXXFLAGS as the library, so its object is ThinLTO bitcode at the audited flags. Relative
+# the same CXXFLAGS as the library, so its object is a plain wasm object (no LTO, see WASM_LTO_FLAG) at the audited flags. Relative
 # path: the link below runs inside the tree (path independence, see "Link").
 INSPECT_SRC="$PROJECT_ROOT/wasm/xasm_inspect.cpp"
 INSPECT_OBJ_REL="libopenmpt/xasm_inspect.o"
@@ -352,7 +352,7 @@ rm -f "$GLUE" "$WASM"
 # by the glue; the processor already re-derives its HEAPF32 views when the buffer moves).
 #
 # Path independence: the link runs inside the libopenmpt tree and names the archive by a relative
-# path (-Lbin). wasm-ld identifies each ThinLTO input by "<archive path>(<member> at <offset>)", and
+# path (-Lbin). wasm-ld identifies each LTO input by "<archive path>(<member> at <offset>)", and
 # with an absolute -L that string carried the checkout directory into the LTO backend: the same
 # sources built in /home/runner/work/… (CI) and elsewhere gave playback wasms that differ in a few
 # bytes of code layout (openmpt::version::get_string), so the drift check failed on a correct
