@@ -11,6 +11,12 @@ export interface IrEntry {
   file: string;
   version: string;
   bytes: number;
+  fallback: {
+    format: 'wav';
+    file: string;
+    version: string;
+    bytes: number;
+  };
   durationSeconds: number;
   channels: number;
   sampleRate: number;
@@ -18,7 +24,8 @@ export interface IrEntry {
 
 export const IR_MANIFEST = manifest as Record<RoomIrId, IrEntry>;
 
-export function irUrl(id: RoomIrId): string {
+export function irUrl(id: RoomIrId, format: 'opus' | 'wav' = 'opus'): string {
   const entry = IR_MANIFEST[id];
-  return `${detectRuntimeBase()}ir/${entry.file}?v=${entry.version}`;
+  const asset = format === 'opus' ? entry : entry.fallback;
+  return `${detectRuntimeBase()}ir/${asset.file}?v=${asset.version}`;
 }

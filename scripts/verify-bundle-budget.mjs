@@ -164,7 +164,9 @@ if (midiChunks.length === 0) {
 {
   const irDir = join(BUILD_DIR, 'ir');
   const irs = existsSync(irDir) ? readdirSync(irDir).filter((f) => f.endsWith('.opus')) : [];
+  const fallbacks = existsSync(irDir) ? readdirSync(irDir).filter((f) => f.endsWith('.wav')) : [];
   if (irs.length === 0) errors.push('dist/ir/*.opus missing (FX room IRs not shipped)');
+  if (fallbacks.length === 0) errors.push('dist/ir/*.wav missing (FX room fallback IRs not shipped)');
 }
 
 // What the browser fetches before any user action: the entry, every <link rel="modulepreload">,

@@ -191,6 +191,28 @@ describe('createFetchIrLoader (#453)', () => {
     expect(b.decodeAudioData).toHaveBeenCalledTimes(1);
   });
 
+  it('falls back to WAV when Opus decoding fails', async () => {
+    const fetchImpl = vi.fn(async (url: RequestInfo | URL) =>
+      new Response(new Uint8Array([String(url).endsWith('.wav') ? 2 : 1, 2, 3, 4])),
+    );
+    const loader = createFetchIrLoader({
+      fetchImpl,
+      urlFor: (_id, format) => `/ir/small.${format === 'opus' ? 'opus' : 'wav'}`,
+    });
+    const ctx = {
+      decodeAudioData: vi.fn(async (data: ArrayBuffer) => {
+        if (new Uint8Array(data)[0] === 1) throw new Error('unsupported Ogg Opus');
+        return { numberOfChannels: 2, duration: 0.35 } as AudioBuffer;
+      }),
+    } as unknown as BaseAudioContext;
+
+    await expect(loader.load(ctx, 'small')).resolves.toBeTruthy();
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(fetchImpl).toHaveBeenNthCalledWith(1, '/ir/small.opus');
+    expect(fetchImpl).toHaveBeenNthCalledWith(2, '/ir/small.wav');
+    expect(ctx.decodeAudioData).toHaveBeenCalledTimes(2);
+  });
+
   it('never caches a failure, and rejects an IR whose length is wrong', async () => {
     let status = 500;
     const fetchImpl = vi.fn(async () => new Response(new Uint8Array([1, 2, 3, 4]), { status }));
@@ -199,7 +221,7 @@ describe('createFetchIrLoader (#453)', () => {
     await expect(loader.load(ctx, 'small')).rejects.toBeInstanceOf(IrUnavailableError);
     status = 200;
     await expect(loader.load(ctx, 'small')).resolves.toBeTruthy();
-    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(fetchImpl).toHaveBeenCalledTimes(3);
     await expect(loader.load(fakeCtx(2), 'medium')).rejects.toThrow(/decoded 2.000 s, expected 0.7 s/);
   });
 

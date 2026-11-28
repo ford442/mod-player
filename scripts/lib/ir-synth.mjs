@@ -6,9 +6,9 @@
  * then a decorrelated noise tail decaying faster in the highs than the lows,
  * a 20 ms end fade, normalized to unit energy per channel.
  *
- * Used by scripts/generate-irs.mjs (→ public/ir/*.opus) and by the vitest room
- * tests, which synthesize the same IRs at any sample rate (node-web-audio-api
- * cannot decode Opus).
+ * Used by scripts/generate-irs.mjs (→ public/ir/*.opus + *.wav) and by the
+ * vitest room tests, which synthesize the same IRs at any sample rate
+ * (node-web-audio-api cannot decode Opus).
  */
 
 /** Bump when the algorithm changes (part of every IR's sourceHash). */
