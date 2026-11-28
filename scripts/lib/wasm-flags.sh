@@ -76,6 +76,11 @@ LIBOPENMPT_C_EXTRA_FLAGS=(-std=c17 -fvisibility=hidden -fno-strict-aliasing)
 # (stable), and the link only has to place the objects. It is also the smallest result here: playback wasm
 # 1,345,593 B vs 1,377,392 (ThinLTO) and 1,351,645 (full LTO). emscripten's own system libraries stay
 # ThinLTO bitcode and are generated at link time; none of them has shown the problem.
+# Cost, measured with scripts/bench-js-libopenmpt.mjs against the previous ThinLTO build (node, 10 s,
+# sinc-8, 3 alternating runs each): PCM bit-identical on every workload; 32-channel XM the same within
+# noise; 64-channel IT mean 0.045 -> ~0.058 ms per 128-frame quantum (+28 %, p50 +9 %), i.e. ~1.7 % ->
+# ~2.2 % of the 2.67 ms budget. Getting it back without bringing drift back means choosing which units to
+# LTO and re-running the determinism checks (cold rebuild at two paths) for that exact set.
 # shellcheck disable=SC2034
 WASM_LTO_FLAG="-fno-lto"
 
