@@ -60,12 +60,21 @@ LIBOPENMPT_CXX_EXTRA_FLAGS=(-std=c++17 -fvisibility=hidden)
 # shellcheck disable=SC2034
 LIBOPENMPT_C_EXTRA_FLAGS=(-std=c17 -fvisibility=hidden -fno-strict-aliasing)
 
-# LTO mode of libopenmpt's objects and the link: FULL LTO, not ThinLTO (#561). With one partition the
-# whole program is code-generated synchronously on wasm-ld's main thread, so the ASLR/CPU pinning
-# below makes the result independent of thread timing; ThinLTO's codegen runs on a worker thread and
-# still split 1:5 under load even with everything pinned. Full LTO is also ~1.9 % smaller.
+# LTO mode of libopenmpt's objects and the link (ThinLTO, as measured in the -Os A/B above).
 # shellcheck disable=SC2034
-WASM_LTO_FLAG="-flto"
+WASM_LTO_FLAG="-flto=thin"
+
+# The one translation unit that is compiled WITHOUT LTO (#561): libopenmpt/libopenmpt_cxx.cpp, which
+# defines openmpt::version::get_string. LTO inlines libopenmpt's build-info / source-info code and the C
+# API's try/catch wrappers into it, which makes a very large, exception-heavy function, and LLVM's
+# WebAssembly backend (CFGStackify's try/delegate nesting) lays that one function out differently
+# depending on heap addresses: two layouts from byte-identical optimised bitcode, selected by ASLR, thread
+# timing and even the length of the checkout path (the earlier "path dependence" that a relative -L only
+# masked). Compiled to a wasm object at compile time, the function is small and the same object came out
+# 8/8 with ASLR on. Everything else is bit-stable under LTO. Nothing is lost at run time: the function
+# only formats version strings.
+# shellcheck disable=SC2034
+WASM_NOLTO_UNITS=(libopenmpt/libopenmpt_cxx)
 
 # Deterministic link (#561). LLVM's WebAssembly backend, run by wasm-ld at link time, is not deterministic
 # for openmpt::version::get_string (a very large, exception-heavy function once LTO has inlined into it):

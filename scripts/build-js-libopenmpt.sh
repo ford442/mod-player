@@ -197,7 +197,14 @@ JS_TREE="$VENDOR_ROOT/${LIBOPENMPT_NAME}-jsengine-${VARIANT}-emsdk${EMCC_VERSION
 # control EH/SIMD/LTO exactly.
 LIBOPENMPT_MAKE_FLAGS=(CONFIG=emscripten STATIC_LIB=1 SHARED_LIB=0 DYNLINK=0 EXAMPLES=0 OPENMPT123=0)
 
-FLAG_STAMP="$(printf '%s\n' "$EMCC_VERSION_LINE" "${COMPILE_FLAGS[@]}" "${CFLAGS_C[@]}" | sha256sum | cut -c1-16)"
+# The same flags minus LTO, for the units in WASM_NOLTO_UNITS (see wasm-flags.sh for why).
+NOLTO_COMPILE_FLAGS=()
+for f in "${COMPILE_FLAGS[@]}"; do
+    [[ "$f" == "$WASM_LTO_FLAG" ]] || NOLTO_COMPILE_FLAGS+=("$f")
+done
+NOLTO_COMPILE_FLAGS+=(-fno-lto)
+
+FLAG_STAMP="$(printf '%s\n' "$EMCC_VERSION_LINE" "${COMPILE_FLAGS[@]}" "${CFLAGS_C[@]}" "nolto:${WASM_NOLTO_UNITS[*]}" | sha256sum | cut -c1-16)"
 
 prepare_tree() {
     if [[ -f "$JS_TREE/Makefile" ]]; then return 0; fi
@@ -217,6 +224,11 @@ build_static_lib() {
     pushd "$JS_TREE" >/dev/null
     make "${LIBOPENMPT_MAKE_FLAGS[@]}" clean >/dev/null 2>&1 || true
     mkdir -p bin
+    # Non-LTO units first: the main make then finds their objects up to date and keeps them.
+    for unit in "${WASM_NOLTO_UNITS[@]}"; do
+        make "${LIBOPENMPT_MAKE_FLAGS[@]}" \
+            CXXFLAGS="${NOLTO_COMPILE_FLAGS[*]}" CFLAGS="${CFLAGS_C[*]}" "${unit}.o"
+    done
     make "${LIBOPENMPT_MAKE_FLAGS[@]}" \
         CXXFLAGS="${COMPILE_FLAGS[*]}" CFLAGS="${CFLAGS_C[*]}" \
         -j"$(nproc 2>/dev/null || echo 2)" bin/libopenmpt.a
@@ -364,8 +376,10 @@ rm -f "$GLUE" "$WASM"
 # The link is ~20 s, so the single CPU costs little; the compiles above stay parallel.
 echo "🔗 Linking ${OUT_BASENAME}.{js,wasm} [${VARIANT}]…"
 determinism_prefix
+ARENA_MAX=1
+if [[ "${XASM_EXP_UNPINNED:-0}" == "1" ]]; then DET_PREFIX=(); WASM_DETERMINISM_LINK_FLAGS=(); ARENA_MAX=64; fi  # EXPERIMENT-ONLY
 pushd "$JS_TREE" >/dev/null
-env MALLOC_ARENA_MAX=1 "${LINK_ENV[@]}" "${DET_PREFIX[@]}" em++ \
+env MALLOC_ARENA_MAX="$ARENA_MAX" "${LINK_ENV[@]}" "${DET_PREFIX[@]}" em++ \
     "${WASM_DETERMINISM_LINK_FLAGS[@]}" \
     "${COMPILE_FLAGS[@]}" \
     "${EH_LINK_FLAGS[@]}" \
