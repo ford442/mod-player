@@ -140,7 +140,7 @@ case "$OUT_BASENAME" in
 esac
 
 # ── Flags ────────────────────────────────────────────────────────────
-# BASE_FLAGS apply to libopenmpt's C++ and C AND to the link (ThinLTO codegen happens at link).
+# BASE_FLAGS apply to libopenmpt's C++ and C AND to the link (LTO codegen happens at link).
 # Not here on purpose: -ffunction-sections/-fdata-sections/-Wl,--gc-sections (wasm-ld already
 # collects per function and segment: the output was byte-identical without them), -msign-ext (on
 # by default since LLVM 16) and -sSAFE_HEAP=0 (the default).
@@ -149,7 +149,7 @@ if [[ "$DEBUG_MODE" -eq 1 ]]; then
     BASE_FLAGS+=(-O0 -g -DDEBUG)
     LINK_MODE_FLAGS=(-sASSERTIONS=2)
 else
-    BASE_FLAGS+=("$OPT_LEVEL" -DNDEBUG -flto=thin)
+    BASE_FLAGS+=("$OPT_LEVEL" -DNDEBUG "$WASM_LTO_FLAG")
     # The function-index → name map for production wasm stack traces (moved to vendor/symbol-maps/
     # below; CI uploads it). Emscripten keeps names through wasm-opt's passes for it, which shifts the
     # wasm by a few bytes (+64 B measured): the map always matches the binary that ships.

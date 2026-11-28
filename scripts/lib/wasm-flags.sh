@@ -60,6 +60,13 @@ LIBOPENMPT_CXX_EXTRA_FLAGS=(-std=c++17 -fvisibility=hidden)
 # shellcheck disable=SC2034
 LIBOPENMPT_C_EXTRA_FLAGS=(-std=c17 -fvisibility=hidden -fno-strict-aliasing)
 
+# LTO mode of libopenmpt's objects and the link: FULL LTO, not ThinLTO (#561). With one partition the
+# whole program is code-generated synchronously on wasm-ld's main thread, so the ASLR/CPU pinning
+# below makes the result independent of thread timing; ThinLTO's codegen runs on a worker thread and
+# still split 1:5 under load even with everything pinned. Full LTO is also ~1.9 % smaller.
+# shellcheck disable=SC2034
+WASM_LTO_FLAG="-flto"
+
 # Deterministic link (#561). LLVM's WebAssembly backend, run by wasm-ld at link time, is not deterministic
 # for openmpt::version::get_string (a very large, exception-heavy function once LTO has inlined into it):
 # on byte-identical optimised bitcode it emits one of two valid layouts of the try/delegate nesting,
