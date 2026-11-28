@@ -62,7 +62,7 @@ LIBOPENMPT_C_EXTRA_FLAGS=(-std=c17 -fvisibility=hidden -fno-strict-aliasing)
 
 # LTO mode of libopenmpt's objects and the link (ThinLTO, as measured in the -Os A/B above).
 # shellcheck disable=SC2034
-WASM_LTO_FLAG="-flto=thin"
+WASM_LTO_FLAG="-fno-lto"
 
 # The one translation unit that is compiled WITHOUT LTO (#561): libopenmpt/libopenmpt_cxx.cpp, which
 # defines openmpt::version::get_string. LTO inlines libopenmpt's build-info / source-info code and the C
