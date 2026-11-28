@@ -28,6 +28,9 @@ HASHED_ASSET_RE = re.compile(r"^assets/.+-[A-Za-z0-9_-]{8}\.[A-Za-z0-9.]+$")
 
 VERSION_FILE = "version.json"
 PROFILE_BY_SITE = {"test": "test", "go": "public"}
+# Build profiles a site accepts. go.1ink.us is the public site and only ever gets the public build;
+# test.1ink.us is staging and takes either (so the public profile can be proven there first).
+PROFILES_BY_SITE = {"test": ("test", "public"), "go": ("public",)}
 
 # Files in dist/ that are uploaded but cannot be (or need not be) fetched back over HTTP.
 NOT_VERIFIABLE_LIVE = {".htaccess", ".deploy-inventory.json"}
@@ -91,7 +94,18 @@ def load_version(build_path: Path) -> Optional[dict]:
     return data if isinstance(data, dict) else None
 
 
-def check_version_for_deploy(version: Optional[dict], site: str, *, allow_dirty: bool = False) -> list[str]:
+def resolve_profile(site: str, profile: Optional[str] = None) -> str:
+    """The build profile to deploy to `site`: `profile` if given (and accepted there), else the site's default."""
+    if profile is None:
+        return PROFILE_BY_SITE[site]
+    if profile not in PROFILES_BY_SITE.get(site, ()):
+        raise ValueError(f"site '{site}' does not accept the '{profile}' profile (accepts: {', '.join(PROFILES_BY_SITE[site])})")
+    return profile
+
+
+def check_version_for_deploy(
+    version: Optional[dict], site: str, *, allow_dirty: bool = False, profile: Optional[str] = None
+) -> list[str]:
     """Reasons this dist/ must not be deployed to `site` (empty = fine)."""
     if version is None:
         return [f"dist/{VERSION_FILE} is missing or unreadable — rebuild with `npm run build:xm-player` (or build:go)"]
@@ -104,10 +118,14 @@ def check_version_for_deploy(version: Optional[dict], site: str, *, allow_dirty:
             "the build was made from a dirty working tree (uncommitted changes); commit them, rebuild, "
             "or pass --allow-dirty for a throwaway deploy"
         )
-    expected = PROFILE_BY_SITE.get(site)
+    try:
+        expected = resolve_profile(site, profile)
+    except ValueError as exc:
+        return errors + [str(exc)]
     if version.get("profile") != expected:
         errors.append(
-            f"dist/ is a '{version.get('profile')}' build but --site {site} needs '{expected}'; rebuild for this site"
+            f"dist/ is a '{version.get('profile')}' build but --site {site} --profile {expected} needs '{expected}'; "
+            "rebuild for this site"
         )
     return errors
 

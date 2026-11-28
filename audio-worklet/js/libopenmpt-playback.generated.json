@@ -5,17 +5,17 @@
   "variant": "eh-wasm-playback",
   "exceptions": "wasm",
   "simd": false,
-  "version": "b08513c59f",
+  "version": "f99d40c266",
   "sharedMemory": true,
   "glue": {
     "file": "libopenmpt-playback.js",
-    "bytes": 51826,
-    "integrity": "sha384-SsithuMvyE8vmBkReLTrcdWEhvrSoVaug2dN2QRNwyWaGW2tepztNs+iB2lOtSAF"
+    "bytes": 51828,
+    "integrity": "sha384-5fm2eahvGL9OZmUdeceIyQMcYeFai/wjto2fHowArrpDIHHXvPvU2FbHKDwgrt5Q"
   },
   "wasm": {
     "file": "libopenmpt-playback.wasm",
-    "bytes": 1377794,
-    "integrity": "sha384-AzbDa3vaQkPJmy42pzM3psD5izHitJuA8L0laZ+pwoc5HjhClqhAFkOg7e4XzVAh"
+    "bytes": 1345593,
+    "integrity": "sha384-dK+GXj56BDZFZvSSEtCMu0Pkb63Yf4BL1ukfxTf5kn895XTi+ur7lPOqnW/Ft7m4"
   },
   "cExportCount": 113
 }

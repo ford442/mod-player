@@ -140,7 +140,7 @@ case "$OUT_BASENAME" in
 esac
 
 # ── Flags ────────────────────────────────────────────────────────────
-# BASE_FLAGS apply to libopenmpt's C++ and C AND to the link (ThinLTO codegen happens at link).
+# BASE_FLAGS apply to libopenmpt's C++ and C AND to the link.
 # Not here on purpose: -ffunction-sections/-fdata-sections/-Wl,--gc-sections (wasm-ld already
 # collects per function and segment: the output was byte-identical without them), -msign-ext (on
 # by default since LLVM 16) and -sSAFE_HEAP=0 (the default).
@@ -149,7 +149,7 @@ if [[ "$DEBUG_MODE" -eq 1 ]]; then
     BASE_FLAGS+=(-O0 -g -DDEBUG)
     LINK_MODE_FLAGS=(-sASSERTIONS=2)
 else
-    BASE_FLAGS+=("$OPT_LEVEL" -DNDEBUG -flto=thin)
+    BASE_FLAGS+=("$OPT_LEVEL" -DNDEBUG "$WASM_LTO_FLAG")
     # The function-index → name map for production wasm stack traces (moved to vendor/symbol-maps/
     # below; CI uploads it). Emscripten keeps names through wasm-opt's passes for it, which shifts the
     # wasm by a few bytes (+64 B measured): the map always matches the binary that ships.
@@ -226,7 +226,7 @@ build_static_lib() {
 
 # The inspection shim (shared pair only). Copied in as libopenmpt/xasm_inspect.cpp — next to
 # libopenmpt_impl.cpp, whose headers it reads — and built by the tree's own `%.o: %.cpp` rule with
-# the same CXXFLAGS as the library, so its object is ThinLTO bitcode at the audited flags. Relative
+# the same CXXFLAGS as the library, so its object is a plain wasm object (no LTO, see WASM_LTO_FLAG) at the audited flags. Relative
 # path: the link below runs inside the tree (path independence, see "Link").
 INSPECT_SRC="$PROJECT_ROOT/wasm/xasm_inspect.cpp"
 INSPECT_OBJ_REL="libopenmpt/xasm_inspect.o"
@@ -352,11 +352,14 @@ rm -f "$GLUE" "$WASM"
 # by the glue; the processor already re-derives its HEAPF32 views when the buffer moves).
 #
 # Path independence: the link runs inside the libopenmpt tree and names the archive by a relative
-# path (-Lbin). wasm-ld identifies each ThinLTO input by "<archive path>(<member> at <offset>)", and
+# path (-Lbin). wasm-ld identifies each LTO input by "<archive path>(<member> at <offset>)", and
 # with an absolute -L that string carried the checkout directory into the LTO backend: the same
 # sources built in /home/runner/work/… (CI) and elsewhere gave playback wasms that differ in a few
 # bytes of code layout (openmpt::version::get_string), so the drift check failed on a correct
 # commit. tests/build/wasmBuildPathIndependence.test.ts guards this line.
+# That was only part of the cause: LTO's backend is not deterministic (see WASM_LTO_FLAG in
+# scripts/lib/wasm-flags.sh), so libopenmpt is built without LTO and the output no longer depends on
+# the path, the machine's load or its thread timing.
 echo "🔗 Linking ${OUT_BASENAME}.{js,wasm} [${VARIANT}]…"
 pushd "$JS_TREE" >/dev/null
 env "${LINK_ENV[@]}" em++ \

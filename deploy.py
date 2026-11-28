@@ -8,6 +8,7 @@ No SFTP passwords are stored in this repo.
 Usage:
   python deploy.py                 # build test.1ink.us profile + validate + upload
   python deploy.py --site go       # build go.1ink.us public-lock profile + validate + upload
+  python deploy.py --profile public  # build the PUBLIC profile and put it on staging (test.1ink.us) to prove it first
   python deploy.py --no-build      # upload existing dist/ only (must already match --site profile)
   python deploy.py --dry-run       # validate locally + probe live COOP/COEP; never upload
   python deploy.py --allow-dirty   # deploy a build made from an uncommitted tree (refused by default)
@@ -54,6 +55,7 @@ from deploy_plan import (  # noqa: E402
     live_version_problems,
     load_version,
     may_skip_upload,
+    resolve_profile,
     pad_for_server,
 )
 
@@ -78,6 +80,16 @@ BUILD_SCRIPT_BY_SITE: dict[str, str] = {
 PROFILE_BY_SITE: dict[str, str] = {
     "test": "dev (full shader catalog)",
     "go": "public (v0.30b lock, no picker)",
+}
+# --profile: which build goes to the site. Default is the site's own (test→test, go→public); staging
+# (test.1ink.us) also accepts "public" so the public build can be proven there before go.1ink.us.
+BUILD_SCRIPT_BY_PROFILE: dict[str, str] = {
+    "test": "build:xm-player",
+    "public": "build:go",
+}
+PROFILE_LABEL: dict[str, str] = {
+    "test": PROFILE_BY_SITE["test"],
+    "public": PROFILE_BY_SITE["go"],
 }
 
 # Set via environment: export DEPLOY_TOKEN="your_long_token_from_vps_env"
@@ -472,10 +484,10 @@ def deploy_bundle(build_path: Path, *, clean: bool, target_site: str) -> bool:
         return False
 
 
-def run_build(target_site: str) -> None:
-    build_script = BUILD_SCRIPT_BY_SITE.get(target_site)
+def run_build(build_profile: str) -> None:
+    build_script = BUILD_SCRIPT_BY_PROFILE.get(build_profile)
     if not build_script:
-        print(f"ERROR: no build script configured for target site '{target_site}'")
+        print(f"ERROR: no build script configured for profile '{build_profile}'")
         sys.exit(1)
     print(f"Running npm run {build_script} ...")
     result = subprocess.run(
@@ -509,7 +521,7 @@ def main() -> None:
     parser.add_argument(
         "--no-build",
         action="store_true",
-        help="Skip the site-matching build/verify step (existing dist/ must already match the selected --site profile)",
+        help="Skip the site-matching build/verify step (existing dist/ must already match the selected --site/--profile; version.json is checked)",
     )
     parser.add_argument(
         "--dry-run",
@@ -522,6 +534,14 @@ def main() -> None:
         default=None,
         help="Deploy target site: test (test.1ink.us) or go (go.1ink.us). "
         "Default from DEPLOY_TARGET env or 'test'.",
+    )
+    parser.add_argument(
+        "--profile",
+        choices=("test", "public"),
+        default=None,
+        help="Build profile to deploy: test (full catalog) or public (VITE_PUBLIC_MODE=1). Default: the site's own "
+        "(test -> test, go -> public). test.1ink.us accepts both, so `--site test --profile public` proves the "
+        "public build on staging; go.1ink.us only accepts public.",
     )
     parser.add_argument(
         "--allow-dirty",
@@ -547,14 +567,19 @@ def main() -> None:
         sys.exit(1)
     host = live_host_for_target(target_site)
 
-    profile = PROFILE_BY_SITE[target_site]
+    try:
+        build_profile = resolve_profile(target_site, args.profile)
+    except ValueError as exc:
+        print(f"ERROR: {exc}")
+        sys.exit(1)
+    profile = PROFILE_LABEL[build_profile]
     print(f"\n=== Deploying '{PROJECT_NAME}' via Contabo -> {host}/xm-player ===")
     print(f"Profile: {profile}\n")
     if args.dry_run:
         print("DRY RUN: local validation only — will not upload.\n")
 
     if not args.no_build:
-        run_build(target_site)
+        run_build(build_profile)
 
     build_path = Path(BUILD_DIR)
     if not build_path.exists() or not build_path.is_dir():
@@ -563,7 +588,7 @@ def main() -> None:
         sys.exit(1)
 
     version = load_version(build_path)
-    version_errors = check_version_for_deploy(version, target_site, allow_dirty=args.allow_dirty)
+    version_errors = check_version_for_deploy(version, target_site, allow_dirty=args.allow_dirty, profile=build_profile)
     if version_errors:
         label = "WARNING (dry run)" if args.dry_run else "ERROR"
         for err in version_errors:

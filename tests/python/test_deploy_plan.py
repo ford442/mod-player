@@ -15,6 +15,7 @@ from deploy_plan import (  # noqa: E402
     live_version_problems,
     may_skip_upload,
     pad_for_server,
+    resolve_profile,
     same_content,
 )
 
@@ -89,6 +90,22 @@ class VersionGateTest(unittest.TestCase):
     def test_wrong_profile_for_site_refuses(self):
         self.assertTrue(check_version_for_deploy(dict(self.good), "go"))
         self.assertTrue(check_version_for_deploy({**self.good, "profile": "public"}, "test"))
+
+    def test_public_profile_may_go_to_staging_when_asked(self):
+        public = {**self.good, "profile": "public"}
+        self.assertEqual(check_version_for_deploy(public, "test", profile="public"), [])
+        # ...but a test build is then refused: the declared profile must match what was built.
+        self.assertTrue(check_version_for_deploy(dict(self.good), "test", profile="public"))
+
+    def test_go_only_ever_accepts_the_public_profile(self):
+        self.assertEqual(resolve_profile("go"), "public")
+        with self.assertRaises(ValueError):
+            resolve_profile("go", "test")
+        self.assertTrue(check_version_for_deploy(dict(self.good), "go", profile="test"))
+
+    def test_default_profile_is_the_sites_own(self):
+        self.assertEqual(resolve_profile("test"), "test")
+        self.assertEqual(resolve_profile("test", "public"), "public")
 
 
 class LiveVerifyTest(unittest.TestCase):

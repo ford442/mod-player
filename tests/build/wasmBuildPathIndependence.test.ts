@@ -32,6 +32,23 @@ describe('libopenmpt build is path-independent', () => {
   });
 });
 
+describe('libopenmpt is built without LTO (#561)', () => {
+  const script = read('scripts/build-js-libopenmpt.sh');
+  const flags = read('scripts/lib/wasm-flags.sh');
+
+  it('compiles and links every libopenmpt object with -fno-lto and never adds -flto back', () => {
+    // LTO's wasm backend lays out large exception-heavy functions (openmpt::version::get_string, ...)
+    // one of two ways depending on heap addresses, so the weekly cold rebuild differed from the committed
+    // wasm on identical inputs. Measurements are in wasm-flags.sh; without LTO the output was identical
+    // under CPU load and at a second checkout path.
+    expect(flags).toMatch(/^WASM_LTO_FLAG="-fno-lto"$/m);
+    expect(script).toContain('"$WASM_LTO_FLAG"');
+    for (const text of [script, flags]) {
+      expect(text.replace(/#.*$/gm, '')).not.toMatch(/-flto\b(?!=)|-flto=(thin|full)/);
+    }
+  });
+});
+
 describe('emsdk is pinned in CI', () => {
   const flags = read('scripts/lib/wasm-flags.sh');
   const ci = read('.github/workflows/ci.yml');

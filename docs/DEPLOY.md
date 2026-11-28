@@ -10,6 +10,7 @@ npm run build:xm-player:verify   # test host build: full catalog + picker
 npm run build:go:verify          # go host build: VITE_PUBLIC_MODE=1 public lock
 python deploy.py                 # same as npm run deploy
 python deploy.py --site go       # same as npm run deploy:go
+python deploy.py --profile public   # build the PUBLIC profile and deploy it to staging (test.1ink.us)
 python deploy.py --no-build      # upload an already-validated test-profile dist/
 python deploy.py --site go --no-build   # upload an already-validated go-profile dist/
 python deploy.py --dry-run --no-build   # local classify/validate; never upload
@@ -23,7 +24,53 @@ Deploy targets via `storage.noahcohn.com` bundle API:
 Both hosts keep the same `/xm-player/` base path.
 
 > [!WARNING]
-> `dist/` is a single folder. Do **not** use `--no-build` to upload a test-profile `dist/` to `go`, or a go-profile `dist/` to `test`; rebuild for the matching `--site` first.
+> `dist/` is a single folder. `deploy.py` reads `dist/version.json` and refuses a `dist/` whose `profile` does not match `--site` / `--profile`, so `--no-build` cannot ship the wrong one: a test-profile `dist/` never goes to `go`, and the public profile reaches staging only with an explicit `--profile public`. Redeploying the test profile afterwards replaces the public build on staging.
+
+## Which commit is live (`version.json`)
+
+Every build writes `dist/version.json` (vite-plugins/buildVersion.ts) and a matching
+`<meta name="xasm-build">` tag in `index.html`:
+
+```json
+{ "sha": "<full 40-char commit>", "builtAt": "2026-11-27T13:40:00.000Z", "profile": "test", "base": "/xm-player/", "dirty": false }
+```
+
+```bash
+curl -s https://test.1ink.us/xm-player/version.json     # compare with: git rev-parse HEAD
+```
+
+`deploy.py` **refuses** a build whose `dirty` is true (uncommitted changes — `--allow-dirty` for a throwaway
+deploy), whose `profile` does not match `--site` (`test` for test, `public` for go), or that has no
+`version.json`. `build:xm-player` / `build:go` / `deploy` run from a committed tree: note that the
+prebuild steps rewrite `public/shaders/` and `public/worklets/`, so commit those syncs first.
+
+After the upload `deploy.py` verifies the live site: `version.json`'s SHA and profile must equal the build,
+and every non-hashed file (everything except `assets/<name>-<hash>.<ext>`, HTML and dot-files) must be
+byte-identical to `dist/`. A live site it cannot read counts as a failure (exit 1).
+
+## What is uploaded
+
+Only Vite's content-hashed `assets/` files are skipped when the remote copy has the same size (a changed file
+has a new name). Everything else — `sw.js`, `worklets/*`, `*.wasm`, `shaders/*`, images, `.htaccess` — is
+considered every time, because size is not content (#561).
+
+The upload service **also skips equal-sized files on its side** (proven live: `sw.js` `mod-player-v8` → `v9` was
+uploaded and left at v8). So an unhashed file whose size equals the remote copy's is not trusted to arrive: a text
+file (js, json, wgsl, css, `.htaccess`, `_headers`) is sent with one trailing newline so its size differs; a binary
+(`.wasm`, images) is sent as is. The post-upload byte comparison above then proves it landed (trailing whitespace is
+ignored for text) and fails the deploy otherwise. test.1ink.us answers bursts with HTTP 429, so live fetches are
+paced and retried, and the comparison has a 5-minute budget after which unread files count as unverified.
+
+## Build output notes
+
+- Vite's 500 kB chunk warning is silenced with a documented `chunkSizeWarningLimit` of 900 kB in
+  `vite.config.ts` (not a silent bump): `three-r3f` (~0.8 MB) is third-party and lazy, `index` (~0.7 MB) is the
+  entry and is gated in gzip bytes by `verify:bundle-budget`. Raise the limit only with a written reason there.
+- No source maps are emitted (Vite default; `build.sourcemap` is not set); wasm frames in fault reports are named by
+  `scripts/symbolicate.mjs` (docs/FAULT_REPORTS.md).
+- `dist/` also carries sample modules (`4-mat_madness.mod`, `libopenmpt-test.mod`, `test.xm`, used by the
+  default load / smokes), `clouds.mp4`, `worklets/README.md` and the Netlify-style `_headers` (ignored by
+  Apache). The two 9.6 MB PWA icons are the bulk of `dist/` (27 MB); shrinking them is Release 4.
 
 ## Which commit is live (`version.json`)
 
