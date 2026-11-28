@@ -6,7 +6,7 @@
 // v6: libmpt/ (wasm2js) → worklets/libopenmpt-worklet.{js,wasm}; also purges the old libmpt cache entries.
 // v7: COEP credentialless → require-corp; evicts the cached index.html that replays the old COEP offline.
 // v8: libopenmpt pairs rebuilt path-independently (new ?v=); drops the old pairs' cached copies.
-const CACHE_NAME = 'mod-player-v8';
+const CACHE_NAME = 'mod-player-v9';
 
 // Get the scope (base path) from the service worker's registration
 const getScope = () => self.registration.scope || '/';

@@ -7,6 +7,7 @@ lazily so the unit tests never need it.
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 from typing import Mapping
 
@@ -81,15 +82,26 @@ def probe_live_coi(host: str, *, timeout: float = 15.0) -> list[tuple[str, CoiRe
     results: list[tuple[str, CoiResult]] = []
     for path in PROBE_PATHS:
         url = f"https://{host}{path}"
-        try:
-            resp = requests.get(
-                url,
-                timeout=timeout,
-                allow_redirects=True,
-                headers={"Cache-Control": "no-cache", "User-Agent": "mod-player-deploy-verify"},
-            )
-        except Exception as exc:  # noqa: BLE001 — report any network failure as a failed probe
-            results.append((url, CoiResult(status=FAIL, messages=[f"request failed: {exc}"])))
+        resp = None
+        error: Exception | None = None
+        for attempt in range(1, 5):
+            try:
+                resp = requests.get(
+                    url,
+                    timeout=timeout,
+                    allow_redirects=True,
+                    headers={"Cache-Control": "no-cache", "User-Agent": "mod-player-deploy-verify"},
+                )
+                error = None
+            except Exception as exc:  # noqa: BLE001 — report any network failure as a failed probe
+                resp, error = None, exc
+                break
+            # test.1ink.us answers a burst of requests with 429 (#561): wait it out instead of failing the probe.
+            if resp.status_code != 429 or attempt == 4:
+                break
+            time.sleep(5.0 * attempt)
+        if resp is None:
+            results.append((url, CoiResult(status=FAIL, messages=[f"request failed: {error}"])))
             continue
         result = check_coi_headers(resp.headers)
         if resp.status_code != 200:

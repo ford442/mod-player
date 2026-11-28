@@ -202,7 +202,6 @@ fn vs(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instance
   return out;
 }
 
-const NOTE_MAX: u32 = 119u;
 
 // Octave brightness multiplier: higher octaves glow brighter (0.65 at C-0, 1.0 at B-9).
 struct FragmentConstants {
