@@ -23,11 +23,17 @@ const MAX_ENTRY_BYTES = Number(process.env.MAX_ENTRY_BYTES || 750 * 1024);
  * Gzipped size of everything fetched on first load (entry + react-vendor + whatever else the entry
  * statically imports). Units match Vite's reporter (1 kB = 1000 B).
  *
+ * 269 kB (was 261, #561): the zod 4.4.3 -> 4.6.7 bump that closes GHSA-mrhx-c7xc-m3w5 (high, a production
+ * dependency; `npm audit --omit=dev` must report 0 high) added 7.5 kB gzip to the entry chunk on its own
+ * (213.6 -> 221.1 kB, measured by building with only that change; initial JS 260.5 -> 268.0 kB). Raised by
+ * that amount plus 1 kB headroom. Getting it back means moving the eager zod callers (utils/storageApi,
+ * store/fxStore, utils/shareState, utils/midiMappings, audio-worklet/protocol) to `zod/mini`.
+ *
  * 261 kB: was 260 kB with the tree at 259.9. MIDI out (#538) is a lazy chunk, but it needs ~0.65 kB of
  * eager glue — the engine's read-only observers (`pollPosition`, `onSeek`, …), the restore hook and
  * the lazy panel wrapper — which the 100 B of headroom could not hold.
  */
-const MAX_INITIAL_GZIP_BYTES = Number(process.env.MAX_INITIAL_GZIP_BYTES || 261 * 1000);
+const MAX_INITIAL_GZIP_BYTES = Number(process.env.MAX_INITIAL_GZIP_BYTES || 269 * 1000);
 const THREE_CHUNK_PREFIX = 'three-r3f';
 const REACT_VENDOR_CHUNK_PREFIX = 'react-vendor';
 const LAZY_3D_CHUNK_PREFIX = 'App3DView';

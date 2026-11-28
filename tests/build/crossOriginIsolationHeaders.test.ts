@@ -57,6 +57,9 @@ describe('cross-origin isolation headers', () => {
     // Both mod_headers tables are cleared so a parent vhost cannot leave a second COEP behind.
     expect(htaccess).toMatch(/^\s*Header\s+unset\s+Cross-Origin-Embedder-Policy/m);
     expect(htaccess).toMatch(/^\s*Header\s+always\s+unset\s+Cross-Origin-Embedder-Policy/m);
+    // Same for COOP (#561): a parent vhost's COOP plus ours is two values, which disables isolation.
+    expect(htaccess).toMatch(/^\s*Header\s+unset\s+Cross-Origin-Opener-Policy/m);
+    expect(htaccess).toMatch(/^\s*Header\s+always\s+unset\s+Cross-Origin-Opener-Policy/m);
   });
 
   it('_headers matches the plugin', () => {

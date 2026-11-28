@@ -3,8 +3,11 @@
 # COOP/COEP match Vite dev (require-corp) so the page is crossOriginIsolated, Safari included.
 
 <IfModule mod_headers.c>
-  # Clear both mod_headers tables (onsuccess and always) so a parent vhost's COEP cannot leave a
-  # second value behind; a duplicated COEP is ignored by browsers.
+  # Clear both mod_headers tables (onsuccess and always) so a parent vhost's COOP/COEP cannot leave a
+  # second value behind. A duplicated COEP is ignored by browsers and a duplicated COOP turns
+  # crossOriginIsolated off (staging sent COOP twice, #561).
+  Header unset Cross-Origin-Opener-Policy
+  Header always unset Cross-Origin-Opener-Policy
   Header unset Cross-Origin-Embedder-Policy
   Header always unset Cross-Origin-Embedder-Policy
   Header always set Cross-Origin-Opener-Policy "same-origin"
@@ -13,6 +16,11 @@
   <FilesMatch "\.css$">
     Header set Content-Type "text/css; charset=utf-8"
   </FilesMatch>
+
+  # version.json (full SHA of the live build, #561) must never be served stale.
+  <Files "version.json">
+    Header always set Cache-Control "no-cache"
+  </Files>
 </IfModule>
 
 <IfModule mod_mime.c>

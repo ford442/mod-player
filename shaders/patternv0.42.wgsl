@@ -168,6 +168,7 @@ fn pitchClass(note: u32) -> f32 {
 fn fs(in: VertexOut) -> @location(0) vec4<f32> {
   let dim  = uniforms.dimFactor;
   let bloom = uniforms.bloomIntensity;
+  let TOTAL_STEPS = f32(uniforms.numRows); // was an undeclared constant (WGSL compile error)
 
   // ── Background ring-grid pass ──────────────────────────────────────────
   if (in.isBackground == 1u) {
