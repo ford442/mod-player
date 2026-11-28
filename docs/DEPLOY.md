@@ -10,6 +10,7 @@ npm run build:xm-player:verify   # test host build: full catalog + picker
 npm run build:go:verify          # go host build: VITE_PUBLIC_MODE=1 public lock
 python deploy.py                 # same as npm run deploy
 python deploy.py --site go       # same as npm run deploy:go
+python deploy.py --profile public   # build the PUBLIC profile and deploy it to staging (test.1ink.us)
 python deploy.py --no-build      # upload an already-validated test-profile dist/
 python deploy.py --site go --no-build   # upload an already-validated go-profile dist/
 python deploy.py --dry-run --no-build   # local classify/validate; never upload
@@ -23,7 +24,7 @@ Deploy targets via `storage.noahcohn.com` bundle API:
 Both hosts keep the same `/xm-player/` base path.
 
 > [!WARNING]
-> `dist/` is a single folder. Do **not** use `--no-build` to upload a test-profile `dist/` to `go`, or a go-profile `dist/` to `test`; rebuild for the matching `--site` first.
+> `dist/` is a single folder. `deploy.py` reads `dist/version.json` and refuses a `dist/` whose `profile` does not match `--site` / `--profile`, so `--no-build` cannot ship the wrong one: a test-profile `dist/` never goes to `go`, and the public profile reaches staging only with an explicit `--profile public`. Redeploying the test profile afterwards replaces the public build on staging.
 
 ## Which commit is live (`version.json`)
 

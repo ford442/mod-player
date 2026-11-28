@@ -59,6 +59,68 @@ jobs:
           path: test-results/junit.xml
           if-no-files-found: ignore
 
+  # The deployed profiles (#561): CI's other jobs build with base `/` only, so a base-path or
+  # profile-only regression (VITE_PUBLIC_MODE) could reach staging unseen. Builds each profile exactly
+  # as deploy.py does (`build:xm-player:verify` = test, `build:go:verify` = public), checks that the
+  # build left the tree clean and wrote the right version.json profile, then serves it under
+  # /xm-player/ and requires every referenced asset to answer 200 without a redirect.
+  build-profiles:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - profile: test
+            script: build:xm-player:verify
+          - profile: public
+            script: build:go:verify
+    name: build-profiles (${{ matrix.profile }})
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build and verify (/xm-player/, ${{ matrix.profile }})
+        run: npm run ${{ matrix.script }}
+
+      - name: The build must not dirty the tree, and must say which profile it is
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            git status --porcelain
+            echo "::error::the ${{ matrix.profile }} build modified tracked or untracked files (e.g. public/shaders is out of sync: run npm run sync:shaders)"
+            exit 1
+          fi
+          node -e "
+            const v = JSON.parse(require('fs').readFileSync('dist/version.json', 'utf8'));
+            if (v.profile !== '${{ matrix.profile }}' || v.base !== '/xm-player/' || v.dirty !== false || !/^[0-9a-f]{40}\$/.test(v.sha)) {
+              console.error('unexpected version.json', v); process.exit(1);
+            }
+            console.log('version.json', v);
+          "
+
+      - name: Serve dist/ under /xm-player/ and check every referenced asset
+        run: |
+          npm run preview -- --port 4173 --host 127.0.0.1 &
+          PID=$!
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:4173/xm-player/ >/dev/null; then break; fi
+            sleep 2
+          done
+          status=0
+          node scripts/check-served-assets.mjs http://127.0.0.1:4173/xm-player/ || status=$?
+          kill $PID 2>/dev/null || true
+          exit $status
+
   visual-smoke:
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -321,7 +383,7 @@ jobs:
   # drift. The build is byte-reproducible across machines and checkout paths (the link names the
   # static lib by a relative path: an absolute one leaked into ThinLTO's input order and gave
   # path-dependent playback wasms), so committed artifacts must equal a fresh build — same
-  # contract as the generated JS worklet (#435). Path-filtered: only runs when its inputs change.
+  # contract as the generated JS worklet (#435). Runs on every push to main; on pull requests only when its inputs change (path filter).
   # .github/workflows/wasm-reproducibility.yml rebuilds cold (no caches) weekly, at two paths.
   js-libopenmpt-rebuild:
     runs-on: ubuntu-latest
@@ -358,20 +420,32 @@ jobs:
               - 'audio-worklet/js/libopenmpt-playback.generated.json'
               - '.github/workflows/ci.yml'
 
+      # Every push to main rebuilds and compares, whatever it touched (#561): the weekly cold run in
+      # wasm-reproducibility.yml found drift that this job's path filter had hidden for two weeks. Pull
+      # requests still only pay for it when they change one of the inputs above.
+      - name: Decide whether to rebuild
+        id: decide
+        run: |
+          if [ "${{ github.event_name }}" = "push" ] || [ "${{ steps.filter.outputs.jsengine }}" = "true" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+
       # emsdk scripts pinned to a commit (scripts/lib/wasm-flags.sh), not emsdk's HEAD.zip.
       - name: Cache emsdk
-        if: steps.filter.outputs.jsengine == 'true'
+        if: steps.decide.outputs.run == 'true'
         uses: actions/cache@v6
         with:
           path: ${{ runner.temp }}/emsdk
           key: emsdk-${{ runner.os }}-${{ hashFiles('scripts/lib/wasm-flags.sh', 'scripts/ci/setup-emsdk.sh') }}
 
       - name: Setup Emscripten (pinned)
-        if: steps.filter.outputs.jsengine == 'true'
+        if: steps.decide.outputs.run == 'true'
         run: bash scripts/ci/setup-emsdk.sh "$RUNNER_TEMP/emsdk"
 
       - name: Setup Node.js
-        if: steps.filter.outputs.jsengine == 'true'
+        if: steps.decide.outputs.run == 'true'
         uses: actions/setup-node@v7
         with:
           node-version: '22'
@@ -382,7 +456,7 @@ jobs:
       # #513); debug trees for the worklet boot check below. Each records its own flag stamp, so a
       # stale tree is rebuilt, never reused.
       - name: Cache libopenmpt static libraries (JS engine variants)
-        if: steps.filter.outputs.jsengine == 'true'
+        if: steps.decide.outputs.run == 'true'
         uses: actions/cache@v6
         with:
           path: |
@@ -395,15 +469,15 @@ jobs:
           key: libopenmpt-js-engine-${{ runner.os }}-emsdk-3.1.51-v0.8.9-${{ hashFiles('scripts/build-js-libopenmpt.sh', 'wasm/xasm_inspect.cpp', 'scripts/lib/wasm-flags.sh', 'scripts/lib/libopenmpt-source.sh', 'public/worklets/libopenmpt-worklet.wasm', 'public/worklets/libopenmpt-playback.wasm') }}
 
       - name: Rebuild libopenmpt-worklet.{js,wasm} (emsdk 3.1.51)
-        if: steps.filter.outputs.jsengine == 'true'
+        if: steps.decide.outputs.run == 'true'
         run: bash scripts/build-js-libopenmpt.sh
 
       - name: Rebuild libopenmpt-playback.{js,wasm} (emsdk 3.1.51)
-        if: steps.filter.outputs.jsengine == 'true'
+        if: steps.decide.outputs.run == 'true'
         run: bash scripts/build-js-libopenmpt.sh --playback
 
       - name: Committed artifacts must equal a fresh build
-        if: steps.filter.outputs.jsengine == 'true'
+        if: steps.decide.outputs.run == 'true'
         run: |
           if ! git diff --exit-code -- \
               public/worklets/libopenmpt-worklet.js public/worklets/libopenmpt-worklet.wasm audio-worklet/js/libopenmpt-worklet.generated.json \
@@ -415,13 +489,13 @@ jobs:
           echo "✅ committed real-WASM libopenmpt (both pairs) matches a fresh emsdk 3.1.51 build"
 
       - name: Verify rebuilt artifacts
-        if: steps.filter.outputs.jsengine == 'true'
+        if: steps.decide.outputs.run == 'true'
         run: node scripts/verify-js-libopenmpt.mjs --smoke
 
       # Function index → name maps of the release wasm, keyed by the pair's cache key (the app's
       # `?v=`), to decode `wasm-function[N]` frames in production stack traces.
       - name: Upload wasm symbol maps
-        if: steps.filter.outputs.jsengine == 'true'
+        if: steps.decide.outputs.run == 'true'
         uses: actions/upload-artifact@v7
         with:
           name: libopenmpt-symbol-maps
@@ -433,7 +507,7 @@ jobs:
       # an AudioWorkletGlobalScope (no window, no importScripts). Boots each debug pair through the
       # compiled processor in a fake worklet scope (#515).
       - name: Build --debug pairs and boot them in a worklet scope
-        if: steps.filter.outputs.jsengine == 'true'
+        if: steps.decide.outputs.run == 'true'
         run: |
           OUT_DIR="$RUNNER_TEMP/debug" bash scripts/build-js-libopenmpt.sh --debug
           OUT_DIR="$RUNNER_TEMP/debug" bash scripts/build-js-libopenmpt.sh --debug --playback
