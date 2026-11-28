@@ -60,6 +60,39 @@ LIBOPENMPT_CXX_EXTRA_FLAGS=(-std=c++17 -fvisibility=hidden)
 # shellcheck disable=SC2034
 LIBOPENMPT_C_EXTRA_FLAGS=(-std=c17 -fvisibility=hidden -fno-strict-aliasing)
 
+# Deterministic link (#561). LLVM's WebAssembly backend, run by wasm-ld at link time, is not deterministic
+# for openmpt::version::get_string (a very large, exception-heavy function once LTO has inlined into it):
+# on byte-identical optimised bitcode it emits one of two valid layouts of the try/delegate nesting,
+# depending on the addresses its allocator hands out and on how the threads interleave. Measured on
+# emsdk 3.1.51, same bitcode, same machine: with ASLR on 6:4 (backend alone), full LTO 6:4, ThinLTO ~5:1;
+# ASLR off alone still split ThinLTO 8:2, and ASLR off + one arena + one thread was still 5:6. What made
+# 12 of 12 links identical: ASLR off, ONE CPU, ONE malloc arena, ONE wasm-ld thread and ONE ThinLTO job.
+# That is why the weekly cold rebuild failed on identical inputs (and why the drift differed per runner).
+# shellcheck disable=SC2034
+WASM_DETERMINISM_LINK_FLAGS=(-Wl,--threads=1 -Wl,--thinlto-jobs=1)
+
+# determinism_prefix
+# Fills DET_PREFIX with `setarch <arch> -R taskset -c <cpu>` as far as this machine has them. A tool that is
+# missing (macOS, a container that forbids personality()) is skipped with a warning: the output is then
+# a valid build but may not match CI byte for byte, and the drift check says so.
+determinism_prefix() {
+    DET_PREFIX=()
+    local arch cpu
+    arch="$(uname -m)"
+    if command -v setarch >/dev/null 2>&1 && setarch "$arch" -R true >/dev/null 2>&1; then
+        DET_PREFIX+=(setarch "$arch" -R)
+    else
+        echo "⚠️  cannot disable ASLR (setarch -R): the link may not be byte-reproducible" >&2
+    fi
+    # First CPU this process may use (cpuset-restricted runners do not have CPU 0).
+    cpu="$(awk '/^Cpus_allowed_list:/ {sub(/[-,].*/, "", $2); print $2}' /proc/self/status 2>/dev/null || true)"
+    if command -v taskset >/dev/null 2>&1 && [[ -n "$cpu" ]]; then
+        DET_PREFIX+=(taskset -c "$cpu")
+    else
+        echo "⚠️  cannot pin the link to one CPU (taskset): the link may not be byte-reproducible" >&2
+    fi
+}
+
 # require_emsdk_pin <script-name>
 # Fails unless the active emcc reports WASM_EMSDK_PIN. Builds made with another emsdk are not
 # reproducible against CI (the committed pairs must equal a fresh pinned build byte for byte)

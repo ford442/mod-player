@@ -32,6 +32,24 @@ describe('libopenmpt build is path-independent', () => {
   });
 });
 
+describe('libopenmpt link is deterministic (#561)', () => {
+  const script = read('scripts/build-js-libopenmpt.sh');
+  const flags = read('scripts/lib/wasm-flags.sh');
+  const link = script.slice(script.indexOf('echo "🔗 Linking'), script.indexOf('-o "$GLUE"'));
+
+  it('runs the link on one CPU, one arena, one linker thread, one ThinLTO job, ASLR off', () => {
+    // LLVM's wasm backend lays out openmpt::version::get_string differently from run to run otherwise;
+    // the measurements are in wasm-flags.sh. Dropping any of these brings the weekly drift failure back.
+    expect(link).toContain('determinism_prefix');
+    expect(link).toContain('MALLOC_ARENA_MAX=1');
+    expect(link).toContain('"${DET_PREFIX[@]}" em++');
+    expect(link).toContain('"${WASM_DETERMINISM_LINK_FLAGS[@]}"');
+    expect(flags).toMatch(/WASM_DETERMINISM_LINK_FLAGS=\(-Wl,--threads=1 -Wl,--thinlto-jobs=1\)/);
+    expect(flags).toMatch(/setarch "\$arch" -R/);
+    expect(flags).toMatch(/taskset -c "\$cpu"/);
+  });
+});
+
 describe('emsdk is pinned in CI', () => {
   const flags = read('scripts/lib/wasm-flags.sh');
   const ci = read('.github/workflows/ci.yml');

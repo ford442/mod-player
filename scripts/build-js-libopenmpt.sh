@@ -357,9 +357,16 @@ rm -f "$GLUE" "$WASM"
 # sources built in /home/runner/work/… (CI) and elsewhere gave playback wasms that differ in a few
 # bytes of code layout (openmpt::version::get_string), so the drift check failed on a correct
 # commit. tests/build/wasmBuildPathIndependence.test.ts guards this line.
+#
+# Determinism: the LTO backend run inside wasm-ld emits one of two layouts of openmpt::version::get_string
+# unless the link runs with ASLR off on one CPU, one malloc arena, one linker thread and one ThinLTO job
+# (WASM_DETERMINISM_LINK_FLAGS / determinism_prefix in scripts/lib/wasm-flags.sh have the measurements).
+# The link is ~20 s, so the single CPU costs little; the compiles above stay parallel.
 echo "🔗 Linking ${OUT_BASENAME}.{js,wasm} [${VARIANT}]…"
+determinism_prefix
 pushd "$JS_TREE" >/dev/null
-env "${LINK_ENV[@]}" em++ \
+env MALLOC_ARENA_MAX=1 "${LINK_ENV[@]}" "${DET_PREFIX[@]}" em++ \
+    "${WASM_DETERMINISM_LINK_FLAGS[@]}" \
     "${COMPILE_FLAGS[@]}" \
     "${EH_LINK_FLAGS[@]}" \
     "${LINK_INPUTS[@]}" \
